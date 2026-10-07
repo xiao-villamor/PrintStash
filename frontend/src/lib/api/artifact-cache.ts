@@ -1,4 +1,6 @@
-import { getJson, sendAction, sendJson } from "@/lib/api/request";
+import { getJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
+import { requireEditingBase, requireEditingReceipt } from "./editing";
+import type { EditingBase } from "@/types/editing";
 
 export interface ArtifactCachePolicy {
   enabled: boolean;
@@ -11,7 +13,7 @@ export interface ArtifactCachePolicy {
   fill_wait_seconds: number;
 }
 
-export interface ArtifactCacheRead {
+export interface ArtifactCacheRead extends EditingBase {
   policy: ArtifactCachePolicy;
   effective_root: string;
   restart_required: boolean;
@@ -41,13 +43,38 @@ export interface ArtifactCacheRead {
   };
 }
 
+type CacheWriteOptions = GetJsonOptions & { base: EditingBase };
+async function writePolicy(
+  method: "PUT" | "DELETE",
+  policy: ArtifactCachePolicy | null,
+  options: CacheWriteOptions,
+) {
+  const { base } = options;
+  requireEditingBase(base);
+  const row = await requestApi<ArtifactCacheRead>("/api/v1/config/artifact-cache", {
+    method,
+    headers: {
+      ...jsonHeaders(),
+      "If-Match": `"vault-config-e${base.edit_epoch}-v${base.edit_version}"`,
+      "X-PrintStash-Edit-Contract": "conditional-v1",
+    },
+    body: policy === null ? undefined : JSON.stringify(policy),
+    signal: options.signal,
+  });
+  requireEditingReceipt(row, base);
+  return row;
+}
 export const artifactCacheApi = {
-  read: () => getJson<ArtifactCacheRead>("/api/v1/config/artifact-cache", {}),
-  save: (policy: ArtifactCachePolicy) =>
-    sendJson<ArtifactCacheRead>("/api/v1/config/artifact-cache", "PUT", policy),
-  reset: async () => {
-    await sendAction("/api/v1/config/artifact-cache", "DELETE");
-    return getJson<ArtifactCacheRead>("/api/v1/config/artifact-cache", {});
-  },
-  clear: () => sendJson<ArtifactCacheRead>("/api/v1/config/artifact-cache/clear", "POST", {}),
+  read: (options?: GetJsonOptions) =>
+    getJson<ArtifactCacheRead>("/api/v1/config/artifact-cache", options),
+  save: (policy: ArtifactCachePolicy, options: CacheWriteOptions) =>
+    writePolicy("PUT", policy, options),
+  reset: (options: CacheWriteOptions) => writePolicy("DELETE", null, options),
+  clear: (options: GetJsonOptions = {}) =>
+    requestApi<ArtifactCacheRead>("/api/v1/config/artifact-cache/clear", {
+      method: "POST",
+      headers: jsonHeaders(),
+      body: "{}",
+      signal: options.signal,
+    }),
 };

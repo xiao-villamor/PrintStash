@@ -4297,5 +4297,7 @@
   "settings.trashLoadFailed": "No se pudo cargar la papelera.",
   "Retry health check": "Reintentar comprobación del sistema",
   "Retry update check": "Reintentar búsqueda de actualizaciones",
-  "Retry cleanup plan": "Reintentar plan de limpieza"
+  "Retry cleanup plan": "Reintentar plan de limpieza",
+  "maintenance.retryHistory": "Reintentar historial de comprobaciones",
+  "maintenance.backupLoadFailed": "No se pudieron cargar los orígenes de copias de seguridad."
 }

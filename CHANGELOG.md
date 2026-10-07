@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Finish Settings cache and audit ownership: preserve pending edits during refresh,
+  reject obsolete cache-policy changes, share audit reads, and retire commands
+  when leaving a view or changing session.
+
 - Keep manual printer-material drafts after rejected saves and offer explicit review
   before adoption; cancel obsolete reads when switching printers.
 

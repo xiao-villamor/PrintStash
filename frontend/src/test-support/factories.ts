@@ -509,6 +509,8 @@ export function aMultipartModel(
 
 export function anArtifactCache(overrides: Partial<ArtifactCacheRead> = {}): ArtifactCacheRead {
   return {
+    edit_epoch: "00000000000000000000000000000001",
+    edit_version: 1,
     policy: {
       enabled: false,
       root: "/cache",

@@ -22,7 +22,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -107,6 +107,63 @@ afterEach(() => {
 });
 
 describe("MaintenancePanel", () => {
+  it("shares audit history between maintenance readers", async () => {
+    const view = renderPanel();
+    await screen.findByText("Recent checks");
+    expect(
+      view
+        .requestsWithMethod("GET")
+        .filter((request) => request.url.endsWith("/maintenance/audits")),
+    ).toHaveLength(1);
+  });
+  it("distinguishes failed audit reads from an empty history", async () => {
+    renderPanel({
+      routes: { "GET /api/v1/maintenance/audits": json({ detail: "unavailable" }, 503) },
+    });
+    expect(await screen.findByRole("button", { name: "Retry check history" })).toBeVisible();
+    expect(screen.queryByText("No checks yet. Start with a quick check.")).not.toBeInTheDocument();
+  });
+  it("retires maintenance command feedback on unmount", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const view = renderPanel({
+      audit: null,
+      routes: {
+        "POST /api/v1/maintenance/audits": (_url, init) => {
+          signal = init?.signal;
+          return pending.promise;
+        },
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Run quick check" }));
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(json(anAudit())));
+    expect(view.client.getQueryData(["maintenance", "audits"])).toEqual([]);
+  });
+  it("reports audit cancellation failure", async () => {
+    renderPanel({
+      audit: anAudit({ state: "running" }),
+      routes: {
+        "POST /api/v1/maintenance/audits/1/cancel": json({ detail: "cancel_unavailable" }, 503),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    expect(await screen.findByText(/Something went wrong reaching the server/)).toBeVisible();
+  });
+  it("keeps failed repair confirmation open", async () => {
+    renderPanel({
+      audit: anAudit({ findings: [aFinding()] }),
+      routes: {
+        "POST /api/v1/maintenance/findings/11/repair": json({ detail: "repair_unavailable" }, 503),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Repair" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Repair" }));
+    expect(await screen.findByText(/Something went wrong reaching the server/)).toBeVisible();
+    expect(dialog).toBeVisible();
+  });
   it("groups the maintenance heading with its check controls", async () => {
     renderPanel({ audit: null });
 
@@ -132,7 +189,9 @@ describe("MaintenancePanel", () => {
     it("offers a quick audit", async () => {
       renderPanel({ audit: null });
 
-      expect(await screen.findByRole("button", { name: "Run quick check" })).toBeEnabled();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Run quick check" })).toBeEnabled(),
+      );
     });
 
     it("offers a full audit as well", async () => {
@@ -140,7 +199,9 @@ describe("MaintenancePanel", () => {
       // and an hour on a large vault — they are not interchangeable.
       renderPanel({ audit: null });
 
-      expect(await screen.findByRole("button", { name: "Run full check" })).toBeEnabled();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Run full check" })).toBeEnabled(),
+      );
     });
   });
 

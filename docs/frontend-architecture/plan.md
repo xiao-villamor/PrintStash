@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. Earlier M0–M10 acceptance records are retained. Final integration review reopened bounded M7 (manual printer materials) and M9 (Artifact cache/maintenance) callers; these prerequisites close before M11. Final completion is not yet claimed.**
+2026-10-07. **Implementation in progress. Earlier M0–M10 acceptance records are retained. Final integration review closed the reopened M7 (manual printer materials) and M9 (Artifact cache/maintenance) callers with targeted and real-browser evidence. M10 dependency/hygiene checks are requalified; M11 final source/CI qualification remains active. Final delivery is not yet claimed.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -199,7 +199,7 @@ and both the [Profile contract](../frontend-m8-profile-edit-validation.md) and
 [Search contract](../frontend-m8-search-edit-validation.md) now have local
 qualification. The [reassessment](../frontend-milestone-reassessment.md) records
 the original contradictions and their regression evidence. M8 is locally closed;
-M9 and M10 have local acceptance; M11 is active, including correction of newly discovered administration gaps. A disclosed limitation is not a waiver of an explicit
+M9 and M10 have local acceptance, including the missed administration callers and the ensuing dependency/hygiene recheck. M11 final source/CI qualification is active. A disclosed limitation is not a waiver of an explicit
 requirement.
 Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an

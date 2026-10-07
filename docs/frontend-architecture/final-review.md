@@ -495,18 +495,18 @@ save/reset affect policy. Background usage updates must not change a dirty polic
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|----------------------|----------|----------------------|-----------------------------|------|--------|
-| C48 | rejects obsolete cache policy saves | Error | Two edits share original base | Second save rejected; winner policy retained | Backend integration | ❌ |
-| C49 | rejects obsolete cache policy resets | Error | Concurrent save before reset | Reset rejected; winner remains persisted | Backend integration | ❌ |
-| C50 | advances cache edit identity for legacy writes | Edge | Unversioned compatibility write | Prior conditional base no longer accepted | Backend integration | ❌ |
-| C51 | requires a base for opted-in cache policy writes | Error | Conditional contract header without If-Match | 428, no policy write | Backend integration | ❌ |
-| C52 | shares cancellable cache maintenance reads | Edge | Maintenance active; delayed read | Single in-flight read; disposal aborts it | Frontend unit | ❌ |
-| C53 | preserves cache policy draft during usage refresh | Edge | User edits size; maintenance read completes | Typed size stays; usage updates | Frontend unit | ❌ |
-| C54 | preserves cache policy draft when clearing bytes | Edge | Dirty policy then clear | Usage receipt published; dirty policy unchanged | Frontend unit | ❌ |
-| C55 | requires explicit review after a cache save conflict | Error | Save receives 412 or uncertain response | Draft retained; ordinary resubmit blocked; authorized adoption available | Frontend unit | ❌ |
-| C56 | retires cache command feedback with its session | Error | Session ends before receipt | No stale toast, draft reset or Query publication | Frontend unit | ❌ |
-| C57 | clears obsolete cache reads before acknowledging writes | Edge | Old usage/policy read races confirmed save | Aborted stale result cannot replace receipt | Frontend unit | ❌ |
-| C58 | recovers a denied cache read without private controls | Error | Previously loaded policy then 403 | Private controls hidden; explicit retry | Frontend unit | ❌ |
-| C59 | reviews a cache policy conflict in the browser | Edge | Two editors; one wins | Other preserves draft and explicitly adopts current policy | Playwright real | ❌ |
+| C48 | rejects obsolete cache policy saves | Error | Two edits share original base | Second save rejected; winner policy retained | Backend integration | ✅ `backend/tests/integration/api/v1/test_artifact_cache.py::test_rejects_obsolete_cache_policy_saves` |
+| C49 | rejects obsolete cache policy resets | Error | Concurrent save before reset | Reset rejected; winner remains persisted | Backend integration | ✅ `backend/tests/integration/api/v1/test_artifact_cache.py::test_rejects_obsolete_cache_policy_resets` |
+| C50 | advances cache edit identity for legacy writes | Edge | Unversioned compatibility write | Prior conditional base no longer accepted | Backend integration | ✅ `backend/tests/integration/api/v1/test_artifact_cache.py::test_advances_cache_edit_identity_for_legacy_writes` |
+| C51 | requires a base for opted-in cache policy writes | Error | Conditional contract header without If-Match | 428, no policy write | Backend integration | ✅ `backend/tests/integration/api/v1/test_artifact_cache.py::test_requires_a_base_for_opted_in_cache_policy_writes` |
+| C52 | shares cancellable cache maintenance reads | Edge | Maintenance active; delayed read | Single in-flight read; disposal aborts it | Frontend unit | ✅ `frontend/src/components/__tests__/artifact-cache-card.test.tsx::shares cancellable cache maintenance reads` |
+| C53 | preserves cache policy draft during usage refresh | Edge | User edits size; maintenance read completes | Typed size stays; usage updates | Frontend unit | ✅ `frontend/src/components/__tests__/artifact-cache-card.test.tsx::preserves cache policy draft during usage refresh` |
+| C54 | preserves cache policy draft when clearing bytes | Edge | Dirty policy then clear | Usage receipt published; dirty policy unchanged | Frontend unit | ✅ `frontend/src/components/__tests__/artifact-cache-card.test.tsx::preserves cache policy draft when clearing bytes` |
+| C55 | requires explicit review after an unaccepted cache save | Error | Save receives 412 or uncertain response | Draft retained; ordinary resubmit blocked; authorized adoption available | Frontend unit | ✅ `frontend/src/components/__tests__/artifact-cache-card.test.tsx::requires explicit review after an unaccepted cache save` |
+| C56 | retires cache command feedback with its session | Error | Session ends before receipt | No stale toast, draft reset or Query publication | Frontend unit | ✅ `frontend/src/components/__tests__/artifact-cache-card.test.tsx::retires cache command feedback with its session` |
+| C57 | clears obsolete cache reads before acknowledging writes | Edge | Old usage/policy read races confirmed save | Aborted stale result cannot replace receipt | Frontend unit | ✅ `frontend/src/components/__tests__/artifact-cache-card.test.tsx::clears obsolete cache reads before acknowledging writes` |
+| C58 | recovers a denied cache read without private controls | Error | Previously loaded policy then 403 | Private controls hidden; explicit retry | Frontend unit | ✅ `frontend/src/components/__tests__/artifact-cache-card.test.tsx::hides denied cache controls` |
+| C59 | reviews a cache policy conflict in the browser | Edge | Two editors; one wins | Other preserves draft and explicitly adopts current policy | Playwright real | ✅ `frontend/tests/e2e-real/artifact-cache.spec.ts::reviews a cache policy conflict in the browser` |
 
 ### Dependency recheck before administration closure
 
@@ -529,7 +529,7 @@ that these callers were migrated.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|----------------------|----------|----------------------|-----------------------------|------|--------|
-| C66 | submits semantic searches against a local index | Edge | Keyword navigation normalizes other Library parameters | Decoded q remains intact independently of parameter order | Playwright real | ❌ Correct stale `/?q=` prefix expectation; pending selected execution |
+| C66 | submits semantic searches against a local index | Edge | Keyword navigation normalizes other Library parameters | Decoded q remains intact independently of parameter order | Playwright real | ✅ `frontend/tests/e2e-real/ai-search/search.spec.ts::submits semantic searches against a local index` |
 
 Deep CI on `90ecfbc0` passed environment-owner setup; its later AI Search test
 failed because it required q to be the first URL parameter. Actual canonical URL
@@ -553,3 +553,52 @@ material/API/dependency selection passed **141 tests in 4.44s**. Lint and all
 frontend type checks passed. The real two-editor nozzle conflict passed and
 requires explicit adoption, preserving the existing backend timestamp contract.
 No stronger backend material-state concurrency guarantee is claimed here.
+
+### Remaining maintenance ownership contracts (M9)
+
+The audit history is a shared projection consumed by Maintenance and its schedule
+panel. Query owns its reads and active-run refresh; commands cancel obsolete reads
+before publishing receipts. Backup sources reuse the existing owned catalog.
+Policy drafts keep their original revision through refresh and skip commands.
+Conflict or uncertain completion requires an explicit authorized review, never an
+automatic replay. Entry/session retirement cancels commands and their feedback.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C68 | shares audit history between maintenance readers | Edge | Parent and schedule visible | One history request; both render the same run | Frontend unit | ✅ `frontend/src/components/__tests__/maintenance-panel.test.tsx::shares audit history between maintenance readers` |
+| C69 | distinguishes failed audit reads from an empty history | Error | History GET fails | Recovery displayed instead of no-checks claim | Frontend unit | ✅ `frontend/src/components/__tests__/maintenance-panel.test.tsx::distinguishes failed audit reads from an empty history` |
+| C70 | retains a schedule draft during catalog refresh | Edge | Changed timezone then new policy revision | Typed timezone and original save revision preserved | Frontend unit | ✅ `frontend/src/components/__tests__/audit-schedule-panel.test.tsx::retains a schedule draft during catalog refresh` |
+| C71 | retains a schedule draft when skipping a slot | Edge | Dirty timezone and skip receipt | Draft unchanged; schedule observation updated | Frontend unit | ✅ `frontend/src/components/__tests__/audit-schedule-panel.test.tsx::retains a schedule draft when skipping a slot` |
+| C72 | requires review after an unaccepted schedule save | Error | Policy save 409 or 503 | Draft retained; resubmit blocked until explicit adoption | Frontend unit | ✅ `frontend/src/components/__tests__/audit-schedule-panel.test.tsx::requires review after an unaccepted schedule save` |
+| C73 | retires maintenance command feedback on unmount | Error | Pending command after leaving | Aborted signal; no receipt publication or feedback | Frontend unit | ✅ `frontend/src/components/__tests__/maintenance-panel.test.tsx::retires maintenance command feedback on unmount` |
+| C74 | keeps failed repair confirmation open | Error | Repair rejected | Confirmation retained; error visible | Frontend unit | ✅ `frontend/src/components/__tests__/maintenance-panel.test.tsx::keeps failed repair confirmation open` |
+| C75 | reports audit cancellation failure | Error | Cancel command rejected | Error displayed; no unhandled rejection | Frontend unit | ✅ `frontend/src/components/__tests__/maintenance-panel.test.tsx::reports audit cancellation failure` |
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C76 | reviews a schedule conflict in the browser | Edge | Two editors save different timezones | Winner persists; loser retains draft until adoption | Playwright real | ✅ `frontend/tests/e2e-real/maintenance.spec.ts::reviews a schedule conflict in the browser` |
+| C77 | recovers a schedule catalog failure without losing draft | Error | Dirty form then transient read failure | Draft remains and explicit retry restores editing | Frontend unit | ✅ `frontend/src/components/__tests__/audit-schedule-panel.test.tsx::recovers a schedule catalog failure without losing draft` |
+
+M9 final caller requalification: Artifact cache routes passed **15 tests**;
+shared atomic configuration claims passed **22 tests**, including PostgreSQL.
+OpenAPI snapshot regenerated and inspected: only cache edit identities and
+conditional request headers were added. Cache real-browser flows passed **2 tests
+in 1.2m**. Maintenance real-browser flows passed **3 tests in 1.1m**, including
+competing schedule editors and persisted schedule reload. AI search's corrected
+canonical-URL assertion passed **1 real test in 2.3m**. The 155-case focused
+frontend selection passed; the expanded selection passed 168 cases and identified
+a missing describe wrapper in the already qualified Materials browser spec. That
+structural test correction does not change the Materials behavior.
+
+The first maintenance test draft contained incorrect Timezone/error-copy selectors;
+those failures were not evidence of production defects. With those corrected,
+the pre-cutover selection showed six failures and the uncaught cancellation error.
+The passive-refresh draft case already passed against an inert private reader;
+it was strengthened to require a second actual policy request after the cutover.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| C78 | saves only revised cache fields over reviewed policy | Edge | Local size edit conflicts with another entries edit | Explicit revised save keeps both changes with reviewed base | Frontend unit | ✅ `frontend/src/components/__tests__/artifact-cache-card.test.tsx::saves only revised cache fields over reviewed policy` |
+| C79 | forbids cache draft replay across restored epochs | Error | Reviewed policy belongs to another epoch | Revised replay disabled; explicit adoption available | Frontend unit | ✅ `frontend/src/components/__tests__/artifact-cache-card.test.tsx::forbids cache draft replay across restored epochs` |
+
+Final cache review selection: **24 tests passed in 5.40s**. Final hygiene correction: **4 tests passed in 2.63s**. Formatting (799 files), frontend lint/types and Vite production build pass. Cache backend final selection: **15 passed in 8.91s**; scoped Ruff/Pyright pass. The build retains existing >500kB chunk warnings; no bundle-size improvement is claimed.

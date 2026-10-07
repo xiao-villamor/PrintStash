@@ -2668,6 +2668,16 @@
             "title": "Available",
             "type": "boolean"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
           "effective_root": {
             "title": "Effective Root",
             "type": "string"
@@ -2703,6 +2713,8 @@
           }
         },
         "required": [
+          "edit_epoch",
+          "edit_version",
           "policy",
           "effective_root",
           "restart_required",
@@ -25710,6 +25722,44 @@
     "/api/v1/config/artifact-cache": {
       "delete": {
         "operationId": "reset_cache_api_v1_config_artifact_cache_delete",
+        "parameters": [
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -25720,6 +25770,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -25758,6 +25818,44 @@
       },
       "put": {
         "operationId": "update_cache_api_v1_config_artifact_cache_put",
+        "parameters": [
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

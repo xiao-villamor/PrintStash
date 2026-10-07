@@ -210,7 +210,9 @@ test.describe("AI Search", () => {
         true,
       );
       await box.press("Enter");
-      await expect(page).toHaveURL(/\/\?q=bike\+lamp\+attachment/);
+      await expect(page).toHaveURL(
+        (url) => url.pathname === "/" && url.searchParams.get("q") === "bike lamp attachment",
+      );
       await box.click();
       await page.getByRole("button", { name: "Search with AI" }).click();
       await expect(page).toHaveURL(/\/search\?q=bike\+lamp\+attachment/);

@@ -1,7 +1,7 @@
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -18,21 +18,22 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { useQuery } from "@tanstack/react-query";
 import {
-  cancelVaultAudit,
-  getVaultAudit,
-  ignoreAuditFinding,
-  listBackupSources,
-  listVaultAudits,
-  repairAuditFinding,
-  startVaultAudit,
-  verifyBackup,
-} from "@/lib/api";
+  auditHistoryOptions,
+  isActiveAudit as isActive,
+  useMaintenanceCommands,
+} from "@/lib/queries/settings-maintenance";
+import {
+  backupSourcesOptions,
+  backupSourceKey as sourceKey,
+} from "@/lib/queries/settings-backup-catalog";
+import { parseApiError } from "@/lib/errors";
 import { toast } from "@/lib/toast";
 import { useI18n } from "@/lib/i18n";
 import { formatBytes } from "@/lib/format";
 import type { BackupMeta } from "@/lib/api";
-import type { BackupVerification, VaultAuditFinding, VaultAuditRun } from "@/types";
+import type { BackupVerification, VaultAuditFinding } from "@/types";
 
 // Audit codes arrive from the API as plain strings, so the lookup is a Map: a
 // code this build has no wording for reads back as `undefined` and falls back
@@ -58,21 +59,6 @@ const FINDING_LABELS = new Map([
   ["backup_member_size_mismatch", "Backup member size differs from its manifest"],
 ]);
 
-function isActive(run: VaultAuditRun | null): boolean {
-  return (
-    run?.state === "pending" ||
-    run?.state === "running" ||
-    (run?.state === "completed" && run.current_phase === "auto_repair")
-  );
-}
-
-function sourceKey(item: BackupMeta): string {
-  return (
-    item.source_ref ??
-    `${item.location}:${item.namespace ?? ""}:${item.key ?? ""}:${item.backup_id}`
-  );
-}
-
 function shortOpaque(value: string | null | undefined): string {
   return value ? `${value.slice(0, 16)}…` : uiText("unavailable");
 }
@@ -95,38 +81,18 @@ function storageFileType(identifier: string): string {
 export function MaintenancePanel() {
   useUiLocale();
   const { t } = useI18n();
-  const [run, setRun] = useState<VaultAuditRun | null>(null);
-  const [busy, setBusy] = useState(false);
+  const commands = useMaintenanceCommands();
+  const history = useQuery({ ...auditHistoryOptions(), enabled: !commands.retired });
+  const catalog = useQuery({ ...backupSourcesOptions(), enabled: !commands.retired });
+  const denied = commands.retired || [401, 403, 404].includes(parseApiError(history.error).status);
+  const run = denied ? null : (history.data?.[0] ?? null);
+  const busy = commands.busy;
+  const backups = catalog.isError ? [] : (catalog.data ?? []);
   const [severity, setSeverity] = useState<"all" | "critical" | "warning" | "info">("all");
-  const [backups, setBackups] = useState<BackupMeta[]>([]);
   const [verifications, setVerifications] = useState<Record<string, BackupVerification>>({});
   const [verifying, setVerifying] = useState<string | null>(null);
   const [repairTarget, setRepairTarget] = useState<VaultAuditFinding | null>(null);
   const [repairing, setRepairing] = useState(false);
-
-  const refresh = useCallback(() => {
-    listVaultAudits()
-      .then((runs) => setRun(runs[0] ?? null))
-      .catch(() => setRun(null));
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    listBackupSources()
-      .then(setBackups)
-      .catch(() => setBackups([]));
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!isActive(run)) return;
-    const timer = window.setInterval(() => {
-      if (run)
-        getVaultAudit(run.id)
-          .then(setRun)
-          .catch(() => {});
-    }, 1500);
-    return () => window.clearInterval(timer);
-  }, [run]);
 
   const findings = useMemo(
     () => (run?.findings ?? []).filter((item) => severity === "all" || item.severity === severity),
@@ -147,37 +113,41 @@ export function MaintenancePanel() {
   );
 
   async function start(mode: "quick" | "full") {
-    setBusy(true);
     try {
-      setRun(await startVaultAudit(mode));
+      await commands.start(mode);
     } catch (error) {
-      toast.error(error);
-    } finally {
-      setBusy(false);
+      if (commands.current()) toast.error(error);
     }
   }
-
+  async function cancel() {
+    if (!run) return;
+    try {
+      await commands.cancel(run.id);
+    } catch (error) {
+      if (commands.current()) toast.error(error);
+    }
+  }
   async function act(finding: VaultAuditFinding, action: "repair" | "ignore") {
     try {
-      if (action === "repair") await repairAuditFinding(finding.id);
-      else await ignoreAuditFinding(finding.id);
-      if (run) setRun(await getVaultAudit(run.id));
+      if (action === "repair") await commands.repair(finding.id);
+      else await commands.ignore(finding.id);
+      if (!commands.current()) return false;
       toast.success(
         action === "repair" ? uiText("Repair completed") : t("settings.auditMarkedReviewed"),
       );
+      return true;
     } catch (error) {
-      toast.error(error);
+      if (commands.current()) toast.error(error);
+      return false;
     }
   }
-
   async function confirmRepair() {
     if (!repairTarget) return;
     setRepairing(true);
     try {
-      await act(repairTarget, "repair");
-      setRepairTarget(null);
+      if (await act(repairTarget, "repair")) setRepairTarget(null);
     } finally {
-      setRepairing(false);
+      if (commands.current()) setRepairing(false);
     }
   }
 
@@ -189,15 +159,17 @@ export function MaintenancePanel() {
     }
     setVerifying(sourceRef);
     try {
-      const result = await verifyBackup(item.backup_id, item.source_ref);
+      const result = await commands.verify(item.backup_id, item.source_ref);
+      if (!commands.current()) return;
       setVerifications((current) => ({ ...current, [sourceRef]: result }));
     } catch (error) {
-      toast.error(error);
+      if (commands.current()) toast.error(error);
     } finally {
-      setVerifying(null);
+      if (commands.current()) setVerifying(null);
     }
   }
 
+  if (commands.retired) return null;
   return (
     <div className="space-y-5 animate-panel-in">
       <Card role="region" aria-labelledby="maintenance-heading" className="overflow-hidden">
@@ -227,7 +199,7 @@ export function MaintenancePanel() {
                 className="w-full sm:w-auto"
                 onClick={() => void start("quick")}
                 loading={busy}
-                disabled={isActive(run)}
+                disabled={busy || history.isPending || history.isError || denied || isActive(run)}
               >
                 {t("maintenance.runQuick")}
               </Button>
@@ -244,13 +216,25 @@ export function MaintenancePanel() {
                 variant="outline"
                 onClick={() => void start("full")}
                 loading={busy}
-                disabled={isActive(run)}
+                disabled={busy || history.isPending || history.isError || denied || isActive(run)}
               >
                 {t("maintenance.runFull")}
               </Button>
             </div>
           </div>
-          {!run ? (
+          {history.isError || denied ? (
+            <div role="alert">
+              <p>{t("auditSchedule.historyLoadFailed")}</p>
+              <Button
+                onClick={() => void history.refetch()}
+                aria-label={t("maintenance.retryHistory")}
+              >
+                {t("auditSchedule.retry")}
+              </Button>
+            </div>
+          ) : history.isPending ? (
+            <p role="status">{t("auditSchedule.loading")}</p>
+          ) : !run ? (
             <p className="text-sm text-muted-foreground">{t("maintenance.noRun")}</p>
           ) : (
             <>
@@ -283,11 +267,7 @@ export function MaintenancePanel() {
                   <span className="ml-auto text-xs tabular-nums">{Math.round(run.progress)}%</span>
                 )}
                 {isActive(run) && (
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    onClick={() => void cancelVaultAudit(run.id).then(setRun)}
-                  >
+                  <Button size="xs" variant="outline" disabled={busy} onClick={() => void cancel()}>
                     {uiText("Cancel")}
                   </Button>
                 )}
@@ -427,7 +407,11 @@ export function MaintenancePanel() {
                           {finding.state === "open" ? (
                             <div className="flex gap-2">
                               {finding.repair_action && (
-                                <Button size="xs" onClick={() => setRepairTarget(finding)}>
+                                <Button
+                                  size="xs"
+                                  disabled={busy || history.isError}
+                                  onClick={() => setRepairTarget(finding)}
+                                >
                                   <Wrench className="h-3.5 w-3.5" />
                                   {uiText(" Repair")}
                                 </Button>
@@ -435,6 +419,7 @@ export function MaintenancePanel() {
                               <Button
                                 size="xs"
                                 variant="ghost"
+                                disabled={busy || history.isError}
                                 onClick={() => void act(finding, "ignore")}
                               >
                                 {t("settings.auditMarkReviewed")}
@@ -464,7 +449,14 @@ export function MaintenancePanel() {
           <CardDescription>{t("maintenance.backupDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          {backups.length === 0 ? (
+          {catalog.isError ? (
+            <div role="alert">
+              <p>{t("maintenance.backupLoadFailed")}</p>
+              <Button onClick={() => void catalog.refetch()}>{t("auditSchedule.retry")}</Button>
+            </div>
+          ) : catalog.isPending ? (
+            <p role="status">{t("auditSchedule.loading")}</p>
+          ) : backups.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("maintenance.noBackups")}</p>
           ) : (
             backups.map((item) => {
@@ -533,7 +525,7 @@ export function MaintenancePanel() {
                     size="xs"
                     variant="outline"
                     loading={verifying === sourceRef}
-                    disabled={!item.source_ref}
+                    disabled={busy || !item.source_ref}
                     title={!item.source_ref ? t("settings.backupSourceUnavailable") : undefined}
                     onClick={() => void checkBackup(item)}
                   >

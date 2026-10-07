@@ -9,7 +9,7 @@ beforeEach(() => {
   fetchMock.mockReset();
 
   fetchMock.mockImplementation(() =>
-    Promise.resolve(new Response(JSON.stringify(anArtifactCache()))),
+    Promise.resolve(new Response(JSON.stringify(anArtifactCache({ edit_version: 2 })))),
   );
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -25,18 +25,15 @@ describe("artifactCacheApi", () => {
 
   it("persists the complete cache policy", async () => {
     const policy = anArtifactCache().policy;
-    await artifactCacheApi.save(policy);
+    await artifactCacheApi.save(policy, { base: anArtifactCache() });
     expectRequest("/api/v1/config/artifact-cache", "PUT");
     expect(lastBody()).toEqual(policy);
   });
 
   it("reads effective defaults after resetting overrides", async () => {
-    const current = await artifactCacheApi.reset();
+    const current = await artifactCacheApi.reset({ base: anArtifactCache() });
     expect(fetchMock.mock.calls.map(([url, init]) => [String(url), init?.method ?? "GET"])).toEqual(
-      [
-        ["/api/v1/config/artifact-cache", "DELETE"],
-        ["/api/v1/config/artifact-cache", "GET"],
-      ],
+      [["/api/v1/config/artifact-cache", "DELETE"]],
     );
     expect(current.source).toBe("environment");
   });

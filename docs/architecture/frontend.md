@@ -643,3 +643,27 @@ is entry/session scoped. A rejected or uncertain save preserves the draft and
 blocks resubmission until explicit current-state review/adoption. This preserves
 the existing material observation timestamp API, separate from printer-settings
 conditional versions.
+
+### Cache policy and maintenance
+
+`lib/queries/settings-artifact-cache.ts` owns the effective cache policy/usage
+projection. Query alone polls while reclamation is active. The card holds only a
+policy draft, its original editing base, numeric input text and explicit review
+state. Clearing disposable bytes never discards a policy draft. Save/reset use
+the existing vault configuration epoch/version; the backend atomically checks
+that base and returns the committed receipt. Reset consumes that receipt directly.
+
+`lib/queries/settings-maintenance.ts` owns audit history, active-run refresh and
+schedule policy catalogs. Maintenance and schedule views share the same history
+key; backup sources use `settings-backup-catalog.ts`. Operational commands cancel
+obsolete reads before issuing a command and before publishing its receipt, and
+abort with the entry/session. Verification results are entry-local observations
+keyed by exact backup source, not another freshness cache. Failed reads remain
+recoverable errors, distinct from an empty catalog.
+
+Schedule form keys identify modes, not revisions. A dirty draft retains its
+original backend `expected_revision`; a refreshed catalog or skip receipt only
+updates observed scheduling information. A conflicting or uncertain save blocks
+ordinary resubmission until an authorized review and explicit adoption. The
+existing scheduling revision contract is preserved; this cutover adds no database
+migration or scheduling engine.

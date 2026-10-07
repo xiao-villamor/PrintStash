@@ -127,3 +127,40 @@ not compared to the local baseline.
 | distributed | en | warm | 30 | 185.50 / 210.90 |
 | distributed | es | fresh | 20 | 379.95 / 397.10 |
 | distributed | es | warm | 30 | 189.55 / 223.50 |
+
+## Later comparable observation: `90ecfbc0`
+
+The same production observer collected another 200 completed observations plus
+four retained warmups, sequentially, without overlapping local tests/builds.
+Dirty-state changes during collection were test/document edits; production source
+was held at `90ecfbc0`. Chromium 148.0.7778.96, Node 24.19.0, production nginx,
+real SQLite corpus, active service worker and the original viewport/sample counts
+were retained. This precedes the subsequent Materials/cache/maintenance changes;
+it is **not a measurement of the final commit**.
+
+| Corpus | Locale | Cache | n | Readiness median / p95 (ms) |
+|---|---|---|---:|---:|
+| dense | en | warm | 30 | 421.50 / 1025.70 |
+| dense | en | fresh context | 20 | 765.05 / 1087.50 |
+| dense | es | warm | 30 | 415.50 / 472.40 |
+| dense | es | fresh context | 20 | 750.30 / 866.00 |
+| distributed | en | warm | 30 | 278.50 / 347.70 |
+| distributed | en | fresh context | 20 | 561.35 / 590.30 |
+| distributed | es | warm | 30 | 262.75 / 353.90 |
+| distributed | es | fresh context | 20 | 543.75 / 610.80 |
+
+Dense English warm p95 exceeds the 800ms reference and regresses from baseline
+636ms to 1025.70ms. Dense Spanish fresh median also regresses (702→750.30ms),
+as does distributed Spanish fresh p95 (592.90→610.80ms). This result does not
+support a universal latency improvement or a claim that every target was met.
+All eight warm/fresh medians remain below their 500/1000ms references. In the
+slowest dense English warm observation (1122.30ms), browse did not start until
+796.80ms; its server app/SQL times were 223.5/27.8ms. This localizes much of the
+delay before the browse request, but does not establish its cause.
+
+Six visible dense thumbnails decoded in every sample. Median/p95 upper-bound
+observations were EN warm 848.75/1385.50ms, EN fresh 1198.45/1583.20ms, ES warm
+819.25/917.10ms, ES fresh 1148.65/1292.40ms. These remain below their corresponding
+baseline values. Distributed root has no visible Model thumbnails; its observer
+timestamps are not thumbnail measurements. Correctness, ownership and these
+performance observations remain separate claims.

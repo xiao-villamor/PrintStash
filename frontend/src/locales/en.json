@@ -4297,5 +4297,7 @@
   "settings.trashLoadFailed": "Trash could not be loaded.",
   "Retry health check": "Retry health check",
   "Retry update check": "Retry update check",
-  "Retry cleanup plan": "Retry cleanup plan"
+  "Retry cleanup plan": "Retry cleanup plan",
+  "maintenance.retryHistory": "Retry check history",
+  "maintenance.backupLoadFailed": "Backup sources could not be loaded."
 }

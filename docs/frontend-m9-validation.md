@@ -1003,3 +1003,31 @@ it is not a second remote freshness owner. All applicable M9 behavior rows have
 local evidence. This accepts M9, not final delivery: M10 removes the named transport
 compatibility bridge and finishes platform boundaries; M11 reconciles every ledger
 row, qualifies the integrated branch and obtains latest-commit green PR checks.
+
+### M11 requalification of remaining entry callers
+
+Final integration review found and closed two missed first-run callers at
+`90ecfbc0`: `SetupStorageChoice` and `GettingStartedPage`. Canonical configuration
+and provider Query owners now replace copied remote state. Named cancellable
+Model-preview/location queries replace effect-owned guide reads. Storage commands
+retire with the entry/session and keep credentials outside MutationCache; typed
+paths survive locale and metadata changes. See C40–47 in the
+[final integration record](frontend-architecture/final-review.md) for red/green,
+whole-file and real first-Model browser evidence. This amends the earlier local
+acceptance rather than asserting those callers were already migrated then.
+
+### Final cache and maintenance caller requalification
+
+The earlier blanket acceptance missed live ArtifactCacheCard, MaintenancePanel,
+and AuditSchedulePanel consumers. Their remote snapshots now belong to explicit
+Query owners; independent intervals and effect-owned copies were removed. Cache
+policy saves/resets share the vault's atomic editing version. Clear retains dirty
+policy fields. Maintenance shares history with schedules and backup catalogs with
+Settings; command receipts retire on navigation/session change. Schedule skips
+update observed timing without replacing dirty fields or their original revision.
+Conflict/uncertain saves require explicit review and adoption. Repair failures keep
+the confirmation open; cancellation failures surface as errors.
+
+C48–59 and C68–77 in the final-review matrix identify the regression tests and real
+browser evidence. These amendments close the missed M9 implementations; they do
+not substitute local results for M11's final remote CI requirement.

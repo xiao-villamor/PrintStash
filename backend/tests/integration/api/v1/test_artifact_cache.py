@@ -179,3 +179,90 @@ class TestArtifactCacheConfig:
         while cache.status()["bytes"] and time.monotonic() < deadline:
             time.sleep(0.01)
         assert cache.status()["bytes"] == 0
+
+
+class TestCachePolicyEditing:
+    @staticmethod
+    def _conditional(response, auth_headers):
+        row = response.json()
+        return {
+            **auth_headers,
+            "X-PrintStash-Edit-Contract": "conditional-v1",
+            "If-Match": f'"vault-config-e{row["edit_epoch"]}-v{row["edit_version"]}"',
+        }
+
+    def test_rejects_obsolete_cache_policy_saves(
+        self, client, auth_headers, cache_settings_env
+    ):
+        first = client.get("/api/v1/config/artifact-cache", headers=auth_headers)
+        headers = self._conditional(first, auth_headers)
+        winner = client.put(
+            "/api/v1/config/artifact-cache",
+            headers=headers,
+            json={**first.json()["policy"], "max_bytes": 123},
+        )
+        assert winner.status_code == 200
+        assert winner.json()["edit_version"] == first.json()["edit_version"] + 1
+        rejected = client.put(
+            "/api/v1/config/artifact-cache",
+            headers=headers,
+            json={**first.json()["policy"], "max_bytes": 456},
+        )
+        assert rejected.status_code == 412
+        assert (
+            client.get("/api/v1/config/artifact-cache", headers=auth_headers).json()[
+                "policy"
+            ]["max_bytes"]
+            == 123
+        )
+
+    def test_rejects_obsolete_cache_policy_resets(
+        self, client, auth_headers, cache_settings_env
+    ):
+        first = client.get("/api/v1/config/artifact-cache", headers=auth_headers)
+        headers = self._conditional(first, auth_headers)
+        client.put(
+            "/api/v1/config/artifact-cache",
+            headers=headers,
+            json={**first.json()["policy"], "max_bytes": 123},
+        )
+        rejected = client.delete("/api/v1/config/artifact-cache", headers=headers)
+        assert rejected.status_code == 412
+        assert (
+            client.get("/api/v1/config/artifact-cache", headers=auth_headers).json()[
+                "source"
+            ]
+            == "database"
+        )
+
+    def test_advances_cache_edit_identity_for_legacy_writes(
+        self, client, auth_headers, cache_settings_env
+    ):
+        first = client.get("/api/v1/config/artifact-cache", headers=auth_headers)
+        headers = self._conditional(first, auth_headers)
+        legacy = client.put(
+            "/api/v1/config/artifact-cache",
+            headers=auth_headers,
+            json={**first.json()["policy"], "max_bytes": 123},
+        )
+        assert legacy.status_code == 200
+        assert legacy.json()["edit_version"] > first.json()["edit_version"]
+        assert (
+            client.delete("/api/v1/config/artifact-cache", headers=headers).status_code
+            == 412
+        )
+
+    def test_requires_a_base_for_opted_in_cache_policy_writes(
+        self, client, auth_headers, cache_settings_env
+    ):
+        first = client.get("/api/v1/config/artifact-cache", headers=auth_headers)
+        response = client.put(
+            "/api/v1/config/artifact-cache",
+            json=first.json()["policy"],
+            headers={**auth_headers, "X-PrintStash-Edit-Contract": "conditional-v1"},
+        )
+        assert response.status_code == 428
+        assert (
+            client.get("/api/v1/config/artifact-cache", headers=auth_headers).json()
+            == first.json()
+        )
