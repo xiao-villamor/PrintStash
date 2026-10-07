@@ -22,7 +22,7 @@ without a changed contract is not an increment.
 | Library navigation    | `features/library/url.ts`, `filters.ts`, `browse.ts`, `navigation.tsx`, `navigation-state.ts`, `reading-position.ts`.                                                                                   | One URL codec, one page order, one restoration policy for the nested scroll container.            |
 | Event policy          | Event transport owns connections; feature adapters classify notices as read invalidation, controlled-refresh hint or authorized resync. | Events cannot independently install unvalidated private entity data or bypass stable-list policy. |
 | Local operation state | Workflow controller where upload bytes, cancellation and retries have a lifecycle.                                                      | Client transfer progress does not get confused with the durable server Job.                       |
-| Protected assets      | `lib/assets`: acquire/release, viewport admission, byte budget, cancellation and session disposal.                                      | Mounted images cannot lose their object URL to an unaware LRU.                                    |
+| Protected assets      | `lib/asset-cache.ts`, `use-authenticated-asset-url.ts`, `use-viewport-admission.ts`: acquire/release, viewport admission, byte budget and session disposal.                                      | Mounted images cannot lose their object URL to an unaware LRU.                                    |
 | Shared UI             | Existing `@printstash/ui` primitives and app-level localized adapters.                                                                  | Preserve focus, overlays, tokens and motion without importing feature workflows into a package.   |
 | Portable helpers      | Existing `@printstash/domain` pure formatting/domain helpers; app owns browser subscriptions.                                           | A package's environment assumptions remain explicit; no package split merely to rename it.        |
 
@@ -347,3 +347,33 @@ with links for explicit current-state review. Undo results remain separate so
 undoing confirmed changes never erases the original uncertainty. Session and view
 retirement suppress delayed feedback. This state is not an entity cache and does
 not participate in Query freshness. Collection commands remain a distinct contract.
+
+
+## Implemented protected-image ownership
+
+`acquireAssetUrl` returns a shared-download lease with an idempotent release.
+`useAuthenticatedAssetUrl` acquires that lease even for a synchronous cache hit;
+`useViewportAssetUrl` admits a persistent frame once it is within200px of the
+viewport. Keep the lease while an image is mounted, including after scrolling
+it away. Queue only four protected downloads; release cancels unneeded queued or
+active work without aborting another consumer's lease. Auth/access retirement
+revokes private URLs and retires requests before replacement-session work starts.
+Explicit path invalidation makes mounted consumers reacquire fresh bytes.
+
+Only inactive entries are evicted, under both400-entry and32MiB encoded-Blob
+budgets. Live lease bytes are reported separately and decoded image/GPU memory
+is not inferred from either counter. `ProtectedThumbnail` marks readiness after
+actual decode of its current connected image. Missing derivatives and failed
+images cannot masquerade as successfully decoded thumbnails. Native external
+covers retain their existing transport semantics. The [M6 comparison](../frontend-m6-performance.md)
+records the measured settings, extra root module requests and remaining limits.
+
+Paginated outliner branches publish their own completed Query pages. Do not
+reintroduce an all-branches promise barrier for remembered expansion. A slow
+branch must not prevent another settled branch from being read or selected.
+
+Capture selection anchors and acknowledged-intent metadata once in the gesture
+handler. Functional React state updaters must remain pure: React can replay them,
+and moving an anchor inside the updater changes the meaning of a Shift range.
+The existing ModelBrowser controller owns selection; this does not require a
+second selection store or a generic state abstraction.

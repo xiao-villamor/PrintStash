@@ -59,13 +59,13 @@ test.describe("production library startup", () => {
     const pending = new Promise<void>((resolve) => {
       release = resolve;
     });
-    await page.route("**/api/v1/models/page?**", async (route) => {
+    await page.route("**/api/v1/models/browse?**", async (route) => {
       await pending;
       await route.continue();
     });
     try {
       await page.goto("/");
-      await expect.poll(() => requests.includes("/api/v1/models/page")).toBe(true);
+      await expect.poll(() => requests.includes("/api/v1/models/browse")).toBe(true);
       expect(requests).not.toContain("/api/v1/models/facets");
       expect(requests).not.toContain("/api/v1/saved-views");
       expect(requests).not.toContain("/api/v1/jobs");
@@ -170,7 +170,7 @@ test.describe("production library startup", () => {
       const modelRequests: URL[] = [];
       page.on("request", (request) => {
         const url = new URL(request.url());
-        if (url.pathname === "/api/v1/models/page") modelRequests.push(url);
+        if (url.pathname === "/api/v1/models/browse") modelRequests.push(url);
       });
       await page.addInitScript((mode) => {
         localStorage.setItem("ps-vault-library-view", mode);
@@ -180,8 +180,11 @@ test.describe("production library startup", () => {
       expect(modelRequests.length).toBeGreaterThan(0);
       expect(modelRequests[0].searchParams.get("collection")).toBe("collection-01");
       expect(modelRequests[0].searchParams.getAll("tag")).toEqual(["benchmark"]);
+      expect(modelRequests[0].searchParams.get("view")).toBe(
+        mode === "multipart" ? "multipart" : "all",
+      );
       const names = await page.locator("main article h2").allTextContents();
-      if (mode === "multipart" || mode === "components") expect(names).toEqual([]);
+      if (mode === "multipart") expect(names).toEqual([]);
       else {
         expect(names.length).toBeGreaterThan(0);
         for (const name of names) {
@@ -203,6 +206,10 @@ test.describe("production library startup", () => {
         await expect.poll(() => page.locator("main article").count()).toBeGreaterThan(count);
       }
       await expect(page.locator("main article")).toHaveCount(90);
+      const identities = await page
+        .locator("main article [data-library-entry]")
+        .evaluateAll((links) => links.map((link) => link.getAttribute("data-library-entry")));
+      expect(new Set(identities).size).toBe(90);
     });
   }
 });

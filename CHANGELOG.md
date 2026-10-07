@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Keep protected thumbnail URLs alive while displayed, admit images near the
+  viewport under a four-download limit, and cancel abandoned work. Bound idle
+  encoded image data without evicting mounted consumers. Fix Shift range
+  selection after appending a Library page when React replays a state update.
+
 - Preserve each Library history entry's filters and reading position when returning
   from Model or Multipart detail. Bound restoration after cache eviction, show a
   clear reset for missing anchors, keep rapid folder transitions coherent, and

@@ -21,7 +21,7 @@ import {
   aPrinter,
   aTag,
 } from "@/test-support/factories";
-import { json, renderApp } from "@/test-support/render";
+import { json, renderApp, type RouteTable } from "@/test-support/render";
 import type { CollectionRead, MultipartModelListItem, OutlinerModelRead } from "@/types";
 
 const TREE = [
@@ -65,11 +65,13 @@ function renderSidebar({
   collections = TREE,
   models = [],
   multipartModels = [],
+  routes = {},
   ...over
 }: Partial<FilterSidebarProps> & {
   collections?: CollectionRead[];
   models?: OutlinerModelRead[];
   multipartModels?: MultipartModelListItem[];
+  routes?: RouteTable;
 } = {}) {
   const handlers = {
     onCollectionChange: vi.fn<FilterSidebarProps["onCollectionChange"]>(),
@@ -116,6 +118,7 @@ function renderSidebar({
     routes: {
       ...collectionTreeRoutes(collections),
       ...outlinerRoutes(collections, models, multipartModels),
+      ...routes,
     },
   });
   return { ...result, ...handlers };
@@ -653,6 +656,56 @@ describe("FilterSidebar", () => {
   });
 
   describe("remembering the open folders", () => {
+    it("publishes a restored branch while another remains pending", async () => {
+      const user = userEvent.setup();
+      const slow = Promise.withResolvers<Response>();
+      const started = Promise.withResolvers<void>();
+      const fastModel = aOutlinerModel({
+        id: 100,
+        name: "Restored bracket",
+        collection: "parts",
+        collection_id: 1,
+      });
+      const slowModel = aOutlinerModel({
+        id: 200,
+        name: "Pending toy",
+        collection: "toys",
+        collection_id: 3,
+      });
+      sessionStorage.setItem("ps-filter-expanded", JSON.stringify(["parts", "toys"]));
+      renderSidebar({
+        models: [fastModel, slowModel],
+        routes: {
+          "GET /api/v1/outliner/entries": (url) => {
+            const id = new URL(url, "http://test").searchParams.get("collection_id");
+            if (id === "3") {
+              started.resolve();
+              return slow.promise;
+            }
+            return json({
+              items: id === "1" ? [{ ...fastModel, kind: "model" }] : [],
+              next_cursor: null,
+            });
+          },
+        },
+      });
+      try {
+        await started.promise;
+        expect(await screen.findByRole("button", { name: "Restored bracket" })).toBeVisible();
+        expect(screen.queryByRole("button", { name: "Pending toy" })).not.toBeInTheDocument();
+
+        await user.click(screen.getByRole("button", { name: "Parts" }));
+
+        expect(screen.getByLabelText("Selected collection")).toHaveTextContent("parts");
+        expect(await screen.findByRole("button", { name: "Restored bracket" })).toBeVisible();
+      } finally {
+        await act(async () =>
+          slow.resolve(json({ items: [{ ...slowModel, kind: "model" }], next_cursor: null })),
+        );
+      }
+      expect(await screen.findByRole("button", { name: "Pending toy" })).toBeVisible();
+    });
+
     it("starts a first visit at the top level", async () => {
       // A tree that loads a level at a time cannot open a whole library, and
       // opening a large one whole is what took a minute (#295).

@@ -21,6 +21,47 @@ import { aModel, aModelListItem, aMultipartModel } from "../../src/test-support/
 useMockApi();
 
 test.describe("vault route", () => {
+  test("preserves range selection across a page append", async ({ page }) => {
+    const models = Array.from({ length: 4 }, (_, index) =>
+      aModelListItem({ id: 100 + index, name: `Selection ${index + 1}` }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) => {
+      const next = new URL(route.request().url()).searchParams.has("cursor");
+      return route.fulfill({
+        json: {
+          items: (next ? models.slice(2) : models.slice(0, 2)).map((model) => ({
+            kind: "model",
+            model,
+          })),
+          total: 4,
+          next_cursor: next ? null : "second",
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/?type=all&sort=name-asc");
+    await page.getByRole("button", { name: "Library tools" }).click();
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Select Selection 2", exact: true }).click();
+    await page.getByRole("button", { name: "Load more", exact: true }).click();
+
+    await page.locator('main [data-library-entry="/models/103"]').click({ modifiers: ["Shift"] });
+
+    await expect(
+      page.getByRole("checkbox", { name: "Select Selection 1", exact: true }),
+    ).not.toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: "Select Selection 2", exact: true }),
+    ).toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: "Select Selection 3", exact: true }),
+    ).toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: "Select Selection 4", exact: true }),
+    ).toBeChecked();
+  });
+
   test("reviews an interrupted batch in the browser", async ({ page }) => {
     let writes = 0;
     await page.route("**/api/v1/models/browse?**", (route) =>

@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M5 are closed locally in dependency order. M6 is active. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M6 are closed locally in dependency order. M7 is active. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -189,7 +189,10 @@ the original failed invocation remains explicit. M5 is locally closed with its
 [history/navigation acceptance](../frontend-m5-closure-validation.md): bounded
 restoration, coherent rapid navigation, private retirement, repeated URL entries,
 real paged detail return, and removal of ignored navigation APIs are qualified.
-M6 is now the only active target.
+M6 is locally closed with its [startup/assets acceptance](../frontend-m6-validation.md)
+and [200-observation comparison](../frontend-m6-performance.md). Asset leases,
+progressive restoration and Shift selection after append are qualified.
+M7 is now the only active target.
 Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an
 unfinished prerequisite. A goal closes only when its prerequisites and its own

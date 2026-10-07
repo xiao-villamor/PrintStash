@@ -1196,21 +1196,22 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   const toggleSelect = useCallback(
     (id: number, range = false) => {
+      // Capture this gesture once; React may replay the state updater.
+      const anchor = lastSelectedModelId.current;
+      const selectingRange = range && anchor !== null;
+      const from = selectingRange ? sortedModels.findIndex((model) => model.id === anchor) : -1;
+      const to = sortedModels.findIndex((model) => model.id === id);
+      const rangeModels =
+        from >= 0 && to >= 0 ? sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1) : [];
+      lastSelectedModelId.current = id;
+      for (const model of rangeModels) selectedModelSnapshot.current.set(model.id, model);
+      const model = sortedModels.find((item) => item.id === id);
+      if (model) selectedModelSnapshot.current.set(id, model);
       setSelectedIds((prev) => {
         const next = new Set(prev);
-        if (range && lastSelectedModelId.current !== null) {
-          const from = sortedModels.findIndex((model) => model.id === lastSelectedModelId.current);
-          const to = sortedModels.findIndex((model) => model.id === id);
-          if (from >= 0 && to >= 0)
-            sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1).forEach((model) => {
-              next.add(model.id);
-              selectedModelSnapshot.current.set(model.id, model);
-            });
-        } else if (next.has(id)) next.delete(id);
+        if (selectingRange) rangeModels.forEach((model) => next.add(model.id));
+        else if (next.has(id)) next.delete(id);
         else next.add(id);
-        lastSelectedModelId.current = id;
-        const model = sortedModels.find((item) => item.id === id);
-        if (model) selectedModelSnapshot.current.set(id, model);
         return next;
       });
     },
