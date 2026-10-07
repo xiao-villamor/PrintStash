@@ -216,7 +216,7 @@ The frozen inventory snapshot above is not silently relabelled as final M11 scop
 
 ## M11 final-source reconciliation
 
-Source snapshot: `8568aa8be97b132dc9530fc17eef274486ad523d` (927 scoped paths).
+Source snapshot: `4094518e66a83c4c4f990873cd23d95d13bbc29f` (927 scoped paths).
 The historical columns and counts above remain immutable checkpoint evidence.
 The six `final_*` columns identify current presence, Git blob, SHA-256 of inspected
 working bytes, bounded review scope and evidence. Generated files, lock metadata

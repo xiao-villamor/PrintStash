@@ -723,7 +723,7 @@ source. Full backend compatibility/coverage and complete browser outcomes are
 identified by the linked Deep run, with the final result summarized in the PR.
 No incomplete or superseded execution is promoted to a passing result.
 
-Subsequent delivery documentation may have a newer commit; it must preserve
+Documentation-only delivery commits may have a newer SHA; they must preserve
 identical frontend/backend/extension/workflow production and test trees. The
 required PR checks must be green for the latest commit before handoff. The final
 ledger reconciles 927 paths at the production snapshot with zero omitted tracked
@@ -773,3 +773,26 @@ measurement must qualify this later production source separately from `8568aa8b`
 |---|----------------------|----------|----------------------|-----------------------------|------|--------|
 | C86 | keeps independent reading positions for repeated Library URLs | Edge | Same URL visited twice with distinct positions; normal or deferred nested scroll notifications before Back/Forward | Each history entry restores its own card position | Playwright | ✅ `tests/e2e/library-snapshot.spec.ts::keeps independent reading positions for repeated Library URLs` (normal/deferred variants) |
 | C87 | captures reading offsets when leaving before scroll notification | Edge | Grid/list offsets changed without a scroll event; navigation outside the scroll container | Returning restores actual container offsets rather than the earlier observation | Frontend unit | ✅ `src/features/library/__tests__/reading-position.test.tsx::captures %s offsets when leaving before scroll notification` |
+
+### Final production source qualification: `4094518e`
+
+The later history correction is qualified independently:
+[required CI](https://github.com/xiao-villamor/PrintStash/actions/runs/37682276097)
+and [Deep CI](https://github.com/xiao-villamor/PrintStash/actions/runs/37682269791).
+Deep frontend coverage passed 4,460 application / 85 domain / 199 UI tests;
+application statements/branches are 86.74%/81.29%, domain 97.20%/93.91%,
+UI 98.78%/97.60%. Every unchanged floor held. Maintenance notices recommend
+future floor increases; no floor was lowered. Remaining run outcomes are
+reported in the PR after completion, including first-attempt browser results.
+
+The final ledger reconciles the same 927 paths to `4094518e`; historical columns
+and manual-review categories are unchanged. Current correction reads cover the
+reading-position owner and its navigation/canonical-readiness boundaries;
+ModelBrowser's large file remains a bounded review, not a complete-file claim.
+
+A new clean-source, sequential 200-sample startup observation plus four warmups
+qualifies `4094518e` under the unchanged protocol. All warm median/p95 and fresh
+median references hold. Baseline comparisons remain mixed: all distributed
+readiness medians regress, while all dense decoded-thumbnail groups improve.
+[Final measurements](../frontend-m11-performance.md#final-comparable-source-observation-4094518e)
+retain every sample group and separate target attainment from improvement.

@@ -165,7 +165,7 @@ baseline values. Distributed root has no visible Model thumbnails; its observer
 timestamps are not thumbnail measurements. Correctness, ownership and these
 performance observations remain separate claims.
 
-## Final comparable observation: `30a529d5`
+## Broad integration observation: `30a529d5`
 
 The final broad integration checkpoint (including Materials, artifact cache and
 maintenance ownership) retained 200 completed samples plus four warmups. Both
@@ -213,3 +213,44 @@ move configuration snapshot reading out of the atomic-claims module to remove a
 dependency cycle. They do not change library startup, browse, thumbnails, route
 composition or its comparable observer. The measurements identify their actual
 source checkpoint rather than claiming to have run on a later commit.
+
+## Final comparable source observation: `4094518e`
+
+The history-race correction changes Library readiness, so the final source was
+measured again rather than inheriting the preceding checkpoint's result. Both
+corpora ran sequentially with no overlapping local tests or builds, on a clean
+`4094518e66a83c4c4f990873cd23d95d13bbc29f` worktree. All 200 observations and four
+warmups are retained. The observer, sample counts, browser, Node, nginx image,
+SQLite corpus, active service worker and viewport match the preceding protocol.
+No source changed during collection.
+
+| Corpus | Locale | Context | n | Baseline median / p95 (ms) | Final source median / p95 (ms) |
+|---|---|---|---:|---:|---:|
+| dense | en | warm | 30 | 451.85 / 636.00 | 429.70 / 794.90 |
+| dense | en | fresh | 20 | 788.00 / 1247.20 | 735.20 / 1182.60 |
+| dense | es | warm | 30 | 429.40 / 854.90 | 400.30 / 500.20 |
+| dense | es | fresh | 20 | 702.00 / 1158.30 | 725.50 / 839.70 |
+| distributed | en | warm | 30 | 283.90 / 356.70 | 300.45 / 369.90 |
+| distributed | en | fresh | 20 | 573.45 / 1636.60 | 597.10 / 867.50 |
+| distributed | es | warm | 30 | 277.65 / 663.40 | 359.30 / 468.20 |
+| distributed | es | fresh | 20 | 559.70 / 592.90 | 732.60 / 843.20 |
+
+All warm median/p95 groups meet the 500/800ms references; all fresh medians
+meet 1000ms. This is target attainment in this observation, not a universal
+performance improvement. Dense warm medians and dense EN fresh median improve
+against baseline; dense ES fresh median and all distributed medians regress.
+Distributed ES warm/fresh medians rise from 277.65/559.70ms to 359.30/732.60ms.
+Shared-host, sequential observations do not identify a causal explanation;
+no outlier is excluded and no regression is attributed to host load without proof.
+
+| Dense locale | Context | n | Decoded visible thumbnails median / p95 (ms) |
+|---|---|---:|---:|
+| en | warm | 30 | 874.05 / 1216.70 |
+| en | fresh | 20 | 1126.55 / 1513.50 |
+| es | warm | 30 | 764.90 / 907.90 |
+| es | fresh | 20 | 1128.70 / 1233.50 |
+
+All dense samples decoded six visible images; all four groups improve against
+baseline. Distributed root has no visible Model thumbnails and cannot measure
+thumbnail decoding. CPU, render counts and memory remain qualified only by the
+earlier diagnostic observations; this final run establishes no improvement there.
