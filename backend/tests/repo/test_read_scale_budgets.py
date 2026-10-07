@@ -18,6 +18,7 @@ grows eight times, and a read may take at most sixteen times as long.
 
 from __future__ import annotations
 
+import base64
 import statistics
 import time
 from typing import Any
@@ -27,6 +28,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.db.models import Collection
+from app.modules.library.model_views.browse import Cursor, _encode
 from tests._library_reads import LIBRARY_READS
 from tests.factories import build_tag, tag_collection
 from tests.factories.library_scale import build_library_at_scale
@@ -86,6 +88,50 @@ def _median_seconds(
 
 
 class TestLibraryReadsAtScale:
+    @pytest.mark.parametrize("sort", ["name-asc", "date-desc"], ids=["name", "date"])
+    def test_answers_a_late_mixed_browse_page_within_budget(
+        self,
+        client: TestClient,
+        db_session: Session,
+        reader: tuple[dict[str, str], Collection],
+        sort: str,
+    ) -> None:
+        headers, root = reader
+        build_library_at_scale(
+            db_session, under=root, **SUPPORTED, multipart_models=10_000
+        )
+        path = "/api/v1/models/browse"
+        params = {"view": "all", "limit": 60, "sort": sort}
+        first = client.get(path, params=params, headers=headers)
+        assert first.status_code == 200, first.text
+        body = first.json()
+        assert body["total"] == 110_000
+        encoded = body["next_cursor"].split(".")[0]
+        cursor = Cursor.model_validate_json(
+            base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        )
+        # The public cursor remains opaque. This test-only setup retains the
+        # server's real caller/filter/revision binding while placing the benchmark
+        # near the tail, without timing a thousand unrelated earlier requests.
+        cursor = Cursor.model_validate(
+            cursor.model_dump() | {"offset": body["total"] - 120}
+        )
+        tail_params = params | {"cursor": _encode(cursor)}
+        warm = client.get(path, params=tail_params, headers=headers)
+        assert warm.status_code == 200, warm.text
+        samples = []
+        for _ in range(3):
+            started = time.perf_counter()
+            response = client.get(path, params=tail_params, headers=headers)
+            samples.append(time.perf_counter() - started)
+            assert response.status_code == 200, response.text
+            page = response.json()
+            assert len(page["items"]) == 60
+            assert page["next_cursor"] is not None
+            assert page["total"] == 110_000
+        print(f"late mixed browse sort={sort} samples_seconds={samples}")
+        assert statistics.median(samples) <= BUDGET_SECONDS[path], samples
+
     def test_answers_within_budget_at_the_supported_scale_without_tags(
         self,
         client: TestClient,

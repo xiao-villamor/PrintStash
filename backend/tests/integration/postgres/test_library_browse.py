@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from threading import Barrier
 
 import pytest
@@ -11,13 +12,23 @@ from sqlmodel import Session, create_engine
 from alembic import command
 from app.core.errors import OperationError
 from app.db.migrate import _alembic_config, run_migrations
-from app.db.models import CollectionRole, Model, User
+from app.db.models import CollectionRole, FileType, Model, PrintJobState, User
 from app.db.url import normalize_database_url
+from app.modules.library import multipart_models
 from app.modules.library.edit_preconditions import EditPrecondition, claim
 from app.modules.library.model_views.browse import page_items
 from app.schemas.library_browse import BrowseQuery
+from app.schemas.multipart_models import MultipartChoiceWrite, MultipartPartWrite
 from tests.containers import fresh_postgres_database
-from tests.factories import build_model, build_multipart_model, build_user
+from tests.factories import (
+    build_collection,
+    build_file,
+    build_model,
+    build_multipart_model,
+    build_print_job,
+    build_user,
+    grant_collection_role,
+)
 
 
 @pytest.fixture
@@ -32,6 +43,183 @@ def pg_library() -> Iterator:
 
 
 class TestLibraryBrowse:
+    def test_excludes_trashed_candidates_before_pagination(self, pg_library):
+        with Session(pg_library) as session:
+            user = build_user(session, superuser=True)
+            discarded = build_collection(session, "Discarded", trashed=True)
+            build_model(session, "0 Trashed", trashed=True)
+            build_model(session, "0 In discarded folder", collection=discarded)
+            build_multipart_model(session, "0 Discarded set", collection=discarded)
+            model = build_model(session, "A Live")
+            group = build_multipart_model(session, "B Live set")
+
+            first = page_items(session, user, BrowseQuery(sort="name-asc", limit=1))
+
+            assert first.total == 2
+            assert len(first.items) == 1
+            assert first.items[0].kind == "model"
+            assert first.items[0].model.id == model.id
+            assert first.next_cursor is not None
+            second = page_items(
+                session,
+                user,
+                BrowseQuery(sort="name-asc", limit=1, cursor=first.next_cursor),
+            )
+            assert second.total == 2
+            assert len(second.items) == 1
+            assert second.items[0].kind == "multipart"
+            assert second.items[0].multipart.id == group.id
+            assert second.next_cursor is None
+
+    @pytest.mark.parametrize(
+        "sort", ["name-asc", "name-desc"], ids=["ascending", "descending"]
+    )
+    def test_pages_equal_names_by_kind_then_identity(self, pg_library, sort):
+        with Session(pg_library) as session:
+            user = build_user(session, superuser=True)
+            first = build_model(session, "Same")
+            second = build_model(session, "SAME")
+            group = build_multipart_model(session, "same")
+            expected = [
+                ("model", first.id),
+                ("model", second.id),
+                ("multipart", group.id),
+            ]
+            actual = []
+            cursor = None
+            for _ in expected:
+                page = page_items(
+                    session, user, BrowseQuery(sort=sort, limit=1, cursor=cursor)
+                )
+                assert len(page.items) == 1
+                entry = page.items[0]
+                actual.append(
+                    (
+                        entry.kind,
+                        entry.model.id if entry.kind == "model" else entry.multipart.id,
+                    )
+                )
+                cursor = page.next_cursor
+            assert actual == expected
+            assert cursor is None
+
+    @pytest.mark.parametrize(
+        "sort",
+        ["success-desc", "printed-desc", "duration-asc", "filament-asc", "cost-asc"],
+        ids=["success", "printed", "duration", "filament", "cost"],
+    )
+    def test_places_missing_metrics_after_measured_models(self, pg_library, sort):
+        with Session(pg_library) as session:
+            user = build_user(session, superuser=True)
+            model = build_model(session, "Measured")
+            artifact = build_file(
+                session,
+                model,
+                file_type=FileType.GCODE,
+                metadata={"estimated_time_s": 100, "filament_weight_g": 10},
+            )
+            build_print_job(
+                session,
+                artifact,
+                state=PrintJobState.COMPLETED,
+                actual_duration_s=100,
+                finished_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                cost=5,
+            )
+            group = build_multipart_model(session, "No metric")
+            first = page_items(session, user, BrowseQuery(sort=sort, limit=1))
+            assert first.items[0].kind == "model"
+            assert first.items[0].model.id == model.id
+            assert first.next_cursor is not None
+            second = page_items(
+                session, user, BrowseQuery(sort=sort, limit=1, cursor=first.next_cursor)
+            )
+            assert second.items[0].kind == "multipart"
+            assert second.items[0].multipart.id == group.id
+            assert second.next_cursor is None
+
+    def test_filters_readable_members_before_pagination(self, pg_library):
+        with Session(pg_library) as session:
+            admin = build_user(session, superuser=True)
+            viewer = build_user(session, superuser=False)
+            visible = build_collection(session, "Visible")
+            private = build_collection(session, "Private")
+            grant_collection_role(session, viewer, visible, CollectionRole.VIEW)
+            hidden = build_model(session, "0 Hidden", collection=private)
+            permitted = build_model(session, "1 Visible", collection=visible)
+            build_file(session, hidden, file_type=FileType.STL)
+            build_file(session, permitted, file_type=FileType.STL)
+            hidden_match = build_multipart_model(
+                session, "0 Hidden member", collection=visible
+            )
+            valid_match = build_multipart_model(
+                session, "2 Visible member", collection=visible
+            )
+            for group, model in [(hidden_match, hidden), (valid_match, permitted)]:
+                multipart_models.replace_parts(
+                    session,
+                    admin,
+                    group,
+                    [
+                        MultipartPartWrite(
+                            name="Body",
+                            choices=[MultipartChoiceWrite(model_id=model.id)],
+                        )
+                    ],
+                )
+            first = page_items(
+                session,
+                viewer,
+                BrowseQuery(file_type=["stl"], sort="name-asc", limit=1),
+            )
+            assert first.total == 2
+            assert first.items[0].kind == "model"
+            assert first.items[0].model.id == permitted.id
+            assert first.next_cursor is not None
+            second = page_items(
+                session,
+                viewer,
+                BrowseQuery(
+                    file_type=["stl"],
+                    sort="name-asc",
+                    limit=1,
+                    cursor=first.next_cursor,
+                ),
+            )
+            assert second.total == 2
+            assert second.items[0].kind == "multipart"
+            assert second.items[0].multipart.id == valid_match.id
+            assert second.next_cursor is None
+
+    @pytest.mark.parametrize(
+        "sort, names",
+        [
+            ("date-asc", ["Old", "Middle", "New"]),
+            ("date-desc", ["New", "Middle", "Old"]),
+        ],
+        ids=["ascending", "descending"],
+    )
+    def test_pages_mixed_dates_in_global_order(self, pg_library, sort, names):
+        with Session(pg_library) as session:
+            user = build_user(session, superuser=True)
+            build_model(session, "Old", updated_at=datetime(2025, 1, 1))
+            build_multipart_model(session, "Middle", updated_at=datetime(2025, 6, 1))
+            build_model(session, "New", updated_at=datetime(2026, 1, 1))
+            actual = []
+            cursor = None
+            for _ in names:
+                page = page_items(
+                    session, user, BrowseQuery(sort=sort, limit=1, cursor=cursor)
+                )
+                assert len(page.items) == 1
+                entry = page.items[0]
+                actual.append(
+                    entry.model.name if entry.kind == "model" else entry.multipart.name
+                )
+                cursor = page.next_cursor
+            assert actual == names
+            assert cursor is None
+
     def test_preserves_unicode_name_order(self, pg_library):
         with Session(pg_library) as session:
             user = build_user(session, superuser=True)

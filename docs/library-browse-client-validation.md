@@ -1,6 +1,8 @@
 # Ordered library client validation
 
-M3 ordered client and grid cutover. Authority revalidation remains pending. Requirements precede tests.
+Historical M3 client/cutover checkpoints follow. M3 is now qualified in the
+[M3 closure record](frontend-m3-closure-validation.md), including authority
+integration, PostgreSQL and deep continuation. Requirements preceded tests.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|

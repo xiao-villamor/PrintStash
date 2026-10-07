@@ -1,171 +1,131 @@
 # M3 ordered browse qualification
 
-M0–M2 are closed; only M3 is active. Its existing implementation and evidence are
-in [the server contract record](library-contracts-validation.md),
-[the browse client record](library-browse-client-validation.md) and
-[authority integration](library-authority-ui-validation.md). This record reconciles
-remaining M3 acceptance; it does not close M4 conditional editing or M5 history.
+M3 is closed locally after M0–M2. M4 is next. This closes the ordered browse
+contract and its first-party consumer acceptance; it does not close conditional
+editing, history restoration, startup performance or final PR/CI delivery.
+The [server contract record](library-contracts-validation.md),
+[browse client record](library-browse-client-validation.md) and
+[authority integration](library-authority-ui-validation.md) retain the broader
+behavior inventory and earlier regression evidence.
 
-## Confirmed integration gap
+## Outcome and ownership
 
-`ModelBrowser::selectAllMatching` sends `limit=500` to `/api/v1/models/browse`.
-`BrowseQuery.limit` permits 1–100. The existing test only asserted that a request
-contained 500; its permissive HTTP fake never rejected that unsupported request.
-The intended outcome is complete Model selection through valid opaque cursor
-pages, retaining prior selection if the server rejects continuation. Multipart
-cards must not become Model IDs. The implementation should use the existing
-endpoint within its published limit, without adding a second list/cache owner.
+The Library backend filters authorized live entries and globally orders both
+Models and Multipart Sets before pagination. Its signed cursor binds the caller,
+normalized view/filter/sort/page-size inputs and transactional catalog revision.
+The implementation uses a revision-bound offset, not keyset pagination or a
+historical snapshot. Concurrent catalog changes reject continuation explicitly.
 
-## Requirement matrix (before test correction)
+The frontend consumes the server sequence through the Library Query owner. It
+retains displayed pages on a continuation failure, offers retry, and requires an
+explicit refresh after a revision change. Separate Model/Multipart downloads,
+arbitrary group caps and sorting a fetched prefix no longer determine grid
+membership/order. This is an ownership change; reduced file size is not evidence.
+
+Acceptance review found one further production defect: `selectAllMatching` sent
+`limit=500` to a browse endpoint that accepts 1–100. It now reuses the existing
+browse page size. The HTTP test fake independently enforces the published bound.
+All-matching selection traverses opaque cursors, skips empty intermediate pages,
+selects only Model identities and preserves prior selection when continuation
+fails. Batch-command limits remain a separate contract.
+
+## Additional acceptance matrix
+
+These requirements were recorded before adding or correcting their tests. Status
+records named assertions; execution results follow separately.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
 | 1 | selects every model through valid browse pages | Happy | Mixed first page and later Model; HTTP enforces limit 1–100 | Two Model identities selected, continuation consumed, set not selected | Frontend unit | ✅ `src/components/__tests__/model-grid.test.tsx::selects every model through valid browse pages` |
 | 2 | selects models beyond an empty continuation page | Edge | Same list with an empty intermediate page carrying another cursor | Later Model selected; advertised continuation consumed | Frontend unit | ✅ `src/components/__tests__/model-grid.test.tsx::selects models beyond an empty continuation page` |
 | 3 | preserves selection when continuation becomes stale | Error | Prior selection, first new page succeeds, next returns 409 browse_refresh_required | Prior selection remains; partial new selection is not published | Frontend unit | ✅ `src/components/__tests__/model-grid.test.tsx::preserves selection when continuation becomes stale` |
-
-Production change is limited to the request size at the existing all-matching
-consumer. Its tests use the real component, Query and endpoint with HTTP stood in
-for. Existing backend query validation supplies the independently defined upper
-bound. Batch command chunk sizes remain separate endpoint contracts.
-
-## Backend gate underway
-
-The prior migration invocation ended without a terminal result after 174 named
-passes. Its disjoint recovery completed 208/208; the union is exactly the 382
-collected ordinary migration/contracts cases. All 1,752 recorded backend Python
-files still match their hashes. This is partitioned evidence, not a single full
-suite result. The current official `full-ordinary` lane excludes exactly those
-two already-qualified paths and runs with four workers, no concurrent migrations
-or resource suites, and a terminal result/source manifest. Remaining resource
-qualification is separate. Do not report this running gate as green.
-
-## Additional acceptance gaps found by assertion review
-
-The existing shared trigger inventory proves registration for every dependency
-and executes INSERT/UPDATE/DELETE on Models, but it does not yet execute a writer
-for every registered table and observe stale continuation. Keep that master row
-open until its behavior coverage is established. The browse route's authentication
-dependency is present; an explicit unauthenticated browse assertion is still needed
-(the existing test covers the revision endpoint). These are test gaps, not evidence
-that authorization or a particular trigger is broken.
-
-The installed cursor is a signed revision-bound offset. The plan's keyset warning
-correctly excludes historical snapshot guarantees, but the current implementation
-must not be described as keyset pagination. Existing scale evidence covers the
-first browse page; deep continuation cost remains unmeasured and must be assessed
-before the M3 performance claim is accepted.
-
-A separate coverage gap concerns recoverable continuation errors. The old 409
-assertion covers a required refresh, not ordinary retry. Add this existing required
-behavior before calling the master row covered:
-
-| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
-|---|---|---|---|---|---|---|
 | 4 | retries a failed continuation without discarding read pages | Error | First page visible; continuation temporarily rate limited; user retries | First page stays visible, error appears, retry appends the later page | Frontend unit | ✅ `src/components/__tests__/model-grid.test.tsx::retries a failed continuation without discarding read pages` |
-
-The writer assertion will mutate an actual persisted row for each table in the
-reviewed dependency inventory, then request continuation with the prior cursor.
-Fixtures retain real foreign keys and enum/check constraints. Existing per-action
-Model cases continue to cover INSERT/UPDATE/DELETE and transactional rollback;
-this additional sweep observes continuation rejection across all registered
-writer tables rather than only inspecting trigger names.
-
-| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
-|---|---|---|---|---|---|---|
 | 5 | rejects continuation after each catalog dependency writer | Edge | Real row from each registered table, prior cursor, committed SQL update | Exactly one row updated; prior cursor rejected with browse_refresh_required | Integration | ✅ `integration/db/test_library_contracts_v1.py::TestInstall::test_rejects_continuation_after_each_catalog_dependency_writer` |
 | 6 | denies unauthenticated library browsing | Error | No cookie or bearer credential; browse request | 401 and no private card payload | Integration | ✅ `integration/api/v1/models/test_browse.py::TestBrowseModels::test_denies_unauthenticated_library_browsing` |
-
-## Deep continuation measurement plan
-
-Use the existing supported-scale factory (25,000 collections, 100,000 Models),
-plus 10,000 Multipart Models so the mixed endpoint exercises both projections.
-Test admin and inherited viewer access with name-ascending and date-descending
-sorts. Seed a valid late position with the production cursor codec after the first
-real page supplies its caller/filter/revision binding. This setup measures a tail
-request; it deliberately does not claim the time of walking all preceding pages.
-Use one warm-up and three retained timings, serially on an otherwise quiet test
-host, against the existing browse budget of 1.5 seconds. Do not run this during the
-ordinary gate or another benchmark. This verifies the implemented offset strategy
-instead of describing it as an unimplemented keyset strategy.
-
-| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
-|---|---|---|---|---|---|---|
-| 7 | answers a late mixed browse page within budget | Edge | Supported library plus 10,000 sets; admin/viewer; name/date sort; valid tail cursor | Authorized tail contains 60 items, advertises its final continuation, median request latency ≤ existing 1.5 s browse budget | Integration scale | ❌ missing |
-
-## PostgreSQL acceptance coverage
-
-Existing PostgreSQL evidence covers Unicode order, revision/authorization changes,
-rollback and migration. It does not assert paginated ties, metric null placement
-or member-filter eligibility before pagination on that engine. Add those required
-contracts using the existing real PostgreSQL fixture and production factories;
-run them only after the ordinary gate, without a second container suite.
-
-| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
-|---|---|---|---|---|---|---|
-| 8 | pages equal names by kind then identity | Edge | Real PostgreSQL, two Model names plus set name fold equally, ascending/descending | Three one-item pages keep the same kind/id tie order without duplicates | Integration PostgreSQL | ❌ missing |
-| 9 | places missing metrics after measured Models | Edge | Real PostgreSQL, measured Model, empty set; five metric sorts | Measured Model precedes null set across page boundary | Integration PostgreSQL | ❌ missing |
-| 10 | filters readable members before pagination | Error | Real PostgreSQL, readable set references hidden STL Model, valid set references readable STL Model | Hidden match excluded; permitted Model/set remain reachable with exact total | Integration PostgreSQL | ❌ missing |
-| 11 | pages mixed dates in global order | Happy | Real PostgreSQL, old Model, middle set, new Model; ascending/descending | Three one-item pages follow global dates without duplicates | Integration PostgreSQL | ❌ missing |
-
-## Qualification checkpoint
-
-The selection request now reuses the browse page size instead of sending 500.
-The initial RED invocation selected the stale-continuation scenario only: one
-failure caused by the HTTP fake rejecting the invalid request. Vitest did not
-select the two computed parameter names from that filter; those cases are not
-claimed as observed RED. After the fix, all six bulk-selection cases passed
-(22.34 s). The additional continuation retry case passed (7.42 s).
-
-All 68 trigger installation/writer cases passed (14.29 s), including one committed
-row update per registered catalog dependency. The first sweep had 31 passes and
-one fixture error: provenance accepts `title`, not `name`. Correcting that fixture
-retained the production validation. The anonymous browse assertion passed (4.85 s).
-
-The ordinary gate found five test names containing `_and_`. They listed outcomes
-of ordering/visibility, version-preserving transfer or transactional rollback.
-Renaming them to those behaviors preserves every assertion. The targeted naming
-gate now passes (8.20 s); the original broad run still records its naming failure.
-The changed matrix references in the server contract record follow the new names.
-PostgreSQL and tail-page measurements remain pending; M3 is not closed.
-
-## Browser continuation gate
-
-The existing browser flow asserts an explicit refresh from a changed revision,
-but does not attempt or assert the availability of continuation while changed.
-Strengthen that same behavior with the unavailable Load more control so the master
-requirement has an observable browser assertion.
-
-| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
-|---|---|---|---|---|---|---|
+| 7 | answers a late mixed browse page within budget | Edge | Supported library plus 10,000 sets; admin/viewer; name/date sort; valid tail cursor | Authorized tail contains 60 items, advertises its final continuation, median request latency ≤ existing 1.5 s browse budget | Integration scale | ✅ `repo/test_read_scale_budgets.py::TestLibraryReadsAtScale::test_answers_a_late_mixed_browse_page_within_budget` |
+| 8 | pages equal names by kind then identity | Edge | Real PostgreSQL, two Model names plus set name fold equally, ascending/descending | Three one-item pages keep the same kind/id tie order without duplicates | Integration PostgreSQL | ✅ `integration/postgres/test_library_browse.py::TestLibraryBrowse::test_pages_equal_names_by_kind_then_identity` |
+| 9 | places missing metrics after measured Models | Edge | Real PostgreSQL, measured Model, empty set; five metric sorts | Measured Model precedes null set across page boundary | Integration PostgreSQL | ✅ `integration/postgres/test_library_browse.py::TestLibraryBrowse::test_places_missing_metrics_after_measured_models` |
+| 10 | filters readable members before pagination | Error | Real PostgreSQL, readable set references hidden STL Model, valid set references readable STL Model | Hidden match excluded; permitted Model/set remain reachable with exact total | Integration PostgreSQL | ✅ `integration/postgres/test_library_browse.py::TestLibraryBrowse::test_filters_readable_members_before_pagination` |
+| 11 | pages mixed dates in global order | Happy | Real PostgreSQL, old Model, middle set, new Model; ascending/descending | Three one-item pages follow global dates without duplicates | Integration PostgreSQL | ✅ `integration/postgres/test_library_browse.py::TestLibraryBrowse::test_pages_mixed_dates_in_global_order` |
 | 12 | refreshes a changed library deliberately | Edge | Existing page has continuation, authority announces a new revision | Load more unavailable until refresh; original card retained; replacement starts without cursor | Playwright | ✅ `tests/e2e/vault.spec.ts::refreshes a changed library deliberately` |
+| 13 | excludes trashed candidates before pagination | Edge | PostgreSQL, live Model/set plus trashed Model and trashed-folder candidates | Only two live identities remain across one-item pages, exact total and final cursor | Integration PostgreSQL | ✅ `integration/postgres/test_library_browse.py::TestLibraryBrowse::test_excludes_trashed_candidates_before_pagination` |
 
-Browser continuation acceptance passed in Chromium (1/1, 14.3 s). App/UI/domain
-type checks and the changed component/test lint and formatting checks passed.
+## Correctness qualification
 
-The existing inaccessible-entry case now also asserts `total == 0`, closing the
-master matrix's explicit no-count-leak requirement. The targeted case passed;
-this tightens the existing authorization behavior without changing production.
+- Bulk selection: 6/6 passed (22.34 s). The initial RED filter selected only the
+  stale-continuation scenario, which failed because the server fake rejected
+  limit 500. Vitest did not select the two computed parameter names; they are
+  not claimed as observed RED. Continuation retry passed separately (7.42 s).
+- Trigger installation and actual writers: 68/68 passed (14.29 s), including one
+  committed row update for each of the 32 registered catalog dependencies.
+  Existing Model cases also cover INSERT/UPDATE/DELETE and transaction rollback;
+  this sweep does not claim all three actions were executed for every table.
+  The first sweep had 31 passes and one fixture error: provenance requires
+  `title`, not `name`. The fixture was corrected without weakening validation.
+- Anonymous browse: 1/1 passed (4.85 s). The inaccessible-entry case also now
+  asserts total zero, closing the explicit no-count-leak requirement (5.89 s).
+- Chromium changed-list continuation: 1/1 passed (14.3 s). Load more is present
+  initially, unavailable after a changed revision, and the explicit refresh
+  starts without a cursor while the old card remains stable until replacement.
+- PostgreSQL additions: 10/10 passed (232.68 s, exit 0, unchanged source manifest).
+  The existing real-service/fresh-migration fixture verifies both date directions,
+  both name tie directions, five metric sorts and readable-member filtering.
+  A final explicit live/trashed PostgreSQL case also passed separately (exit 0),
+  asserting that trashed candidates cannot consume the page or inflate its total.
+  Earlier related PostgreSQL qualification remains in the server record.
+- Ordinary backend gate: 19,226 passed, one failed (2,588.87 s, exit 1). Its only
+  failure was five test names containing `_and_`; these listed ordering,
+  visibility, version-preserving transfer or rollback outcomes. Renaming them
+  preserved all assertions. The naming gate then passed (8.20 s). This is a
+  broad run plus a verified correction, not a single all-green invocation.
+- Ordinary migrations/contracts: the retained 174 named passes plus the disjoint
+  208-case recovery exactly cover the 382 collected cases. The original process
+  had no terminal result; the recovery exited 0. All 1,752 recorded backend Python
+  sources matched at recovery qualification. This is partitioned evidence.
+- Static checks: frontend app/UI/domain type checks, affected component/browser
+  lint and formatting passed. Backend `ruff check app/ tests/`, required format
+  scope (175 files), and Pyright (zero errors/warnings) passed.
 
-Backend static qualification: `ruff check app/ tests/` passed; the required
-formatting scope passed (175 files); Pyright reported 0 errors and 0 warnings.
-These checks do not replace the pending runtime and scale qualification.
+Production `app/` and Alembic sources stayed unchanged throughout the ordinary
+run. Six test files changed: the browse, transfer and restore tests received
+naming/additional authorization assertions; the excluded contracts, PostgreSQL
+and scale files gained the explicit acceptance cases above. New assertions were
+qualified separately. Both additional PostgreSQL and scale runs recorded no
+source changes. Their raw commands, logs, results and source hashes are retained
+in the local M3 evidence archive.
 
-## Ordinary gate completed
+## Backend performance acceptance
 
-The official `full-ordinary` lane (excluding the already-qualified ordinary
-migration/contracts partition) finished with **19,226 passed and one failed** in
-2,588.87 s. The only failure was the five naming violations documented above;
-the targeted control passed after those names were corrected. Retain both
-results: this is a broad run plus a targeted correction, not a single all-green
-invocation. The process returned exit 1 normally.
+The deep-page test uses the existing factory with 25,000 collections, 100,000
+Models and 10,000 Multipart Sets. An initial real request supplies the cursor's
+caller/filter/revision binding. The production codec seeds a test-only offset
+near the tail (total minus 120), avoiding timing a thousand preceding requests.
+This measures the late request, not cumulative navigation or a historical view.
 
-The source manifest confirms production `app/` and Alembic files did not change
-during the run. Six test files changed: three received naming-only corrections
-or the additional anonymous/count assertions, and the excluded contracts,
-PostgreSQL and scale files gained the explicit acceptance cases documented here.
-Those additions are qualified separately. The earlier ordinary migration union
-contains exactly 382 cases (174 retained passes plus 208 disjoint recovery passes).
-Final full resource and latest-commit CI qualification remain M11 delivery gates;
-the M3-specific PostgreSQL additions and deep continuation measurements are still
-pending. No resource suite has been described as fully green.
+One warm-up and three retained samples run serially per combination, after the
+other suites exit. Existing host services remain; this is not dedicated hardware.
+Every response contains 60 authorized entries, exact total and final continuation.
+The unchanged budget is median ≤1.5 s. All four cases passed in 41.71 s (exit 0).
+
+| Reader | Sort | Retained samples (ms) | Median (ms) |
+|---|---|---|---|
+| Administrator | name ascending | 311.70, 320.53, 314.45 | 314.45 |
+| Administrator | date descending | 217.63, 223.16, 486.37 | 223.16 |
+| Granted viewer | name ascending | 382.14, 382.25, 384.50 | 382.25 |
+| Granted viewer | date descending | 287.90, 279.64, 291.49 | 287.90 |
+
+The prior first-page/growth measurements remain distinct. Constant statement and
+bound-parameter tests (including Multipart projection) passed in the ordinary
+lane. The late-page result supports the current offset strategy at the measured
+size; it is not evidence of an overall frontend speedup. Render, image decoding,
+request contention and before/after frontend distributions remain M6/M11.
+
+## Boundaries of closure
+
+M3's reviewed assertions and scoped acceptance are complete. The final complete
+resource suite and required CI for the final commit remain M11 delivery gates.
+The broad run's naming failure and its targeted correction remain visible.
+Global revision invalidation can reject continuation during active writes;
+performance under ingestion remains an explicit later measurement. Legacy
+headerless edit compatibility and restore/edit-version semantics belong to M4,
+not this browse closure. No required behavior is silently waived here.

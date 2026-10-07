@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M2 are closed locally in dependency order. M3 is active. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M3 are closed locally in dependency order. M4 is active. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
