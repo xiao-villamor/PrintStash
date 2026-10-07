@@ -15,6 +15,7 @@ export function backupRunsOptions(reader: typeof listBackupRuns = listBackupRuns
     queryKey: backupRunKeys.all,
     queryFn: ({ signal }) => reader({ fresh: true, signal }),
     retry: false,
+    staleTime: 0,
   });
 }
 export interface BackupRetryCommand {

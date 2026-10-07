@@ -1,14 +1,10 @@
 import { currentLocale } from "@/lib/locale";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  backupRunKeys,
-  backupRunsOptions,
-  useBackupDestinationRetry,
-} from "@/lib/queries/settings-backup-runs";
+import { backupRunsOptions, useBackupDestinationRetry } from "@/lib/queries/settings-backup-runs";
 import { useAuth } from "@/lib/auth-context";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
@@ -16,13 +12,7 @@ import { parseApiError } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 
-export function BackupRunHistory({
-  refreshKey,
-  onPublished,
-}: {
-  refreshKey: number;
-  onPublished: () => void;
-}) {
+export function BackupRunHistory({ onPublished }: { onPublished: () => void }) {
   const { t } = useI18n();
   const { user } = useAuth();
   const admin = useRef(!!user?.is_superuser);
@@ -31,8 +21,6 @@ export function BackupRunHistory({
   }, [user?.is_superuser]);
   const live = useRef(true);
   const [retired, setRetired] = useState(false);
-  const previousRefresh = useRef(refreshKey);
-  const client = useQueryClient();
   const history = useQuery({ ...backupRunsOptions(), enabled: !!user?.is_superuser && !retired });
   const command = useBackupDestinationRetry();
   const retrying = command.retrying;
@@ -48,12 +36,6 @@ export function BackupRunHistory({
       release();
     };
   }, []);
-  useEffect(() => {
-    if (previousRefresh.current === refreshKey) return;
-    previousRefresh.current = refreshKey;
-    if (user?.is_superuser && !retired)
-      void client.invalidateQueries({ queryKey: backupRunKeys.all, exact: true });
-  }, [client, refreshKey, retired, user?.is_superuser]);
   async function retry(id: string) {
     const session = getSessionVersion();
     function current() {

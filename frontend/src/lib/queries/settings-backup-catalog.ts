@@ -1,6 +1,7 @@
 /** Exact owned backup sources and optional discovery catalogs have independent read failures. */
 import { queryOptions } from "@tanstack/react-query";
 import {
+  type BackupMeta,
   listBackupSources,
   listUnownedLocalBackups,
   listUnownedS3Backups,
@@ -29,6 +30,7 @@ export function backupSourcesOptions() {
     queryKey: backupCatalogKeys.owned,
     queryFn: ({ signal }) => listBackupSources({ fresh: true, signal }),
     retry: false,
+    staleTime: 0,
   });
 }
 export function unownedLocalBackupsOptions() {
@@ -36,6 +38,7 @@ export function unownedLocalBackupsOptions() {
     queryKey: backupCatalogKeys.local,
     queryFn: ({ signal }) => optionalDiscovery(listUnownedLocalBackups({ fresh: true, signal })),
     retry: false,
+    staleTime: 0,
   });
 }
 export function unownedS3BackupsOptions() {
@@ -43,6 +46,7 @@ export function unownedS3BackupsOptions() {
     queryKey: backupCatalogKeys.s3,
     queryFn: ({ signal }) => optionalDiscovery(listUnownedS3Backups({ fresh: true, signal })),
     retry: false,
+    staleTime: 0,
   });
 }
 export function unownedRemoteBackupsOptions() {
@@ -50,5 +54,14 @@ export function unownedRemoteBackupsOptions() {
     queryKey: backupCatalogKeys.remote,
     queryFn: ({ signal }) => optionalDiscovery(listUnownedRemoteBackups({ fresh: true, signal })),
     retry: false,
+    staleTime: 0,
   });
+}
+
+/** Legacy id-only rows stay distinct; destructive operations still require source_ref. */
+export function backupSourceKey(backup: BackupMeta): string {
+  return (
+    backup.source_ref ??
+    `${backup.location}:${backup.namespace ?? ""}:${backup.key ?? ""}:${backup.backup_id}`
+  );
 }

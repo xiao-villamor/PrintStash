@@ -44,6 +44,17 @@ loss of eligibility blocks submission until recovery or explicit selection.
 Accepted scans belong to TaskCenter even after their originating form closes.
 These increments do not yet complete the broader administration migration.
 
+### Implemented backup seam (M9 increment)
+
+`settings-backup-catalog.ts` owns independent exact-source and optional discovery
+reads; `settings-backup-commands.ts` validates reviewed source identity, coordinates
+cancellation and publishes confirmed backup receipts. `settings-backup-runs.ts`
+owns execution history and destination retry. The component retains only drafts,
+confirmation snapshots and local feedback. Configuration and connection owners
+publish each policy transaction; a later failure does not erase earlier ACKs.
+This does not imply an atomic backend policy transaction. Process catalogs read
+again on return, so accepted work completed away from the view is recoverable.
+
 ## Proposed directory tree
 
 ```text

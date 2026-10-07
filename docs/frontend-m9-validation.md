@@ -177,3 +177,77 @@ edited policy fields rather than refreshed full DTOs. The existing destructive/
 publication handlers still need migration; four explicitly marked local Query
 update adapters must be removed in the next bounded backup command step before
 M9 can close. Real backup/browser qualification follows that complete workflow.
+
+## Backup command preflight (before tests)
+
+Move exact-source command validation, cancellation and confirmed publication into
+one backup owner. Preserve opaque locators, remote adoption hashes, provider delete
+capabilities and durable accepted Jobs. Remove the four temporary catalog update
+adapters and component-level receipt races. Keep policy writes explicit through
+existing config/connection owners; they remain multiple server transactions, not
+an invented atomic operation. Accepted successes publish independently; failed
+intent remains reviewable. Local drafts and callbacks retire with their session.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| C1 | rejects a backup confirmation after its source changed | Conflict | Confirmation open; source/hash changes | No DELETE; review failure retained | Frontend unit | ✅ Settings/history mirrors |
+| C2 | keeps a deleted backup absent after an older catalog response | Race | Held GET; confirmed DELETE; late old response | No resurrection; old GET canceled | Frontend unit | ✅ Settings/history mirrors |
+| C3 | retires backup confirmations with the private session | Permission | Open confirmation then auth retirement | Old confirmation cannot dispatch | Frontend unit | ✅ Settings/history mirrors |
+| C4 | retains an accepted backup without disposed-view feedback | Edge | Accepted Job, leave Settings, terminal | Task reaches terminal; no old toast/local follow-up | Frontend unit | ✅ Settings/history mirrors |
+| C5 | publishes acknowledged backup policy to shared configuration | Happy | Retention/policy ACK normalized | Other config readers see acknowledged values | Frontend unit | ✅ Settings/history mirrors |
+| C6 | retains partial policy failure without claiming full success | Error | Config accepted; connection refused | Accepted config visible; failed connection intent retained; explicit retry | Frontend unit | ✅ Settings/history mirrors |
+| C7 | preserves exact-source backup lifecycle | Happy/Error | Existing create/upload/adopt/download/restore/delete/retry contracts | Exact locators, hashes, recovery and durable task outcomes retained | Unit/API/real browser | ✅ unit/API + real recovery |
+| C8 | publishes an adopted backup before another listing | Happy | Full adoption DTO accepted | Owned catalog shows ACK; exact discovery candidate disappears; no redundant owned GET | Frontend unit | ✅ Settings/history mirrors |
+| C9 | keeps one canonical history snapshot after invalidation | Happy | Backup command invalidates run history | History reuses the same key and fetches once; obsolete refresh counter removed | Frontend unit | ✅ backup-run-history.test.tsx |
+| C10 | refreshes backup process views when returning | Recovery | Leave during server work; revisit with warm Query data | Owned catalog and run history read current server state without waiting for the global30s window | Frontend unit | ✅ Settings/history mirrors |
+
+### Backup command qualification
+
+Five initial REDs8.65s: an obsolete exact-source confirmation dispatched DELETE;
+a GET remained uncancelled after deletion; auth retirement retained a confirmation;
+a completed Job emitted a disposed-view toast; a normalized config ACK never
+reached the shared projection. Tightened the delete race arrangement to await the
+known deletion before releasing the held read; its cancellation assertion remained
+RED4.80s. Separate partial-policy1RED5.85s and authoritative-adoption1RED5.69s
+captured the remaining publication defects.
+
+`settings-backup-commands.ts` now owns exact-source eligibility, cancellation,
+confirmed publication and accepted manual-backup Jobs. Typed backup endpoints use
+native caller signals and no legacy transport invalidation. Catalog/source refs,
+reviewed archive identity, remote adoption digest and provider delete capability
+are rechecked before dispatch; four local Query setter adapters are removed.
+Delete refreshes independent discovery catalogs instead of removing matching keys
+or basenames across unrelated providers. Adoption publishes the actual full DTO.
+The existing run-history owner replaces the obsolete refresh counter; successful
+retry asks only the owned-catalog observer to refresh, not policy/config catalogs.
+
+Config/connection policy writes use their existing owners in explicit sequence.
+Each accepted part publishes immediately, including when a later connection fails;
+only acknowledged drafts clear. The backend still exposes multiple unversioned
+transactions. This is not atomic multi-resource commit or external-editor conflict
+detection. Exact-source command failures retain the confirmation for cancellation/
+review, and callbacks/reload timers remain fenced to the originating view/session.
+
+First command gate42passed/2failed18.81s: the authored review error needed its typed
+message mapping, and a delete fixture kept serving the removed discovery file.
+Mapped the specific code and made the fake reflect the actual deletion.44passed
+17.81s, then the partial-policy increment45passed18.37s. A complete gate269passed/
+2failed56.56s found two unrelated Trash scenarios whose earlier partial config had
+implicitly meant unguarded storage. The new full config factory defaults verified;
+those tests now explicitly request unguarded storage, preserving their original
+assertions. Corrected full gate271/7files59.10s passed.
+
+Two return-to-view regressions failed6.89s on the inherited30s freshness window.
+Backup catalog/history options now read on return without a timer; both pass.
+Latest Settings/history/owner/repository/i18n gate210/5files56.60s passed; affected
+return/command controls11passed9.29s. Types passed. Lint required moving the auth
+cleanup declaration after its setters and declaring the stable trash-retention
+setter dependency; no suppression added. Final lint/format766files passed, and
+15 affected lifetime/Trash assertions10.26s passed after that correction. Build
+passed1.60s with the existing >500kB warning. Counts overlap across invocations.
+
+Real `backup-recovery.spec.ts`:1/1,39.4s scenario1.3m invocation. The operator created
+a backup, purged a real Model, restored it and downloaded matching Artifact bytes.
+Dedicated ports3327/4327 and `/tmp/printstash-m9-backup-data`; no backend production
+changes. No performance improvement claimed. M9 remains open: storage migration,
+remaining Settings/notification and entry-route ownership must still be reconciled.

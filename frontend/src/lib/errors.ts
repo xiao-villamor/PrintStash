@@ -225,6 +225,9 @@ const ERROR_MESSAGES = {
   backup_all_destinations_failed:
     "The backup couldn't be saved to any selected destination. Check each destination and try again.",
   backup_retry_new_backup_required: "No verified backup copy survives. Create a new backup.",
+  backup_source_changed: "source.reviewChanged",
+  backup_source_unavailable: "settings.backupSourceUnavailable",
+  backup_adoption_unavailable: "settings.backupLegacySourceUnavailable",
   backup_retry_target_changed:
     "The destination changed. Restore its original configuration or create a new backup.",
   backup_retry_target_unverified:

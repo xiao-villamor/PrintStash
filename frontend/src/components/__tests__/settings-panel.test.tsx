@@ -28,6 +28,8 @@ import { SettingsPanel } from "@/components/settings-panel";
 import { aCollectionPermission, aPrinterPermission } from "@/test-support/permissions";
 import { aUser, aApiKey } from "@/test-support/account";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
+import { backupCatalogKeys } from "@/lib/queries/settings-backup-catalog";
+import { listTasks, syncImportJobs } from "@/lib/task-center";
 import { storageConnectionKeys } from "@/lib/queries/settings-storage";
 import { queryKeys } from "@/lib/query-client";
 import { clearLogin } from "@/lib/auth-store";
@@ -961,6 +963,201 @@ describe("SettingsPanel", () => {
       expect(screen.queryByText("No backups found.")).toBeNull();
     });
 
+    it("rejects a backup confirmation after its source changed", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/sources": json([BACKUP]),
+          "DELETE /api/v1/backups/": json(null, 204),
+        },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Delete backup" }));
+      act(() =>
+        app.client.setQueryData(backupCatalogKeys.owned, [
+          { ...BACKUP, archive_sha256: "b".repeat(64) },
+        ]),
+      );
+      await userEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Delete backup" }),
+      );
+      expect(app.requestsWithMethod("DELETE")).toHaveLength(0);
+      expect(
+        await screen.findByText(
+          "The source changed during review. Review the latest version again.",
+        ),
+      ).toBeVisible();
+    });
+    it("keeps a deleted backup absent after an older catalog response", async () => {
+      const held = Promise.withResolvers<Response>();
+      let signal: AbortSignal | null | undefined;
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/sources": json([BACKUP]),
+          "DELETE /api/v1/backups/": json(null, 204),
+        },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Delete backup" }));
+      app.route({
+        "GET /api/v1/backups/sources": (_url, init) => {
+          signal = init?.signal;
+          return held.promise;
+        },
+      });
+      let pending: Promise<void>;
+      act(() => {
+        pending = app.client.invalidateQueries({ queryKey: backupCatalogKeys.owned });
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+      await userEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Delete backup" }),
+      );
+      await waitFor(() => expect(app.requestsWithMethod("DELETE")).toHaveLength(1));
+      await waitFor(() => expect(app.client.getQueryData(backupCatalogKeys.owned)).toEqual([]));
+      await act(async () => {
+        held.resolve(json([BACKUP]));
+        await pending;
+      });
+      await waitFor(() => expect(screen.queryByText(BACKUP.backup_id)).toBeNull());
+      expect(signal?.aborted).toBe(true);
+    });
+    it("retires backup confirmations with the private session", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Delete backup" }));
+      act(() => clearLogin());
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(app.requestsWithMethod("DELETE")).toHaveLength(0);
+    });
+    it("retains an accepted backup without disposed-view feedback", async () => {
+      const id = "backup-disposed-view";
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: backupRoutes(id, { state: "running", result: null }),
+      });
+      await userEvent.click(await screen.findByRole("button", { name: /Backup now/ }));
+      await waitFor(() => expect(listTasks().some((task) => task.jobId === id)).toBe(true));
+      app.rerender(<p>Other view</p>);
+      app.route(backupRoutes(id));
+      await act(async () => {
+        await syncImportJobs();
+      });
+      await waitFor(() =>
+        expect(listTasks().find((task) => task.jobId === id)?.status).toBe("completed"),
+      );
+      expect(screen.queryByText(/Backup created —/)).toBeNull();
+    });
+    it("publishes acknowledged backup policy to shared configuration", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, backup_retention_days: 15 }) },
+      });
+      await screen.findByText("No backups found.");
+      await userEvent.clear(screen.getByLabelText("Retention (days)"));
+      await userEvent.type(screen.getByLabelText("Retention (days)"), "14");
+      await userEvent.click(screen.getByRole("button", { name: "Save retention" }));
+      await waitFor(() =>
+        expect(app.client.getQueryData(queryKeys.vaultConfig)).toMatchObject({
+          backup_retention_days: 15,
+        }),
+      );
+      expect(screen.getByLabelText("Retention (days)")).toHaveValue(15);
+    });
+
+    it("retains partial policy failure without claiming full success", async () => {
+      const connection = aStorageConnection({
+        id: 7,
+        name: "Off-site archive",
+        purpose: "backup",
+        manual_backup_enabled: true,
+      });
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/storage-connections": json([connection]),
+          "PUT /api/v1/config": json({ ...VAULT_CONFIG, automatic_backups_enabled: true }),
+          "PATCH /api/v1/storage-connections/7": json({ detail: "unavailable" }, 503),
+        },
+      });
+      await screen.findByText("No backups found.");
+      await userEvent.click(screen.getByLabelText("Enable automatic backups"));
+      await userEvent.click(screen.getByLabelText("Use Off-site archive for manual backups"));
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await waitFor(() =>
+        expect(app.client.getQueryData(queryKeys.vaultConfig)).toMatchObject({
+          automatic_backups_enabled: true,
+        }),
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save backup settings" })).toBeEnabled(),
+      );
+      expect(screen.getByLabelText("Use Off-site archive for manual backups")).not.toBeChecked();
+      expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual(connection);
+      expect(screen.queryByText("Backup settings saved.")).toBeNull();
+      app.route({
+        "PATCH /api/v1/storage-connections/7": json({
+          ...connection,
+          manual_backup_enabled: false,
+        }),
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await waitFor(() =>
+        expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual({
+          ...connection,
+          manual_backup_enabled: false,
+        }),
+      );
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(2);
+    });
+
+    it("publishes an adopted backup before another listing", async () => {
+      const candidate = {
+        ...BACKUP,
+        filename: "discovered.tar.gz",
+        source_ref: "discovered-source",
+      };
+      const saved = { ...BACKUP, source_ref: "adopted-source" };
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/unowned-local": json([candidate]),
+          "POST /api/v1/backups/adopt-local": json(saved),
+        },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Adopt backup" }));
+      await userEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Adopt backup" }),
+      );
+      await waitFor(() =>
+        expect(app.client.getQueryData(backupCatalogKeys.owned)).toEqual([saved]),
+      );
+      expect(screen.queryByText("discovered.tar.gz")).toBeNull();
+      expect(
+        app.requestsWithMethod("GET").filter((row) => row.url === "/api/v1/backups/sources"),
+      ).toHaveLength(1);
+    });
+
+    it("refreshes the backup catalog when returning", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
+      });
+      await screen.findByText(BACKUP.backup_id);
+      app.rerender(<p>Other view</p>);
+      app.route({
+        "GET /api/v1/backups/sources": json([
+          { ...BACKUP, backup_id: "backup-completed-while-away" },
+        ]),
+      });
+      app.rerender(<SettingsPanel />);
+      expect(await screen.findByText("backup-completed-while-away")).toBeVisible();
+      expect(
+        app.requestsWithMethod("GET").filter((row) => row.url === "/api/v1/backups/sources"),
+      ).toHaveLength(2);
+    });
+
     it("keeps backup controls out of the storage section", async () => {
       renderSettings({ at: "/settings?section=storage" });
 
@@ -1164,21 +1361,27 @@ describe("SettingsPanel", () => {
 
     it("deletes the exact backup source after confirmation", async () => {
       const user = userEvent.setup();
+      let deleted = false;
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=backup",
         routes: {
           "GET /api/v1/backups/sources": json([BACKUP]),
-          "GET /api/v1/backups/unowned-local": json([
-            {
-              ...BACKUP,
-              filename: "2026-01-01T000000Z.tar.gz",
-              source_ref: undefined,
-            },
-          ]),
-          "DELETE /api/v1/backups/2026-01-01T000000Z": json({
-            backup_id: BACKUP.backup_id,
-            deleted: true,
-          }),
+          "GET /api/v1/backups/unowned-local": () =>
+            json(
+              deleted
+                ? []
+                : [
+                    {
+                      ...BACKUP,
+                      filename: "2026-01-01T000000Z.tar.gz",
+                      source_ref: undefined,
+                    },
+                  ],
+            ),
+          "DELETE /api/v1/backups/2026-01-01T000000Z": () => {
+            deleted = true;
+            return json({ backup_id: BACKUP.backup_id, deleted: true });
+          },
         },
       });
 
@@ -1194,7 +1397,7 @@ describe("SettingsPanel", () => {
         ).toBe(true),
       );
       expect(screen.queryByText("2026-01-01T000000Z")).toBeNull();
-      expect(screen.queryByText("2026-01-01T000000Z.tar.gz")).toBeNull();
+      await waitFor(() => expect(screen.queryByText("2026-01-01T000000Z.tar.gz")).toBeNull());
     });
 
     it("describes deletion without restore consequences", async () => {
@@ -1360,7 +1563,11 @@ describe("SettingsPanel", () => {
               storage_backend: "local",
             },
           ]),
-          "POST /api/v1/backups/adopt-remote": json({ backup_id: "old" }),
+          "POST /api/v1/backups/adopt-remote": json({
+            ...BACKUP,
+            backup_id: "old",
+            source_ref: "remote-source",
+          }),
         },
       });
 
@@ -1401,7 +1608,11 @@ describe("SettingsPanel", () => {
               storage_backend: "s3",
             },
           ]),
-          "POST /api/v1/backups/adopt-s3": json({ backup_id: "legacy-1" }),
+          "POST /api/v1/backups/adopt-s3": json({
+            ...BACKUP,
+            backup_id: "legacy-1",
+            source_ref: "s3-source",
+          }),
         },
       });
 
@@ -1440,7 +1651,11 @@ describe("SettingsPanel", () => {
               storage_backend: "local",
             },
           ]),
-          "POST /api/v1/backups/adopt-local": json({ backup_id: "legacy-1" }),
+          "POST /api/v1/backups/adopt-local": json({
+            ...BACKUP,
+            backup_id: "legacy-1",
+            source_ref: "adopted-local",
+          }),
         },
       });
 
@@ -1793,6 +2008,7 @@ describe("SettingsPanel", () => {
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=trash",
         routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, storage_tier: "unguarded" }),
           "GET /api/v1/models/trash": json([TRASHED_MODEL]),
           "DELETE /api/v1/models/7": json(null, 204),
         },
@@ -1813,6 +2029,7 @@ describe("SettingsPanel", () => {
       renderSettings({
         at: "/settings?section=trash",
         routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, storage_tier: "unguarded" }),
           "GET /api/v1/models/trash": json([TRASHED_MODEL]),
           "DELETE /api/v1/models/7": json({
             purged_model_ids: [7],

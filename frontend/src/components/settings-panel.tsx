@@ -8,15 +8,19 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { ApiError, parseApiError } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
-  backupCatalogKeys,
+  backupSourceKey,
   backupSourcesOptions,
   unownedLocalBackupsOptions,
   unownedS3BackupsOptions,
   unownedRemoteBackupsOptions,
 } from "@/lib/queries/settings-backup-catalog";
-import { storageConnectionsOptions } from "@/lib/queries/settings-storage";
+import { useBackupCommand } from "@/lib/queries/settings-backup-commands";
+import {
+  storageConnectionsOptions,
+  useStorageConnectionCommand,
+} from "@/lib/queries/settings-storage";
 import {
   apiKeysOptions,
   adminUsersOptions,
@@ -106,33 +110,23 @@ import { MaintenancePanel } from "@/components/maintenance-panel";
 import { BackgroundWorkPanel } from "@/components/background-work-panel";
 import { BrandMark } from "@/components/brand-mark";
 import {
-  createBackup,
   createGcPlan,
   approveGcPlan,
   abortGcPlan,
   finalizeGcPlan,
-  adoptLocalBackup,
-  adoptRemoteBackup,
-  adoptS3Backup,
-  deleteBackup,
-  downloadBackup,
   downloadModelExport,
   downloadLibraryArchive,
   importLibraryArchive,
   regenerateDerivatives,
-  backupFromJob,
   getHealthDetails,
   getActiveGcPlan,
   getLatestRelease,
   getVaultConfig,
   listTrash,
   purgeModel,
-  restoreBackup,
   restoreModel,
   restartPrintStash,
   updateVaultConfig,
-  updateStorageConnection,
-  uploadBackup,
 } from "@/lib/api";
 import type {
   BackupMeta,
@@ -175,7 +169,6 @@ import {
   type PreviewQuality,
   type ScreenshotScale,
 } from "@/lib/preview-preferences";
-import { waitForImportJob } from "@/lib/task-center";
 import {
   prepareBrowserExtensionSetup,
   discardBrowserExtensionSetup,
@@ -323,13 +316,6 @@ function formatDateTime(value: string): string {
   }).format(new Date(value));
 }
 
-function backupSourceKey(backup: BackupMeta): string {
-  return (
-    backup.source_ref ??
-    `${backup.location}:${backup.namespace ?? ""}:${backup.key ?? ""}:${backup.backup_id}`
-  );
-}
-
 function parseBackupRetentionDays(value: string): number | null {
   if (!/^\d+$/.test(value)) return null;
   const days = Number(value);
@@ -458,7 +444,6 @@ function SettingsCard({
 export function SettingsPanel() {
   useUiLocale();
   const { user } = useAuth();
-  const queryClient = useQueryClient();
   const { locale, t } = useI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -586,26 +571,6 @@ export function SettingsPanel() {
   useEffect(() => {
     accountIdentity.current = user?.id ?? null;
   }, [user?.id]);
-  useEffect(() => {
-    accountLive.current = true;
-    const release = onAuthChange(() => {
-      setOwnedReceipt(null);
-      setAccessCollection(null);
-      setAccessPickerOpen(false);
-      setAccessUserId("");
-      setAccessRole("view");
-      setPrinterAccessUserId("");
-      setAccessPrinterId("");
-      setPrinterAccessRole("view");
-      setAutoMarkKnownGood(null);
-      setCurrency(null);
-      setModelThumbnailWidth(null);
-    });
-    return () => {
-      accountLive.current = false;
-      release();
-    };
-  }, []);
   function accountCurrent(session: number) {
     return (
       accountLive.current && session === getSessionVersion() && accountIdentity.current === user?.id
@@ -649,8 +614,9 @@ export function SettingsPanel() {
   const [purgeExpiredOpen, setPurgeExpiredOpen] = useState(false);
   const [trashStorageTier, setTrashStorageTier] = useState("verified");
   const [trashOperations, setTrashOperations] = useState<StorageOperations>();
+  const backupCommand = useBackupCommand();
+  const backupConnectionCommand = useStorageConnectionCommand();
   const [backingUp, setBackingUp] = useState(false);
-  const [backupRunRefresh, setBackupRunRefresh] = useState(0);
   const backupEnabled = !!user?.is_superuser && activeSection === "backup";
   const ownedBackupRead = useQuery({ ...backupSourcesOptions(), enabled: backupEnabled });
   const localBackupRead = useQuery({ ...unownedLocalBackupsOptions(), enabled: backupEnabled });
@@ -704,33 +670,6 @@ export function SettingsPanel() {
   );
   const automaticLocalBackupEnabled =
     automaticLocalBackupDraft ?? remoteConfigData?.automatic_local_backup_enabled ?? true;
-  // Receipt publication is migrated with exact-source commands in the next bounded backup step.
-  function setBackups(update: (current: BackupMeta[]) => BackupMeta[]) {
-    queryClient.setQueryData<BackupMeta[]>(backupCatalogKeys.owned, (previous) =>
-      update(previous ?? []),
-    );
-  }
-  function setUnownedBackups(
-    update: (current: UnownedBackupCandidate[]) => UnownedBackupCandidate[],
-  ) {
-    queryClient.setQueryData<UnownedBackupCandidate[]>(backupCatalogKeys.local, (previous) =>
-      update(previous ?? []),
-    );
-  }
-  function setUnownedS3Backups(
-    update: (current: UnownedS3BackupCandidate[]) => UnownedS3BackupCandidate[],
-  ) {
-    queryClient.setQueryData<UnownedS3BackupCandidate[]>(backupCatalogKeys.s3, (previous) =>
-      update(previous ?? []),
-    );
-  }
-  function setUnownedRemoteBackups(
-    update: (current: UnownedRemoteBackupCandidate[]) => UnownedRemoteBackupCandidate[],
-  ) {
-    queryClient.setQueryData<UnownedRemoteBackupCandidate[]>(backupCatalogKeys.remote, (previous) =>
-      update(previous ?? []),
-    );
-  }
   const [backupPolicyBusy, setBackupPolicyBusy] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupMeta | null>(null);
   const [deleteBackupTarget, setDeleteBackupTarget] = useState<BackupMeta | null>(null);
@@ -753,6 +692,37 @@ export function SettingsPanel() {
   const [printerImageWarningOpen, setPrinterImageWarningOpen] = useState(false);
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [restartBusy, setRestartBusy] = useState(false);
+  useEffect(() => {
+    accountLive.current = true;
+    const release = onAuthChange(() => {
+      setOwnedReceipt(null);
+      setAccessCollection(null);
+      setAccessPickerOpen(false);
+      setAccessUserId("");
+      setAccessRole("view");
+      setPrinterAccessUserId("");
+      setAccessPrinterId("");
+      setPrinterAccessRole("view");
+      setAutoMarkKnownGood(null);
+      setCurrency(null);
+      setModelThumbnailWidth(null);
+      setRestoreTarget(null);
+      setDeleteBackupTarget(null);
+      setAdoptTarget(null);
+      setAdoptS3Target(null);
+      setAdoptRemoteTarget(null);
+      setBackupRetentionDays(null);
+      setAutomaticBackupsEnabled(null);
+      setAutomaticBackupTimeUtc(null);
+      setManualLocalBackupEnabled(null);
+      setAutomaticLocalBackupEnabled(null);
+      setBackupConnectionDrafts({});
+    });
+    return () => {
+      accountLive.current = false;
+      release();
+    };
+  }, []);
   const visibleSettingsSections = SETTINGS_SECTIONS.filter(
     (section) =>
       !["sso", "maintenance", "work", "ai-search"].includes(section.id) || user?.is_superuser,
@@ -819,7 +789,7 @@ export function SettingsPanel() {
     } finally {
       setTrashLoading(false);
     }
-  }, [user]);
+  }, [user, setTrashRetentionDays]);
 
   useEffect(() => {
     if (activeSection === "trash") {
@@ -830,9 +800,8 @@ export function SettingsPanel() {
     }
   }, [activeSection, loadTrash]);
 
-  async function loadBackups(preserve?: BackupMeta) {
+  async function loadBackups() {
     if (!user?.is_superuser) return;
-    const session = getSessionVersion();
     await Promise.all([
       ownedBackupRead.refetch(),
       localBackupRead.refetch(),
@@ -841,73 +810,56 @@ export function SettingsPanel() {
       remoteConfig.refetch(),
       backupConnectionRead.refetch(),
     ]);
-    if (preserve && accountCurrent(session)) {
-      setBackups((current) =>
-        current.some((item) => backupSourceKey(item) === backupSourceKey(preserve))
-          ? current
-          : [preserve, ...current],
-      );
-    }
   }
 
   async function confirmAdoptBackup() {
     if (!adoptTarget) return;
     const target = adoptTarget;
+    const session = getSessionVersion();
     setAdoptingBackup(true);
     try {
-      await adoptLocalBackup(target.filename);
+      await backupCommand.run({ kind: "adopt-local", session, target });
+      if (!accountCurrent(session)) return;
       toast.success(t("settings.backupLegacyAdopted", { filename: target.filename }));
       setAdoptTarget(null);
-      await loadBackups();
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setAdoptingBackup(false);
+      if (accountCurrent(session)) setAdoptingBackup(false);
     }
   }
 
   async function confirmAdoptS3Backup() {
     if (!adoptS3Target) return;
     const target = adoptS3Target;
-    if (!target.source_ref || !target.archive_sha256) {
-      toast.error(t("settings.backupLegacySourceUnavailable"));
-      return;
-    }
+    const session = getSessionVersion();
     setAdoptingS3Backup(true);
     try {
-      await adoptS3Backup(target.key, target.source_ref, target.archive_sha256);
+      await backupCommand.run({ kind: "adopt-s3", session, target });
+      if (!accountCurrent(session)) return;
       toast.success(t("settings.backupLegacyAdopted", { filename: target.key }));
       setAdoptS3Target(null);
-      await loadBackups();
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setAdoptingS3Backup(false);
+      if (accountCurrent(session)) setAdoptingS3Backup(false);
     }
   }
 
   async function confirmAdoptRemoteBackup() {
     if (!adoptRemoteTarget) return;
     const target = adoptRemoteTarget;
-    if (!target.source_ref || !target.archive_sha256) {
-      toast.error(t("settings.backupLegacySourceUnavailable"));
-      return;
-    }
+    const session = getSessionVersion();
     setAdoptingRemoteBackup(true);
     try {
-      await adoptRemoteBackup(
-        target.connection_id,
-        target.key,
-        target.source_ref,
-        target.archive_sha256,
-      );
+      await backupCommand.run({ kind: "adopt-remote", session, target });
+      if (!accountCurrent(session)) return;
       toast.success(t("settings.backupLegacyAdopted", { filename: target.key }));
       setAdoptRemoteTarget(null);
-      await loadBackups();
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setAdoptingRemoteBackup(false);
+      if (accountCurrent(session)) setAdoptingRemoteBackup(false);
     }
   }
 
@@ -996,63 +948,67 @@ export function SettingsPanel() {
   }
 
   async function handleBackupNow() {
+    const session = getSessionVersion();
     setBackingUp(true);
     try {
-      const accepted = await createBackup();
-      const job = await waitForImportJob(accepted.job_id, "Backup");
-      const meta = backupFromJob(job);
-      if (!meta) throw new Error(job.error ?? "backup_failed");
+      const receipt = await backupCommand.run({ kind: "create", session });
+      if (!accountCurrent(session)) return;
+      if (receipt.kind !== "saved") throw new Error("Expected a created backup receipt");
+      const meta = receipt.backup;
       const mb = formatNumber(meta.size_bytes / 1024 / 1024, {
         maximumFractionDigits: 1,
         minimumFractionDigits: 1,
       });
-      await loadBackups(meta);
-      if (meta.outcome === "partial") {
-        toast.warning(t("settings.backupPartialNotice"));
-      } else {
+      if (meta.outcome === "partial") toast.warning(t("settings.backupPartialNotice"));
+      else
         toast.success(
           uiText("Backup created — {value1} files, {value2} MB", {
             value1: String(meta.file_count),
-            value2: String(mb),
+            value2: mb,
           }),
         );
-      }
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setBackingUp(false);
-      setBackupRunRefresh((value) => value + 1);
+      if (accountCurrent(session)) setBackingUp(false);
     }
   }
 
   async function handleBackupUpload(file: File) {
+    const session = getSessionVersion();
     setUploadingBackup(true);
     try {
-      const meta = await uploadBackup(file);
-      setBackups((current) => [
-        meta,
-        ...current.filter((item) => backupSourceKey(item) !== backupSourceKey(meta)),
-      ]);
+      const receipt = await backupCommand.run({ kind: "upload", session, file });
+      if (!accountCurrent(session)) return;
+      if (receipt.kind !== "saved") throw new Error("Expected an uploaded backup receipt");
       toast.success(
-        uiText("Backup uploaded — {value1} files", { value1: String(meta.file_count) }),
+        uiText("Backup uploaded — {value1} files", { value1: String(receipt.backup.file_count) }),
       );
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setUploadingBackup(false);
+      if (accountCurrent(session)) setUploadingBackup(false);
     }
   }
 
   async function saveBackupRetention() {
-    if (parsedBackupRetentionDays === null || backupConfigUnavailable) return;
+    if (parsedBackupRetentionDays === null || backupConfigUnavailable || configCommand.isPending)
+      return;
+    const session = getSessionVersion();
+    const sent = backupRetentionDraft;
     setBackupRetentionBusy(true);
     try {
-      await updateVaultConfig({ backup_retention_days: parsedBackupRetentionDays });
+      await configCommand.mutateAsync({
+        session,
+        payload: { backup_retention_days: parsedBackupRetentionDays },
+      });
+      if (!accountCurrent(session)) return;
+      setBackupRetentionDays((current) => (current === sent ? null : current));
       toast.success(t("settings.backupRetentionSaved"));
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setBackupRetentionBusy(false);
+      if (accountCurrent(session)) setBackupRetentionBusy(false);
     }
   }
 
@@ -1068,7 +1024,15 @@ export function SettingsPanel() {
   }
 
   async function saveBackupPolicy() {
-    if (backupConfigUnavailable || backupConnectionRead.isError || !backupConnectionRead.data)
+    if (
+      !user?.is_superuser ||
+      backupConfigUnavailable ||
+      backupConnectionRead.isError ||
+      !backupConnectionRead.data ||
+      configCommand.isPending ||
+      backupConnectionCommand.isPending ||
+      backupPolicyBusy
+    )
       return;
     const manualDestinationSelected =
       manualLocalBackupEnabled ||
@@ -1088,94 +1052,108 @@ export function SettingsPanel() {
       toast.error(t("settings.backupAutomaticDestinationRequired"));
       return;
     }
+    const session = getSessionVersion();
+    const sent = {
+      enabled: automaticBackupsDraft,
+      time: automaticBackupTimeDraft,
+      manual: manualLocalBackupDraft,
+      automatic: automaticLocalBackupDraft,
+      connections: backupConnectionDrafts,
+    };
     setBackupPolicyBusy(true);
     try {
-      const [config, ...connections] = await Promise.all([
-        updateVaultConfig({
+      // These are separate server transactions. Publish every acknowledged part
+      // through its owner before moving on; a later failure cannot undo it.
+      await configCommand.mutateAsync({
+        session,
+        payload: {
           automatic_backups_enabled: automaticBackupsEnabled,
           automatic_backup_time_utc: automaticBackupTimeUtc,
           manual_local_backup_enabled: manualLocalBackupEnabled,
           automatic_local_backup_enabled: automaticLocalBackupEnabled,
-        }),
-        ...backupConnections.map((connection) =>
-          updateStorageConnection(connection.id, {
+        },
+      });
+      if (!accountCurrent(session)) return;
+      setAutomaticBackupsEnabled((current) => (current === sent.enabled ? null : current));
+      setAutomaticBackupTimeUtc((current) => (current === sent.time ? null : current));
+      setManualLocalBackupEnabled((current) => (current === sent.manual ? null : current));
+      setAutomaticLocalBackupEnabled((current) => (current === sent.automatic ? null : current));
+      for (const connection of backupConnections) {
+        await backupConnectionCommand.mutateAsync({
+          kind: "update",
+          session,
+          id: connection.id,
+          payload: {
             manual_backup_enabled: connection.manual_backup_enabled,
             automatic_backup_enabled: connection.automatic_backup_enabled,
-          }),
-        ),
-      ]);
-      setAutomaticBackupsEnabled(config.automatic_backups_enabled);
-      setAutomaticBackupTimeUtc(config.automatic_backup_time_utc);
-      setManualLocalBackupEnabled(config.manual_local_backup_enabled);
-      setAutomaticLocalBackupEnabled(config.automatic_local_backup_enabled);
-      queryClient.setQueryData<StorageConnection[]>(
-        storageConnectionsOptions().queryKey,
-        (previous) =>
-          previous?.map((row) => connections.find((saved) => saved.id === row.id) ?? row),
-      );
-      setBackupConnectionDrafts({});
+          },
+        });
+        if (!accountCurrent(session)) return;
+        setBackupConnectionDrafts((current) => {
+          if (current[connection.id] !== sent.connections[connection.id]) return current;
+          const next = { ...current };
+          delete next[connection.id];
+          return next;
+        });
+      }
       toast.success(t("settings.backupPolicySaved"));
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setBackupPolicyBusy(false);
+      if (accountCurrent(session)) setBackupPolicyBusy(false);
     }
   }
 
   async function confirmRestoreBackup() {
     if (!restoreTarget) return;
-    const target = restoreTarget;
+    const session = getSessionVersion();
     setRestoringBackup(true);
     try {
-      const result = await restoreBackup(target.backup_id, target.source_ref);
+      const receipt = await backupCommand.run({ kind: "restore", session, target: restoreTarget });
+      if (!accountCurrent(session)) return;
+      if (receipt.kind !== "restored") throw new Error("Expected a restored backup receipt");
       toast.success(
-        uiText("Backup restored — {value1} files", { value1: String(result.restored_files) }),
+        uiText("Backup restored — {value1} files", {
+          value1: String(receipt.result.restored_files),
+        }),
       );
       setRestoreTarget(null);
-      window.setTimeout(() => window.location.reload(), 800);
-    } catch (e) {
-      toast.error(e);
+      window.setTimeout(() => {
+        if (accountCurrent(session)) window.location.reload();
+      }, 800);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setRestoringBackup(false);
+      if (accountCurrent(session)) setRestoringBackup(false);
     }
   }
 
   async function handleDownloadBackup(backup: BackupMeta) {
-    const sourceRef = backupSourceKey(backup);
-    setDownloadingBackup(sourceRef);
+    const session = getSessionVersion();
+    setDownloadingBackup(backupSourceKey(backup));
     try {
-      await downloadBackup(backup.backup_id, backup.source_ref);
-      toast.success(uiText("Backup download started."));
-    } catch (e) {
-      toast.error(e);
+      await backupCommand.run({ kind: "download", session, target: backup });
+      if (accountCurrent(session)) toast.success(uiText("Backup download started."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setDownloadingBackup(null);
+      if (accountCurrent(session)) setDownloadingBackup(null);
     }
   }
 
   async function confirmDeleteBackup() {
     if (!deleteBackupTarget) return;
-    const target = deleteBackupTarget;
-    const sourceKey = backupSourceKey(target);
-    setDeletingBackup(sourceKey);
+    const session = getSessionVersion();
+    setDeletingBackup(backupSourceKey(deleteBackupTarget));
     try {
-      await deleteBackup(target.backup_id, target.source_ref);
-      setBackups((current) => current.filter((item) => backupSourceKey(item) !== sourceKey));
-      const deletedKey = target.key;
-      const deletedFilename = deletedKey?.split("/").at(-1);
-      setUnownedBackups((current) =>
-        current.filter((candidate) => candidate.filename !== deletedFilename),
-      );
-      setUnownedS3Backups((current) => current.filter((candidate) => candidate.key !== deletedKey));
-      setUnownedRemoteBackups((current) =>
-        current.filter((candidate) => candidate.key !== deletedKey),
-      );
+      await backupCommand.run({ kind: "delete", session, target: deleteBackupTarget });
+      if (!accountCurrent(session)) return;
       setDeleteBackupTarget(null);
       toast.success(t("settings.backupDeleteSuccess"));
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setDeletingBackup(null);
+      if (accountCurrent(session)) setDeletingBackup(null);
     }
   }
 
@@ -3384,10 +3362,7 @@ export function SettingsPanel() {
                   </div>
                 </SettingsCard>
                 {user?.is_superuser && (
-                  <BackupRunHistory
-                    refreshKey={backupRunRefresh}
-                    onPublished={() => void loadBackups()}
-                  />
+                  <BackupRunHistory onPublished={() => void ownedBackupRead.refetch()} />
                 )}
                 <SettingsCard
                   icon={RotateCcw}

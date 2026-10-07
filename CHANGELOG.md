@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Fence backup confirmations to the reviewed source, keep accepted Jobs after
+  navigation, and publish backup/configuration receipts without stale read races.
+  Preserve acknowledged policy parts after a later connection fails and refresh
+  backup process views on return.
+
 - Preserve unsaved backup settings during catalog refresh, distinguish failed
   source discovery from empty storage, cancel abandoned reads, and hide owned
   backup details after access denial.
