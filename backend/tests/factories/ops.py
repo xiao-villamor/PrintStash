@@ -106,6 +106,7 @@ def build_system_config(
     """A persisted runtime configuration row for startup/overlay tests."""
     overrides.setdefault("setup_storage_pending", False)
     overrides.setdefault("vault_edit_version", 1)
+    overrides.setdefault("search_edit_version", 1)
     return save(
         session,
         SystemConfig(

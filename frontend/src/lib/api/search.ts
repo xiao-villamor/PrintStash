@@ -1,3 +1,5 @@
+import { requireEditingBase, requireEditingReceipt } from "./editing";
+import type { EditingBase } from "@/types/editing";
 import {
   authHeaders,
   getJson,
@@ -125,8 +127,19 @@ const configuration = "/api/v1/config/ai-search";
 export function getSearchSettings(options: GetJsonOptions = {}) {
   return getJson<SearchSettingsRead>(configuration, { fresh: true, ...options });
 }
-export function saveSearchSettings(settings: SearchSettings) {
-  return writeSearch<SearchSettingsRead>(configuration, "PUT", settings);
+export async function saveSearchSettings(settings: SearchSettings, base: EditingBase) {
+  requireEditingBase(base);
+  const result = await requestApi<SearchSettingsRead>(configuration, {
+    method: "PUT",
+    headers: {
+      ...jsonHeaders(),
+      "If-Match": `"search-settings-e${base.edit_epoch}-v${base.edit_version}"`,
+      "X-PrintStash-Edit-Contract": "conditional-v1",
+    },
+    body: JSON.stringify(settings),
+  });
+  requireEditingReceipt(result, base);
+  return result;
 }
 export function createInferenceEndpoint(proposal: EndpointProposal) {
   return writeSearch<InferenceEndpoint>(`${configuration}/endpoints`, "POST", proposal);

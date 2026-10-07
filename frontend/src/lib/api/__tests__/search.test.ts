@@ -7,6 +7,7 @@ import {
   downloadInferenceModel,
   getSearchPreferences,
   getSearchSettings,
+  saveSearchSettings,
   getSearchStatus,
   listInferenceModels,
   listSearchGenerations,
@@ -19,9 +20,9 @@ import {
   validateInferenceModel,
 } from "@/lib/api/search";
 import { json } from "@/test-support/render";
-import { searchResponse } from "@/test-support/search";
+import { searchResponse, searchConfiguration } from "@/test-support/search";
 
-import { expectRequest, fetchMock, lastBody, respondWith } from "./_wire";
+import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
 const fetcher = vi.fn<typeof fetch>();
 describe("Interactive search requests", () => {
@@ -183,5 +184,34 @@ describe("Local model management", () => {
 
     expectRequest("/api/v1/config/ai-search/endpoints/from-environment/chat", "POST");
     expect(lastBody()).toEqual({});
+  });
+});
+
+describe("Conditional Search settings transport", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sends the captured editing base", async () => {
+    const original = searchConfiguration({ edit_version: 5 });
+    fetchMock.mockResolvedValue(json({ ...original, edit_version: 6 }));
+    await saveSearchSettings(original.settings, original);
+    const headers = new Headers(lastCall().init.headers);
+    expect(headers.get("If-Match")).toBe(`"search-settings-e${original.edit_epoch}-v5"`);
+    expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
+    expect(lastBody()).toEqual(original.settings);
+  });
+
+  it.each([
+    { label: "non-advancing", edit_version: 1, edit_epoch: "a".repeat(32) },
+    { label: "other history", edit_version: 2, edit_epoch: "b".repeat(32) },
+  ])("refuses a $label acknowledgement", async ({ edit_version, edit_epoch }) => {
+    const original = searchConfiguration();
+    fetchMock.mockResolvedValue(json(searchConfiguration({ edit_version, edit_epoch })));
+    await expect(saveSearchSettings(original.settings, original)).rejects.toThrow(
+      "Invalid editing acknowledgement",
+    );
   });
 });

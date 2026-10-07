@@ -4264,5 +4264,8 @@
   "This preset needs review before another save. Your draft is preserved.": "Revisa este perfil antes de volver a guardarlo. Tu borrador se conserva.",
   "Review current values": "Revisar valores actuales",
   "Spoolman": "Spoolman",
-  "Preset history changed. Use current values before starting another edit.": "El historial del perfil ha cambiado. Usa los valores actuales antes de iniciar otra edición."
+  "Preset history changed. Use current values before starting another edit.": "El historial del perfil ha cambiado. Usa los valores actuales antes de iniciar otra edición.",
+  "aiSearch.historyChanged": "El historial de la base de datos ha cambiado. Usa la configuración actual antes de iniciar otra edición.",
+  "aiSearch.reviewEnabled": "Activado",
+  "aiSearch.reviewDisabled": "Desactivado"
 }

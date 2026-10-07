@@ -551,6 +551,17 @@ atomic claim and current authority check. Its epoch binds database history to th
 preset incarnation, including reuse of a deleted SQLite ID. Spoolman-linked rows
 remain read-only. Do not bypass these commands with unconditioned `sendJson` calls.
 
-Search settings still lack the required conditional-write contract. M8 remains
-open; preserving local drafts alone does not prove concurrency protection. The
-[qualification](../frontend-m8-validation.md) preserves earlier evidence.
+Search settings use an independent version for opt-ins and ranking settings;
+vault configuration and indexing progress do not invalidate those drafts.
+`modules/search/settings_edits.py` owns backend claims, and `configuration.py`
+merges PATCH fields only after reserving the singleton. PUT/PATCH responses carry
+the accepted transaction snapshot. Legacy writes invalidate newer editors but
+remain explicitly unprotected themselves.
+
+`lib/queries/search.ts` owns first-party conditional commands and authorized
+review reads. The advanced form retains its original base across refetches;
+revised replacement preserves settings the user did not change. Guided setup
+stops before download/preparation after an uncertain or conflicting settings save,
+requires explicit review/adoption, and never retries a gesture automatically.
+Review snapshots remain local to the active editor. See the [Search matrix](../frontend-m8-search-edit-validation.md)
+and the [earlier M8 qualification](../frontend-m8-validation.md).

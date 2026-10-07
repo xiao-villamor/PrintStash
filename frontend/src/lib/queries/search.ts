@@ -1,3 +1,5 @@
+import { captureEditingBase } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
 import { useEffect, useRef } from "react";
 import {
   infiniteQueryOptions,
@@ -37,6 +39,7 @@ import type {
   GenerationProposal,
   SearchGeneration,
   SearchSettings,
+  SearchSettingsRead,
 } from "@/types/search";
 
 export const searchKeys = {
@@ -225,6 +228,15 @@ export function useSearchCommands() {
     refresh(session, [searchKeys.generations, ["ai-search", "status"]]);
   };
   return {
+    reviewSettings: async (session: number) => {
+      requireSessionVersion(session);
+      await client.cancelQueries({ queryKey: searchKeys.settings, exact: true });
+      requireSessionVersion(session);
+      const result = await client.fetchQuery({ ...searchSettingsOptions(), retry: false });
+      requireSessionVersion(session);
+      captureEditingBase(result);
+      return result;
+    },
     preferences: useMutation({
       retry: false,
       mutationFn: ({
@@ -254,15 +266,29 @@ export function useSearchCommands() {
     }),
     settings: useMutation({
       retry: false,
-      mutationFn: ({ payload, session }: { payload: SearchSettings; session: number }) => {
+      mutationFn: ({
+        payload,
+        base,
+        session,
+      }: {
+        payload: SearchSettings;
+        base: EditingBase;
+        session: number;
+      }) => {
         requireSessionVersion(session);
-        return saveSearchSettings(payload);
+        return saveSearchSettings(payload, base);
       },
       onMutate: ({ session }) => prepare(session),
       onSuccess: async (result, _, context) => {
         const session = await acknowledge(context);
         requireSessionVersion(session);
-        client.setQueryData(searchKeys.settings, result);
+        client.setQueryData<SearchSettingsRead>(searchKeys.settings, (current) => {
+          requireSessionVersion(session);
+          return current &&
+            (current.edit_epoch !== result.edit_epoch || current.edit_version > result.edit_version)
+            ? current
+            : result;
+        });
         refresh(session, [["ai-search", "status"], searchKeys.models, searchKeys.generations]);
       },
     }),

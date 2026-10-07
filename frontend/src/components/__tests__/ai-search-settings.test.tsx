@@ -32,7 +32,7 @@ async function settingsPanel(options: RenderAppOptions = {}) {
       "GET /api/v1/inference/models": json([anInferenceModel()]),
       "GET /api/v1/jobs": json([]),
       "GET /api/v1/search/status": json(searchStatus({ semantic_ready: true })),
-      "PUT /api/v1/config/ai-search": json(searchConfiguration()),
+      "PUT /api/v1/config/ai-search": json(searchConfiguration({ edit_version: 2 })),
       ...options.routes,
     },
   });
@@ -302,6 +302,174 @@ describe("AI Search settings", () => {
       expect(screen.getByRole("button", { name: "Build new index" })).toBeEnabled(),
     );
   });
+  it("preserves the advanced draft on conflict", async () => {
+    const app = await settingsPanel({
+      routes: {
+        "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    const weight = screen.getByRole("spinbutton", { name: "Keyword ranking weight" });
+    fireEvent.change(weight, { target: { value: "2" } });
+    await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
+    expect(weight).toHaveValue(2);
+    expect(screen.getByRole("button", { name: "Save search settings" })).toBeDisabled();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it("saves deliberate edits after review", async () => {
+    const app = await settingsPanel({
+      routes: {
+        "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Keyword ranking weight" }), {
+      target: { value: "2" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
+    await screen.findByRole("button", { name: "Review latest version" });
+    const latest = searchConfiguration({
+      edit_version: 5,
+      settings: searchSettings({
+        enabled: true,
+        local_models_enabled: true,
+        download_enabled: true,
+        timezone: "Europe/Madrid",
+        semantic_weight: 3,
+      }),
+    });
+    app.route({
+      "GET /api/v1/config/ai-search": json(latest),
+      "PUT /api/v1/config/ai-search": json({
+        ...latest,
+        edit_version: 6,
+        settings: { ...latest.settings, lexical_weight: 2 },
+      }),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Review latest version" }));
+    expect(await screen.findByText("Europe/Madrid")).toBeVisible();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save my draft against this version" }),
+    );
+    await waitFor(() => expect(app.requestsWithMethod("PUT")).toHaveLength(2));
+    expect(JSON.parse(app.requestsWithMethod("PUT")[1].body)).toEqual({
+      ...latest.settings,
+      lexical_weight: 2,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("spinbutton", { name: "Semantic ranking weight" })).toHaveValue(3),
+    );
+  });
+
+  it("requires review after an uncertain save", async () => {
+    const app = await settingsPanel({
+      routes: {
+        "PUT /api/v1/config/ai-search": () => {
+          throw new TypeError("Failed to fetch");
+        },
+      },
+    });
+    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    fireEvent.change(screen.getByRole("spinbutton", { name: "Keyword ranking weight" }), {
+      target: { value: "2" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save search settings" })).toBeDisabled();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it.each([403, 404])("retires inaccessible review data after %s", async (status) => {
+    const app = await settingsPanel({
+      routes: { "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, 412) },
+    });
+    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
+    await screen.findByRole("button", { name: "Review latest version" });
+    app.route({ "GET /api/v1/config/ai-search": json({ detail: "forbidden" }, status) });
+    await userEvent.click(screen.getByRole("button", { name: "Review latest version" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("form", { name: "AI Search" })).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Save my draft against this version" }),
+    ).not.toBeInTheDocument();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it("preserves native validation on revised saves", async () => {
+    const app = await settingsPanel({
+      routes: { "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, 412) },
+    });
+    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
+    await screen.findByRole("button", { name: "Review latest version" });
+    app.route({ "GET /api/v1/config/ai-search": json(searchConfiguration({ edit_version: 5 })) });
+    await userEvent.click(screen.getByRole("button", { name: "Review latest version" }));
+    const save = await screen.findByRole("button", { name: "Save my draft against this version" });
+    const weight = screen.getByRole("spinbutton", { name: "Keyword ranking weight" });
+    fireEvent.change(weight, { target: { value: "11" } });
+    await userEvent.click(save);
+    expect(weight).toBeInvalid();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
+  it("keeps the draft editing base across a refetch", async () => {
+    let submittedBase: string | null = null;
+    const app = await settingsPanel({
+      routes: {
+        "PUT /api/v1/config/ai-search": (_url, init) => {
+          submittedBase = new Headers(init?.headers).get("If-Match");
+          return json({ detail: "edit_conflict" }, 412);
+        },
+      },
+    });
+    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    const weight = screen.getByRole("spinbutton", { name: "Keyword ranking weight" });
+    fireEvent.change(weight, { target: { value: "2" } });
+    app.route({ "GET /api/v1/config/ai-search": json(searchConfiguration({ edit_version: 5 })) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["ai-search", "settings"] });
+    });
+    expect(weight).toHaveValue(2);
+    await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
+    await screen.findByRole("button", { name: "Review latest version" });
+    expect(submittedBase).toBe(`"search-settings-e${"a".repeat(32)}-v1"`);
+  });
+
+  it("requires adoption after the database history changes", async () => {
+    const app = await settingsPanel({
+      routes: { "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, 412) },
+    });
+    await userEvent.click(screen.getByRole("tab", { name: "Technical" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save search settings" }));
+    await screen.findByRole("button", { name: "Review latest version" });
+    app.route({
+      "GET /api/v1/config/ai-search": json(
+        searchConfiguration({
+          edit_epoch: "b".repeat(32),
+          settings: searchSettings({ lexical_weight: 3 }),
+        }),
+      ),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Review latest version" }));
+    expect(
+      await screen.findByRole("button", { name: "Save my draft against this version" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText(
+        "The database history changed. Adopt the current settings before starting a new edit.",
+      ),
+    ).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Use latest version" }));
+    expect(screen.getByRole("spinbutton", { name: "Keyword ranking weight" })).toHaveValue(3);
+    expect(screen.getByRole("button", { name: "Save search settings" })).toBeEnabled();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+
   it("saves advanced ranking choices explicitly", async () => {
     const user = userEvent.setup();
     const app = await settingsPanel();

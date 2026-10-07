@@ -49,7 +49,7 @@ class TestPreplacedSparse:
         configuration.update(
             db_session,
             SearchSettings(enabled=True, local_models_enabled=True),
-            actor_id=actor.id,
+            actor=actor,
         )
         db_session.commit()
         ordinary = {}
@@ -74,7 +74,7 @@ class TestPreplacedSparse:
                 sparse_expansion_enabled=True,
                 sparse_model_id=model.id,
             ),
-            actor_id=actor.id,
+            actor=actor,
         )
         db_session.commit()
         processor = ExpansionProcessor(get_session_factory())

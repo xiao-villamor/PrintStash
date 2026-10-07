@@ -5,8 +5,9 @@
 > See [M5–M8 reassessment](frontend-milestone-reassessment.md) for the missing
 > competing-edit contracts and corrected execution order. M7 has since satisfied
 > its reopened contract. The [Profile correction](frontend-m8-profile-edit-validation.md)
-> is now locally qualified; Search configuration is the active gap. The closure
-> text below is historical.
+> and [Search correction](frontend-m8-search-edit-validation.md) are now locally
+> qualified. Together with the evidence below, they close M8 locally. M9 is next;
+> final delivery/CI remains open. The original closure text below is historical.
 
 
 Status: locally closed after M7 acceptance c4b43c25. Scope: Model/Multipart detail,

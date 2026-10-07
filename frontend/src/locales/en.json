@@ -4264,5 +4264,8 @@
   "This preset needs review before another save. Your draft is preserved.": "This preset needs review before another save. Your draft is preserved.",
   "Review current values": "Review current values",
   "Spoolman": "Spoolman",
-  "Preset history changed. Use current values before starting another edit.": "Preset history changed. Use current values before starting another edit."
+  "Preset history changed. Use current values before starting another edit.": "Preset history changed. Use current values before starting another edit.",
+  "aiSearch.historyChanged": "The database history changed. Adopt the current settings before starting a new edit.",
+  "aiSearch.reviewEnabled": "Enabled",
+  "aiSearch.reviewDisabled": "Disabled"
 }

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Detect competing Search settings edits in the advanced form and guided setup.
+  Preserve drafts for explicit review, keep unrelated settings during revised
+  saves, and stop setup before downloads when consent could not be confirmed.
+
 - Detect competing filament and printer preset edits. Retain drafts for explicit
   review after conflicts or uncertain saves, preserve untouched fields, and
   prevent an older saved indicator from unlocking a pending row. Spoolman-linked

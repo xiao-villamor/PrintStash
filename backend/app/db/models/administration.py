@@ -48,6 +48,11 @@ class SystemConfig(SQLModel, table=True):
         default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
     )
 
+    # Search opt-ins have an independent editing boundary from vault settings.
+    search_edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+
     # Random installation identity used to bind managed filesystem roots to
     # this database. It is generated once and never derived from a path.
     storage_identity: Optional[str] = Field(default=None, max_length=64, index=True)

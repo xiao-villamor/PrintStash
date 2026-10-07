@@ -23,6 +23,7 @@ function SettingsCommand() {
         onClick={() =>
           commands.settings.mutate({
             payload: searchSettings({ enabled: false }),
+            base: searchConfiguration(),
             session: getSessionVersion(),
           })
         }
@@ -39,13 +40,36 @@ function renderCommand() {
         searchConfiguration({ settings: searchSettings({ enabled: true }) }),
       ),
       "PUT /api/v1/config/ai-search": json(
-        searchConfiguration({ settings: searchSettings({ enabled: false }) }),
+        searchConfiguration({ edit_version: 2, settings: searchSettings({ enabled: false }) }),
       ),
     },
   });
 }
 afterEach(() => vi.restoreAllMocks());
 describe("Search command lifetime", () => {
+  it("retains a newer accepted query receipt", async () => {
+    const app = renderCommand();
+    await screen.findByText("Enabled");
+    const response = Promise.withResolvers<Response>();
+    app.route({ "PUT /api/v1/config/ai-search": () => response.promise });
+    await userEvent.click(screen.getByRole("button", { name: "Save search" }));
+    await waitFor(() => expect(app.requestsWithMethod("PUT")).toHaveLength(1));
+    const newer = searchConfiguration({
+      edit_version: 5,
+      settings: searchSettings({ enabled: true }),
+    });
+    await act(async () => {
+      app.client.setQueryData(searchKeys.settings, newer);
+      response.resolve(
+        json(
+          searchConfiguration({ edit_version: 2, settings: searchSettings({ enabled: false }) }),
+        ),
+      );
+    });
+    await waitFor(() => expect(app.client.isMutating()).toBe(0));
+    expect(app.client.getQueryData(searchKeys.settings)).toEqual(newer);
+    expect(screen.getByText("Enabled")).toBeVisible();
+  });
   it("never dispatches a retired gesture", async () => {
     const app = renderCommand();
     await screen.findByText("Enabled");

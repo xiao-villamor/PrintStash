@@ -826,7 +826,7 @@ def owed_caption(
             send_rendered_images=True,
             chat_endpoint_id=endpoint.id,
         ),
-        actor_id=actor.id,
+        actor=actor,
     )
     db_session.commit()
     subject = SearchSubject(SubjectType.MODEL, model.id)

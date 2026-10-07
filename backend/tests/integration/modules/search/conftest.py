@@ -109,7 +109,7 @@ def sparse_setup(db_session, tmp_path, monkeypatch, make_user):
             sparse_expansion_enabled=True,
             sparse_model_id=model.id,
         ),
-        actor_id=actor.id,
+        actor=actor,
     )
     db_session.commit()
     return actor, model

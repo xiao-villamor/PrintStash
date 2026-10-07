@@ -1,4 +1,5 @@
-import { useId, useState } from "react";
+import { SearchSettingsSnapshot } from "@/components/search-settings-snapshot";
+import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 
@@ -22,7 +23,8 @@ import { parseApiError } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
 import { formatBytes } from "@/lib/format";
 import { toast } from "@/lib/toast";
-import type { SearchSettingsRead } from "@/types/search";
+import { captureEditingBase } from "@/lib/api/editing";
+import type { SearchSettings, SearchSettingsRead } from "@/types/search";
 
 function SettingsForm({
   initial,
@@ -34,10 +36,21 @@ function SettingsForm({
   readOnly: boolean;
 }) {
   const { t } = useI18n();
+  const [original, setOriginal] = useState(initial);
   const [draft, setDraft] = useState(initial.settings);
+  const [review, setReview] = useState<
+    null | { phase: "required" | "loading" } | { phase: "ready"; snapshot: SearchSettingsRead }
+  >(null);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
   const helpId = useId();
   const { models } = catalog;
-  const { download: downloadSparse, settings: save } = useSearchCommands();
+  const { download: downloadSparse, settings: save, reviewSettings } = useSearchCommands();
   const sparse = models.data?.find(
     (model) => model.id === draft.sparse_model_id && model.modality === "sparse",
   );
@@ -55,14 +68,33 @@ function SettingsForm({
       aria-label={t("aiSearch.settingsTitle")}
       onSubmit={(event) => {
         event.preventDefault();
+        if (readOnly || save.isPending || (review && review.phase !== "ready")) return;
+        const target = review?.phase === "ready" ? review.snapshot : original;
+        if (target.edit_epoch !== original.edit_epoch) return;
+        const payload: SearchSettings = { ...target.settings };
+        // SAFETY: draft is the SearchSettings form state; keys index that same shape.
+        for (const key of Object.keys(draft) as (keyof SearchSettings)[]) {
+          if (JSON.stringify(draft[key]) !== JSON.stringify(original.settings[key]))
+            Object.assign(payload, { [key]: draft[key] });
+        }
+        const session = getSessionVersion();
         save.mutate(
-          { payload: draft, session: getSessionVersion() },
+          { payload, base: captureEditingBase(target), session },
           {
             onSuccess: (result) => {
+              if (!live.current || session !== getSessionVersion()) return;
+              setOriginal(result);
               setDraft(result.settings);
+              setReview(null);
               toast.success(t("aiSearch.settingsSaved"));
             },
-            onError: toast.error,
+            onError: (error) => {
+              if (!live.current || session !== getSessionVersion()) return;
+              const parsed = parseApiError(error);
+              if ([0, 401, 403, 404, 412, 428].includes(parsed.status) || parsed.status >= 500)
+                setReview({ phase: "required" });
+              toast.error(error);
+            },
           },
         );
       }}
@@ -353,8 +385,63 @@ function SettingsForm({
             {t("aiSearch.settingsError")}
           </p>
         )}
-        <Button type="submit" loading={save.isPending}>
-          {t("aiSearch.saveSettings")}
+        {review && (
+          <section
+            aria-label={t("library.latestVersion")}
+            className="space-y-3 rounded-md border border-border p-3"
+          >
+            <p role="alert">{t("library.saveUnconfirmed")}</p>
+            <Button
+              type="button"
+              variant="outline"
+              loading={review.phase === "loading"}
+              onClick={async () => {
+                const session = getSessionVersion();
+                setReview({ phase: "loading" });
+                try {
+                  const snapshot = await reviewSettings(session);
+                  if (live.current && session === getSessionVersion())
+                    setReview({ phase: "ready", snapshot });
+                } catch (error) {
+                  if (!live.current || session !== getSessionVersion()) return;
+                  setReview({ phase: "required" });
+                  toast.error(error);
+                }
+              }}
+            >
+              {t("library.reviewLatest")}
+            </Button>
+            {review.phase === "ready" && (
+              <>
+                <SearchSettingsSnapshot snapshot={review.snapshot} catalog={catalog} />
+                {review.snapshot.edit_epoch !== original.edit_epoch && (
+                  <p role="alert">{t("aiSearch.historyChanged")}</p>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setOriginal(review.snapshot);
+                    setDraft(review.snapshot.settings);
+                    setReview(null);
+                    save.reset();
+                  }}
+                >
+                  {t("library.useLatest")}
+                </Button>
+              </>
+            )}
+          </section>
+        )}
+        <Button
+          type="submit"
+          loading={save.isPending}
+          disabled={Boolean(
+            review &&
+            (review.phase !== "ready" || review.snapshot.edit_epoch !== original.edit_epoch),
+          )}
+        >
+          {t(review?.phase === "ready" ? "library.retryDraft" : "aiSearch.saveSettings")}
         </Button>
       </fieldset>
     </form>
