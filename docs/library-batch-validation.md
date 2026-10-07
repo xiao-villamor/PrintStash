@@ -93,3 +93,7 @@ failure remains separately recorded; the full hygiene suite is not claimed green
 Production Vite build passed (2.35 s), retaining existing chunk-size advisories.
 The change removes loss of earlier batch receipts and blind whole-operation
 feedback, without adding another entity owner or transport cache.
+
+Current acceptance: [M4 is locally closed](frontend-m4-closure-validation.md) after
+the broad backend expectation failure was reconciled. The pending-gate statement
+above records this batch checkpoint's status before that acceptance.

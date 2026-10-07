@@ -3,7 +3,7 @@
 Status: implementation qualification in progress. M2 rows 1–5 have reviewed
 assertions and qualified executions, consolidated in the
 [M2 closure record](../frontend-m2-closure-validation.md). M1 rows 28–31 are qualified in the
-[M1 closure record](../frontend-m1-closure-validation.md). M3 rows 6–19 are reconciled in the [M3 closure record](../frontend-m3-closure-validation.md), including the ordinary gate correction, PostgreSQL additions and deep-page budget. Other rows remain the
+[M1 closure record](../frontend-m1-closure-validation.md). M3 rows 6–19 are reconciled in the [M3 closure record](../frontend-m3-closure-validation.md), including the ordinary gate correction, PostgreSQL additions and deep-page budget. M4 rows20–27 are reconciled in the [M4 acceptance record](../frontend-m4-closure-validation.md). Other rows remain the
 original requirements pending reconciliation with their feature validation records;
 `❌ missing` means no accepted reference has yet been attached here, not that no
 test exists anywhere. This is not an assertion-by-assertion audit of the whole
@@ -73,7 +73,7 @@ each case must have the same assertion shape; otherwise split the row.
 | 53  | preserves locale on initial navigation                   | Happy    | EN or ES preference                              | correct initial UI without wrong-locale flash                   | Playwright      | ❌ missing |
 | 54  | keeps the extension capture contract compatible          | Happy    | supported provider capture                       | accepted pending import with correct authorization              | Contract        | ❌ missing |
 | 55  | rejects forbidden module dependencies                    | Error    | fixture edge across an enforced boundary         | diagnostic names the offending edge                             | Frontend unit   | ❌ missing |
-| 56  | upgrades the conditional-write schema with existing data | Edge     | prior supported schema with library rows         | data survives with valid initial edit versions                  | Integration     | ❌ missing |
+| 56  | upgrades the conditional-write schema with existing data | Edge     | prior supported schema with library rows         | data survives with valid initial edit versions                  | Integration     | ✅ `integration/db/test_library_contracts_v1.py::TestUpgrade::test_upgrades_existing_rows`; released-schema upgrade in the M3 closure record |
 
 ## Baseline and measurement protocol
 

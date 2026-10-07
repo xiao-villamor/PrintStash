@@ -44,6 +44,8 @@ remains deferred. Coverage status names tests; actual run results are separate.
 | R16 | rejects an acknowledgement after a newer history was observed | Edge | Old write held; canonical Query receives another epoch | Older-history receipt cannot replace the newly observed history | Frontend unit | ✅ `frontend/src/features/library/__tests__/model-detail.test.tsx::rejects a receipt after a different history has become canonical; frontend/src/lib/queries/__tests__/documents.test.tsx::preserves a restored document after an earlier history acknowledges` |
 | R17 | adopts a reviewed restored history with a lower counter | Happy | Explicit review returns another epoch at version1 | Correct new history replaces old larger counter; draft retained until decision | Frontend unit | ✅ `frontend/src/features/library/__tests__/model-detail.test.tsx::publishes an explicitly read history with a lower counter` |
 
+| R18 | returns only the fields the tree needs | Happy | Lightweight legacy outliner read after editing identity cutover | Exact tree fields including epoch/version, without rich Model payload | Integration | ✅ `backend/tests/integration/api/v1/models/test_listing.py::TestOutlinerModels::test_returns_only_the_fields_the_tree_needs` |
+
 Rollback readers and conditional writers as one contract. Keep existing durable
 restore publication/recovery evidence unchanged. Final acceptance must include
 OpenAPI, affected SQLite/Postgres cases, frontend behavioral regressions and the
@@ -99,3 +101,15 @@ column or change portable database copies, and that list queries remain bounded.
 No performance improvement is claimed. Bounded query work is a correctness and
 scaling contract, not an end-user latency measurement. Raw logs and source
 provenance are retained in the local implementation evidence directory.
+
+## Final M4 reconciliation
+
+The broad fast invocation completed **13,351 passed / 1 failed** in4,237.13 s.
+Its sole failure was R18's old exact-field expectation omitting the required
+`edit_epoch`. An isolated selection reproduced it (84 passed / 1 failed,45.01 s).
+After correcting that expectation, the full listing/outliner/conditional-edit/
+OpenAPI selection passed **214/214** (69.86 s); test lint passed. No backend
+production code changed after the broad run began. The original invocation is not
+claimed green. M4 local acceptance and retained limits are consolidated in
+[the closure record](frontend-m4-closure-validation.md); final full/CI qualification
+remains M11.

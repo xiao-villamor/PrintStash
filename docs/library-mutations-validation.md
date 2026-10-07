@@ -77,3 +77,7 @@ startup). App/UI/domain types and frontend lint passed. This closes the F1–F4
 behaviours; M4 itself awaits the wider backend gate's outstanding failure.
 Rollback this scroll adjustment and its card-action capture together; retain
 confirmed Query publication and the existing navigation metadata contract.
+
+Current acceptance: the backend expectation failure was corrected and qualified;
+[M4 is locally closed](frontend-m4-closure-validation.md). The earlier pending-gate
+paragraph records the Favorites checkpoint, not an unresolved mutation defect.

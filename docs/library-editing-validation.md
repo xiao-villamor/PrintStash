@@ -47,5 +47,6 @@ auxiliary editing, batch undo and detail ownership have their own completed
 matrices. [Restore qualification](library-restore-editing-validation.md) records
 the integrated incarnation-qualified protocol, including explicitly reviewed
 cross-history retries. The real Favorites reading-position contract is now qualified in
-[mutation validation](library-mutations-validation.md). The current broad backend
-gate has an outstanding failure; M4 remains active and M5 has not started.
+[mutation validation](library-mutations-validation.md). The sole broad backend expectation failure is corrected with214 passing affected
+contract tests. [M4 is locally accepted](frontend-m4-closure-validation.md), and M5
+is the next active milestone. Final delivery and remote CI remain open.

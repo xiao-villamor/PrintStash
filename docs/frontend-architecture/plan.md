@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M3 are closed locally in dependency order. M4 is active. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M4 are closed locally in dependency order. M5 is active. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -141,8 +141,9 @@ both succeed. A client-side comparison or timestamp precision is not sufficient.
 
 Prefer a documented `If-Match`/ETag precondition: `412 edit_conflict` for a stale
 version and, after compatibility cutover, `428 edit_precondition_required` when
-the required precondition is absent. These are proposed API contracts, not current
-responses.
+the required precondition is absent. These contracts are implemented for opted-in first-party writers; see the
+[M4 acceptance record](../frontend-m4-closure-validation.md) for the compound editing
+identity and explicitly unprotected legacy compatibility boundary.
 Define missing-precondition handling and compatibility before enabling enforcement;
 update OpenAPI, clients and factories together. During an additive rollout,
 unversioned legacy writes must advance the version so newer clients detect them,
@@ -179,11 +180,12 @@ M0 is qualified by the [exact-base checkpoint](baseline-measurement.md#m0-accept
 observations and bounded reproductions of the six failure families. M1 is qualified
 by the [transport closure record](../frontend-m1-closure-validation.md). M2
 prerequisites and acceptance are satisfied. M3 is locally closed with its
-[ordered-browse qualification](../frontend-m3-closure-validation.md); M4 is the
-active closure target. Source, Multipart auxiliary editing and conditional
-Model movement are qualified. Restored editing-token identity now has
-[focused cross-stack qualification](../library-restore-editing-validation.md);
-the wider backend lane and final M4 acceptance remain open.
+[ordered-browse qualification](../frontend-m3-closure-validation.md). M4 is locally
+closed with its [acceptance consolidation](../frontend-m4-closure-validation.md):
+conditional editing, restored-history identity, confirmed Favorites reading position
+and interrupted-batch recovery are qualified. The broad backend run's single stale
+field expectation was corrected and the214-test affected contract selection passed;
+the original failed invocation remains explicit. M5 is now the only active target.
 Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an
 unfinished prerequisite. A goal closes only when its prerequisites and its own
