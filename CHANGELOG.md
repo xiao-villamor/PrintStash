@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add conditional storage-connection edits with independent versions and identity
+  checks. Preserve credential omission and target-in-use restrictions; legacy
+  clients remain compatible while the first-party editor adopts the contract.
+
 - Keep missing-route recovery bounded even when other chunks load successfully.
   Show a localized reload action when a route remains unavailable. Restrict the
   offline worker cache to public static resources and exclude bearer requests.

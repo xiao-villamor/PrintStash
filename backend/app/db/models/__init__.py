@@ -7,6 +7,9 @@ from app.db import (
 from app.db import (
     config_edit_contracts_v1 as _config_edit_contracts_v1,  # noqa: F401, E402
 )
+from app.db import (
+    connection_edit_contracts_v1 as _connection_edit_contracts_v1,  # noqa: F401, E402
+)
 from app.db import library_contracts_v1 as _library_contracts_v1  # noqa: F401, E402
 from app.db import (
     notification_edit_contracts_v1 as _notification_edit_contracts_v1,  # noqa: F401, E402
