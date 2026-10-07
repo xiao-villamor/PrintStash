@@ -1,3 +1,5 @@
+import type { GcPlan } from "@/lib/api/gc";
+import type { TrashedModelRead } from "@/types";
 import type { VolumeMeasurement } from "@/types/models";
 import type { ArtifactCacheRead } from "@/lib/api/artifact-cache";
 /**
@@ -970,4 +972,37 @@ export function anEditingBase(
   override?: Partial<import("@/types").EditingBase>,
 ): import("@/types").EditingBase {
   return { edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1, ...override };
+}
+
+/** A restorable model and a separately reviewed cleanup plan. */
+export function aTrashedModel(override?: Partial<TrashedModelRead>): TrashedModelRead {
+  return {
+    id: 7,
+    name: "Old bracket",
+    slug: "old-bracket",
+    collection: null,
+    tags: [],
+    thumbnail_url: null,
+    file_count: 2,
+    size_bytes: 2048,
+    deleted_at: "2026-01-01T00:00:00Z",
+    expires_at: "2026-02-01T00:00:00Z",
+    ...override,
+  };
+}
+export function aGcPlan(override?: Partial<GcPlan>): GcPlan {
+  return {
+    id: 12,
+    state: "preview",
+    digest: "a".repeat(64),
+    resource_count: 3,
+    candidate_pool_count: 3,
+    key_count: 5,
+    size_bytes: 2048,
+    quarantine_until: null,
+    backup_id: null,
+    last_error: null,
+    items: [],
+    ...override,
+  };
 }

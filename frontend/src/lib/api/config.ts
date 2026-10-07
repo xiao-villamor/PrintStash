@@ -71,8 +71,8 @@ export function getVaultConfig(options: GetJsonOptions = {}): Promise<VaultConfi
   return getJson<VaultConfigRead>("/api/v1/config", { ...options, fresh: true });
 }
 
-export function getHealthDetails<T>(): Promise<T> {
-  return getJson<T>("/api/v1/health/details", { fresh: true });
+export function getHealthDetails<T>(options: GetJsonOptions = {}): Promise<T> {
+  return getJson<T>("/api/v1/health/details", { ...options, fresh: true });
 }
 
 export function enrollStorageRoot(
@@ -98,9 +98,15 @@ export interface ReleaseStatus {
   checked_at: string;
 }
 
-export function getLatestRelease(refresh = false): Promise<ReleaseStatus> {
+export function getLatestRelease(
+  refresh = false,
+  options: GetJsonOptions = {},
+): Promise<ReleaseStatus> {
   const query = refresh ? "?refresh=true" : "";
-  return getJson<ReleaseStatus>(`/api/v1/health/releases/latest${query}`, { fresh: true });
+  return getJson<ReleaseStatus>(`/api/v1/health/releases/latest${query}`, {
+    ...options,
+    fresh: true,
+  });
 }
 
 export async function updateVaultConfig(

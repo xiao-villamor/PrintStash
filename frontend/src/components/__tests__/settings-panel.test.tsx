@@ -618,7 +618,9 @@ describe("SettingsPanel", () => {
         },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
-      await user.selectOptions((await screen.findAllByLabelText("User"))[0], "2");
+      const choice = (await screen.findAllByLabelText("User"))[0];
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "2");
       await pickParts(user);
 
       await user.click(screen.getByRole("button", { name: "Grant" }));
@@ -664,7 +666,9 @@ describe("SettingsPanel", () => {
         },
       });
 
-      await user.selectOptions((await screen.findAllByLabelText("User"))[0], "2");
+      const choice = (await screen.findAllByLabelText("User"))[0];
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "2");
       await pickParts(user);
 
       expect(await screen.findByTitle("Remove collection access")).toBeInTheDocument();
@@ -681,7 +685,9 @@ describe("SettingsPanel", () => {
         },
       });
 
-      await user.selectOptions((await screen.findAllByLabelText("User"))[0], "2");
+      const choice = (await screen.findAllByLabelText("User"))[0];
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "2");
       await pickParts(user);
 
       await user.click(await screen.findByTitle("Remove collection access"));
@@ -709,7 +715,9 @@ describe("SettingsPanel", () => {
         },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
-      await user.selectOptions((await screen.findAllByLabelText("User"))[1], "2");
+      const choice = (await screen.findAllByLabelText("User"))[1];
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "2");
       await user.selectOptions(screen.getByLabelText("Printer"), "4");
 
       await user.click(screen.getByRole("button", { name: "Save" }));
@@ -733,7 +741,9 @@ describe("SettingsPanel", () => {
         },
       });
 
-      await user.selectOptions((await screen.findAllByLabelText("User"))[1], "2");
+      const choice = (await screen.findAllByLabelText("User"))[1];
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "2");
 
       await user.click(await screen.findByTitle("Remove printer access"));
 
@@ -1227,6 +1237,7 @@ describe("SettingsPanel", () => {
     ])("refuses $label backup retention", async ({ value }) => {
       renderSettings({ at: "/settings?section=backup" });
       const input = await screen.findByLabelText("Retention (days)");
+      await waitFor(() => expect(input).toBeEnabled());
 
       fireEvent.change(input, { target: { value } });
 
@@ -2248,6 +2259,7 @@ describe("SettingsPanel", () => {
         },
       });
       const days = await screen.findByLabelText("Days");
+      await waitFor(() => expect(days).toBeEnabled());
       await user.clear(days);
       await user.type(days, "7");
 
@@ -2800,7 +2812,9 @@ describe("SettingsPanel", () => {
         },
       });
 
-      await user.selectOptions(await screen.findByLabelText("Display currency"), "EUR");
+      const choice = await screen.findByLabelText("Display currency");
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "EUR");
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -2839,7 +2853,9 @@ describe("SettingsPanel", () => {
         },
       });
 
-      await user.selectOptions(await screen.findByLabelText("Model image quality"), "1280");
+      const choice = await screen.findByLabelText("Model image quality");
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "1280");
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -3290,6 +3306,7 @@ describe("Settings account draft lifetime", () => {
       },
     });
     const selects = await screen.findAllByLabelText("User");
+    await waitFor(() => expect(selects[0]).toBeEnabled());
     await userEvent.selectOptions(selects[0], "2");
     await userEvent.click(screen.getByRole("button", { name: "Select collection" }));
     await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
@@ -3580,5 +3597,91 @@ describe("Settings remote configuration recovery", () => {
     expect(
       app.requestsWithMethod("GET").filter((request) => request.url.includes("/api/v1/config")),
     ).toHaveLength(1);
+  });
+});
+
+describe("Settings remote read recovery", () => {
+  it("keeps finalization unavailable before quarantine expires", async () => {
+    const app = renderSettings({
+      at: "/settings?section=trash",
+      routes: {
+        "GET /api/v1/admin/gc": json({
+          ...GC_PLAN,
+          state: "quarantined",
+          quarantine_until: "2099-01-01T00:00:00Z",
+        }),
+      },
+    });
+    const finalize = await screen.findByRole("button", { name: "Reverify and finalize" });
+    expect(finalize).toBeDisabled();
+    await userEvent.click(finalize);
+    expect(
+      app.requestsWithMethod("POST").filter((request) => request.url.endsWith("/finalize")),
+    ).toHaveLength(0);
+  });
+
+  it("retries unavailable health information", async () => {
+    const app = renderSettings({
+      at: "/settings?section=about",
+      routes: {
+        "GET /api/v1/health/details": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText("System health could not be loaded.")).toBeVisible();
+    app.route({ "GET /api/v1/health/details": json(HEALTH) });
+    await userEvent.click(screen.getByRole("button", { name: "Retry health check" }));
+    await waitFor(() =>
+      expect(screen.queryByText("System health could not be loaded.")).not.toBeInTheDocument(),
+    );
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url.endsWith("/health/details")),
+    ).toHaveLength(2);
+  });
+  it("retries unavailable release information", async () => {
+    const app = renderSettings({
+      at: "/settings?section=about",
+      routes: {
+        "GET /api/v1/health/releases/latest": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText("Release information could not be loaded.")).toBeVisible();
+    app.route({
+      "GET /api/v1/health/releases/latest?refresh=true": json({
+        status: "up_to_date",
+        update_available: false,
+        current_version: "0.12.1",
+        latest_version: "0.12.1",
+      }),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Retry update check" }));
+    expect(await screen.findByText("Latest published release installed.")).toBeVisible();
+    expect(screen.queryByText("Release information could not be loaded.")).not.toBeInTheDocument();
+  });
+
+  it("refuses false empty trash after a failed listing", async () => {
+    const app = renderSettings({
+      at: "/settings?section=trash",
+      routes: {
+        "GET /api/v1/models/trash": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText("Trash could not be loaded.")).toBeVisible();
+    expect(screen.queryByText("Trash is empty.")).not.toBeInTheDocument();
+    app.route({ "GET /api/v1/models/trash": json([TRASHED_MODEL]) });
+    await userEvent.click(screen.getByTitle("Refresh trash"));
+    expect(await screen.findByText(TRASHED_MODEL.name)).toBeVisible();
+  });
+  it("keeps trash available when the GC read fails", async () => {
+    renderSettings({
+      at: "/settings?section=trash",
+      routes: {
+        "GET /api/v1/models/trash": json([TRASHED_MODEL]),
+        "GET /api/v1/admin/gc": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText(TRASHED_MODEL.name)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Restore" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Review expired/ })).toBeDisabled();
+    expect(await screen.findByText("The cleanup plan could not be loaded.")).toBeVisible();
   });
 });

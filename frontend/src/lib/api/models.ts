@@ -3,6 +3,7 @@ import { editHeaders, requireEditingReceipt } from "./editing";
 import {
   expectOk,
   getJson,
+  jsonHeaders,
   GetJsonOptions,
   requestApi,
   requestMutation,
@@ -297,20 +298,32 @@ export function batchDeleteModels(modelIds: number[]): Promise<ModelBatchResult>
   });
 }
 
-export function listTrash(): Promise<TrashedModelRead[]> {
-  return getJson<TrashedModelRead[]>("/api/v1/models/trash");
+export function listTrash(options: GetJsonOptions = {}): Promise<TrashedModelRead[]> {
+  return getJson<TrashedModelRead[]>("/api/v1/models/trash", options);
 }
 
-export function restoreModel(id: number): Promise<ModelRead> {
-  return sendJson<ModelRead>(`/api/v1/models/${id}/restore`, "POST", {});
+export function restoreModel(
+  id: number,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<ModelRead> {
+  return requestMutation<ModelRead>(`/api/v1/models/${id}/restore`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
 }
 
-export async function purgeModel(id: number, confirmStorageRisk = false): Promise<TrashPurgeRead> {
+export async function purgeModel(
+  id: number,
+  confirmStorageRisk = false,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<TrashPurgeRead> {
   const query = confirmStorageRisk ? "?confirm_storage_risk=true" : "";
   return normalizeTrashPurgeRead(
     await requestMutation<Partial<TrashPurgeRead>>(
       `/api/v1/models/${id}/purge${query}`,
-      { method: "DELETE" },
+      { method: "DELETE", signal: options.signal },
       `/api/v1/models/${id}/purge`,
     ),
   );

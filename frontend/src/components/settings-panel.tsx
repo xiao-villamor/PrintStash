@@ -12,9 +12,9 @@ import { knownUiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
-import { ApiError, parseApiError } from "@/lib/errors";
+import { parseApiError } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   backupSourceKey,
   backupSourcesOptions,
@@ -35,6 +35,16 @@ import {
   type ApiKeyReceipt,
 } from "@/lib/queries/settings-account";
 import { savedPreference, useSettingsPreferenceCommand } from "@/lib/queries/settings-preferences";
+import {
+  settingsHealthOptions,
+  settingsReleaseOptions,
+  settingsSystemKeys,
+} from "@/lib/queries/settings-system";
+import {
+  settingsTrashOptions,
+  settingsGcOptions,
+  useSettingsTrashCommand,
+} from "@/lib/queries/settings-trash";
 import { useBackupPolicyDraft } from "@/lib/queries/settings-backup-policy";
 import { getSessionVersion } from "@/lib/session-transport";
 import {
@@ -46,7 +56,7 @@ import {
 } from "@/lib/queries/settings-access";
 import { onAuthChange } from "@/lib/auth-store";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BackupRunHistory } from "@/components/backup-run-history";
 import { CollectionPicker } from "@/components/collection-picker";
 import {
@@ -117,26 +127,14 @@ import { MaintenancePanel } from "@/components/maintenance-panel";
 import { BackgroundWorkPanel } from "@/components/background-work-panel";
 import { BrandMark } from "@/components/brand-mark";
 import {
-  createGcPlan,
-  approveGcPlan,
-  abortGcPlan,
-  finalizeGcPlan,
   downloadModelExport,
   downloadLibraryArchive,
   importLibraryArchive,
   regenerateDerivatives,
-  getHealthDetails,
-  getActiveGcPlan,
-  getLatestRelease,
-  listTrash,
-  purgeModel,
-  restoreModel,
   restartPrintStash,
 } from "@/lib/api";
 import type {
   BackupMeta,
-  GcPlan,
-  ReleaseStatus,
   UnownedBackupCandidate,
   UnownedRemoteBackupCandidate,
   UnownedS3BackupCandidate,
@@ -487,9 +485,18 @@ export function SettingsPanel() {
       tabs.scrollLeft = selected.offsetLeft - (tabs.clientWidth - selected.clientWidth) / 2;
     }
   }, [activeSection, user?.is_superuser]);
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [releaseStatus, setReleaseStatus] = useState<ReleaseStatus | null>(null);
-  const [releaseChecking, setReleaseChecking] = useState(false);
+  const client = useQueryClient();
+  const healthRead = useQuery({ ...settingsHealthOptions(), enabled: !!user?.is_superuser });
+  const releaseRead = useQuery({ ...settingsReleaseOptions(), enabled: !!user?.is_superuser });
+  const health =
+    user?.is_superuser && !(healthRead.isError && accessDenied(healthRead.error))
+      ? (healthRead.data ?? null)
+      : null;
+  const releaseStatus =
+    user?.is_superuser && !(releaseRead.isError && accessDenied(releaseRead.error))
+      ? (releaseRead.data ?? null)
+      : null;
+  const releaseChecking = releaseRead.isFetching;
   // Vault totals refresh automatically when models change (model writes
   // invalidate queryKeys.vaultStats), so no manual refetch on this screen.
   const stats = useVaultStats().data ?? null;
@@ -606,10 +613,23 @@ export function SettingsPanel() {
     if (receipt?.handoff) discardBrowserExtensionSetup(receipt.handoff);
     setOwnedReceipt(null);
   }
-  const [trashItems, setTrashItems] = useState<TrashedModelRead[]>([]);
-  const [trashLoading, setTrashLoading] = useState(false);
+  const trashRead = useQuery({
+    ...settingsTrashOptions(),
+    enabled: !!user && activeSection === "trash",
+  });
+  const gcRead = useQuery({
+    ...settingsGcOptions(),
+    enabled: !!user?.is_superuser && activeSection === "trash",
+  });
+  const trashCommand = useSettingsTrashCommand();
+  const trashItems =
+    user && !(trashRead.isError && accessDenied(trashRead.error)) ? (trashRead.data ?? []) : [];
+  const trashLoading = trashRead.isFetching;
   const [trashPurgeResult, setTrashPurgeResult] = useState<TrashPurgeRead | null>(null);
-  const [gcPlan, setGcPlan] = useState<GcPlan | null>(null);
+  const gcPlan =
+    user?.is_superuser && !(gcRead.isError && accessDenied(gcRead.error))
+      ? (gcRead.data ?? null)
+      : null;
   const gcQuarantineReady = useDeadlineReached(
     gcPlan?.state === "quarantined" ? (gcPlan.quarantine_until ?? null) : null,
   );
@@ -643,7 +663,7 @@ export function SettingsPanel() {
       ? preferenceIntent.value
       : (remoteConfigData?.model_thumbnail_width ?? 640);
   const [previewBusy, setPreviewBusy] = useState<"rebuild" | null>(null);
-  const [purgeTarget, setPurgeTarget] = useState<number | null>(null);
+  const [purgeTarget, setPurgeTarget] = useState<TrashedModelRead | null>(null);
   const [purgeExpiredOpen, setPurgeExpiredOpen] = useState(false);
   const trashRetentionText =
     trashRetentionDraft?.text ?? String(remoteConfigData?.trash_retention_days ?? 30);
@@ -748,6 +768,10 @@ export function SettingsPanel() {
       setBackupRetentionDays(null);
       setTrashRetentionDraft(null);
       setBackupConnectionDrafts({});
+      setTrashPurgeResult(null);
+      setGcDigestConfirmation("");
+      setPurgeTarget(null);
+      setTrashBusy(null);
     });
     return () => {
       accountLive.current = false;
@@ -767,65 +791,24 @@ export function SettingsPanel() {
     router.replace(query ? `/settings?${query}` : "/settings");
   }
 
-  useEffect(() => {
-    if (!user?.is_superuser) return;
-    getHealthDetails<HealthResponse>()
-      .then(setHealth)
-      .catch(() => {});
-  }, [user]);
-
   const storageHealth = storageHealthFrom(health);
 
-  const checkForUpdates = useCallback(
-    async (refresh = false) => {
-      if (!user?.is_superuser) return;
-      setReleaseChecking(true);
-      try {
-        setReleaseStatus(await getLatestRelease(refresh));
-      } catch {
-        setReleaseStatus(null);
-      } finally {
-        setReleaseChecking(false);
-      }
-    },
-    [user],
-  );
-
-  useEffect(() => {
-    // `checkForUpdates` awaits the release feed; the only synchronous write is the flag
-    // that says a request is in flight, which is what this effect exists to start.
-    // oxlint-disable-next-line react/set-state-in-effect -- the release itself arrives asynchronously
-    void checkForUpdates(false);
-  }, [checkForUpdates]);
-
-  const loadTrash = useCallback(async () => {
-    if (!user) {
-      setTrashItems([]);
-      return;
-    }
-    setTrashLoading(true);
+  async function checkForUpdates(refresh = false) {
+    if (!user?.is_superuser || releaseRead.isFetching) return;
+    const session = getSessionVersion();
+    await client.cancelQueries({ queryKey: settingsSystemKeys.release, exact: true });
+    if (!accountCurrent(session)) return;
     try {
-      const [items, activePlan] = await Promise.all([
-        listTrash(),
-        user.is_superuser ? getActiveGcPlan() : Promise.resolve(null),
-      ]);
-      setTrashItems(items);
-      setGcPlan(activePlan);
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setTrashLoading(false);
+      await client.fetchQuery({ ...settingsReleaseOptions(refresh), staleTime: 0 });
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
-  }, [user]);
+  }
 
-  useEffect(() => {
-    if (activeSection === "trash") {
-      // Opening the Trash section is what starts the listing fetch; `loadTrash` writes the
-      // items only after awaiting the API, and synchronously sets just its loading flag.
-      // oxlint-disable-next-line react/set-state-in-effect -- fetch-on-open of an external listing
-      loadTrash();
-    }
-  }, [activeSection, loadTrash]);
+  async function loadTrash() {
+    if (!user) return;
+    await Promise.all([trashRead.refetch(), ...(user.is_superuser ? [gcRead.refetch()] : [])]);
+  }
 
   async function loadBackups() {
     if (!user?.is_superuser) return;
@@ -1613,119 +1596,124 @@ export function SettingsPanel() {
   }
 
   async function restoreTrashItem(id: number) {
+    const target = trashItems.find((item) => item.id === id);
+    if (!target || trashRead.isError || trashBusy !== null) return;
+    const session = getSessionVersion();
     setTrashBusy(id);
     try {
-      await restoreModel(id);
-      setTrashItems((current) => current.filter((item) => item.id !== id));
-      toast.success(uiText("Model restored."));
-    } catch (e) {
-      toast.error(e);
+      await trashCommand.run({ kind: "restore", target, session });
+      if (accountCurrent(session)) toast.success(uiText("Model restored."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
-  async function purgeTrashItem(id: number) {
-    setPurgeTarget(id);
+  function purgeTrashItem(id: number) {
+    const target = trashItems.find((item) => item.id === id);
+    if (target && !trashRead.isError) setPurgeTarget(target);
   }
 
   async function confirmPurge() {
-    if (purgeTarget === null) return;
-    const id = purgeTarget;
+    if (!purgeTarget || trashRead.isError || trashBusy !== null) return;
+    const target = purgeTarget;
+    const session = getSessionVersion();
     setPurgeTarget(null);
-    setTrashBusy(id);
+    setTrashBusy(target.id);
     try {
-      const result = await purgeModel(
-        id,
-        trashOperations?.catalog_purge.confirmation_required ?? trashStorageTier !== "verified",
-      );
-      setTrashItems((current) => current.filter((item) => item.id !== id));
-      setTrashPurgeResult(result);
-      if (result.storage_cleanup_status === "completed") {
-        toast.success(cleanupStatusMessage(t, result));
-      } else {
-        toast.warning(cleanupStatusMessage(t, result));
-      }
-    } catch (e) {
-      toast.error(e);
+      const receipt = await trashCommand.run({
+        kind: "purge",
+        target,
+        session,
+        confirmStorageRisk:
+          trashOperations?.catalog_purge.confirmation_required ?? trashStorageTier !== "verified",
+      });
+      if (!accountCurrent(session)) return;
+      if (receipt.kind !== "purged") throw new Error("Expected a purge receipt");
+      setTrashPurgeResult(receipt.result);
+      if (receipt.result.storage_cleanup_status === "completed")
+        toast.success(cleanupStatusMessage(t, receipt.result));
+      else toast.warning(cleanupStatusMessage(t, receipt.result));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
   async function createExpiredGcPreview() {
+    if (!user?.is_superuser || gcRead.isError || gcRead.isPending || trashBusy !== null) return;
+    const session = getSessionVersion();
     setPurgeExpiredOpen(false);
     setTrashBusy("gc");
     try {
-      const plan = await createGcPlan();
-      setGcPlan(plan);
+      const receipt = await trashCommand.run({ kind: "preview", session });
+      if (!accountCurrent(session)) return;
+      if (receipt.kind !== "plan") throw new Error("Expected a GC plan receipt");
       setGcDigestConfirmation("");
       toast.success(
         uiText("gc.previewCreated", {
-          value1: String(plan.resource_count),
-          count: Number(plan.resource_count),
+          value1: String(receipt.plan.resource_count),
+          count: receipt.plan.resource_count,
         }),
       );
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409 && e.code === "gc_plan_active") {
-        try {
-          const activePlan = await getActiveGcPlan();
-          if (activePlan === null) throw e;
-          setGcPlan(activePlan);
-          setGcDigestConfirmation("");
-        } catch (readError) {
-          toast.error(readError);
-        }
-      } else {
-        toast.error(e);
-      }
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
   async function approveExpiredGcPlan() {
-    if (!gcPlan) return;
+    if (!gcPlan || gcRead.isError || trashBusy !== null) return;
+    const session = getSessionVersion();
     setTrashBusy("gc");
     try {
-      const approved = await approveGcPlan(gcPlan.id, gcDigestConfirmation);
-      setGcPlan(approved);
+      await trashCommand.run({
+        kind: "approve",
+        plan: gcPlan,
+        digest: gcDigestConfirmation,
+        session,
+      });
+      if (!accountCurrent(session)) return;
       setGcDigestConfirmation("");
       toast.success(uiText("Backup verified. The plan is now in its recovery quarantine."));
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
   async function abortExpiredGcPlan() {
-    if (!gcPlan) return;
+    if (!gcPlan || gcRead.isError || trashBusy !== null) return;
+    const session = getSessionVersion();
     setTrashBusy("gc");
     try {
-      const aborted = await abortGcPlan(gcPlan.id);
-      setGcPlan(aborted);
+      await trashCommand.run({ kind: "abort", plan: gcPlan, session });
+      if (!accountCurrent(session)) return;
       setGcDigestConfirmation("");
       toast.success(uiText("GC plan aborted. Every candidate remains in the trash."));
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
   async function finalizeExpiredGcPlan() {
-    if (!gcPlan) return;
+    if (!gcPlan || gcRead.isError || trashBusy !== null) return;
+    const session = getSessionVersion();
     setTrashBusy("gc");
     try {
-      const finalized = await finalizeGcPlan(gcPlan.id);
-      setGcPlan(finalized);
-      toast.success(uiText("GC plan finalized after all safety evidence was reverified."));
-      await loadTrash();
-    } catch (e) {
-      toast.error(e);
+      await trashCommand.run({ kind: "finalize", plan: gcPlan, session });
+      if (accountCurrent(session))
+        toast.success(uiText("GC plan finalized after all safety evidence was reverified."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
@@ -2104,6 +2092,22 @@ export function SettingsPanel() {
                 </div>
               )}
 
+            {user?.is_superuser && healthRead.isError && (
+              <div role="alert" className="flex items-center gap-2 text-sm">
+                <p>{uiText("settings.healthLoadFailed")}</p>
+                <Button variant="outline" onClick={() => void healthRead.refetch()}>
+                  {uiText("Retry health check")}
+                </Button>
+              </div>
+            )}
+            {user?.is_superuser && releaseRead.isError && (
+              <div role="alert" className="flex items-center gap-2 text-sm">
+                <p>{uiText("settings.releaseLoadFailed")}</p>
+                <Button variant="outline" onClick={() => void checkForUpdates(true)}>
+                  {uiText("Retry update check")}
+                </Button>
+              </div>
+            )}
             {releaseStatus?.update_available && releaseStatus.latest_version && (
               <div
                 role="status"
@@ -4481,6 +4485,14 @@ export function SettingsPanel() {
 
             {activeSection === "trash" && (
               <div className="space-y-6 animate-panel-in">
+                {gcRead.isError && user?.is_superuser && (
+                  <div role="alert" className="flex items-center gap-2 text-sm">
+                    <p>{uiText("settings.gcLoadFailed")}</p>
+                    <Button variant="outline" onClick={() => void gcRead.refetch()}>
+                      {uiText("Retry cleanup plan")}
+                    </Button>
+                  </div>
+                )}
                 {user?.is_superuser && remoteConfig.isError && (
                   <div role="alert" className="flex items-center gap-2 text-sm">
                     <p>{t("settings.configLoadFailed")}</p>
@@ -4557,6 +4569,8 @@ export function SettingsPanel() {
                         trashBusy === "gc" ||
                         parsedTrashRetentionDays === null ||
                         trashRetentionDays < 0 ||
+                        gcRead.isError ||
+                        gcRead.isPending ||
                         (gcPlan !== null &&
                           ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
                       }
@@ -4624,7 +4638,7 @@ export function SettingsPanel() {
                             aria-label={uiText("Confirm GC plan digest")}
                             placeholder={uiText("Paste the 64-character digest")}
                             value={gcDigestConfirmation}
-                            disabled={trashBusy === "gc"}
+                            disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
                             onChange={(event) => setGcDigestConfirmation(event.target.value.trim())}
                           />
                         </div>
@@ -4645,7 +4659,12 @@ export function SettingsPanel() {
                           <button
                             type="button"
                             className={BTN_PRIMARY}
-                            disabled={trashBusy === "gc" || gcDigestConfirmation !== gcPlan.digest}
+                            disabled={
+                              gcRead.isError ||
+                              gcRead.isPending ||
+                              trashBusy === "gc" ||
+                              gcDigestConfirmation !== gcPlan.digest
+                            }
                             onClick={approveExpiredGcPlan}
                           >
                             <ShieldCheck className="h-3.5 w-3.5" />
@@ -4657,7 +4676,11 @@ export function SettingsPanel() {
                             type="button"
                             className={BTN_PRIMARY}
                             disabled={
-                              trashBusy === "gc" || !gcPlan.quarantine_until || !gcQuarantineReady
+                              gcRead.isError ||
+                              gcRead.isPending ||
+                              trashBusy === "gc" ||
+                              !gcPlan.quarantine_until ||
+                              !gcQuarantineReady
                             }
                             onClick={finalizeExpiredGcPlan}
                           >
@@ -4669,7 +4692,7 @@ export function SettingsPanel() {
                           <button
                             type="button"
                             className={BTN_SECONDARY}
-                            disabled={trashBusy === "gc"}
+                            disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
                             onClick={abortExpiredGcPlan}
                           >
                             {uiText("Abort plan")}
@@ -4712,6 +4735,10 @@ export function SettingsPanel() {
                     ) : trashLoading ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">
                         {uiText("Loading...")}
+                      </p>
+                    ) : trashRead.isError ? (
+                      <p role="alert" className="p-4 text-sm">
+                        {uiText("settings.trashLoadFailed")}
                       </p>
                     ) : trashItems.length === 0 ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">

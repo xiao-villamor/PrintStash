@@ -4289,5 +4289,12 @@
   "Requested": "Solicitado",
   "Current": "Actual",
   "Page unavailable": "Página no disponible",
-  "Reload page": "Recargar página"
+  "Reload page": "Recargar página",
+  "settings.healthLoadFailed": "No se pudo cargar el estado del sistema.",
+  "settings.releaseLoadFailed": "No se pudo cargar la información de versiones.",
+  "settings.gcLoadFailed": "No se pudo cargar el plan de limpieza.",
+  "settings.trashLoadFailed": "No se pudo cargar la papelera.",
+  "Retry health check": "Reintentar comprobación del sistema",
+  "Retry update check": "Reintentar búsqueda de actualizaciones",
+  "Retry cleanup plan": "Reintentar plan de limpieza"
 }

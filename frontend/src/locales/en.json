@@ -4289,5 +4289,12 @@
   "Requested": "Requested",
   "Current": "Current",
   "Page unavailable": "Page unavailable",
-  "Reload page": "Reload page"
+  "Reload page": "Reload page",
+  "settings.healthLoadFailed": "System health could not be loaded.",
+  "settings.releaseLoadFailed": "Release information could not be loaded.",
+  "settings.gcLoadFailed": "The cleanup plan could not be loaded.",
+  "settings.trashLoadFailed": "Trash could not be loaded.",
+  "Retry health check": "Retry health check",
+  "Retry update check": "Retry update check",
+  "Retry cleanup plan": "Retry cleanup plan"
 }

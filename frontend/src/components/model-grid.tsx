@@ -1477,7 +1477,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             count: Number(deletedModelIds.length),
           }),
           async () => {
-            await Promise.all(deletedModelIds.map(restoreModel));
+            await Promise.all(deletedModelIds.map((id) => restoreModel(id)));
             refresh();
             toast.success(uiText("Models restored"));
           },
