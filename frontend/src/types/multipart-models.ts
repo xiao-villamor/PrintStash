@@ -18,6 +18,7 @@ export interface MultipartModelReference {
 }
 
 export interface MultipartModelListItem {
+  edit_epoch: string;
   edit_version: number;
   id: number;
   name: string;

@@ -39,7 +39,11 @@ const DefaultPdfViewer = lazy(() =>
 type ViewMode = "preview" | "edit";
 
 /** The name and body the editor is holding, tagged with the document it belongs to. */
-type Draft = { docId: number; base: DocumentRead; name: string; body: string };
+type NewDocument = Omit<DocumentRead, "edit_epoch" | "edit_version"> & {
+  edit_epoch: null;
+  edit_version: null;
+};
+type Draft = { docId: number; base: DocumentRead | NewDocument; name: string; body: string };
 type SaveAttempt =
   | { kind: "conflict" }
   | { kind: "uncertain"; submitted: { name: string; body: string } };
@@ -53,7 +57,7 @@ type BinaryPreview = {
   imageUrl: string | null;
 };
 
-function canEditDoc(doc: DocumentRead | null, isSuper: boolean): boolean {
+function canEditDoc(doc: DocumentRead | NewDocument | null, isSuper: boolean): boolean {
   if (isSuper) return true;
   return doc?.effective_role === "edit" || doc?.effective_role === "admin";
 }
@@ -77,7 +81,7 @@ export default function DocumentDetailPage({
   const invalidId = !isNew && (!id || Number.isNaN(docId));
 
   // New doc: no DB row yet — it exists only in this render until save POSTs it.
-  const newDocument = useMemo<DocumentRead>(
+  const newDocument = useMemo<NewDocument>(
     () => ({
       id: 0,
       name: translate(locale, "Untitled document"),
@@ -88,7 +92,8 @@ export default function DocumentDetailPage({
       filename: null,
       effective_role: "edit",
       updated_at: "",
-      edit_version: 1,
+      edit_epoch: null,
+      edit_version: null,
       body: "",
     }),
     [collectionParam, collectionId, locale],
@@ -283,10 +288,13 @@ export default function DocumentDetailPage({
         router.replace(`/documents/${created.id}`);
         return;
       }
+      const base = liveDraft?.base ?? doc;
+      if (base.edit_epoch === null || base.edit_version === null)
+        throw new Error("Existing document has no editing base");
       await mutations.update.mutateAsync({
         session,
         id: doc.id,
-        editVersion: liveDraft?.base.edit_version ?? doc.edit_version,
+        editVersion: { edit_epoch: base.edit_epoch, edit_version: base.edit_version },
         payload: submitted,
       });
       if (getSessionVersion() !== session || routeRef.current !== route) return;

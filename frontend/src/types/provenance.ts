@@ -50,6 +50,7 @@ export interface ProvenanceSourceRead {
 }
 
 export interface ModelProvenanceRead {
+  edit_epoch: string;
   edit_version: number;
   sources: ProvenanceSourceRead[];
 }

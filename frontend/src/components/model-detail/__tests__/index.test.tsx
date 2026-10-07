@@ -52,6 +52,7 @@ function aFile(over: Partial<FileRead> = {}): FileRead {
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,
     name: "Benchy",
@@ -143,11 +144,18 @@ describe("ModelDetail", () => {
       await user.type(screen.getByPlaceholderText("Model name"), "My draft");
 
       act(() =>
-        client.setQueryData(queryKeys.model(1), aModel({ name: "Remote edit", edit_version: 4 })),
+        client.setQueryData(
+          queryKeys.model(1),
+          aModel({
+            name: "Remote edit",
+            edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            edit_version: 4,
+          }),
+        ),
       );
       await user.click(screen.getByRole("button", { name: "Save" }));
 
-      expect(headers).toEqual(['"model-1-v1"']);
+      expect(headers).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
       expect(screen.getByPlaceholderText("Model name")).toHaveValue("My draft");
     });
 
@@ -404,7 +412,13 @@ describe("ModelDetail", () => {
       const app = renderDetail({
         routes: {
           "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
-          "GET /api/v1/models/1": json(aModel({ name: "Other editor", edit_version: 7 })),
+          "GET /api/v1/models/1": json(
+            aModel({
+              name: "Other editor",
+              edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              edit_version: 7,
+            }),
+          ),
         },
       });
       await openEdit(user);
@@ -417,14 +431,20 @@ describe("ModelDetail", () => {
       app.route({
         "PATCH /api/v1/models/1": (_url, init) => {
           version = new Headers(init?.headers).get("If-Match");
-          return json(aModel({ name: "My draft", edit_version: 8 }));
+          return json(
+            aModel({
+              name: "My draft",
+              edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              edit_version: 8,
+            }),
+          );
         },
       });
 
       await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
 
       expect(await screen.findByText("My draft")).toBeVisible();
-      expect(version).toBe('"model-1-v7"');
+      expect(version).toBe('"model-1-ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-v7"');
       expect(app.requestsWithMethod("PATCH")).toHaveLength(2);
     });
 
@@ -542,7 +562,7 @@ describe("ModelDetail", () => {
     it("saves the name the user typed", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderDetail({
-        routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2" })) },
+        routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2", edit_version: 2 })) },
       });
       await openEdit(user);
       const name = screen.getByPlaceholderText("Model name");
@@ -576,7 +596,7 @@ describe("ModelDetail", () => {
       // server leaves the user looking at the old values.
       const user = userEvent.setup();
       renderDetail({
-        routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2" })) },
+        routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2", edit_version: 2 })) },
       });
       await openEdit(user);
       const name = screen.getByPlaceholderText("Model name");
@@ -691,6 +711,7 @@ describe("ModelDetail", () => {
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
       expect(app.client.getQueryData<ModelRead>(queryKeys.model(1))).toMatchObject({
         name: "Saved draft",
+        edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         edit_version: 7,
       });
       expect(screen.getByPlaceholderText("Model name")).toHaveValue("Saved draft");

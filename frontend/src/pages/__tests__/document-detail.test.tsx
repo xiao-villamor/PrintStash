@@ -33,6 +33,7 @@ import type { DocumentRead } from "@/types";
 function aDocument(over: Partial<DocumentRead> = {}): DocumentRead {
   return {
     id: 3,
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     name: "Assembly notes",
     kind: "markdown",
@@ -175,7 +176,9 @@ describe("DocumentDetailPage", () => {
 
       await user.click(screen.getByRole("button", { name: "Save" }));
 
-      await waitFor(() => expect(conditionalHeader).toBe('"document-3-v1"'));
+      await waitFor(() =>
+        expect(conditionalHeader).toBe('"document-3-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"'),
+      );
     });
 
     it("requires explicit review before saving a conflicting draft", async () => {
@@ -430,7 +433,7 @@ describe("DocumentDetailPage", () => {
         expect(app.requests().filter((request) => request.method === "GET")).toHaveLength(2),
       );
       await act(async () => {
-        resolveWrite(json(aDocument({ name: "Saved title" })));
+        resolveWrite(json(aDocument({ name: "Saved title", edit_version: 2 })));
       });
       expect(await screen.findByRole("heading", { name: "Saved title" })).toBeInTheDocument();
       await act(async () => {

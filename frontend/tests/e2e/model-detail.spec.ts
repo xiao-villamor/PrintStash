@@ -121,13 +121,16 @@ test.describe("model detail route", () => {
     await expect(page.getByRole("dialog", { name: "Latest saved version" })).toContainText(
       "Other editor",
     );
-    expect(versions).toEqual(['"model-1-v1"']);
+    expect(versions).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
     await page.getByRole("button", { name: "Save my draft against this version" }).click();
 
     await expect(
       page.getByRole("heading", { name: "My browser draft", exact: true }),
     ).toBeVisible();
-    expect(versions).toEqual(['"model-1-v1"', '"model-1-v7"']);
+    expect(versions).toEqual([
+      '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"',
+      '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"',
+    ]);
   });
 
   test("restores a trashed source within its original Model", async ({ page }) => {

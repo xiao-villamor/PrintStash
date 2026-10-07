@@ -112,6 +112,7 @@ def outliner_items(
     return [
         OutlinerModelRead(
             id=model.id,
+            edit_epoch=model.edit_epoch,
             edit_version=model.edit_version,
             name=model.name,
             collection=collection_name_for(model),

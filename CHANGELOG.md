@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Bind conditional Model, Multipart and Document edits to the database history
+  as well as the entity version. Restored backups cannot reauthorize old drafts
+  when a counter recurs; delayed old-history receipts cannot replace a restored
+  snapshot. Preserve explicit review and retry with the complete editing base.
+
 - Preserve the editing version when dragging Models from the grid, list or
   paginated tree. Retain the destination after conflicts or uncertain moves,
   and require explicit review before retrying with the current version.

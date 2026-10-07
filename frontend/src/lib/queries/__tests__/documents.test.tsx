@@ -4,11 +4,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearLogin } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
 import { json, renderApp } from "@/test-support/render";
-import { FROZEN_NOW } from "@/test-support/factories";
-import { useDocument, useDocumentMutations } from "@/lib/queries/documents";
+import { anEditingBase, FROZEN_NOW } from "@/test-support/factories";
+import { documentKeys, useDocument, useDocumentMutations } from "@/lib/queries/documents";
 import type { DocumentRead } from "@/types";
 const document: DocumentRead = {
   id: 3,
+  edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   name: "Earlier document",
   kind: "markdown",
@@ -38,7 +39,12 @@ function Editor({ kind }: { kind: Kind }) {
         commands.upload.mutate({ file: new File(["Notes"], "notes.md"), collectionId: 1, session });
         break;
       case "update":
-        commands.update.mutate({ id: 3, payload: { name: "Saved" }, editVersion: 1, session });
+        commands.update.mutate({
+          id: 3,
+          payload: { name: "Saved" },
+          editVersion: anEditingBase(),
+          session,
+        });
         break;
       case "remove":
         commands.remove.mutate({ id: 3, session });
@@ -48,6 +54,7 @@ function Editor({ kind }: { kind: Kind }) {
   return (
     <>
       <p>{read.data?.name}</p>
+      <p>{commands.update.status}</p>
       <button onClick={save}>Save</button>
     </>
   );
@@ -57,7 +64,7 @@ function renderCommand(kind: Kind) {
     routes: {
       "GET /api/v1/documents/3": json(document),
       "POST /api/v1/documents": json({ ...document, name: "Saved" }),
-      "PUT /api/v1/documents/3": json({ ...document, name: "Saved" }),
+      "PUT /api/v1/documents/3": json({ ...document, name: "Saved", edit_version: 2 }),
       "DELETE /api/v1/documents/3": json(null, 204),
     },
   });
@@ -65,6 +72,37 @@ function renderCommand(kind: Kind) {
 
 afterEach(() => vi.restoreAllMocks());
 describe("retired document acknowledgements", () => {
+  it("preserves a restored document after an earlier history acknowledges", async () => {
+    const reply = Promise.withResolvers<Response>();
+    const app = renderApp(<Editor kind="update" />, {
+      routes: {
+        "GET /api/v1/documents/3": json(document),
+        "PUT /api/v1/documents/3": () => reply.promise,
+      },
+    });
+    await screen.findByText("Earlier document");
+    act(() => app.client.setQueryData(documentKeys.list(null), [document]));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(app.requests().some((request) => request.method === "PUT")).toBe(true),
+    );
+    const restored = {
+      ...document,
+      edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      name: "Restored document",
+    };
+    act(() => {
+      app.client.setQueryData(documentKeys.detail(3), restored);
+      app.client.setQueryData(documentKeys.list(null), [restored]);
+    });
+    await screen.findByText("Restored document");
+    await act(async () => reply.resolve(json({ ...document, edit_version: 2, name: "Saved" })));
+    await waitFor(() => expect(app.client.isMutating()).toBe(0));
+    expect(screen.getByText("Restored document")).toBeVisible();
+    expect(app.client.getQueryData(documentKeys.list(null))).toEqual([restored]);
+    expect(screen.getByText("error")).toBeVisible();
+  });
+
   it.each(KINDS.map((kind) => ({ kind })))(
     "leaves a new document read active after retired $kind acknowledgement",
     async ({ kind }) => {

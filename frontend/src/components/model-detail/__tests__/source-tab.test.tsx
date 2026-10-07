@@ -28,7 +28,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelProvenanceRead, ProvenanceFieldRead } from "@/types";
 import { SourceTab } from "@/components/model-detail/source-tab";
 import { renderApp, renderApp as render, json } from "@/test-support/render";
-import { aModel } from "@/test-support/factories";
+import { anEditingBase, aModel } from "@/test-support/factories";
 import { queryKeys } from "@/lib/query-client";
 import type { SourceApi } from "@/features/library/provenance";
 import { getMessageCatalog } from "@/lib/i18n";
@@ -54,6 +54,7 @@ const api: SourceApi = {
 };
 
 const provenance: ModelProvenanceRead = {
+  edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   sources: [
     {
@@ -112,6 +113,7 @@ describe("SourceTab", () => {
     getProvenance.mockResolvedValue(provenance);
     getModel.mockResolvedValue(aModel());
     putCover.mockResolvedValue({
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 2,
       cover: {
         id: 9,
@@ -211,7 +213,12 @@ describe("SourceTab", () => {
     await user.upload(input, new File(["cover"], "cover.png", { type: "image/png" }));
 
     await waitFor(() => {
-      expect(putCover).toHaveBeenCalledWith(1, 8, expect.any(File), 1);
+      expect(putCover).toHaveBeenCalledWith(
+        1,
+        8,
+        expect.any(File),
+        expect.objectContaining(anEditingBase()),
+      );
     });
   });
 
@@ -223,8 +230,18 @@ describe("SourceTab", () => {
     render(<SourceTab modelId={1} canEdit api={api} />);
     await user.click(await screen.findByRole("button", { name: "Use source title" }));
     await user.click(screen.getByRole("button", { name: "Use source description" }));
-    expect(updateModel).toHaveBeenNthCalledWith(1, 1, { name: "Source title" }, 1);
-    expect(updateModel).toHaveBeenNthCalledWith(2, 1, { description: "Inferred description" }, 2);
+    expect(updateModel).toHaveBeenNthCalledWith(
+      1,
+      1,
+      { name: "Source title" },
+      expect.objectContaining(anEditingBase()),
+    );
+    expect(updateModel).toHaveBeenNthCalledWith(
+      2,
+      1,
+      { description: "Inferred description" },
+      expect.objectContaining(anEditingBase({ edit_version: 2 })),
+    );
     expect(patchProvenance).not.toHaveBeenCalled();
     expect(screen.getByText(/does not grant, interpret, or expand rights/i)).toBeInTheDocument();
   });
@@ -292,7 +309,7 @@ describe("SourceTab", () => {
           overrides: { title: "Edited title" },
           clear_overrides: [],
         },
-        1,
+        expect.objectContaining(anEditingBase()),
       );
     });
   });
@@ -315,7 +332,7 @@ describe("SourceTab", () => {
           overrides: {},
           clear_overrides: ["title"],
         },
-        1,
+        expect.objectContaining(anEditingBase()),
       );
     });
   });
@@ -400,11 +417,12 @@ describe("SourceTab conditional editing", () => {
     await act(async () => {
       view.client.setQueryData([...queryKeys.model(1), "provenance"], {
         ...provenance,
+        edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         edit_version: 7,
       });
     });
     await user.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(base).toBe('"model-1-v1"'));
+    await waitFor(() => expect(base).toBe('"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"'));
     expect(screen.getByRole("textbox", { name: "Title override" })).toHaveValue("My draft");
   });
 
@@ -417,6 +435,7 @@ describe("SourceTab conditional editing", () => {
     const writes: (string | null)[] = [];
     const latest = {
       ...provenance,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 7,
       sources: [
         {
@@ -427,6 +446,7 @@ describe("SourceTab conditional editing", () => {
     };
     const accepted = {
       ...latest,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 11,
       sources: [
         {
@@ -459,7 +479,10 @@ describe("SourceTab conditional editing", () => {
     expect(screen.getByRole("textbox", { name: "Title override" })).toHaveValue("My draft");
     await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
     expect(await screen.findByText("My draft")).toBeInTheDocument();
-    expect(writes).toEqual(['"model-1-v1"', '"model-1-v7"']);
+    expect(writes).toEqual([
+      '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"',
+      '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"',
+    ]);
   });
 });
 
@@ -475,6 +498,7 @@ describe("SourceTab conflict recovery", () => {
     const user = userEvent.setup();
     const latest = {
       ...provenance,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 7,
       sources: [
         {
@@ -491,6 +515,7 @@ describe("SourceTab conflict recovery", () => {
           : json(
               aModel({
                 id: 1,
+                edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
                 edit_version: options.version ?? 7,
                 effective_role: options.role ?? "edit",
               }),
@@ -617,7 +642,7 @@ describe("SourceTab conflict recovery", () => {
             size_bytes: 12,
             updated_at: "2026-08-24T00:00:00Z",
           });
-          response.headers.set("ETag", '"model-1-v12"');
+          response.headers.set("ETag", '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v12"');
           return response;
         },
       },
@@ -629,10 +654,14 @@ describe("SourceTab conflict recovery", () => {
       await screen.findByRole("button", { name: "Save my draft against this version" }),
     );
     expect(await screen.findByRole("button", { name: "Replace cover" })).toBeInTheDocument();
-    expect(uploads.map((upload) => upload.base)).toEqual(['"model-1-v1"', '"model-1-v7"']);
+    expect(uploads.map((upload) => upload.base)).toEqual([
+      '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"',
+      '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"',
+    ]);
     expect(uploads[0].file).toBe(file);
     expect(uploads[1].file).toBe(file);
     expect(view.client.getQueryData([...queryKeys.model(1), "provenance"])).toMatchObject({
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 12,
     });
   });
@@ -659,9 +688,10 @@ describe("SourceTab conflict recovery", () => {
     });
     await user.click(await screen.findByRole("button", { name: button }));
     await waitFor(() => expect(view.client.getQueryData(queryKeys.model(1))).toMatchObject(saved));
-    expect(base).toBe('"model-1-v1"');
+    expect(base).toBe('"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"');
     expect(JSON.parse(view.requestsWithMethod("PATCH")[0].body)).toEqual(payload);
     expect(view.client.getQueryData([...queryKeys.model(1), "provenance"])).toMatchObject({
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 8,
     });
   });
@@ -737,6 +767,7 @@ describe("SourceTab edit boundaries", () => {
     await act(async () => held.resolve(json({ ...provenance, edit_version: 9 })));
     expect(screen.queryByRole("textbox", { name: "Title override" })).not.toBeInTheDocument();
     expect(view.client.getQueryData([...queryKeys.model(2), "provenance"])).toMatchObject({
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 12,
     });
   });
@@ -781,6 +812,7 @@ describe("SourceTab edit boundaries", () => {
     act(() => {
       view.client.setQueryData([...queryKeys.model(1), "provenance"], {
         ...snapshot,
+        edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         edit_version: 7,
       });
     });
@@ -790,7 +822,7 @@ describe("SourceTab edit boundaries", () => {
       }),
     );
     await screen.findByRole("button", { name: "Review latest version" });
-    expect(base).toBe('"model-1-v1"');
+    expect(base).toBe('"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"');
   });
 });
 
@@ -807,6 +839,7 @@ describe("SourceTab cover review", () => {
     const snapshot = { ...provenance, sources: [{ ...provenance.sources[0], cover: firstCover }] };
     const latest = {
       ...provenance,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 7,
       sources: [
         { ...provenance.sources[0], cover: { ...firstCover, updated_at: "2026-08-25T00:00:00Z" } },

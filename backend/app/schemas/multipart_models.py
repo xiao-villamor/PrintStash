@@ -9,10 +9,10 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from app.db.models import CollectionRole
 from app.schemas.documents import DocumentListItem
+from app.schemas.editing import EditingBase
 
 
-class MultipartModelListItem(BaseModel):
-    edit_version: int
+class MultipartModelListItem(EditingBase):
     id: int
     name: str
     slug: str

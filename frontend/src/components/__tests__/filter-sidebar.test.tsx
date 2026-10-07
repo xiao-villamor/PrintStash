@@ -32,6 +32,7 @@ const TREE = [
 
 function multipartSet(over: Partial<MultipartModelListItem> = {}): MultipartModelListItem {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 40,
     name: "Dragon figure",

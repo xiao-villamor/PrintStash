@@ -116,7 +116,7 @@ owner has migrated; no ESLint or new build framework is required.
 | ------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | Server entities, lists, counts, capabilities, remote process status | Feature-owned Query entries backed by authorized endpoints       | One cache, complete keys, declared invalidation. No transport JSON TTL.                                               |
 | Collection, filters, sort, library mode, selected route entity      | URL                                                              | Parse/normalize once. URL wins over preference; preference supplies an absent initial default only.                   |
-| Form draft and base edit version                                    | Editing feature                                                  | Preserve dirty values across refetch/errors; explicit conflict resolution. Never persist secrets as a convenience.    |
+| Form draft and base editing identity                                    | Editing feature                                                  | Preserve dirty values across refetch/errors; explicit conflict resolution. Never persist secrets as a convenience.    |
 | Selection, open modal, hover, active local tab                      | Nearest owning component/workflow                                | Clear or reconcile when its view identity changes.                                                                    |
 | Locale, theme, grid preferences                                     | Preference owner                                                 | Shared subscription; validated/versioned persisted values. Private preferences are scoped and cleaned appropriately.  |
 | Displayed library ordering                                          | Query data for that view/session + bounded presentation metadata | No second indefinite entity cache. Freeze ordinary external reordering until refresh; patch confirmed own actions.    |
@@ -186,8 +186,7 @@ alongside name and location, including search and continuation pages. Collection
 search matches are a distinct unversioned case. A move must carry the version
 captured from its source gesture; fetching a current version just to authorize a
 stale move defeats conflict detection. The read contract is qualified in
-[the movement validation record](../library-move-validation.md); the remaining
-unconditional drop handler is still an explicit M4 migration gap.
+[the movement validation record](../library-move-validation.md); the gesture and conditional movement owner preserve that base through review.
 
 Multipart detail publication stays in `features/library/multipart.ts`. Composition,
 tag and cover writes use conditional versions; their endpoint clients reject a
@@ -281,3 +280,28 @@ file split or a universal repository is not a sufficient reason. Production work
 ships with the repository's behaviour matrix and applicable tests in the same PR.
 Update this document's migration status as owners actually move; do not document
 a proposed guarantee as available behaviour.
+
+### Editing identity across restoration
+
+An editing base is `{edit_epoch, edit_version}`, captured with the authorized
+Model, Multipart Model, Document or Source snapshot when the user starts an
+intent. `lib/api/editing.ts` validates and serializes that public protocol;
+`types/editing.ts` defines its value type. These helpers do not own data or fetch a
+replacement base. The server compares the pair atomically. Batch acknowledgement
+and undo also carry pairs. Keep invalid or absent bases out of existing-entity
+editors; a new unsaved Document has a distinct shape with no server editing base.
+
+Counters order edits only within one epoch. `features/library/editing.ts` compares
+snapshots using the epoch the operation observed before starting. Model,
+Multipart, Source, movement and Document publication use that rule: an old receipt
+cannot replace a different history installed while its request was in flight.
+Explicit review can adopt a restored history whose counter is lower. Capture the
+publication authority before that review request, including when adoption is a
+later user action. Do not infer epoch ordering or look up a new epoch to authorize
+an old draft. Session retirement remains a separate, stronger fence.
+
+The backend projects the singleton incarnation in the aggregate SELECT; it is not
+a new persisted entity column, per-row request, cache or migration. Contributor
+changes to an editing DTO must update conditional clients, acknowledgement
+validation, factories and OpenAPI in one increment. Qualification is recorded in
+[the restoration matrix](../library-restore-editing-validation.md).

@@ -705,7 +705,7 @@ class TestOutlinerEditingBase:
             f"/api/v1/models/{model.id}",
             headers={
                 **auth_headers,
-                "If-Match": f'"model-{model.id}-v7"',
+                "If-Match": f'"model-{model.id}-e{model.edit_epoch}-v7"',
                 "X-PrintStash-Edit-Contract": "conditional-v1",
             },
             json={"name": "Renamed", "collection": folder.path},

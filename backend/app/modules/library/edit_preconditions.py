@@ -16,9 +16,17 @@ from sqlalchemy.orm.attributes import set_committed_value
 from sqlmodel import Session, col, select
 
 from app.core.errors import ErrorKind, OperationError
-from app.db.models import CollectionRole, Document, Model, MultipartModel, User
+from app.db.models import (
+    CollectionRole,
+    Document,
+    LibraryRevision,
+    Model,
+    MultipartModel,
+    User,
+)
 from app.db.scopes import live
 from app.modules.identity import rbac
+from app.schemas.editing import EditingBase
 
 
 class EditKind(str, Enum):
@@ -36,13 +44,13 @@ class EditPrecondition(BaseModel):
     contract: str | None = None
 
 
-def etag(kind: EditKind, id: int, version: int) -> str:
-    return f'"{kind.value}-{id}-v{version}"'
+def etag(kind: EditKind, id: int, version: int, epoch: str) -> str:
+    return f'"{kind.value}-{id}-e{epoch}-v{version}"'
 
 
-def expected_version(
+def expected_base(
     kind: EditKind, id: int, precondition: EditPrecondition
-) -> int | None:
+) -> EditingBase | None:
     """Validate headers without claiming a write, before preparing stored bytes."""
     if (
         precondition.contract is not None
@@ -53,15 +61,15 @@ def expected_version(
         raise OperationError(
             "edit_precondition_required", kind=ErrorKind.PRECONDITION_REQUIRED
         )
-    expected: int | None = None
+    expected: EditingBase | None = None
     if precondition.if_match is not None:
         match = re.fullmatch(
-            r'"(model|multipart|document)-([1-9][0-9]*)-v([1-9][0-9]*)"',
+            r'"(model|multipart|document)-([1-9][0-9]*)-e([0-9a-f]{32})-v([1-9][0-9]*)"',
             precondition.if_match,
         )
         if match is None or match[1] != kind.value or int(match[2]) != id:
             raise OperationError("edit_conflict", kind=ErrorKind.PRECONDITION_FAILED)
-        expected = int(match[3])
+        expected = EditingBase(edit_version=int(match[4]), edit_epoch=match[3])
     return expected
 
 
@@ -79,12 +87,18 @@ def claim(
     }[entity]
     if row.id is None:
         raise ValueError("edit_claim_requires_persisted_aggregate")
-    expected = expected_version(kind, row.id, precondition)
+    expected = expected_base(kind, row.id, precondition)
     statement = update(entity).where(col(entity.id) == row.id)
     if entity is not MultipartModel:
         statement = statement.where(live(entity))
     if expected is not None:
-        statement = statement.where(col(entity.edit_version) == expected)
+        statement = statement.where(
+            col(entity.edit_version) == expected.edit_version,
+            select(col(LibraryRevision.epoch))
+            .where(col(LibraryRevision.id) == 1)
+            .scalar_subquery()
+            == expected.edit_epoch,
+        )
     claimed = session.execute(
         statement.values(edit_version=col(entity.edit_version) + 1)
         .returning(col(entity.edit_version))
@@ -114,7 +128,7 @@ def claim(
 
 
 def validate_batch(
-    contract: str | None, ids: list[int], versions: dict[int, int] | None
+    contract: str | None, ids: list[int], versions: dict[int, EditingBase] | None
 ) -> None:
     """A versioned selection supplies exactly the set of Models it will edit."""
     if contract is not None and contract != EditContract.CONDITIONAL_V1.value:

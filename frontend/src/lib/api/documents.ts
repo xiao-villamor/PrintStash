@@ -1,3 +1,5 @@
+import type { EditingBase } from "@/types/editing";
+import { editHeaders, requireEditingReceipt } from "./editing";
 import { getJson, sendAction, sendForm, sendJson, type GetJsonOptions } from "@/lib/api/request";
 import type { DocumentListItem, DocumentRead } from "@/types";
 
@@ -39,11 +41,17 @@ export function uploadDocument(
 export function updateDocument(
   id: number,
   payload: { name?: string; body?: string },
-  editVersion: number,
+  base: EditingBase,
 ): Promise<DocumentRead> {
-  return sendJson<DocumentRead>(`/api/v1/documents/${id}`, "PUT", payload, {
-    "If-Match": `"document-${id}-v${editVersion}"`,
-    "X-PrintStash-Edit-Contract": "conditional-v1",
+  return sendJson<DocumentRead>(
+    `/api/v1/documents/${id}`,
+    "PUT",
+    payload,
+    editHeaders("document", id, base),
+  ).then((saved) => {
+    if (saved.id !== id) throw new Error("Invalid Document acknowledgement");
+    requireEditingReceipt(saved, base);
+    return saved;
   });
 }
 

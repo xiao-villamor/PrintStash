@@ -104,3 +104,34 @@ class TestPostgresBackup:
         assert [
             (item["subject_type"], item["subject_id"]) for item in found.json()["items"]
         ] == [("document", document_id)]
+
+    @pytest.mark.postgres
+    @pytest.mark.asyncio
+    async def test_rejects_document_draft_from_restored_history(
+        self, api, tmp_path, postgres_e2e_db
+    ):
+        headers = await setup_and_login(api, tmp_path)
+        created = await api.post(
+            "/api/v1/documents",
+            headers=headers,
+            json={"name": "Before restore", "body": "Original"},
+        )
+        assert created.status_code == 201, created.text
+        path = f"/api/v1/documents/{created.json()['id']}"
+        before = await api.get(path, headers=headers)
+        assert before.status_code == 200, before.text
+        backup_id = (await create_backup(api, headers))["backup_id"]
+        restored = await api.post(
+            f"/api/v1/backups/{backup_id}/restore", headers=headers
+        )
+        assert restored.status_code == 200, restored.text
+        current = await api.get(path, headers=headers)
+        assert current.json()["edit_version"] == before.json()["edit_version"]
+        assert current.json()["edit_epoch"] != before.json()["edit_epoch"]
+        rejected = await api.put(
+            path,
+            headers={**headers, "If-Match": before.headers["etag"]},
+            json={"name": "Obsolete draft"},
+        )
+        assert rejected.status_code == 412, rejected.text
+        assert (await api.get(path, headers=headers)).json()["name"] == "Before restore"

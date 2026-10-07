@@ -2,14 +2,14 @@
 import { act } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { clearLogin } from "@/lib/auth-store";
-import { aModelListItem } from "@/test-support/factories";
+import { anEditingBase, aModelListItem } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 import { moveLibraryModels, tagLibraryModels } from "../batch-edits";
 
 const accepted = {
   succeeded_ids: [1],
   succeeded_count: 1,
-  succeeded_versions: { 1: 9 },
+  succeeded_versions: { 1: anEditingBase({ edit_version: 9 }) },
   failed: [],
   failed_count: 0,
 };
@@ -23,11 +23,25 @@ describe("conditional Library batch edits", () => {
       [aModelListItem({ id: 1, collection: "original", edit_version: 3 })],
       "destination",
     );
+    app.route({
+      "POST /api/v1/models/batch/move": json({
+        ...accepted,
+        succeeded_versions: { 1: anEditingBase({ edit_version: 10 }) },
+      }),
+    });
     await receipt.undo();
     const bodies = app.requestsWithMethod("POST").map((request) => JSON.parse(request.body));
     expect(bodies).toEqual([
-      { model_ids: [1], collection: "destination", expected_versions: { 1: 3 } },
-      { model_ids: [1], collection: "original", expected_versions: { 1: 9 } },
+      {
+        model_ids: [1],
+        collection: "destination",
+        expected_versions: { 1: anEditingBase({ edit_version: 3 }) },
+      },
+      {
+        model_ids: [1],
+        collection: "original",
+        expected_versions: { 1: anEditingBase({ edit_version: 9 }) },
+      },
     ]);
   });
 
@@ -38,7 +52,7 @@ describe("conditional Library batch edits", () => {
         "POST /api/v1/models/batch/tags": json(accepted),
         "PATCH /api/v1/models/1": (_url, init) => {
           version = new Headers(init?.headers).get("If-Match");
-          return json({ edit_version: 12 });
+          return json({ id: 1, ...anEditingBase({ edit_version: 12 }) });
         },
       },
     });
@@ -48,7 +62,7 @@ describe("conditional Library batch edits", () => {
       [],
     );
     await receipt.undo();
-    expect(version).toBe('"model-1-v9"');
+    expect(version).toBe('"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v9"');
     expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toEqual({ tags: ["original"] });
   });
 
@@ -80,7 +94,12 @@ describe("conditional Library batch edits", () => {
       [aModelListItem({ id: 1 }), aModelListItem({ id: 2 })],
       "destination",
     );
-    app.route({ "POST /api/v1/models/batch/move": json(accepted) });
+    app.route({
+      "POST /api/v1/models/batch/move": json({
+        ...accepted,
+        succeeded_versions: { 1: anEditingBase({ edit_version: 10 }) },
+      }),
+    });
     await receipt.undo();
     expect(JSON.parse(app.requestsWithMethod("POST")[1].body).model_ids).toEqual([1]);
   });
@@ -124,7 +143,9 @@ describe("conditional Library batch edits", () => {
         return json({
           succeeded_ids: ids,
           succeeded_count: ids.length,
-          succeeded_versions: Object.fromEntries(ids.map((id) => [id, 9])),
+          succeeded_versions: Object.fromEntries(
+            ids.map((id) => [id, anEditingBase({ edit_version: 9 })]),
+          ),
           failed: [],
           failed_count: 0,
         });
@@ -135,6 +156,6 @@ describe("conditional Library batch edits", () => {
       app.requestsWithMethod("POST").map((request) => JSON.parse(request.body).model_ids.length),
     ).toEqual([500, 1]);
     expect(receipt.result.succeeded_ids).toEqual(models.map((model) => model.id));
-    expect(receipt.result.succeeded_versions[501]).toBe(9);
+    expect(receipt.result.succeeded_versions[501]).toEqual(anEditingBase({ edit_version: 9 }));
   });
 });

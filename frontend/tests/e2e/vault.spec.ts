@@ -92,12 +92,16 @@ test.describe("vault route", () => {
       }),
     );
     await page.route("**/api/v1/models/batch/tags", (route) => {
-      expect(route.request().postDataJSON().expected_versions).toEqual({ 1: 3 });
+      expect(route.request().postDataJSON().expected_versions).toEqual({
+        1: { edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 3 },
+      });
       return route.fulfill({
         json: {
           succeeded_ids: [1],
           succeeded_count: 1,
-          succeeded_versions: { 1: 9 },
+          succeeded_versions: {
+            1: { edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 9 },
+          },
           failed: [],
           failed_count: 0,
         },
@@ -122,7 +126,7 @@ test.describe("vault route", () => {
 
     await expect(page.getByText("1 skipped", { exact: true })).toBeVisible();
     await expect(page.getByText("Tags restored", { exact: true })).toHaveCount(0);
-    expect(undoVersions).toEqual(['"model-1-v9"']);
+    expect(undoVersions).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v9"']);
   });
 
   test("removes a favorite after browser confirmation", async ({ page }) => {

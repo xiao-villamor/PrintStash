@@ -25,6 +25,52 @@ function Probe({ ready }: { ready: (publish: Publish) => void }) {
 }
 
 describe("Multipart detail owner", () => {
+  it("adopts a reviewed Multipart history with a lower counter", async () => {
+    let publish!: Publish;
+    const view = renderApp(
+      <Probe
+        ready={(value) => {
+          publish = value;
+        }}
+      />,
+      { seed: [[queryKeys.multipartModel(7), detail]] },
+    );
+    await screen.findByText("Current");
+    const restored = {
+      ...detail,
+      edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      edit_version: 1,
+      name: "Restored",
+    };
+    await act(async () => expect(await publish(restored)).toBe(true));
+    expect(await screen.findByText("Restored")).toBeVisible();
+    expect(view.client.getQueryData(queryKeys.multipartModel(7))).toEqual(restored);
+  });
+
+  it("preserves another history against a late Multipart receipt", async () => {
+    let publish!: Publish;
+    const view = renderApp(
+      <Probe
+        ready={(value) => {
+          publish = value;
+        }}
+      />,
+      { seed: [[queryKeys.multipartModel(7), detail]] },
+    );
+    await screen.findByText("Current");
+    const previousPublication = publish;
+    const restored = {
+      ...detail,
+      edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      edit_version: 1,
+      name: "Restored",
+    };
+    act(() => view.client.setQueryData(queryKeys.multipartModel(7), restored));
+    await screen.findByText("Restored");
+    expect(await previousPublication({ ...detail, edit_version: 9 })).toBe(false);
+    expect(view.client.getQueryData(queryKeys.multipartModel(7))).toEqual(restored);
+  });
+
   it("retires an older Multipart read before publishing a write", async () => {
     let publish!: Publish;
     let signal: AbortSignal | null | undefined;

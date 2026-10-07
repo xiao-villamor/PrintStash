@@ -1,3 +1,4 @@
+export type { EditingBase } from "./editing";
 export type { DocumentKind, DocumentListItem, DocumentRead } from "./documents";
 export type {
   MultipartModelReference,

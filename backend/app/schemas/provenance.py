@@ -16,6 +16,8 @@ from printstash_core.imports import (
 from printstash_core.imports.contracts import MAX_FIELD_VALUE_LENGTHS
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.editing import EditingBase
+
 PROVENANCE_FIELD_NAMES = frozenset(MAX_FIELD_VALUE_LENGTHS)
 
 
@@ -64,8 +66,7 @@ class ProvenanceSourceRead(BaseModel):
     cover: ModelSourceCoverRead | None
 
 
-class ModelProvenanceRead(BaseModel):
-    edit_version: int = Field(gt=0)
+class ModelProvenanceRead(EditingBase):
     schema_version: Literal[2] = 2
     sources: list[ProvenanceSourceRead] = Field(default_factory=list)
 

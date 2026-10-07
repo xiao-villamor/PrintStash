@@ -70,7 +70,7 @@ test.describe("outliner pagination", () => {
       // Another editor changes the same Model after this gesture acquired its editing base.
       const concurrent = await page.request.patch(`/api/v1/models/${seeded.target.id}`, {
         headers: {
-          "If-Match": `"model-${seeded.target.id}-v${beforeMove.edit_version}"`,
+          "If-Match": `"model-${seeded.target.id}-e${beforeMove.edit_epoch}-v${beforeMove.edit_version}"`,
           "X-PrintStash-Edit-Contract": "conditional-v1",
         },
         data: { description: "Changed during the drag" },
@@ -90,7 +90,7 @@ test.describe("outliner pagination", () => {
       const rejected = await conflictResponse;
       expect(rejected.status()).toBe(412);
       expect(rejected.request().headers()["if-match"]).toBe(
-        `"model-${seeded.target.id}-v${beforeMove.edit_version}"`,
+        `"model-${seeded.target.id}-e${beforeMove.edit_epoch}-v${beforeMove.edit_version}"`,
       );
       const review = page.getByRole("dialog", { name: "Review model move" });
       await expect(
@@ -108,7 +108,7 @@ test.describe("outliner pagination", () => {
       const retried = await retriedResponse;
       expect(retried.status()).toBe(200);
       expect(retried.request().headers()["if-match"]).toBe(
-        `"model-${seeded.target.id}-v${reviewedVersion}"`,
+        `"model-${seeded.target.id}-e${beforeMove.edit_epoch}-v${reviewedVersion}"`,
       );
       await expect(review).not.toBeVisible();
       await expect

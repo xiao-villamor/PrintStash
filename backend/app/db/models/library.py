@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from sys import float_info
-from typing import List, Optional
+from typing import ClassVar, List, Optional
 
 from printstash_core.mesh.measurements import (
     VolumeMethod,
@@ -24,7 +24,8 @@ from sqlalchemy import (
 from sqlalchemy import (
     Enum as SAEnum,
 )
-from sqlmodel import Field, Relationship
+from sqlalchemy.orm import Mapped, column_property
+from sqlmodel import Field, Relationship, select
 
 from app.core.time import utcnow
 from app.db.enum_columns import EnumText, enum_check
@@ -491,6 +492,7 @@ class Model(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_epoch: ClassVar[Mapped[str]]
     edit_version: int = Field(
         default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
     )
@@ -553,6 +555,7 @@ class MultipartModel(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("slug", name="uq_multipart_models_slug"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_epoch: ClassVar[Mapped[str]]
     edit_version: int = Field(
         default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
     )
@@ -703,6 +706,7 @@ class Document(SQLModel, table=True):
     __tablename__ = "documents"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_epoch: ClassVar[Mapped[str]]
     edit_version: int = Field(
         default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
     )
@@ -748,4 +752,13 @@ class LibraryRevision(SQLModel, table=True):
     )
     revision: int = Field(
         default=0, sa_column=Column(BigInteger, nullable=False, server_default="0")
+    )
+
+
+# Capture the database incarnation in the same SELECT as each editing version.
+# This is an uncorrelated read expression, not a table column or a per-row query.
+# Snapshot/export code continues to copy only the durable table columns.
+for _editable_aggregate in (Model, MultipartModel, Document):
+    _editable_aggregate.edit_epoch = column_property(
+        select(LibraryRevision.epoch).where(LibraryRevision.id == 1).scalar_subquery()
     )

@@ -13,6 +13,7 @@
  * The revision comparison is a single request carrying repeated `file_id` keys, so
  * the comparison table renders from one round trip rather than N.
  */
+import { anEditingBase } from "@/test-support/factories";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -54,29 +55,56 @@ describe("getModel", () => {
 });
 
 describe("updateModel", () => {
+  it.each([
+    { label: "absent", epoch: undefined },
+    { label: "malformed", epoch: "not-an-epoch" },
+    { label: "different history", epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+  ])("rejects an acknowledgement with $label identity", async ({ epoch }) => {
+    if (epoch === undefined) respondWith({ id: 1, edit_version: 2 });
+    else respondWith({ id: 1, edit_version: 2, edit_epoch: epoch });
+    await expect(updateModel(1, { name: "Draft" }, anEditingBase())).rejects.toThrow(
+      /Invalid editing/,
+    );
+  });
+
   it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
     "rejects invalid editing version %s before HTTP",
     (version) => {
-      expect(() => updateModel(1, { collection: "parts" }, version)).toThrow(
-        "Invalid Model edit version",
-      );
+      expect(() =>
+        updateModel(
+          1,
+          { collection: "parts" },
+          anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: version }),
+        ),
+      ).toThrow("Invalid editing base");
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
   it("sends the editor's Model version", async () => {
-    respondWith({ id: 1, edit_version: 8 });
+    respondWith({ id: 1, edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 8 });
 
-    await updateModel(1, { name: "Renamed" }, 7);
+    await updateModel(
+      1,
+      { name: "Renamed" },
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
+    );
 
     const headers = new Headers(lastCall().init?.headers);
-    expect(headers.get("If-Match")).toBe('"model-1-v7"');
+    expect(headers.get("If-Match")).toBe('"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"');
     expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
   });
 
   it("PATCHes only what changed", async () => {
-    respondWith({ id: 1 });
+    respondWith({
+      id: 1,
+      ...anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 8 }),
+    });
 
-    await updateModel(1, { name: "Renamed" }, 7);
+    await updateModel(
+      1,
+      { name: "Renamed" },
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
+    );
 
     expectRequest("/api/v1/models/1", "PATCH");
     expect(lastBody()).toEqual({ name: "Renamed" });

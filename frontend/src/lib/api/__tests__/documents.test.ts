@@ -15,6 +15,7 @@
  * directly, including the case where the document belongs to no collection: an
  * empty `collection_id` and an absent one are different requests.
  */
+import { anEditingBase } from "@/test-support/factories";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -133,13 +134,27 @@ describe("uploadDocument", () => {
 });
 
 describe("updateDocument", () => {
-  it("PUTs an edit", async () => {
-    respondWith({ id: 1, name: "Manual" });
+  it.each([
+    { label: "absent", epoch: undefined },
+    { label: "malformed", epoch: "not-an-epoch" },
+    { label: "different history", epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+  ])("rejects an acknowledgement with $label identity", async ({ epoch }) => {
+    if (epoch === undefined) respondWith({ id: 1, edit_version: 2 });
+    else respondWith({ id: 1, edit_version: 2, edit_epoch: epoch });
+    await expect(updateDocument(1, { name: "Draft" }, anEditingBase())).rejects.toThrow(
+      /Invalid editing/,
+    );
+  });
 
-    await updateDocument(1, { body: "# Edited" }, 3);
+  it("PUTs an edit", async () => {
+    respondWith({ id: 1, name: "Manual", ...anEditingBase({ edit_version: 4 }) });
+
+    await updateDocument(1, { body: "# Edited" }, anEditingBase({ edit_version: 3 }));
 
     expectRequest("/api/v1/documents/1", "PUT");
-    expect(new Headers(lastCall().init.headers).get("If-Match")).toBe('"document-1-v3"');
+    expect(new Headers(lastCall().init.headers).get("If-Match")).toBe(
+      '"document-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v3"',
+    );
     expect(new Headers(lastCall().init.headers).get("X-PrintStash-Edit-Contract")).toBe(
       "conditional-v1",
     );

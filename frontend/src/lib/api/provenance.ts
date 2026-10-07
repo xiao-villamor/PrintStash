@@ -1,3 +1,5 @@
+import type { EditingBase } from "@/types/editing";
+import { editHeaders, requireEditingBase, requireEditingReceipt } from "./editing";
 import {
   authHeaders,
   expectOk,
@@ -17,26 +19,22 @@ function sourceCoverPath(modelId: number, sourceId: number): string {
   return `/api/v1/models/${modelId}/provenance/${sourceId}/cover`;
 }
 
-function editHeaders(modelId: number, version: number) {
-  if (!Number.isSafeInteger(version) || version < 1)
-    throw new Error("Invalid Source editing version");
-  return {
-    "If-Match": `"model-${modelId}-v${version}"`,
-    "X-PrintStash-Edit-Contract": "conditional-v1",
-  };
-}
-
-function coverVersion(response: Response, modelId: number, base: number): number {
-  const match = response.headers.get("ETag")?.match(/^"model-(\d+)-v(\d+)"$/);
-  const version = match ? Number(match[2]) : NaN;
-  if (!match || Number(match[1]) !== modelId || !Number.isSafeInteger(version) || version <= base)
+function coverVersion(response: Response, modelId: number, base: EditingBase): number {
+  const match = response.headers.get("ETag")?.match(/^"model-(\d+)-e([0-9a-f]{32})-v(\d+)"$/);
+  const version = match ? Number(match[3]) : NaN;
+  if (
+    !match ||
+    Number(match[1]) !== modelId ||
+    !Number.isSafeInteger(version) ||
+    version <= base.edit_version ||
+    match[2] !== base.edit_epoch
+  )
     throw new Error("Invalid Source cover acknowledgement");
   return version;
 }
 
-export interface SourceCoverReceipt {
+export interface SourceCoverReceipt extends EditingBase {
   cover: ModelSourceCoverRead | null;
-  edit_version: number;
 }
 
 export function getModelSourceCoverContentPath(modelId: number, sourceId: number): string {
@@ -54,7 +52,7 @@ export async function putModelSourceCover(
   modelId: number,
   sourceId: number,
   file: File,
-  editVersion: number,
+  base: EditingBase,
 ): Promise<SourceCoverReceipt> {
   const form = new FormData();
   form.append("file", file);
@@ -62,14 +60,18 @@ export async function putModelSourceCover(
     sourceCoverPath(modelId, sourceId),
     {
       method: "PUT",
-      headers: { ...authHeaders(), ...editHeaders(modelId, editVersion) },
+      headers: { ...authHeaders(), ...editHeaders("model", modelId, base) },
       body: form,
     },
     async (response, session) => {
       const cover = await handleResponse<ModelSourceCoverRead>(response, session);
       if (cover.provenance_source_id !== sourceId)
         throw new Error("Invalid Source cover acknowledgement");
-      return { cover, edit_version: coverVersion(response, modelId, editVersion) };
+      return {
+        cover,
+        edit_version: coverVersion(response, modelId, base),
+        edit_epoch: base.edit_epoch,
+      };
     },
   );
 }
@@ -77,17 +79,21 @@ export async function putModelSourceCover(
 export function deleteModelSourceCover(
   modelId: number,
   sourceId: number,
-  editVersion: number,
+  base: EditingBase,
 ): Promise<SourceCoverReceipt> {
   return requestApi(
     sourceCoverPath(modelId, sourceId),
     {
       method: "DELETE",
-      headers: { ...authHeaders(), ...editHeaders(modelId, editVersion) },
+      headers: { ...authHeaders(), ...editHeaders("model", modelId, base) },
     },
     async (response, session) => {
       await expectOk(response, session);
-      return { cover: null, edit_version: coverVersion(response, modelId, editVersion) };
+      return {
+        cover: null,
+        edit_version: coverVersion(response, modelId, base),
+        edit_epoch: base.edit_epoch,
+      };
     },
   );
 }
@@ -97,8 +103,7 @@ export async function getModelProvenance(
   options?: GetJsonOptions,
 ): Promise<ModelProvenanceRead> {
   const value = await getJson<ModelProvenanceRead>(`/api/v1/models/${modelId}/provenance`, options);
-  if (!Number.isSafeInteger(value.edit_version) || value.edit_version < 1)
-    throw new Error("Invalid Source snapshot");
+  requireEditingBase(value);
   return value;
 }
 
@@ -106,19 +111,18 @@ export function patchModelProvenance(
   modelId: number,
   sourceId: number,
   payload: ModelProvenancePatch,
-  editVersion: number,
+  base: EditingBase,
 ): Promise<ModelProvenanceRead> {
   return requestApi(
     `/api/v1/models/${modelId}/provenance/${sourceId}`,
     {
       method: "PATCH",
-      headers: { ...jsonHeaders(), ...editHeaders(modelId, editVersion) },
+      headers: { ...jsonHeaders(), ...editHeaders("model", modelId, base) },
       body: JSON.stringify(payload),
     },
     async (response, session) => {
       const value = await handleResponse<ModelProvenanceRead>(response, session);
-      if (!Number.isSafeInteger(value.edit_version) || value.edit_version <= editVersion)
-        throw new Error("Invalid Source acknowledgement");
+      requireEditingReceipt(value, base);
       return value;
     },
   );

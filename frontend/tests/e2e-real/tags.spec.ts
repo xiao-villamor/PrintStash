@@ -41,7 +41,7 @@ test.describe("tags", () => {
       const before = await (await page.request.get(`/api/v1/models/${id}`)).json();
       const competing = await page.request.patch(`/api/v1/models/${id}`, {
         headers: {
-          "If-Match": `"model-${id}-v${before.edit_version}"`,
+          "If-Match": `"model-${id}-e${before.edit_epoch}-v${before.edit_version}"`,
           "X-PrintStash-Edit-Contract": "conditional-v1",
         },
         data: { tags: [remoteTag] },
@@ -61,7 +61,7 @@ test.describe("tags", () => {
       const saved = await savedResponse;
       expect(saved.ok()).toBe(true);
       expect(saved.request().postDataJSON().expected_versions).toEqual({
-        [id]: latest.edit_version,
+        [id]: { edit_epoch: latest.edit_epoch, edit_version: latest.edit_version },
       });
       await expect(dialog).toHaveCount(0);
       const persisted = await (await page.request.get(`/api/v1/models/${id}`)).json();

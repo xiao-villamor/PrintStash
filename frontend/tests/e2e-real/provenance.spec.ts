@@ -72,7 +72,7 @@ test.describe("Source editing", () => {
       await draft.fill("My reviewed source draft");
       const competing = await page.request.patch(`${API}${writePath}`, {
         headers: {
-          "If-Match": `"model-${modelId}-v${initial.edit_version}"`,
+          "If-Match": `"model-${modelId}-e${initial.edit_epoch}-v${initial.edit_version}"`,
           "X-PrintStash-Edit-Contract": "conditional-v1",
         },
         data: { overrides: { title: "Another editor's source title" }, clear_overrides: [] },
@@ -101,7 +101,7 @@ test.describe("Source editing", () => {
       const acknowledgement = await confirmed;
       expect(acknowledgement.ok()).toBe(true);
       expect(await acknowledgement.request().headerValue("If-Match")).toBe(
-        `"model-${modelId}-v${current.edit_version}"`,
+        `"model-${modelId}-e${current.edit_epoch}-v${current.edit_version}"`,
       );
       await expect(page.getByText("My reviewed source draft", { exact: true })).toBeVisible();
       const persisted: ModelProvenanceRead = await (

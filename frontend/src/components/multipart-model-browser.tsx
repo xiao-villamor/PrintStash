@@ -1,5 +1,7 @@
 "use client";
 
+import type { EditingBase } from "@/types/editing";
+
 import type { LibraryEntry } from "@/features/library/navigation-state";
 import { LibraryItemLink, LibraryBackLink } from "@/features/library/navigation";
 import { useMultipartPublication } from "@/features/library/multipart";
@@ -112,7 +114,7 @@ export function MultipartModelCard({
   async function saveCardTags(
     nextTags: string[],
     signal: AbortSignal,
-    version = item.edit_version,
+    version: EditingBase = item,
   ) {
     if (!isCurrent() || signal.aborted) throw new DOMException("Editor retired", "AbortError");
     const saved = await replaceMultipartModelTags(item.id, nextTags, version);
@@ -126,7 +128,7 @@ export function MultipartModelCard({
     return {
       tags: latest.tags,
       canEdit: latest.effective_role === "edit" || latest.effective_role === "admin",
-      save: (tags, commandSignal) => saveCardTags(tags, commandSignal, latest.edit_version),
+      save: (tags, commandSignal) => saveCardTags(tags, commandSignal, latest),
       adopt: async (commandSignal) => {
         if (await publish(latest, commandSignal)) onDataChange?.();
       },
@@ -945,6 +947,7 @@ function MultipartDetail({ id }: { id: number }) {
   } = useMultipartModel(Number.isFinite(id) ? id : null);
   const { publish, active, isCurrent } = useMultipartPublication(id);
   const [editProblem, setEditProblem] = useState<"conflict" | "unconfirmed" | null>(null);
+  const reviewPublication = useRef<typeof publish | null>(null);
   const [reviewed, setReviewed] = useState<MultipartModelRead | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewDenied, setReviewDenied] = useState(false);
@@ -1109,14 +1112,17 @@ function MultipartDetail({ id }: { id: number }) {
     void queryClient.invalidateQueries({ queryKey: queryKeys.collections });
     void queryClient.resetQueries({ queryKey: queryKeys.outliner });
   }
-  async function applySavedCover(saved: MultipartModelRead, baseVersion: number) {
+  async function applySavedCover(saved: MultipartModelRead, baseVersion: EditingBase) {
     if (!(await publish(saved)) || !isCurrent()) return false;
     setDraft((current) =>
       current
         ? {
             ...current,
             edit_version:
-              current.edit_version === baseVersion ? saved.edit_version : current.edit_version,
+              current.edit_epoch === baseVersion.edit_epoch &&
+              current.edit_version === baseVersion.edit_version
+                ? saved.edit_version
+                : current.edit_version,
             cover_image_url: saved.cover_image_url,
             cover_image_uploaded: saved.cover_image_uploaded,
             cover_thumbnail_url: saved.cover_thumbnail_url,
@@ -1146,7 +1152,7 @@ function MultipartDetail({ id }: { id: number }) {
       setSaveError(multipartError(cause, t, fallback));
     }
   }
-  async function saveCover(command: CoverIntent, version: number) {
+  async function saveCover(command: CoverIntent, version: EditingBase) {
     if (!model || !canEdit || writePending.current || !isCurrent()) return;
     writePending.current = true;
     setCoverBusy(true);
@@ -1177,14 +1183,14 @@ function MultipartDetail({ id }: { id: number }) {
   }
   async function uploadCover(file: File) {
     if (!model || editProblem) return;
-    await saveCover({ kind: "upload", file }, model.edit_version);
+    await saveCover({ kind: "upload", file }, model);
   }
   async function removeCover() {
     if (!model || editProblem) return;
-    await saveCover({ kind: "remove" }, model.edit_version);
+    await saveCover({ kind: "remove" }, model);
   }
-  async function save(version = model?.edit_version) {
-    if (!model || !canEdit || writePending.current || version === undefined || !isCurrent()) return;
+  async function save(version = model) {
+    if (!model || !canEdit || writePending.current || version === null || !isCurrent()) return;
     writePending.current = true;
     const session = getSessionVersion();
     setBusy(true);
@@ -1235,6 +1241,7 @@ function MultipartDetail({ id }: { id: number }) {
     setReviewed(null);
     setReviewing(true);
     try {
+      reviewPublication.current = publish;
       const latest = await getMultipartModel(id, { signal: controller.signal });
       if (!isCurrent() || controller.signal.aborted) return;
       setReviewDenied(false);
@@ -1249,7 +1256,14 @@ function MultipartDetail({ id }: { id: number }) {
     }
   }
   async function useReviewedVersion() {
-    if (!reviewed || writePending.current || !(await publish(reviewed)) || !isCurrent()) return;
+    if (
+      !reviewed ||
+      !reviewPublication.current ||
+      writePending.current ||
+      !(await reviewPublication.current(reviewed)) ||
+      !isCurrent()
+    )
+      return;
     if (coverIntent) {
       setDraft((current) =>
         current
@@ -1267,8 +1281,8 @@ function MultipartDetail({ id }: { id: number }) {
     setEditProblem(null);
     setSaveError(null);
   }
-  async function saveTags(nextTags: string[], signal: AbortSignal, version = model?.edit_version) {
-    if (!model || !canEdit || !isCurrent() || signal.aborted || version === undefined)
+  async function saveTags(nextTags: string[], signal: AbortSignal, version = model) {
+    if (!model || !canEdit || !isCurrent() || signal.aborted || version === null)
       throw new DOMException("Editor retired", "AbortError");
     const saved = await replaceMultipartModelTags(model.id, nextTags, version);
     if (!(await publish(saved, signal)) || !isCurrent()) return;
@@ -1279,7 +1293,10 @@ function MultipartDetail({ id }: { id: number }) {
             tags: saved.tags,
             // An auxiliary retry must not rebase unrelated composition edits.
             edit_version:
-              current.edit_version === version ? saved.edit_version : current.edit_version,
+              current.edit_epoch === version.edit_epoch &&
+              current.edit_version === version.edit_version
+                ? saved.edit_version
+                : current.edit_version,
           }
         : current,
     );
@@ -1291,7 +1308,7 @@ function MultipartDetail({ id }: { id: number }) {
     return {
       tags: latest.tags,
       canEdit: latest.effective_role === "edit" || latest.effective_role === "admin",
-      save: (tags, commandSignal) => saveTags(tags, commandSignal, latest.edit_version),
+      save: (tags, commandSignal) => saveTags(tags, commandSignal, latest),
       adopt: async (commandSignal) => {
         if (!(await publish(latest, commandSignal)) || !isCurrent()) return;
         setDraft((current) => (current ? { ...current, tags: latest.tags } : current));
@@ -1418,9 +1435,7 @@ function MultipartDetail({ id }: { id: number }) {
                 loading={busy || coverBusy}
                 disabled={reviewed.effective_role !== "edit" && reviewed.effective_role !== "admin"}
                 onClick={() =>
-                  void (coverIntent
-                    ? saveCover(coverIntent, reviewed.edit_version)
-                    : save(reviewed.edit_version))
+                  void (coverIntent ? saveCover(coverIntent, reviewed) : save(reviewed))
                 }
               >
                 {uiText("library.retryDraft")}

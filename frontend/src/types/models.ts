@@ -1,3 +1,4 @@
+import type { EditingBase } from "./editing";
 import type {
   PrintJobIdentityRead,
   PrintJobReportedMetadataRead,
@@ -116,6 +117,7 @@ export interface ModelSimilarityRead {
 }
 
 export interface ModelRead {
+  edit_epoch: string;
   edit_version: number;
   similarity?: ModelSimilarityRead;
   id: number;
@@ -211,6 +213,7 @@ export interface PrintSummaryRead {
 }
 
 export interface ModelListItem {
+  edit_epoch: string;
   edit_version: number;
   similarity?: ModelSimilarityRead;
   id: number;
@@ -317,7 +320,7 @@ export interface ModelBatchResult {
 }
 
 export interface ModelEditBatchResult extends ModelBatchResult {
-  succeeded_versions: Record<number, number>;
+  succeeded_versions: Record<number, EditingBase>;
 }
 
 export interface RevisionBatchResult {
@@ -850,6 +853,7 @@ export interface OutlinerItemRead {
 }
 
 export interface OutlinerModelRead extends OutlinerItemRead {
+  edit_epoch: string;
   edit_version: number;
 }
 

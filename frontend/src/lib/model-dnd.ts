@@ -4,15 +4,18 @@ import type { OutlinerModelRead } from "@/types";
 // Internal model moves are distinct from OS file-upload drags.
 export const MODEL_DND_MIME = "application/x-printstash-model";
 export type ModelDrag = Readonly<
-  Pick<OutlinerModelRead, "id" | "edit_version" | "name" | "collection"> & { session: number }
+  Pick<OutlinerModelRead, "id" | "edit_epoch" | "edit_version" | "name" | "collection"> & {
+    session: number;
+  }
 >;
 
 /** Freeze the displayed editing base at the gesture, including for paginated tree leaves. */
 export function captureModelDrag(
-  model: Pick<OutlinerModelRead, "id" | "edit_version" | "name" | "collection">,
+  model: Pick<OutlinerModelRead, "id" | "edit_epoch" | "edit_version" | "name" | "collection">,
 ): ModelDrag {
   return {
     id: model.id,
+    edit_epoch: model.edit_epoch,
     edit_version: model.edit_version,
     name: model.name,
     collection: model.collection,
@@ -32,6 +35,9 @@ export function readModelDrag(raw: string): ModelDrag | null {
       typeof value.id !== "number" ||
       !Number.isSafeInteger(value.id) ||
       value.id < 1 ||
+      !("edit_epoch" in value) ||
+      typeof value.edit_epoch !== "string" ||
+      !/^[0-9a-f]{32}$/.test(value.edit_epoch) ||
       !("edit_version" in value) ||
       typeof value.edit_version !== "number" ||
       !Number.isSafeInteger(value.edit_version) ||
@@ -46,6 +52,7 @@ export function readModelDrag(raw: string): ModelDrag | null {
       return null;
     return {
       id: value.id,
+      edit_epoch: value.edit_epoch,
       edit_version: value.edit_version,
       name: value.name,
       collection: value.collection,

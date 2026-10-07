@@ -46,7 +46,7 @@ from app.modules.library.edit_preconditions import (
     EditKind,
     EditPrecondition,
     etag,
-    expected_version,
+    expected_base,
 )
 from app.modules.library.edit_preconditions import claim as claim_edit
 from app.modules.media.source_cover_processing import (
@@ -236,7 +236,9 @@ def replace_multipart_model_tags(
     session.commit()
     session.refresh(aggregate)
     result = multipart_models.read(session, current_user, aggregate)
-    response.headers["ETag"] = etag(EditKind.MULTIPART, result.id, result.edit_version)
+    response.headers["ETag"] = etag(
+        EditKind.MULTIPART, result.id, result.edit_version, result.edit_epoch
+    )
     return result
 
 
@@ -255,7 +257,9 @@ def get_multipart_model(
         session, current_user, multipart_model_id, CollectionRole.VIEW
     )
     result = multipart_models.read(session, current_user, aggregate)
-    response.headers["ETag"] = etag(EditKind.MULTIPART, result.id, result.edit_version)
+    response.headers["ETag"] = etag(
+        EditKind.MULTIPART, result.id, result.edit_version, result.edit_epoch
+    )
     return result
 
 
@@ -305,7 +309,7 @@ def put_multipart_model_cover(
         aggregate = multipart_models.require(
             session, current_user, multipart_model_id, CollectionRole.EDIT
         )
-        expected_version(EditKind.MULTIPART, multipart_model_id, precondition)
+        expected_base(EditKind.MULTIPART, multipart_model_id, precondition)
         data = file.file.read(MAX_SOURCE_COVER_BYTES + 1)
         try:
             processed = process_source_cover_upload(data, file.content_type)
@@ -362,7 +366,10 @@ def put_multipart_model_cover(
             process_storage_delete_intents()
         session.refresh(aggregate)
         response.headers["ETag"] = etag(
-            EditKind.MULTIPART, aggregate.id, aggregate.edit_version
+            EditKind.MULTIPART,
+            aggregate.id,
+            aggregate.edit_version,
+            aggregate.edit_epoch,
         )
         return multipart_models.read(session, current_user, aggregate)
 
@@ -397,7 +404,7 @@ def delete_multipart_model_cover(
     process_storage_delete_intents()
     session.refresh(aggregate)
     response.headers["ETag"] = etag(
-        EditKind.MULTIPART, aggregate.id, aggregate.edit_version
+        EditKind.MULTIPART, aggregate.id, aggregate.edit_version, aggregate.edit_epoch
     )
     return multipart_models.read(session, current_user, aggregate)
 
@@ -458,7 +465,9 @@ def update_multipart_model(
     result = multipart_models.read(session, current_user, aggregate)
     if removed_uploaded_cover:
         process_storage_delete_intents()
-    response.headers["ETag"] = etag(EditKind.MULTIPART, result.id, result.edit_version)
+    response.headers["ETag"] = etag(
+        EditKind.MULTIPART, result.id, result.edit_version, result.edit_epoch
+    )
     return result
 
 
@@ -485,7 +494,7 @@ def replace_multipart_parts(
             session, current_user, aggregate, payload.parts
         )
         response.headers["ETag"] = etag(
-            EditKind.MULTIPART, result.id, result.edit_version
+            EditKind.MULTIPART, result.id, result.edit_version, result.edit_epoch
         )
         return result
     except multipart_models.MultipartModelError as exc:
@@ -556,7 +565,7 @@ def save_multipart_model(
         if removed_uploaded_cover:
             process_storage_delete_intents()
         response.headers["ETag"] = etag(
-            EditKind.MULTIPART, result.id, result.edit_version
+            EditKind.MULTIPART, result.id, result.edit_version, result.edit_epoch
         )
         return result
     except multipart_models.MultipartModelError as exc:

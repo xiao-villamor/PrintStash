@@ -4444,7 +4444,13 @@
             ],
             "title": "Collection Id"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
           "edit_version": {
+            "exclusiveMinimum": 0.0,
             "title": "Edit Version",
             "type": "integer"
           },
@@ -4498,6 +4504,7 @@
           }
         },
         "required": [
+          "edit_epoch",
           "edit_version",
           "id",
           "name",
@@ -4542,7 +4549,13 @@
             ],
             "title": "Collection Id"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
           "edit_version": {
+            "exclusiveMinimum": 0.0,
             "title": "Edit Version",
             "type": "integer"
           },
@@ -4596,6 +4609,7 @@
           }
         },
         "required": [
+          "edit_epoch",
           "edit_version",
           "id",
           "name",
@@ -4648,6 +4662,26 @@
           "job_id"
         ],
         "title": "DownloadRead",
+        "type": "object"
+      },
+      "EditingBase": {
+        "properties": {
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "edit_epoch",
+          "edit_version"
+        ],
+        "title": "EditingBase",
         "type": "object"
       },
       "EndpointProposal": {
@@ -9620,8 +9654,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "exclusiveMinimum": 0.0,
-                  "type": "integer"
+                  "$ref": "#/components/schemas/EditingBase"
                 },
                 "maxProperties": 500,
                 "type": "object"
@@ -9695,8 +9728,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "exclusiveMinimum": 0.0,
-                  "type": "integer"
+                  "$ref": "#/components/schemas/EditingBase"
                 },
                 "maxProperties": 500,
                 "type": "object"
@@ -9761,7 +9793,7 @@
           },
           "succeeded_versions": {
             "additionalProperties": {
-              "type": "integer"
+              "$ref": "#/components/schemas/EditingBase"
             },
             "title": "Succeeded Versions",
             "type": "object"
@@ -10111,7 +10143,13 @@
             ],
             "title": "Collection Label"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
           "edit_version": {
+            "exclusiveMinimum": 0.0,
             "title": "Edit Version",
             "type": "integer"
           },
@@ -10236,6 +10274,7 @@
           }
         },
         "required": [
+          "edit_epoch",
           "edit_version",
           "id",
           "name",
@@ -10646,6 +10685,11 @@
       },
       "ModelProvenanceRead": {
         "properties": {
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
           "edit_version": {
             "exclusiveMinimum": 0.0,
             "title": "Edit Version",
@@ -10666,6 +10710,7 @@
           }
         },
         "required": [
+          "edit_epoch",
           "edit_version"
         ],
         "title": "ModelProvenanceRead",
@@ -10722,7 +10767,13 @@
             ],
             "title": "Description"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
           "edit_version": {
+            "exclusiveMinimum": 0.0,
             "title": "Edit Version",
             "type": "integer"
           },
@@ -10813,6 +10864,7 @@
           }
         },
         "required": [
+          "edit_epoch",
           "edit_version",
           "id",
           "name",
@@ -11311,7 +11363,13 @@
             ],
             "title": "Description"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
           "edit_version": {
+            "exclusiveMinimum": 0.0,
             "title": "Edit Version",
             "type": "integer"
           },
@@ -11378,6 +11436,7 @@
           }
         },
         "required": [
+          "edit_epoch",
           "edit_version",
           "id",
           "name",
@@ -11476,7 +11535,13 @@
             ],
             "title": "Description"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
           "edit_version": {
+            "exclusiveMinimum": 0.0,
             "title": "Edit Version",
             "type": "integer"
           },
@@ -11557,6 +11622,7 @@
           }
         },
         "required": [
+          "edit_epoch",
           "edit_version",
           "id",
           "name",
@@ -12585,6 +12651,11 @@
             ],
             "title": "Collection Label"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
           "edit_version": {
             "exclusiveMinimum": 0.0,
             "title": "Edit Version",
@@ -12606,9 +12677,10 @@
           }
         },
         "required": [
+          "edit_epoch",
+          "edit_version",
           "id",
-          "name",
-          "edit_version"
+          "name"
         ],
         "title": "OutlinerModel",
         "type": "object"
@@ -12648,6 +12720,11 @@
             ],
             "title": "Collection Label"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
           "edit_version": {
             "exclusiveMinimum": 0.0,
             "title": "Edit Version",
@@ -12663,9 +12740,10 @@
           }
         },
         "required": [
+          "edit_epoch",
+          "edit_version",
           "id",
-          "name",
-          "edit_version"
+          "name"
         ],
         "title": "OutlinerModelRead",
         "type": "object"
@@ -12705,6 +12783,11 @@
             ],
             "title": "Collection Label"
           },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
           "edit_version": {
             "exclusiveMinimum": 0.0,
             "title": "Edit Version",
@@ -12726,9 +12809,10 @@
           }
         },
         "required": [
+          "edit_epoch",
+          "edit_version",
           "id",
-          "name",
-          "edit_version"
+          "name"
         ],
         "title": "OutlinerMultipart",
         "type": "object"

@@ -1,5 +1,7 @@
 "use client";
 
+import { captureEditingBase } from "@/lib/api/editing";
+
 import { LibraryBackLink } from "@/features/library/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -176,8 +178,9 @@ function ModelDetailPresentation({
   const { user } = useAuth();
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [editBaseVersion, setEditBaseVersion] = useState(model.edit_version);
+  const [editBase, setEditBase] = useState(() => captureEditingBase(model));
   const [editProblem, setEditProblem] = useState<"conflict" | "unconfirmed" | null>(null);
+  const reviewPublication = useRef<typeof setModel | null>(null);
   const [reviewedModel, setReviewedModel] = useState<ModelRead | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -322,7 +325,7 @@ function ModelDetailPresentation({
   }
 
   function enterEdit() {
-    setEditBaseVersion(model.edit_version);
+    setEditBase(captureEditingBase(model));
     setEditProblem(null);
     setReviewedModel(null);
     setEditName(model.name);
@@ -343,7 +346,7 @@ function ModelDetailPresentation({
     setEditing(false);
   }
 
-  async function saveEdit(version = editBaseVersion) {
+  async function saveEdit(version = editBase) {
     if (!editName.trim() || saving || !canEditModel || reviewedModel?.effective_role === "view")
       return;
     const session = getSessionVersion();
@@ -389,6 +392,7 @@ function ModelDetailPresentation({
     const session = getSessionVersion();
     setReviewing(true);
     try {
+      reviewPublication.current = setModel;
       const latest = await getModel(model.id);
       requireSessionVersion(session);
       setReviewedModel(latest);
@@ -400,8 +404,13 @@ function ModelDetailPresentation({
   }
 
   async function useReviewedVersion() {
-    if (!reviewedModel || !(await setModel(reviewedModel))) return;
-    setEditBaseVersion(reviewedModel.edit_version);
+    if (
+      !reviewedModel ||
+      !reviewPublication.current ||
+      !(await reviewPublication.current(reviewedModel))
+    )
+      return;
+    setEditBase(captureEditingBase(reviewedModel));
     setEditName(reviewedModel.name);
     setEditDescription(reviewedModel.description ?? "");
     setEditSourceUrl(reviewedModel.source_url ?? "");
@@ -597,7 +606,7 @@ function ModelDetailPresentation({
           open={tagDialogOpen}
           onClose={() => setTagDialogOpen(false)}
           onSaved={(nextTags, editVersion) => {
-            void setModel((current) => ({ ...current, tags: nextTags, edit_version: editVersion }));
+            void setModel((current) => ({ ...current, tags: nextTags, ...editVersion }));
           }}
         />
         {editing && editProblem && (
@@ -649,7 +658,7 @@ function ModelDetailPresentation({
                     reviewedModel.effective_role !== "edit" &&
                     reviewedModel.effective_role !== "admin"
                   }
-                  onClick={() => void saveEdit(reviewedModel.edit_version)}
+                  onClick={() => void saveEdit(reviewedModel)}
                 >
                   {uiText("library.retryDraft")}
                 </Button>

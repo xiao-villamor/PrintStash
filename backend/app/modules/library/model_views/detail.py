@@ -51,7 +51,9 @@ from .projections import _file_reads_with_revisions, collection_name_for, thumb_
 
 def provenance_detail(session: Session, model_id: int) -> ModelProvenanceRead:
     """Bind editable source fields and cover metadata to one Model version."""
-    version_query = select(col(Model.edit_version)).where(col(Model.id) == model_id)
+    version_query = select(col(Model.edit_version), Model.edit_epoch).where(
+        col(Model.id) == model_id
+    )
     version = session.exec(version_query).one_or_none()
     if version is None:
         raise OperationError("model_not_found", kind=ErrorKind.NOT_FOUND)
@@ -60,7 +62,11 @@ def provenance_detail(session: Session, model_id: int) -> ModelProvenanceRead:
     # Never attach a newer editing base to values composed from the older one.
     if session.exec(version_query).one_or_none() != version:
         raise OperationError("edit_snapshot_changed", kind=ErrorKind.CONFLICT)
-    return ModelProvenanceRead(edit_version=version, sources=sources)
+    return ModelProvenanceRead(
+        edit_version=version.edit_version,
+        edit_epoch=version.edit_epoch,
+        sources=sources,
+    )
 
 
 def _provenance_sources(session: Session, model_id: int) -> list[ProvenanceSourceRead]:
@@ -191,6 +197,7 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
 
     return ModelRead(
         similarity=similarity_summaries(session, user, [model_id]).get(model_id, {}),
+        edit_epoch=m.edit_epoch,
         edit_version=m.edit_version,
         id=m.id,  # type: ignore[arg-type]
         name=m.name,

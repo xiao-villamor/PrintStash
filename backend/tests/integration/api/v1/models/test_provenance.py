@@ -170,7 +170,10 @@ class TestVersionedProvenance:
         assert response.status_code == 200, response.text
         assert response.json()["sources"] == []
         assert response.json()["edit_version"] == model.edit_version
-        assert response.headers["etag"] == f'"model-{model.id}-v{model.edit_version}"'
+        assert (
+            response.headers["etag"]
+            == f'"model-{model.id}-e{model.edit_epoch}-v{model.edit_version}"'
+        )
 
     def test_reports_absent_cover(self, client, auth_headers, model, source):
         response = client.get(
@@ -216,7 +219,10 @@ class TestVersionedProvenance:
         assert response.status_code == 200, response.text
         version = response.json()["edit_version"]
         assert version > first.json()["edit_version"]
-        assert response.headers["etag"] == f'"model-{model.id}-v{version}"'
+        assert (
+            response.headers["etag"]
+            == f'"model-{model.id}-e{model.edit_epoch}-v{version}"'
+        )
         field = _source_read(response.json(), source.id)["fields"][0]
         assert field["effective_value"] == "My retained title"
 
@@ -921,6 +927,29 @@ class TestCoverCommandOwnership:
 
 
 class TestConditionalProvenance:
+    def test_preserves_source_cover_when_old_history_deletes(
+        self, client, auth_headers, model, uploaded_cover
+    ):
+        before = client.get(uploaded_cover, headers=auth_headers)
+        detail = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
+        rejected = client.delete(
+            uploaded_cover,
+            headers={
+                **auth_headers,
+                "If-Match": f'"model-{model.id}-e{"b" * 32}-v{detail.json()["edit_version"]}"',
+            },
+        )
+        assert rejected.status_code == 412, rejected.text
+        after = client.get(uploaded_cover, headers=auth_headers)
+        assert after.status_code == 200, after.text
+        assert after.content == before.content
+        assert (
+            client.get(f"/api/v1/models/{model.id}", headers=auth_headers).headers[
+                "etag"
+            ]
+            == detail.headers["etag"]
+        )
+
     def test_rejects_stale_override(self, client, auth_headers, model, source):
         changed = client.patch(
             f"/api/v1/models/{model.id}",
@@ -931,7 +960,10 @@ class TestConditionalProvenance:
 
         response = client.patch(
             f"/api/v1/models/{model.id}/provenance/{source.id}",
-            headers={**auth_headers, "If-Match": f'"model-{model.id}-v1"'},
+            headers={
+                **auth_headers,
+                "If-Match": f'"model-{model.id}-e{model.edit_epoch}-v1"',
+            },
             json={"overrides": {"title": "Old draft"}},
         )
 
@@ -948,14 +980,20 @@ class TestConditionalProvenance:
 
         uploaded = client.put(
             f"/api/v1/models/{model.id}/provenance/{source.id}/cover",
-            headers={**auth_headers, "If-Match": f'"model-{model.id}-v1"'},
+            headers={
+                **auth_headers,
+                "If-Match": f'"model-{model.id}-e{model.edit_epoch}-v1"',
+            },
             files={"file": ("cover.png", png(), "image/png")},
         )
         assert uploaded.status_code == 200, uploaded.text
 
         stale = client.delete(
             f"/api/v1/models/{model.id}/provenance/{source.id}/cover",
-            headers={**auth_headers, "If-Match": f'"model-{model.id}-v1"'},
+            headers={
+                **auth_headers,
+                "If-Match": f'"model-{model.id}-e{model.edit_epoch}-v1"',
+            },
         )
 
         assert stale.status_code == 412, stale.text
@@ -982,7 +1020,10 @@ class TestConditionalProvenance:
 
         response = client.patch(
             f"/api/v1/models/{model.id}",
-            headers={**auth_headers, "If-Match": f'"model-{model.id}-v1"'},
+            headers={
+                **auth_headers,
+                "If-Match": f'"model-{model.id}-e{model.edit_epoch}-v1"',
+            },
             json={"name": "Old draft"},
         )
 

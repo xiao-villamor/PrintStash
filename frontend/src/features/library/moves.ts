@@ -1,3 +1,5 @@
+import { acceptsEditingSnapshot } from "./editing";
+import type { EditingBase } from "@/types/editing";
 import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getModel, updateModel } from "@/lib/api/models";
@@ -13,7 +15,7 @@ import type { LibraryEntry } from "./navigation-state";
 
 type ReviewState =
   | { phase: "needs-review" | "reviewing" | "review-failed" | "denied" | "saving" }
-  | { phase: "reviewed"; model: ModelRead };
+  | { phase: "reviewed"; model: ModelRead; observedEpoch: string | null };
 export type MoveIssue = Readonly<{
   source: ModelDrag;
   destination: string | null;
@@ -73,17 +75,18 @@ export function useModelMoves(entry: LibraryEntry, onConfirmed: () => Promise<vo
     scope.records.delete(record.source.id);
     present();
   }
-  async function publish(record: MoveRecord, model: ModelRead) {
-    if (!owns(record)) return;
+  async function publish(record: MoveRecord, model: ModelRead, observedEpoch: string | null) {
+    if (!owns(record)) return false;
     const queryKey = queryKeys.model(model.id);
     await client.cancelQueries({ queryKey, exact: true });
-    if (!owns(record)) return;
-    client.setQueryData<ModelRead>(queryKey, (previous) =>
-      previous && previous.edit_version > model.edit_version ? previous : model,
-    );
+    if (!owns(record)) return false;
+    const previous = client.getQueryData<ModelRead>(queryKey);
+    if (!acceptsEditingSnapshot(previous, model, observedEpoch)) return false;
+    client.setQueryData<ModelRead>(queryKey, model);
     await onConfirmed();
+    return true;
   }
-  async function execute(record: MoveRecord, version: number) {
+  async function execute(record: MoveRecord, base: EditingBase) {
     if (!owns(record)) return;
     changeReview(record, { phase: "saving" });
     // Returning after navigation must recheck an in-flight command even when its ACK was lost.
@@ -92,17 +95,16 @@ export function useModelMoves(entry: LibraryEntry, onConfirmed: () => Promise<vo
       exact: true,
       refetchType: "none",
     });
+    const observedEpoch =
+      client.getQueryData<ModelRead>(queryKeys.model(record.source.id))?.edit_epoch ?? null;
     let model: ModelRead;
     try {
-      model = await updateModel(
-        record.source.id,
-        { collection: record.destination ?? "" },
-        version,
-      );
+      model = await updateModel(record.source.id, { collection: record.destination ?? "" }, base);
       if (
         model.id !== record.source.id ||
         !Number.isSafeInteger(model.edit_version) ||
-        model.edit_version <= version
+        model.edit_version <= base.edit_version ||
+        model.edit_epoch !== base.edit_epoch
       )
         throw new Error("Invalid move acknowledgement");
     } catch (error) {
@@ -126,7 +128,18 @@ export function useModelMoves(entry: LibraryEntry, onConfirmed: () => Promise<vo
       }
       return;
     }
-    await publish(record, model);
+    if (!(await publish(record, model, observedEpoch))) {
+      if (owns(record)) {
+        record.issue = {
+          source: record.source,
+          destination: record.destination,
+          problem: "unconfirmed",
+          review: { phase: "needs-review" },
+        };
+        present();
+      }
+      return;
+    }
     if (!owns(record)) return;
     toast.success(uiText("Moved"));
     remove(record);
@@ -146,7 +159,7 @@ export function useModelMoves(entry: LibraryEntry, onConfirmed: () => Promise<vo
       controller: null,
     };
     scope.records.set(source.id, record);
-    await execute(record, source.edit_version);
+    await execute(record, source);
   }
   async function review(id: number) {
     const record = scope.records.get(id);
@@ -156,6 +169,7 @@ export function useModelMoves(entry: LibraryEntry, onConfirmed: () => Promise<vo
       ["reviewing", "saving"].includes(record.issue.review.phase)
     )
       return;
+    const observedEpoch = client.getQueryData<ModelRead>(queryKeys.model(id))?.edit_epoch ?? null;
     const controller = new AbortController();
     record.controller = controller;
     changeReview(record, { phase: "reviewing" });
@@ -164,7 +178,7 @@ export function useModelMoves(entry: LibraryEntry, onConfirmed: () => Promise<vo
       if (controller.signal.aborted || !owns(record)) return;
       if (model.id !== id || !Number.isSafeInteger(model.edit_version) || model.edit_version < 1)
         throw new Error("Invalid move review");
-      changeReview(record, { phase: "reviewed", model });
+      changeReview(record, { phase: "reviewed", model, observedEpoch });
     } catch (error) {
       if (controller.signal.aborted || !owns(record)) return;
       changeReview(record, {
@@ -185,15 +199,15 @@ export function useModelMoves(entry: LibraryEntry, onConfirmed: () => Promise<vo
       (state.model.effective_role !== "admin" && state.model.effective_role !== "edit")
     )
       return;
-    await execute(record, state.model.edit_version);
+    await execute(record, state.model);
   }
   async function adopt(id: number) {
     const record = scope.records.get(id);
     const state = record?.issue?.review;
     if (!record || !owns(record) || state?.phase !== "reviewed") return;
     changeReview(record, { phase: "saving" });
-    await publish(record, state.model);
-    remove(record);
+    if (await publish(record, state.model, state.observedEpoch)) remove(record);
+    else changeReview(record, { phase: "needs-review" });
   }
   function dismiss(id: number) {
     const record = scope.records.get(id);

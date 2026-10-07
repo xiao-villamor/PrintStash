@@ -2932,7 +2932,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               onClose={() => setTagDialogOpen(false)}
               onSaved={(nextTags, editVersion) => {
                 setTagTarget((current) =>
-                  current ? { ...current, tags: nextTags, edit_version: editVersion } : current,
+                  current ? { ...current, tags: nextTags, ...editVersion } : current,
                 );
                 refresh();
               }}

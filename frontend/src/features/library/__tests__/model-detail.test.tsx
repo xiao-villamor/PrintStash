@@ -21,6 +21,65 @@ function Probe({ ready }: { ready: (publish: PublishModel) => void }) {
   return <p>{resource.data?.name}</p>;
 }
 describe("useModelDetail", () => {
+  it("rejects a receipt after a different history has become canonical", async () => {
+    let publish!: PublishModel;
+    const view = renderApp(
+      <Probe
+        ready={(value) => {
+          publish = value;
+        }}
+      />,
+    );
+    await screen.findByText("Current");
+    const oldPublication = publish;
+    act(() =>
+      view.client.setQueryData(
+        queryKeys.model(1),
+        aModel({
+          id: 1,
+          edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          edit_version: 1,
+          name: "Restored",
+        }),
+      ),
+    );
+    await screen.findByText("Restored");
+    const accepted = await oldPublication(
+      aModel({ id: 1, edit_version: 5, name: "Previous history ACK" }),
+    );
+    expect(accepted).toBe(false);
+    expect(view.client.getQueryData(queryKeys.model(1))).toMatchObject({
+      name: "Restored",
+      edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      edit_version: 1,
+    });
+  });
+
+  it("publishes an explicitly read history with a lower counter", async () => {
+    let publish!: PublishModel;
+    const view = renderApp(
+      <Probe
+        ready={(value) => {
+          publish = value;
+        }}
+      />,
+    );
+    await screen.findByText("Current");
+    const accepted = await publish(
+      aModel({
+        id: 1,
+        edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        edit_version: 1,
+        name: "Reviewed restoration",
+      }),
+    );
+    expect(accepted).toBe(true);
+    expect(view.client.getQueryData(queryKeys.model(1))).toMatchObject({
+      name: "Reviewed restoration",
+      edit_version: 1,
+    });
+  });
+
   it("ignores a confirmed publication after session retirement", async () => {
     let publish!: PublishModel;
     const view = renderApp(

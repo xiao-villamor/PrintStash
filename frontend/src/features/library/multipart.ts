@@ -1,3 +1,4 @@
+import { acceptsEditingSnapshot } from "./editing";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
 import { getMultipartModel } from "@/lib/api/multipart-models";
@@ -37,6 +38,8 @@ export function useMultipartPublication(id: number) {
     () => mounted.current && session === getSessionVersion(),
     [session],
   );
+  const observedEpoch =
+    client.getQueryData<MultipartModelRead>(queryKeys.multipartModel(id))?.edit_epoch ?? null;
   const publish = useCallback(
     async (
       next: MultipartModelRead | ((value: MultipartModelRead) => MultipartModelRead),
@@ -58,13 +61,13 @@ export function useMultipartPublication(id: number) {
           candidate.edit_version < 1
         )
           throw new Error("Invalid Multipart acknowledgement");
-        if (value && candidate.edit_version < value.edit_version) return value;
+        if (!acceptsEditingSnapshot(value, candidate, observedEpoch)) return value;
         accepted = true;
         return candidate;
       });
       return accepted;
     },
-    [client, id, isCurrent],
+    [client, id, isCurrent, observedEpoch],
   );
   return { publish, active: session === current, isCurrent };
 }

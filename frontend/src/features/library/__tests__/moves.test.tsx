@@ -69,6 +69,29 @@ const retryButton = () =>
   screen.getByRole("button", { name: "Save my draft against this version" });
 
 describe("useModelMoves", () => {
+  it("requires review when another history overtakes a move acknowledgement", async () => {
+    const user = userEvent.setup();
+    const held = Promise.withResolvers<Response>();
+    const view = renderApp(<Probe />, {
+      seed: [[queryKeys.model(1), aModel({ id: 1, edit_version: 7 })]],
+      routes: { "PATCH /api/v1/models/1": () => held.promise },
+    });
+    await user.click(screen.getByRole("button", { name: "Move" }));
+    const restored = aModel({
+      id: 1,
+      edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      edit_version: 1,
+      collection: "restored",
+    });
+    act(() => view.client.setQueryData(queryKeys.model(1), restored));
+    await act(async () =>
+      held.resolve(json(aModel({ id: 1, edit_version: 8, collection: "parts" }))),
+    );
+    expect(view.client.getQueryData(queryKeys.model(1))).toEqual(restored);
+    expect(screen.getByText("Confirmed: 0")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Review latest version" })).toBeEnabled();
+  });
+
   it("preserves the requested destination after a conflict without reading automatically", async () => {
     const user = userEvent.setup();
     const view = renderApp(<Probe />, { routes: { "PATCH /api/v1/models/1": conflict() } });
@@ -123,7 +146,10 @@ describe("useModelMoves", () => {
     expect(await screen.findByText("Current location: elsewhere")).toBeVisible();
     await user.click(retryButton());
     await screen.findByText("Confirmed: 1");
-    expect(versions).toEqual(['"model-1-v7"', '"model-1-v10"']);
+    expect(versions).toEqual([
+      '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"',
+      '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v10"',
+    ]);
     expect(view.requestsWithMethod("PATCH").map((request) => JSON.parse(request.body))).toEqual([
       { collection: "parts" },
       { collection: "parts" },

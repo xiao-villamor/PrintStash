@@ -1,3 +1,5 @@
+import { acceptsEditingSnapshot } from "@/features/library/editing";
+import type { EditingBase } from "@/types/editing";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createDocument,
@@ -50,11 +52,24 @@ export function useDocumentMutations() {
     if (version === undefined) throw new Error("Document mutation session context is required");
     requireSessionVersion(version);
   };
-  const publish = async (document: DocumentRead, version: number | undefined) => {
+  const publish = async (
+    document: DocumentRead,
+    version: number | undefined,
+    observedEpoch: string | null = null,
+  ) => {
     assertSession(version);
     await cancel();
     assertSession(version);
-    client.setQueryData(documentKeys.detail(document.id), document);
+    const current = client.getQueryData<DocumentRead>(documentKeys.detail(document.id));
+    if (
+      current &&
+      current.edit_epoch !== document.edit_epoch &&
+      !acceptsEditingSnapshot(current, document, observedEpoch)
+    )
+      throw new Error("Editing history changed during publication");
+    client.setQueryData<DocumentRead>(documentKeys.detail(document.id), (current) =>
+      acceptsEditingSnapshot(current, document, observedEpoch) ? document : current,
+    );
     for (const [key, items] of client.getQueriesData<DocumentListItem[]>({
       queryKey: documentKeys.lists,
     })) {
@@ -64,7 +79,8 @@ export function useDocumentMutations() {
       client.setQueryData(
         key,
         items.flatMap((item) => {
-          if (item.id !== document.id) return [item];
+          if (item.id !== document.id || !acceptsEditingSnapshot(item, document, observedEpoch))
+            return [item];
           return collection === null || collection === document.collection ? [document] : [];
         }),
       );
@@ -126,17 +142,23 @@ export function useDocumentMutations() {
         session,
       }: {
         id: number;
-        editVersion: number;
+        editVersion: EditingBase;
         session: number;
         payload: Parameters<typeof updateDocument>[1];
       }) => {
         requireSessionVersion(session);
         return updateDocument(id, payload, editVersion);
       },
-      onMutate: prepare,
-      onSuccess: async (document, _, version) => {
-        await publish(document, version);
-        refreshLists(version);
+      onMutate: async (input) => {
+        const observedEpoch =
+          client.getQueryData<DocumentRead>(documentKeys.detail(input.id))?.edit_epoch ?? null;
+        const session = await prepare(input);
+        return { session, observedEpoch };
+      },
+      onSuccess: async (document, _, context) => {
+        if (!context) throw new Error("Document mutation context is required");
+        await publish(document, context.session, context.observedEpoch);
+        refreshLists(context.session);
       },
     }),
     remove: useMutation({

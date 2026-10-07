@@ -51,6 +51,7 @@ function aRevision(over: Partial<FileRead> = {}): FileRead {
 /** The model the batch re-reads once its labels have landed. */
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,
     name: "Benchy",

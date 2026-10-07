@@ -13,6 +13,7 @@
  * recoverable from not: `DELETE /models/{id}` trashes, `DELETE /models/{id}/purge`
  * destroys, and `/trash/expired` destroys everything past its retention window.
  */
+import { anEditingBase } from "@/test-support/factories";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -44,13 +45,19 @@ describe("batchMoveModels", () => {
   it("moves with every selected version", async () => {
     respondWith({ succeeded_ids: [] });
 
-    await batchMoveModels([1, 2], "functional", { 1: 3, 2: 7 });
+    await batchMoveModels([1, 2], "functional", {
+      1: anEditingBase({ edit_version: 3 }),
+      2: anEditingBase({ edit_version: 7 }),
+    });
 
     expectRequest("/api/v1/models/batch/move", "POST");
     expect(lastBody()).toEqual({
       model_ids: [1, 2],
       collection: "functional",
-      expected_versions: { 1: 3, 2: 7 },
+      expected_versions: {
+        1: anEditingBase({ edit_version: 3 }),
+        2: anEditingBase({ edit_version: 7 }),
+      },
     });
     expect(new Headers(lastCall().init?.headers).get("X-PrintStash-Edit-Contract")).toBe(
       "conditional-v1",
@@ -62,14 +69,14 @@ describe("batchTagModels", () => {
   it("tags with every selected version", async () => {
     respondWith({ succeeded_ids: [] });
 
-    await batchTagModels([1], ["new"], ["old"], { 1: 7 });
+    await batchTagModels([1], ["new"], ["old"], { 1: anEditingBase({ edit_version: 7 }) });
 
     // Each row is conditional; one row may conflict while another succeeds.
     expect(lastBody()).toEqual({
       model_ids: [1],
       add: ["new"],
       remove: ["old"],
-      expected_versions: { 1: 7 },
+      expected_versions: { 1: anEditingBase({ edit_version: 7 }) },
     });
     expect(new Headers(lastCall().init?.headers).get("X-PrintStash-Edit-Contract")).toBe(
       "conditional-v1",

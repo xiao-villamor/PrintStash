@@ -74,6 +74,7 @@ def _guides(
     ).all()
     return [
         DocumentListItem(
+            edit_epoch=row.edit_epoch,
             edit_version=row.edit_version,
             id=int(row.id),
             name=row.name,
@@ -303,6 +304,7 @@ def _list_item(
     )
     guides = _guides(session, user, int(aggregate.id))
     return MultipartModelListItem(
+        edit_epoch=aggregate.edit_epoch,
         edit_version=aggregate.edit_version,
         id=int(aggregate.id),
         name=aggregate.name,
@@ -561,6 +563,7 @@ def read_items_by_ids(
         )
         output.append(
             MultipartModelListItem(
+                edit_epoch=row.edit_epoch,
                 edit_version=row.edit_version,
                 id=group_id,
                 name=row.name,

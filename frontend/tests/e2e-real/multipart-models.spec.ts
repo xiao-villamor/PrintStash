@@ -243,7 +243,7 @@ test.describe("Multipart auxiliary editing", () => {
       await tagDialog.getByRole("button", { name: "Create tag" }).click();
       const competing = await page.request.put(`${api}${path}/tags`, {
         headers: {
-          "If-Match": `"multipart-${initial.id}-v${initial.edit_version}"`,
+          "If-Match": `"multipart-${initial.id}-e${initial.edit_epoch}-v${initial.edit_version}"`,
           "X-PrintStash-Edit-Contract": "conditional-v1",
         },
         data: { tags: ["Other editor tag"] },
@@ -271,7 +271,7 @@ test.describe("Multipart auxiliary editing", () => {
       const tagReceipt = await tagConfirmed;
       expect(tagReceipt.ok()).toBe(true);
       expect(await tagReceipt.request().headerValue("If-Match")).toBe(
-        `"multipart-${initial.id}-v${latest.edit_version}"`,
+        `"multipart-${initial.id}-e${latest.edit_epoch}-v${latest.edit_version}"`,
       );
       await expect(tagDialog).toHaveCount(0);
       await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
@@ -307,7 +307,7 @@ test.describe("Multipart auxiliary editing", () => {
       expect(coverReceipt.ok()).toBe(true);
       const tagged: MultipartModelRead = await tagReceipt.json();
       expect(await coverReceipt.request().headerValue("If-Match")).toBe(
-        `"multipart-${initial.id}-v${tagged.edit_version}"`,
+        `"multipart-${initial.id}-e${tagged.edit_epoch}-v${tagged.edit_version}"`,
       );
       await expect(page.getByRole("dialog")).toHaveCount(0);
       await expect(page.getByText("Uploaded from your computer")).toBeVisible();
@@ -321,7 +321,7 @@ test.describe("Multipart auxiliary editing", () => {
       const rejected = await compositionConflict;
       expect(rejected.status()).toBe(412);
       expect(await rejected.request().headerValue("If-Match")).toBe(
-        `"multipart-${initial.id}-v${initial.edit_version}"`,
+        `"multipart-${initial.id}-e${initial.edit_epoch}-v${initial.edit_version}"`,
       );
       await expect(page.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(
         "My unsaved composition",

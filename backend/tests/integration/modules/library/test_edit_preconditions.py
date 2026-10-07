@@ -3,6 +3,8 @@
 import pytest
 from sqlalchemy import text
 
+from app.schemas.editing import EditingBase
+
 
 @pytest.fixture(
     params=[
@@ -26,14 +28,14 @@ class TestConditionalEdit:
 
         assert response.status_code == 200, response.text
         assert response.json()["edit_version"] == 1
-        assert response.headers["etag"] == f'"{kind}-{row.id}-v1"'
+        assert response.headers["etag"] == f'"{kind}-{row.id}-e{row.edit_epoch}-v1"'
 
     def test_performs_conditional_metadata_edit(self, client, auth_headers, resource):
         kind, path, method, row = resource
         headers = {
             **auth_headers,
             "X-PrintStash-Edit-Contract": "conditional-v1",
-            "If-Match": f'"{kind}-{row.id}-v1"',
+            "If-Match": f'"{kind}-{row.id}-e{row.edit_epoch}-v1"',
         }
 
         response = client.request(
@@ -45,7 +47,7 @@ class TestConditionalEdit:
         assert response.json()["edit_version"] > 1
         assert (
             response.headers["etag"]
-            == f'"{kind}-{row.id}-v{response.json()["edit_version"]}"'
+            == f'"{kind}-{row.id}-e{row.edit_epoch}-v{response.json()["edit_version"]}"'
         )
 
     def test_rejects_stale_metadata_edit(self, client, auth_headers, resource):
@@ -62,7 +64,7 @@ class TestConditionalEdit:
             headers={
                 **auth_headers,
                 "X-PrintStash-Edit-Contract": "conditional-v1",
-                "If-Match": f'"{kind}-{row.id}-v1"',
+                "If-Match": f'"{kind}-{row.id}-e{row.edit_epoch}-v1"',
             },
         )
 
@@ -145,7 +147,10 @@ class TestConditionalEdit:
             method,
             path,
             json={"name": "Old draft"},
-            headers={**auth_headers, "If-Match": f'"{kind}-{row.id}-v1"'},
+            headers={
+                **auth_headers,
+                "If-Match": f'"{kind}-{row.id}-e{row.edit_epoch}-v1"',
+            },
         )
 
         assert response.status_code == 412, response.text
@@ -194,7 +199,10 @@ class TestConditionalEdit:
             method,
             path,
             json={"name": "Denied"},
-            headers={**headers_for(user), "If-Match": f'"{kind}-{row.id}-v{version}"'},
+            headers={
+                **headers_for(user),
+                "If-Match": f'"{kind}-{row.id}-e{row.edit_epoch}-v{version}"',
+            },
         )
 
         assert response.status_code == 403, response.text
@@ -210,7 +218,10 @@ class TestConditionalEdit:
 
         response = client.put(
             f"/api/v1/multipart-models/{group.id}",
-            headers={**auth_headers, "If-Match": f'"multipart-{group.id}-v1"'},
+            headers={
+                **auth_headers,
+                "If-Match": f'"multipart-{group.id}-e{group.edit_epoch}-v1"',
+            },
             json={"name": "Invalid", "cover_model_id": outsider.id, "parts": []},
         )
 
@@ -235,7 +246,10 @@ class TestConditionalEdit:
 
         stale = client.patch(
             f"/api/v1/multipart-models/{group.id}",
-            headers={**auth_headers, "If-Match": f'"multipart-{group.id}-v1"'},
+            headers={
+                **auth_headers,
+                "If-Match": f'"multipart-{group.id}-e{group.edit_epoch}-v1"',
+            },
             json={"name": "Old draft"},
         )
 
@@ -285,7 +299,10 @@ class TestMultipartCoverEdit:
 
         response = client.put(
             f"/api/v1/multipart-models/{group.id}/cover",
-            headers={**auth_headers, "If-Match": f'"multipart-{group.id}-v1"'},
+            headers={
+                **auth_headers,
+                "If-Match": f'"multipart-{group.id}-e{group.edit_epoch}-v1"',
+            },
             files={"file": ("cover.png", png(), "image/png")},
         )
 
@@ -305,12 +322,19 @@ class TestMultipartCoverEdit:
         path = f"/api/v1/multipart-models/{group.id}/cover"
         uploaded = client.put(
             path,
-            headers={**auth_headers, "If-Match": f'"multipart-{group.id}-v1"'},
+            headers={
+                **auth_headers,
+                "If-Match": f'"multipart-{group.id}-e{group.edit_epoch}-v1"',
+            },
             files={"file": ("cover.png", png(), "image/png")},
         )
         assert uploaded.status_code == 200, uploaded.text
         stale = client.delete(
-            path, headers={**auth_headers, "If-Match": f'"multipart-{group.id}-v1"'}
+            path,
+            headers={
+                **auth_headers,
+                "If-Match": f'"multipart-{group.id}-e{group.edit_epoch}-v1"',
+            },
         )
         assert stale.status_code == 412, stale.text
 
@@ -323,7 +347,7 @@ class TestMultipartCoverEdit:
         assert deleted.json()["edit_version"] > uploaded.json()["edit_version"]
         assert (
             deleted.headers["etag"]
-            == f'"multipart-{group.id}-v{deleted.json()["edit_version"]}"'
+            == f'"multipart-{group.id}-e{group.edit_epoch}-v{deleted.json()["edit_version"]}"'
         )
 
 
@@ -382,7 +406,8 @@ class TestClaim:
                         user,
                         row,
                         EditPrecondition(
-                            if_match=f'"{kind}-{row_id}-v1"', contract="conditional-v1"
+                            if_match=f'"{kind}-{row_id}-e{row.edit_epoch}-v1"',
+                            contract="conditional-v1",
                         ),
                     )
                     row.name = name
@@ -410,11 +435,12 @@ class TestClaim:
 
         engine, kind, entity, user_id, row_id = edit_database
         with Session(engine) as session:
+            row = session.get(entity, row_id)
             claim(
                 session,
                 session.get(User, user_id),
                 session.get(entity, row_id),
-                EditPrecondition(if_match=f'"{kind}-{row_id}-v1"'),
+                EditPrecondition(if_match=f'"{kind}-{row_id}-e{row.edit_epoch}-v1"'),
             )
             session.rollback()
 
@@ -453,7 +479,9 @@ class TestClaim:
                     session,
                     actor,
                     row,
-                    EditPrecondition(if_match=f'"{kind}-{row_id}-v1"'),
+                    EditPrecondition(
+                        if_match=f'"{kind}-{row_id}-e{row.edit_epoch}-v1"'
+                    ),
                 )
             session.rollback()
 
@@ -484,7 +512,13 @@ class TestConditionalBatchEdit:
             headers={**auth_headers, "X-PrintStash-Edit-Contract": "conditional-v1"},
             json={
                 "model_ids": [stale.id, current.id],
-                "expected_versions": {str(stale.id): 1, str(current.id): 1},
+                "expected_versions": {
+                    str(stale.id): {"edit_version": 1, "edit_epoch": stale.edit_epoch},
+                    str(current.id): {
+                        "edit_version": 1,
+                        "edit_epoch": current.edit_epoch,
+                    },
+                },
                 **changes,
             },
         )
@@ -494,7 +528,12 @@ class TestConditionalBatchEdit:
             f"/api/v1/models/{current.id}", headers=auth_headers
         ).json()["edit_version"]
         assert response.json() == {
-            "succeeded_versions": {str(current.id): current_version},
+            "succeeded_versions": {
+                str(current.id): {
+                    "edit_version": current_version,
+                    "edit_epoch": current.edit_epoch,
+                }
+            },
             "succeeded_ids": [current.id],
             "failed": [{"model_id": stale.id, "reason": "edit_conflict"}],
             "succeeded_count": 1,
@@ -532,7 +571,9 @@ class TestConditionalBatchEdit:
             headers={**auth_headers, "X-PrintStash-Edit-Contract": "conditional-v1"},
             json={
                 "model_ids": [first.id, second.id],
-                "expected_versions": {str(first.id): 1},
+                "expected_versions": {
+                    str(first.id): {"edit_version": 1, "edit_epoch": first.edit_epoch}
+                },
                 **changes,
             },
         )
@@ -564,14 +605,21 @@ class TestConditionalBatchEdit:
             headers=headers,
             json={
                 "model_ids": [model.id],
-                "expected_versions": {str(model.id): 1},
+                "expected_versions": {
+                    str(model.id): {"edit_version": 1, "edit_epoch": model.edit_epoch}
+                },
                 **changes,
             },
         )
         assert saved.status_code == 200, saved.text
         versions = saved.json()["succeeded_versions"]
         current = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
-        assert versions == {str(model.id): current.json()["edit_version"]}
+        assert versions == {
+            str(model.id): {
+                "edit_version": current.json()["edit_version"],
+                "edit_epoch": current.json()["edit_epoch"],
+            }
+        }
         edited = client.patch(
             f"/api/v1/models/{model.id}",
             headers=auth_headers,
@@ -622,7 +670,9 @@ class TestConditionalBatchEdit:
                 return
             with Session(engine) as other:
                 row = other.get(entity, row_id)
-                acknowledged[str(row_id)] = row.edit_version
+                acknowledged[str(row_id)] = EditingBase.model_validate(
+                    row, from_attributes=True
+                )
                 row.name = "Committed externally"
                 other.add(row)
                 other.commit()
@@ -631,10 +681,23 @@ class TestConditionalBatchEdit:
             event.listen(session, "after_commit", external_writer)
             command = batch_move_models if path == "move" else batch_tag_models
             payload = (
-                ModelBatchMove(model_ids=[row_id], expected_versions={row_id: 1})
+                ModelBatchMove(
+                    model_ids=[row_id],
+                    expected_versions={
+                        row_id: EditingBase.model_validate(
+                            session.get(entity, row_id), from_attributes=True
+                        )
+                    },
+                )
                 if path == "move"
                 else ModelBatchTags(
-                    model_ids=[row_id], expected_versions={row_id: 1}, add=["new-tag"]
+                    model_ids=[row_id],
+                    expected_versions={
+                        row_id: EditingBase.model_validate(
+                            session.get(entity, row_id), from_attributes=True
+                        )
+                    },
+                    add=["new-tag"],
                 )
             )
             result = command(payload, session.get(User, user_id), session)
@@ -643,7 +706,10 @@ class TestConditionalBatchEdit:
         with Session(engine) as session:
             latest = session.get(entity, row_id)
             assert latest.name == "Committed externally"
-            assert latest.edit_version > result.succeeded_versions[str(row_id)]
+            assert (
+                latest.edit_version
+                > result.succeeded_versions[str(row_id)].edit_version
+            )
 
     @pytest.mark.parametrize(
         "edit_database",
@@ -673,11 +739,24 @@ class TestConditionalBatchEdit:
                 other.commit()
             ids = [row_id, peer_id]
             payload = (
-                ModelBatchMove(model_ids=ids, expected_versions={id: 1 for id in ids})
+                ModelBatchMove(
+                    model_ids=ids,
+                    expected_versions={
+                        id: EditingBase.model_validate(
+                            session.get(entity, id), from_attributes=True
+                        )
+                        for id in ids
+                    },
+                )
                 if path == "move"
                 else ModelBatchTags(
                     model_ids=ids,
-                    expected_versions={id: 1 for id in ids},
+                    expected_versions={
+                        id: EditingBase.model_validate(
+                            session.get(entity, id), from_attributes=True
+                        )
+                        for id in ids
+                    },
                     add=["new-tag"],
                 )
             )
@@ -699,7 +778,12 @@ class TestConditionalBatchEdit:
         user = make_user(superuser=True)
         model = make_model()
         result = batch_move_models(
-            ModelBatchMove(model_ids=[model.id], expected_versions={model.id: 1}),
+            ModelBatchMove(
+                model_ids=[model.id],
+                expected_versions={
+                    model.id: EditingBase.model_validate(model, from_attributes=True)
+                },
+            ),
             user,
             db_session,
             commit=False,
@@ -730,7 +814,9 @@ class TestConditionalBatchEdit:
             headers=auth_headers,
             json={
                 "model_ids": [model.id],
-                "expected_versions": {str(model.id): 1},
+                "expected_versions": {
+                    str(model.id): {"edit_version": 1, "edit_epoch": model.edit_epoch}
+                },
                 **changes,
             },
         )
@@ -749,10 +835,107 @@ class TestConditionalBatchEdit:
             headers=auth_headers,
             json={
                 "model_ids": [model.id],
-                "expected_versions": {str(model.id): 1, "9999": 1},
+                "expected_versions": {
+                    str(model.id): {"edit_version": 1, "edit_epoch": model.edit_epoch},
+                    "9999": {"edit_version": 1, "edit_epoch": model.edit_epoch},
+                },
                 "add": ["new-tag"],
             },
         )
 
         assert response.status_code == 400, response.text
         assert response.json()["detail"] == "edit_precondition_invalid"
+
+
+class TestEditingHistory:
+    def test_reads_the_database_incarnation_with_the_entity(
+        self, client, auth_headers, resource
+    ):
+        _kind, path, _method, row = resource
+        response = client.get(path, headers=auth_headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["edit_epoch"] == row.edit_epoch
+        assert "edit_epoch" not in row.__table__.columns
+
+    def test_rejects_the_previous_database_incarnation(
+        self, client, auth_headers, resource, db_session
+    ):
+        from app.db.models import LibraryRevision
+
+        _kind, path, method, row = resource
+        before = client.get(path, headers=auth_headers)
+        old_tag = before.headers["etag"]
+        authority = db_session.get_one(LibraryRevision, 1)
+        authority.epoch = "b" * 32
+        db_session.add(authority)
+        db_session.commit()
+        rejected = client.request(
+            method,
+            path,
+            headers={
+                **auth_headers,
+                "If-Match": old_tag,
+                "X-PrintStash-Edit-Contract": "conditional-v1",
+            },
+            json={"name": "Old history"},
+        )
+        assert rejected.status_code == 412, rejected.text
+        current = client.get(path, headers=auth_headers).json()
+        assert current["name"] == "Original"
+        assert current["edit_version"] == before.json()["edit_version"]
+        assert current["edit_epoch"] == "b" * 32
+
+    @pytest.mark.parametrize("operation", ["move", "tags"])
+    def test_rejects_a_batch_from_an_old_history(
+        self, client, auth_headers, make_model, operation
+    ):
+        model = make_model()
+        payload = {
+            "model_ids": [model.id],
+            "expected_versions": {
+                str(model.id): {
+                    "edit_version": model.edit_version,
+                    "edit_epoch": "b" * 32,
+                }
+            },
+        }
+        payload.update(
+            {"collection": "old-destination"}
+            if operation == "move"
+            else {"add": ["old-tag"]}
+        )
+        response = client.post(
+            f"/api/v1/models/batch/{operation}",
+            headers={**auth_headers, "X-PrintStash-Edit-Contract": "conditional-v1"},
+            json=payload,
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["succeeded_versions"] == {}
+        assert response.json()["failed"] == [
+            {"model_id": model.id, "reason": "edit_conflict"}
+        ]
+        current = client.get(f"/api/v1/models/{model.id}", headers=auth_headers).json()
+        assert current["collection"] is None
+        assert current["tags"] == []
+        assert current["edit_version"] == model.edit_version
+
+    def test_rejects_cover_bytes_from_an_old_history(
+        self, client, auth_headers, make_multipart_model
+    ):
+        from tests.factories.content import png
+
+        group = make_multipart_model()
+        path = f"/api/v1/multipart-models/{group.id}"
+        before = client.get(path, headers=auth_headers)
+        rejected = client.put(
+            f"{path}/cover",
+            headers={
+                **auth_headers,
+                "If-Match": f'"multipart-{group.id}-e{"b" * 32}-v{group.edit_version}"',
+            },
+            files={"file": ("cover.png", png(), "image/png")},
+        )
+        assert rejected.status_code == 412, rejected.text
+        after = client.get(path, headers=auth_headers)
+        assert after.json()["cover_image_uploaded"] is False
+        assert after.headers["etag"] == before.headers["etag"]

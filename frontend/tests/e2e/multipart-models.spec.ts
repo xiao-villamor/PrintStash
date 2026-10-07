@@ -47,6 +47,7 @@ const candidates: MultipartModelCandidate[] = [
 ];
 
 const populatedMobileDetail: MultipartModelRead = {
+  edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   id: 90,
   name: "broom_holder_vcd_base_25mm",
@@ -120,11 +121,14 @@ test.describe("multipart models", () => {
     await expect(page.getByRole("dialog", { name: "Latest saved version" })).toContainText(
       "Other editor's composition",
     );
-    expect(versions).toEqual(['"multipart-90-v1"']);
+    expect(versions).toEqual(['"multipart-90-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
     await page.getByRole("button", { name: "Save my draft against this version" }).click();
     await expect(page.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "My composition", exact: true })).toBeVisible();
-    expect(versions).toEqual(['"multipart-90-v1"', '"multipart-90-v7"']);
+    expect(versions).toEqual([
+      '"multipart-90-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"',
+      '"multipart-90-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"',
+    ]);
   });
 
   test("keeps populated editor controls in the mobile flow", async ({ page }) => {
@@ -186,6 +190,7 @@ test.describe("multipart models", () => {
       parts: Array<{ name: string; choices: Array<{ model_id: number; choice_id?: number }> }>;
     } | null = null;
     let detail: MultipartModelRead = {
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 1,
       id: 90,
       name: "Desk organiser",
@@ -273,6 +278,7 @@ test.describe("multipart models", () => {
         savedPayload = payload;
         detail = {
           ...detail,
+          edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           edit_version: detail.edit_version + 1,
           name: payload.name,
           description: payload.description,

@@ -311,6 +311,8 @@ class TestLibraryContractTransfer:
             session.commit()
             source_authority = revision(session)
             model_version = session.get_one(Model, model_id).edit_version
+            editing_epoch = session.get_one(Model, model_id).edit_epoch
+            assert session.get_one(MultipartModel, group.id).edit_epoch == editing_epoch
             group_id, group_version = (
                 group.id,
                 session.get_one(MultipartModel, group.id).edit_version,
@@ -325,6 +327,8 @@ class TestLibraryContractTransfer:
                 revision(session).browse_revision.split(":")[0]
                 == source_authority.browse_revision.split(":")[0]
             )
+            assert session.get_one(Model, model_id).edit_epoch == editing_epoch
+            assert session.get_one(MultipartModel, group_id).edit_epoch == editing_epoch
             assert session.get_one(Model, model_id).edit_version == model_version
             assert (
                 session.get_one(MultipartModel, group_id).edit_version == group_version
@@ -336,6 +340,11 @@ class TestLibraryContractTransfer:
             snapshot_postgres(target, snapshot)
             with Session(snapshot) as session:
                 assert revision(session) == target_authority
+                assert session.get_one(Model, model_id).edit_epoch == editing_epoch
+                assert (
+                    session.get_one(MultipartModel, group_id).edit_epoch
+                    == editing_epoch
+                )
                 assert session.get_one(Model, model_id).edit_version == model_version
                 assert (
                     session.get_one(MultipartModel, group_id).edit_version

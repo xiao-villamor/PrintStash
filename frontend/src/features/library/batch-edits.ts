@@ -1,9 +1,14 @@
+import { captureEditingBase, requireEditingBase, requireEditingReceipt } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
 import { batchMoveModels, batchTagModels, updateModel } from "@/lib/api/models";
 import { ApiError } from "@/lib/errors";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import type { ModelEditBatchResult, ModelListItem } from "@/types";
 
-type SelectedModel = Pick<ModelListItem, "id" | "edit_version" | "collection" | "tags">;
+type SelectedModel = Pick<
+  ModelListItem,
+  "id" | "edit_epoch" | "edit_version" | "collection" | "tags"
+>;
 export interface LibraryEditReceipt {
   result: ModelEditBatchResult;
   /** Bound to this acknowledgment and session; never reads a newer version to authorize undo. */
@@ -19,10 +24,10 @@ const emptyResult = (): ModelEditBatchResult => ({
   failed_count: 0,
 });
 const versions = (models: SelectedModel[]) =>
-  Object.fromEntries(models.map((model) => [model.id, model.edit_version]));
-function acknowledge(result: ModelEditBatchResult, id: number): number {
+  Object.fromEntries(models.map((model) => [model.id, captureEditingBase(model)]));
+function acknowledge(result: ModelEditBatchResult, id: number): EditingBase {
   const version = result.succeeded_versions[id];
-  if (!Number.isSafeInteger(version) || version < 1) throw new Error("invalid_edit_acknowledgment");
+  requireEditingBase(version);
   return version;
 }
 function snapshot(models: SelectedModel[]): SelectedModel[] {
@@ -41,7 +46,13 @@ async function chunks(
     requireSessionVersion(session);
     const part = await operation(models.slice(offset, offset + BATCH_LIMIT));
     requireSessionVersion(session);
-    for (const id of part.succeeded_ids) result.succeeded_versions[id] = acknowledge(part, id);
+    for (const id of part.succeeded_ids) {
+      const source = models.find((model) => model.id === id);
+      if (!source) throw new Error("Unexpected batch acknowledgement");
+      const acknowledged = acknowledge(part, id);
+      requireEditingReceipt(acknowledged, source);
+      result.succeeded_versions[id] = acknowledged;
+    }
     result.succeeded_ids.push(...part.succeeded_ids);
     result.failed.push(...part.failed);
   }
@@ -73,7 +84,7 @@ export async function moveLibraryModels(
         if (!successful.has(model.id)) continue;
         const collection = model.collection ?? "";
         const group = groups.get(collection) ?? [];
-        group.push({ ...model, edit_version: acknowledge(result, model.id) });
+        group.push({ ...model, ...acknowledge(result, model.id) });
         groups.set(collection, group);
       }
       const undone = emptyResult();
@@ -128,7 +139,7 @@ export async function tagLibraryModels(
           );
           requireSessionVersion(session);
           undone.succeeded_ids.push(model.id);
-          undone.succeeded_versions[model.id] = restored.edit_version;
+          undone.succeeded_versions[model.id] = captureEditingBase(restored);
         } catch (error) {
           requireSessionVersion(session);
           if (!(error instanceof ApiError) || error.status !== 412) throw error;

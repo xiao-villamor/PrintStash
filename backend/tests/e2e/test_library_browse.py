@@ -30,7 +30,7 @@ class TestLibraryBrowse:
             headers={
                 **superuser_headers,
                 "X-PrintStash-Edit-Contract": "conditional-v1",
-                "If-Match": f'"model-{model.id}-v1"',
+                "If-Match": f'"model-{model.id}-e{model.edit_epoch}-v1"',
             },
             json={"name": "Renamed"},
         )

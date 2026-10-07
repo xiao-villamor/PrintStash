@@ -1,3 +1,4 @@
+import { acceptsEditingSnapshot } from "./editing";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getModel, updateModel } from "@/lib/api/models";
@@ -42,7 +43,11 @@ export type SourceCommand =
   | { kind: "delete"; sourceId: number };
 
 type PendingEdit = { command: SourceCommand; base: ModelProvenanceRead; finish: () => void };
-type ReviewedSource = { model: ModelRead; provenance: ModelProvenanceRead };
+type ReviewedSource = {
+  model: ModelRead;
+  provenance: ModelProvenanceRead;
+  adopt: () => Promise<void>;
+};
 type EditingState =
   | { phase: "idle" }
   | { phase: "saving"; pending: PendingEdit }
@@ -83,12 +88,23 @@ export function useSourceEditing(id: number, api: SourceApi = sourceApi) {
     };
   }, []);
 
+  const observedSourceEpoch = query.data?.edit_epoch ?? null;
+  const observedModelEpoch =
+    client.getQueryData<ModelRead>(queryKeys.model(id))?.edit_epoch ?? null;
+
   async function publish(next: ModelProvenanceRead) {
     if (!isCurrent()) return;
     await client.cancelQueries({ queryKey: provenanceOptions(id).queryKey, exact: true });
     if (!isCurrent()) return;
+    const current = client.getQueryData<ModelProvenanceRead>(provenanceOptions(id).queryKey);
+    if (
+      current &&
+      current.edit_epoch !== next.edit_epoch &&
+      !acceptsEditingSnapshot(current, next, observedSourceEpoch)
+    )
+      throw new Error("Editing history changed during publication");
     client.setQueryData<ModelProvenanceRead>(provenanceOptions(id).queryKey, (current) =>
-      current && current.edit_version > next.edit_version ? current : next,
+      acceptsEditingSnapshot(current, next, observedSourceEpoch) ? next : current,
     );
   }
 
@@ -96,8 +112,15 @@ export function useSourceEditing(id: number, api: SourceApi = sourceApi) {
     if (!isCurrent()) return;
     await client.cancelQueries({ queryKey: queryKeys.model(id), exact: true });
     if (!isCurrent()) return;
+    const current = client.getQueryData<ModelRead>(queryKeys.model(id));
+    if (
+      current &&
+      current.edit_epoch !== next.edit_epoch &&
+      !acceptsEditingSnapshot(current, next, observedModelEpoch)
+    )
+      throw new Error("Editing history changed during publication");
     client.setQueryData<ModelRead>(queryKeys.model(id), (current) =>
-      current && current.edit_version > next.edit_version ? current : next,
+      acceptsEditingSnapshot(current, next, observedModelEpoch) ? next : current,
     );
   }
 
@@ -115,11 +138,9 @@ export function useSourceEditing(id: number, api: SourceApi = sourceApi) {
     const { command, base } = pending;
     try {
       if (command.kind === "override") {
-        await publish(
-          await api.patchProvenance(id, command.sourceId, command.payload, base.edit_version),
-        );
+        await publish(await api.patchProvenance(id, command.sourceId, command.payload, base));
       } else if (command.kind === "apply") {
-        const next = await api.updateModel(id, command.payload, base.edit_version);
+        const next = await api.updateModel(id, command.payload, base);
         if (
           next.id !== id ||
           !Number.isSafeInteger(next.edit_version) ||
@@ -131,8 +152,8 @@ export function useSourceEditing(id: number, api: SourceApi = sourceApi) {
       } else {
         const receipt =
           command.kind === "upload"
-            ? await api.putCover(id, command.sourceId, command.file, base.edit_version)
-            : await api.deleteCover(id, command.sourceId, base.edit_version);
+            ? await api.putCover(id, command.sourceId, command.file, base)
+            : await api.deleteCover(id, command.sourceId, base);
         await publish({
           ...base,
           edit_version: receipt.edit_version,
@@ -196,7 +217,11 @@ export function useSourceEditing(id: number, api: SourceApi = sourceApi) {
         api.getProvenance(id, { signal: controller.signal }),
       ]);
       if (!isCurrent() || controller.signal.aborted) return;
-      if (model.id !== id || model.edit_version !== provenance.edit_version) {
+      if (
+        model.id !== id ||
+        model.edit_version !== provenance.edit_version ||
+        model.edit_epoch !== provenance.edit_epoch
+      ) {
         toast.error(uiText("source.reviewChanged"));
         return;
       }
@@ -208,7 +233,17 @@ export function useSourceEditing(id: number, api: SourceApi = sourceApi) {
       setEditDenied(
         sourceMissing || (model.effective_role !== "edit" && model.effective_role !== "admin"),
       );
-      setState({ ...state, reviewed: { model, provenance } });
+      setState({
+        ...state,
+        reviewed: {
+          model,
+          provenance,
+          adopt: async () => {
+            await publish(provenance);
+            await publishModel(model);
+          },
+        },
+      });
     } catch (error) {
       if (!isCurrent() || controller.signal.aborted) return;
       if (error instanceof Error && readDenied(error)) setDenied(true);
@@ -229,11 +264,15 @@ export function useSourceEditing(id: number, api: SourceApi = sourceApi) {
     if (state.phase !== "blocked" || !state.reviewed || working.current || !isCurrent()) return;
     working.current = true;
     try {
-      await publishModel(state.reviewed.model);
-      await publish(state.reviewed.provenance);
+      await state.reviewed.adopt();
       if (!isCurrent()) return;
       state.pending.finish();
       setState({ phase: "idle" });
+    } catch (error) {
+      if (isCurrent()) {
+        setState({ ...state, reviewed: null });
+        toast.error(error);
+      }
     } finally {
       working.current = false;
     }

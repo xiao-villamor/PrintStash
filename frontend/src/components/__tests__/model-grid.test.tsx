@@ -38,7 +38,7 @@ import type {
   TagRead,
 } from "@/types";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
-import { aCollectionNode, aModelListItem, aPrinter } from "@/test-support/factories";
+import { anEditingBase, aCollectionNode, aModelListItem, aPrinter } from "@/test-support/factories";
 import {
   adminSession,
   json,
@@ -68,6 +68,7 @@ function aTag(override: Partial<TagRead> = {}): TagRead {
 
 function aMultipartSet(override: Partial<MultipartModelListItem> = {}): MultipartModelListItem {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 40,
     name: "Dragon figure",
@@ -1722,7 +1723,10 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/move": json({
             succeeded_ids: [1, 2],
-            succeeded_versions: { 1: 9, 2: 9 },
+            succeeded_versions: {
+              1: anEditingBase({ edit_version: 9 }),
+              2: anEditingBase({ edit_version: 9 }),
+            },
             succeeded_count: 2,
             failed: [],
             failed_count: 0,
@@ -2008,7 +2012,7 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/tags": json({
             succeeded_ids: [1],
-            succeeded_versions: { 1: 9 },
+            succeeded_versions: { 1: anEditingBase({ edit_version: 9 }) },
             succeeded_count: 1,
             failed_count: 0,
             failed: [],
@@ -3342,7 +3346,7 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/tags": json({
             succeeded_ids: [1],
-            succeeded_versions: { 1: 9 },
+            succeeded_versions: { 1: anEditingBase({ edit_version: 9 }) },
             succeeded_count: 1,
             failed: [],
             failed_count: 0,
@@ -3370,7 +3374,7 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/tags": json({
             succeeded_ids: [1],
-            succeeded_versions: { 1: 9 },
+            succeeded_versions: { 1: anEditingBase({ edit_version: 9 }) },
             succeeded_count: 1,
             failed: [],
             failed_count: 0,
@@ -3519,7 +3523,9 @@ describe("ModelBrowser", () => {
           { dataTransfer },
         );
         fireEvent.drop(folder, { dataTransfer });
-        await waitFor(() => expect(versions).toEqual(['"model-1-v7"']));
+        await waitFor(() =>
+          expect(versions).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"']),
+        );
       },
     );
 
@@ -3641,7 +3647,7 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/move": json({
             succeeded_ids: [1],
-            succeeded_versions: { 1: 9 },
+            succeeded_versions: { 1: anEditingBase({ edit_version: 9 }) },
             succeeded_count: 1,
             failed: [],
             failed_count: 0,
@@ -3664,7 +3670,7 @@ describe("ModelBrowser", () => {
         routes: {
           "POST /api/v1/models/batch/move": json({
             succeeded_ids: [1],
-            succeeded_versions: { 1: 9 },
+            succeeded_versions: { 1: anEditingBase({ edit_version: 9 }) },
             succeeded_count: 1,
             failed: [],
             failed_count: 0,
@@ -3683,8 +3689,16 @@ describe("ModelBrowser", () => {
             .filter((request) => request.url.endsWith("/models/batch/move"))
             .map((request) => JSON.parse(request.body)),
         ).toEqual([
-          { model_ids: [1], collection: "spares", expected_versions: { 1: 1 } },
-          { model_ids: [1], collection: "parts", expected_versions: { 1: 9 } },
+          {
+            model_ids: [1],
+            collection: "spares",
+            expected_versions: { 1: anEditingBase({ edit_version: 1 }) },
+          },
+          {
+            model_ids: [1],
+            collection: "parts",
+            expected_versions: { 1: anEditingBase({ edit_version: 9 }) },
+          },
         ]),
       );
     });

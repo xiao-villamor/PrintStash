@@ -35,12 +35,52 @@ function Probe() {
         Save
       </button>
       <button onClick={() => void owner.review()}>Review</button>
+      <button onClick={() => void owner.adopt()}>Adopt</button>
       <p>{owner.state.phase}</p>
     </>
   );
 }
 
 describe("useSourceEditing", () => {
+  it("retains the draft when another history overtakes a Source acknowledgement", async () => {
+    const user = userEvent.setup();
+    const held = Promise.withResolvers<Response>();
+    const view = renderApp(<Probe />, {
+      seed: [[provenanceOptions(1).queryKey, aModelProvenance()]],
+      routes: { "PATCH /api/v1/models/1/provenance/8": () => held.promise },
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const restored = aModelProvenance({
+      edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      edit_version: 1,
+    });
+    act(() => view.client.setQueryData(provenanceOptions(1).queryKey, restored));
+    await act(async () => held.resolve(json(aModelProvenance({ edit_version: 9 }))));
+    expect(view.client.getQueryData(provenanceOptions(1).queryKey)).toEqual(restored);
+    expect(screen.getByText("Unsaved")).toBeVisible();
+    expect(screen.getByText("blocked")).toBeVisible();
+  });
+
+  it("adopts an explicitly reviewed restored Source history", async () => {
+    const user = userEvent.setup();
+    const epoch = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const restored = aModelProvenance({ edit_epoch: epoch, edit_version: 1 });
+    const view = renderApp(<Probe />, {
+      seed: [[provenanceOptions(1).queryKey, aModelProvenance({ edit_version: 9 })]],
+      routes: {
+        "PATCH /api/v1/models/1/provenance/8": json({ detail: "edit_conflict" }, 412),
+        "GET /api/v1/models/1/provenance": json(restored),
+        "GET /api/v1/models/1": json(aModel({ id: 1, edit_epoch: epoch, edit_version: 1 })),
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await screen.findByText("blocked");
+    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "Adopt" }));
+    expect(await screen.findByText("Saved")).toBeVisible();
+    expect(view.client.getQueryData(provenanceOptions(1).queryKey)).toEqual(restored);
+  });
+
   it("publishes a confirmed Source receipt ahead of a late read", async () => {
     const user = userEvent.setup();
     const held = Promise.withResolvers<Response>();

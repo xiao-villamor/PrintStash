@@ -1,3 +1,4 @@
+import { acceptsEditingSnapshot } from "./editing";
 import { useCallback, useState, useSyncExternalStore } from "react";
 import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getModel, getModelPrinterFiles, getModelPrintJobs } from "@/lib/api/models";
@@ -45,6 +46,7 @@ export function useModelDetail(id: number, initialModel?: ModelRead) {
     initialData: active ? initialModel : undefined,
     enabled: active,
   });
+  const observedEpoch = query.data?.edit_epoch ?? null;
   const publish = useCallback<PublishModel>(
     async (next) => {
       if (session !== getSessionVersion()) return false;
@@ -54,13 +56,13 @@ export function useModelDetail(id: number, initialModel?: ModelRead) {
       client.setQueryData<ModelRead>(queryKeys.model(id), (current) => {
         const candidate = next instanceof Function ? (current ? next(current) : undefined) : next;
         if (!candidate || candidate.id !== id) return current;
-        if (current && candidate.edit_version < current.edit_version) return current;
+        if (!acceptsEditingSnapshot(current, candidate, observedEpoch)) return current;
         accepted = true;
         return candidate;
       });
       return accepted;
     },
-    [client, id, session],
+    [client, id, session, observedEpoch],
   );
   return { ...query, data: active ? query.data : undefined, active, publish };
 }

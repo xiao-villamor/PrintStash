@@ -265,6 +265,7 @@ export function vaultStats(override?: Partial<VaultStatsRead>): VaultStatsRead {
 /** One row of the model library listing, with nothing printed yet. */
 export function aModelListItem(override?: Partial<ModelListItem>): ModelListItem {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,
     name: "Bracket",
@@ -292,6 +293,7 @@ export function aModel(
   override?: Partial<import("@/types").ModelRead>,
 ): import("@/types").ModelRead {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,
     name: "Leg",
@@ -465,6 +467,7 @@ export function aMultipartModel(
   override?: Partial<import("@/types/multipart-models").MultipartModelRead>,
 ): import("@/types/multipart-models").MultipartModelRead {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 7,
     name: "Table",
@@ -902,6 +905,7 @@ export function aModelProvenance(
   override?: Partial<import("@/types").ModelProvenanceRead>,
 ): import("@/types").ModelProvenanceRead {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     sources: [
       {
@@ -938,6 +942,7 @@ export function aModelProvenance(
 export function aOutlinerModel(override: Partial<OutlinerModelRead> = {}): OutlinerModelRead {
   return {
     id: 1,
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     name: "Benchy",
     collection: "parts",
@@ -945,4 +950,11 @@ export function aOutlinerModel(override: Partial<OutlinerModelRead> = {}): Outli
     collection_label: "Parts",
     ...override,
   };
+}
+
+/** An acknowledged editing base in the test library's stable database history. */
+export function anEditingBase(
+  override?: Partial<import("@/types").EditingBase>,
+): import("@/types").EditingBase {
+  return { edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1, ...override };
 }

@@ -18,6 +18,7 @@ import { json, renderApp, type RouteTable } from "@/test-support/render";
 import type { ModelListItem, PrintSummaryRead } from "@/types";
 
 const model: ModelListItem = {
+  edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   id: 1,
   name: "Cam Holder v4",

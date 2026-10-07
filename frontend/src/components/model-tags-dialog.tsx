@@ -1,5 +1,8 @@
 "use client";
 
+import { captureEditingBase, requireEditingReceipt } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
+
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -17,9 +20,8 @@ import { toast } from "@/lib/toast";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
 import type { ModelRead, TagRead } from "@/types";
 
-interface TaggedModel {
+interface TaggedModel extends EditingBase {
   id: number;
-  edit_version: number;
   name: string;
   tags: string[];
 }
@@ -39,7 +41,7 @@ export function ModelTagsDialog({
   suggestions: TagRead[];
   open: boolean;
   onClose: () => void;
-  onSaved: (tags: string[], editVersion: number) => void;
+  onSaved: (tags: string[], base: EditingBase) => void;
 }) {
   useUiLocale();
   const [base, setBase] = useState(model);
@@ -143,7 +145,7 @@ export function ModelTagsDialog({
     setBusy(true);
     try {
       const result = await batchTagModels([capturedBase.id], add, remove, {
-        [capturedBase.id]: capturedBase.edit_version,
+        [capturedBase.id]: captureEditingBase(capturedBase),
       });
       if (!isCurrent(generation)) return;
       if (
@@ -159,8 +161,7 @@ export function ModelTagsDialog({
         throw new Error(result.failed[0]?.reason ?? "invalid_edit_acknowledgment");
       }
       const version = result.succeeded_versions[capturedBase.id];
-      if (!Number.isSafeInteger(version) || version < 1)
-        throw new Error("invalid_edit_acknowledgment");
+      requireEditingReceipt(version, capturedBase);
       onSaved(submitted, version);
       toast.success(uiText("Tags updated"));
       setQuery("");

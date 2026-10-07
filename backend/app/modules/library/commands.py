@@ -42,6 +42,7 @@ from app.modules.library.edit_preconditions import claim as claim_edit
 from app.modules.library.trash import (
     soft_delete_models,
 )
+from app.schemas.editing import EditingBase
 from app.schemas.models import (
     FileRevisionUpdate,
     ModelBatchDelete,
@@ -191,7 +192,10 @@ def _require_all_editable_models(
 
 
 def _claim_batch_models(
-    session: Session, user: User, rows: list[Model], versions: dict[int, int] | None
+    session: Session,
+    user: User,
+    rows: list[Model],
+    versions: dict[int, EditingBase] | None,
 ) -> tuple[list[Model], list[ModelBatchFailure]]:
     if versions is None:
         return rows, []
@@ -207,7 +211,12 @@ def _claim_batch_models(
                     user,
                     row,
                     EditPrecondition(
-                        if_match=etag(EditKind.MODEL, row_id, versions[row_id])
+                        if_match=etag(
+                            EditKind.MODEL,
+                            row_id,
+                            versions[row_id].edit_version,
+                            versions[row_id].edit_epoch,
+                        )
                     ),
                 )
             claimed.append(row)
@@ -223,9 +232,9 @@ def _edit_batch_result(
 ) -> ModelEditBatchResult:
     session.flush()
     versions = {
-        str(row.id): row.edit_version
-        for row in session.execute(
-            select(col(Model.id), col(Model.edit_version)).where(
+        str(row_id): EditingBase(edit_version=version, edit_epoch=epoch)
+        for row_id, version, epoch in session.exec(
+            select(col(Model.id), col(Model.edit_version), Model.edit_epoch).where(
                 col(Model.id).in_(succeeded)
             )
         )

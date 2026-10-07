@@ -16,6 +16,7 @@ import type { CollectionRead, MultipartModelRead } from "@/types";
 
 function aMultipart(over: Partial<MultipartModelRead> = {}): MultipartModelRead {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 7,
     name: "Desk organiser",
@@ -126,7 +127,7 @@ describe("MultipartModelDetailPage", () => {
     );
     await user.click(screen.getByRole("button", { name: "Save changes" }));
 
-    expect(versions).toEqual(['"multipart-7-v1"']);
+    expect(versions).toEqual(['"multipart-7-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("My composition");
   });
 
@@ -190,7 +191,10 @@ describe("MultipartModelDetailPage", () => {
 
     expect(await screen.findByRole("button", { name: "Edit multipart set" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "My composition" })).toBeVisible();
-    expect(versions).toEqual(['"multipart-7-v1"', '"multipart-7-v7"']);
+    expect(versions).toEqual([
+      '"multipart-7-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"',
+      '"multipart-7-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"',
+    ]);
   });
 
   it("adopts reviewed Multipart values without a write", async () => {
@@ -569,6 +573,7 @@ describe("MultipartModelDetailPage", () => {
         "GET /api/v1/multipart-models/7": json(aMultipart()),
         "POST /api/v1/documents/upload": json({
           id: 44,
+          edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           edit_version: 1,
           name: "Assembly",
           kind: "pdf",
@@ -599,6 +604,7 @@ describe("MultipartModelDetailPage", () => {
     const user = userEvent.setup();
     const guide = {
       id: 44,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 1,
       name: "Assembly",
       kind: "pdf" as const,
@@ -779,6 +785,7 @@ describe("MultipartModelDetailPage", () => {
     const detail = aMultipart();
     const saved = {
       ...detail,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 2,
       collection: collection.path,
       collection_id: collection.id,
@@ -813,6 +820,7 @@ describe("MultipartModelDetailPage", () => {
     const coverImageUrl = "https://images.example.test/desk-organiser.webp";
     const saved = {
       ...detail,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 2,
       cover_image_url: coverImageUrl,
       cover_thumbnail_url: coverImageUrl,
@@ -841,6 +849,7 @@ describe("MultipartModelDetailPage", () => {
     const detail = aMultipart();
     const uploaded = {
       ...detail,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 2,
       cover_image_uploaded: true,
       cover_thumbnail_url: "/api/v1/multipart-models/7/cover/content?v=cover.webp",
@@ -904,7 +913,10 @@ describe("MultipartModelDetailPage", () => {
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     await screen.findByRole("button", { name: "Edit multipart set" });
 
-    expect(versions).toEqual(['"multipart-7-v1"', '"multipart-7-v9"']);
+    expect(versions).toEqual([
+      '"multipart-7-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"',
+      '"multipart-7-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v9"',
+    ]);
     expect(screen.getByRole("heading", { name: "My composition" })).toBeVisible();
   });
 
@@ -1509,6 +1521,7 @@ describe("MultipartModelCard editing", () => {
 
     expect(view.client.getQueryData(queryKeys.multipartModel(7))).toMatchObject({
       tags: ["Confirmed"],
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 9,
     });
   });
@@ -1564,10 +1577,11 @@ describe("Multipart auxiliary tag recovery", () => {
     );
     await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(versions).toEqual(['"multipart-7-v7"']);
+    expect(versions).toEqual(['"multipart-7-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"']);
     expect(JSON.parse(view.requestsWithMethod("PUT")[1].body)).toEqual({ tags: ["Local"] });
     expect(view.client.getQueryData(queryKeys.multipartModel(7))).toMatchObject({
       tags: ["Local"],
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 8,
     });
   });
@@ -1582,6 +1596,7 @@ describe("Multipart auxiliary tag recovery", () => {
     expect(view.requestsWithMethod("PUT")).toHaveLength(1);
     expect(view.client.getQueryData(queryKeys.multipartModel(7))).toMatchObject({
       tags: ["Remote"],
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 7,
     });
   });
@@ -1724,7 +1739,7 @@ describe("Multipart auxiliary tag recovery", () => {
     expect(screen.getByText("Local")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     await screen.findByRole("button", { name: "Review latest version" });
-    expect(versions).toEqual(['"multipart-7-v1"']);
+    expect(versions).toEqual(['"multipart-7-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
   });
 });
 
@@ -1770,6 +1785,7 @@ describe("Multipart auxiliary cover recovery", () => {
         });
         return json(
           aMultipart({
+            edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             edit_version: 8,
             cover_image_uploaded: true,
             cover_thumbnail_url: "/latest.webp",
@@ -1784,7 +1800,7 @@ describe("Multipart auxiliary cover recovery", () => {
       await screen.findByRole("button", { name: "Save my draft against this version" }),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(sent).toEqual([{ version: '"multipart-7-v7"', file }]);
+    expect(sent).toEqual([{ version: '"multipart-7-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"', file }]);
     expect(view.requestsWithMethod("PUT").every((request) => request.url.endsWith("/cover"))).toBe(
       true,
     );
@@ -1824,6 +1840,7 @@ describe("Multipart auxiliary cover recovery", () => {
       "GET /api/v1/multipart-models/7": json(
         aMultipart({
           name: "Remote composition",
+          edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           edit_version: 7,
           cover_image_uploaded: true,
           cover_thumbnail_url: "/remote.webp",
@@ -1843,7 +1860,7 @@ describe("Multipart auxiliary cover recovery", () => {
     expect(view.requestsWithMethod("PUT")).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     await screen.findByRole("button", { name: "Review latest version" });
-    expect(versions).toEqual(['"multipart-7-v1"']);
+    expect(versions).toEqual(['"multipart-7-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
   });
 
   it("preserves composition recovery after a rejected cover", async () => {
@@ -1963,6 +1980,7 @@ describe("Multipart auxiliary cover recovery", () => {
       "PUT /api/v1/multipart-models/7/cover": json(
         aMultipart({
           name: "Remote composition",
+          edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           edit_version: 8,
           cover_image_uploaded: true,
           cover_thumbnail_url: "/latest.webp",
@@ -1978,7 +1996,7 @@ describe("Multipart auxiliary cover recovery", () => {
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Local composition");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     await screen.findByRole("button", { name: "Review latest version" });
-    expect(versions).toEqual(['"multipart-7-v1"']);
+    expect(versions).toEqual(['"multipart-7-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
   });
 });
 
@@ -1990,6 +2008,7 @@ describe("Multipart auxiliary read races", () => {
       const held = Promise.withResolvers<Response>();
       let signal: AbortSignal | null | undefined;
       const saved = aMultipart({
+        edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         edit_version: 2,
         tags: ["Confirmed"],
         cover_image_uploaded: true,

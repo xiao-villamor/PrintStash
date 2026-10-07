@@ -1,4 +1,5 @@
 /** Wire contract for the standalone multipart-model API client. */
+import { anEditingBase } from "@/test-support/factories";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -42,22 +43,42 @@ describe("multipart model wire contract", () => {
             cover_image_url: null,
             parts: [],
           },
-          7,
+          anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
         ),
     },
-    { label: "tags", write: () => replaceMultipartModelTags(4, ["Draft"], 7) },
+    {
+      label: "tags",
+      write: () =>
+        replaceMultipartModelTags(
+          4,
+          ["Draft"],
+          anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
+        ),
+    },
     {
       label: "cover upload",
-      write: () => uploadMultipartModelCover(4, new File(["cover"], "cover.png"), 7),
+      write: () =>
+        uploadMultipartModelCover(
+          4,
+          new File(["cover"], "cover.png"),
+          anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
+        ),
     },
-    { label: "cover removal", write: () => deleteMultipartModelCover(4, 7) },
+    {
+      label: "cover removal",
+      write: () =>
+        deleteMultipartModelCover(
+          4,
+          anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
+        ),
+    },
   ])("sends the editor's Multipart version for $label", async ({ write }) => {
-    respondWith({ id: 4, edit_version: 9 });
+    respondWith({ id: 4, edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 9 });
 
     await write();
 
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
-    expect(headers.get("If-Match")).toBe('"multipart-4-v7"');
+    expect(headers.get("If-Match")).toBe('"multipart-4-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"');
     expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
   });
 
@@ -97,7 +118,12 @@ describe("multipart model wire contract", () => {
   });
 
   it("saves the complete multipart draft atomically", async () => {
-    respondWith({ id: 4, edit_version: 2, parts: [] });
+    respondWith({
+      id: 4,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      edit_version: 2,
+      parts: [],
+    });
     await saveMultipartModel(
       4,
       {
@@ -114,7 +140,7 @@ describe("multipart model wire contract", () => {
           },
         ],
       },
-      1,
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1 }),
     );
     expectRequest("/api/v1/multipart-models/4", "PUT");
     expect(lastBody()).toEqual({
@@ -130,10 +156,19 @@ describe("multipart model wire contract", () => {
   });
 
   it("uploads a local image as the multipart cover", async () => {
-    respondWith({ id: 4, edit_version: 2, cover_image_uploaded: true });
+    respondWith({
+      id: 4,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      edit_version: 2,
+      cover_image_uploaded: true,
+    });
     const image = new File(["cover"], "cover.png", { type: "image/png" });
 
-    await uploadMultipartModelCover(4, image, 1);
+    await uploadMultipartModelCover(
+      4,
+      image,
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1 }),
+    );
 
     expectRequest("/api/v1/multipart-models/4/cover", "PUT");
     const body = fetchMock.mock.calls[0]?.[1]?.body;
@@ -143,9 +178,17 @@ describe("multipart model wire contract", () => {
   });
 
   it("removes the uploaded multipart cover", async () => {
-    respondWith({ id: 4, edit_version: 2, cover_image_uploaded: false });
+    respondWith({
+      id: 4,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      edit_version: 2,
+      cover_image_uploaded: false,
+    });
 
-    await deleteMultipartModelCover(4, 1);
+    await deleteMultipartModelCover(
+      4,
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1 }),
+    );
 
     expectRequest("/api/v1/multipart-models/4/cover", "DELETE");
   });
@@ -185,8 +228,17 @@ describe("multipart model wire contract", () => {
   });
 
   it("replaces the grouping's own tags", async () => {
-    respondWith({ id: 4, edit_version: 2, tags: ["Display"] });
-    await replaceMultipartModelTags(4, ["Display"], 1);
+    respondWith({
+      id: 4,
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      edit_version: 2,
+      tags: ["Display"],
+    });
+    await replaceMultipartModelTags(
+      4,
+      ["Display"],
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1 }),
+    );
     expectRequest("/api/v1/multipart-models/4/tags", "PUT");
     expect(lastBody()).toEqual({ tags: ["Display"] });
   });
@@ -209,9 +261,21 @@ describe("multipart mutation isolation", () => {
   it.each([
     {
       label: "cover upload",
-      write: () => uploadMultipartModelCover(4, new File(["cover"], "cover.png"), 1),
+      write: () =>
+        uploadMultipartModelCover(
+          4,
+          new File(["cover"], "cover.png"),
+          anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1 }),
+        ),
     },
-    { label: "cover deletion", write: () => deleteMultipartModelCover(4, 1) },
+    {
+      label: "cover deletion",
+      write: () =>
+        deleteMultipartModelCover(
+          4,
+          anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1 }),
+        ),
+    },
     { label: "favourite removal", write: () => unstarMultipartModel(4) },
   ])("discards a retired $label acknowledgement", async ({ write }) => {
     const headers = Promise.withResolvers<Response>();
@@ -266,24 +330,66 @@ describe.each([
           cover_image_url: null,
           parts: [],
         },
-        7,
+        anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
       ),
   },
-  { label: "tags", write: () => replaceMultipartModelTags(4, ["Draft"], 7) },
+  {
+    label: "tags",
+    write: () =>
+      replaceMultipartModelTags(
+        4,
+        ["Draft"],
+        anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
+      ),
+  },
   {
     label: "cover upload",
-    write: () => uploadMultipartModelCover(4, new File(["cover"], "cover.png"), 7),
+    write: () =>
+      uploadMultipartModelCover(
+        4,
+        new File(["cover"], "cover.png"),
+        anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
+      ),
   },
-  { label: "cover removal", write: () => deleteMultipartModelCover(4, 7) },
+  {
+    label: "cover removal",
+    write: () =>
+      deleteMultipartModelCover(
+        4,
+        anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
+      ),
+  },
 ])("Multipart $label acknowledgement", ({ write }) => {
   it.each<{ label: string; value: WireValue }>([
-    { label: "another aggregate", value: { id: 5, edit_version: 8 } },
+    {
+      label: "another aggregate",
+      value: { id: 5, edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 8 },
+    },
     { label: "missing version", value: { id: 4 } },
-    { label: "unchanged version", value: { id: 4, edit_version: 7 } },
-    { label: "older version", value: { id: 4, edit_version: 6 } },
-    { label: "unsafe version", value: { id: 4, edit_version: Number.MAX_SAFE_INTEGER + 1 } },
-    { label: "fractional version", value: { id: 4, edit_version: 8.5 } },
-    { label: "string version", value: { id: 4, edit_version: "8" } },
+    {
+      label: "unchanged version",
+      value: { id: 4, edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 },
+    },
+    {
+      label: "older version",
+      value: { id: 4, edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 6 },
+    },
+    {
+      label: "unsafe version",
+      value: {
+        id: 4,
+        edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        edit_version: Number.MAX_SAFE_INTEGER + 1,
+      },
+    },
+    {
+      label: "fractional version",
+      value: { id: 4, edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 8.5 },
+    },
+    {
+      label: "string version",
+      value: { id: 4, edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: "8" },
+    },
     { label: "null body", value: null },
   ])("rejects $label instead of confirming the edit", async ({ value }) => {
     respondWith(value);

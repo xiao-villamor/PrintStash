@@ -71,6 +71,7 @@ const metadata: MetadataRead = {
 };
 
 const model = {
+  edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   id: 1,
   name: "skadis_kitchen-roll_screw",
@@ -222,6 +223,7 @@ const printerDiagnostics = {
 const modelList = [
   {
     id: model.id,
+    edit_epoch: model.edit_epoch,
     edit_version: model.edit_version,
     name: model.name,
     slug: model.slug,
@@ -597,18 +599,22 @@ function claimSourceEdit(req: IncomingMessage, res: ServerResponse): boolean {
     sendJson(res, { detail: "edit_precondition_required" }, 428);
     return false;
   }
-  if (req.headers["if-match"] !== `"model-1-v${state.sourceEditVersion}"`) {
+  if (
+    req.headers["if-match"] !==
+    `"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v${state.sourceEditVersion}"`
+  ) {
     sendJson(res, { detail: "edit_conflict" }, 412);
     return false;
   }
   state.sourceEditVersion++;
-  res.setHeader("ETag", `"model-1-v${state.sourceEditVersion}"`);
+  res.setHeader("ETag", `"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v${state.sourceEditVersion}"`);
   return true;
 }
 
 function provenance(): ModelProvenanceRead & { schema_version: 2 } {
   return {
     schema_version: 2,
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: state.sourceEditVersion,
     sources: [
       {
@@ -1047,15 +1053,18 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   // The tree a level, a lookup or a search at a time. Every mock collection is
   // a top-level folder with nothing below it.
   if (url.pathname.startsWith("/api/v1/outliner/")) {
-    const leaves = modelList.map(({ id, name, edit_version, collection, collection_id }) => ({
-      kind: "model",
-      edit_version,
-      id,
-      name,
-      collection,
-      collection_id,
-      collection_label: mockCollections().find((row) => row.id === collection_id)?.name ?? null,
-    }));
+    const leaves = modelList.map(
+      ({ id, name, edit_epoch, edit_version, collection, collection_id }) => ({
+        kind: "model",
+        edit_epoch,
+        edit_version,
+        id,
+        name,
+        collection,
+        collection_id,
+        collection_label: mockCollections().find((row) => row.id === collection_id)?.name ?? null,
+      }),
+    );
     const page = <T extends { name: string; id: number }>(items: T[]) => {
       const offset = Number(url.searchParams.get("cursor") ?? 0);
       const limit = Number(url.searchParams.get("limit") ?? 50);
@@ -1200,7 +1209,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (url.pathname === "/api/v1/models/1/provenance") {
-    res.setHeader("ETag", `"model-1-v${state.sourceEditVersion}"`);
+    res.setHeader(
+      "ETag",
+      `"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v${state.sourceEditVersion}"`,
+    );
     sendJson(res, provenance());
     return;
   }
@@ -1342,7 +1354,8 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   if (url.pathname === "/api/v1/models/outliner") {
     sendJson(
       res,
-      modelList.map(({ id, name, edit_version, collection, collection_id }) => ({
+      modelList.map(({ id, name, edit_epoch, edit_version, collection, collection_id }) => ({
+        edit_epoch,
         edit_version,
         id,
         name,

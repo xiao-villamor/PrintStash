@@ -89,7 +89,7 @@ from app.modules.library.edit_preconditions import (
     EditKind,
     EditPrecondition,
     etag,
-    expected_version,
+    expected_base,
 )
 from app.modules.library.edit_preconditions import claim as claim_edit
 from app.modules.library.model_views import browse as models_browse
@@ -893,7 +893,9 @@ def get_model(
     session: Session = Depends(get_session),
 ) -> ModelRead:
     result = _detail_or_404(session, model_id, current_user)
-    response.headers["ETag"] = etag(EditKind.MODEL, result.id, result.edit_version)
+    response.headers["ETag"] = etag(
+        EditKind.MODEL, result.id, result.edit_version, result.edit_epoch
+    )
     return result
 
 
@@ -910,7 +912,9 @@ def get_model_provenance(
 ) -> ModelProvenanceRead:
     _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
     result = models_detail.provenance_detail(session, model_id)
-    response.headers["ETag"] = etag(EditKind.MODEL, model_id, result.edit_version)
+    response.headers["ETag"] = etag(
+        EditKind.MODEL, model_id, result.edit_version, result.edit_epoch
+    )
     return result
 
 
@@ -958,7 +962,9 @@ def patch_model_provenance(
         )
     session.commit()
     result = models_detail.provenance_detail(session, model_id)
-    response.headers["ETag"] = etag(EditKind.MODEL, model_id, result.edit_version)
+    response.headers["ETag"] = etag(
+        EditKind.MODEL, model_id, result.edit_version, result.edit_epoch
+    )
     return result
 
 
@@ -1032,7 +1038,7 @@ def put_model_source_cover(
         model = _require_model_role(
             session, current_user, model_id, CollectionRole.EDIT
         )
-        expected_version(EditKind.MODEL, model_id, precondition)
+        expected_base(EditKind.MODEL, model_id, precondition)
         _provenance_source_or_404(session, model_id, source_id)
         data = file.file.read(15 * 1024 * 1024 + 1)
         try:
@@ -1061,7 +1067,9 @@ def put_model_source_cover(
             raise
         session.refresh(cover)
         session.refresh(model)
-        response.headers["ETag"] = etag(EditKind.MODEL, model_id, model.edit_version)
+        response.headers["ETag"] = etag(
+            EditKind.MODEL, model_id, model.edit_version, model.edit_epoch
+        )
         return ModelSourceCoverRead.model_validate(cover)
 
 
@@ -1091,7 +1099,9 @@ def delete_model_source_cover(
     session.refresh(model)
     return Response(
         status_code=status.HTTP_204_NO_CONTENT,
-        headers={"ETag": etag(EditKind.MODEL, model_id, model.edit_version)},
+        headers={
+            "ETag": etag(EditKind.MODEL, model_id, model.edit_version, model.edit_epoch)
+        },
     )
 
 
@@ -1533,7 +1543,9 @@ def update_model(
         precondition=precondition,
     )
     result = _detail_or_404(session, model_id, current_user)
-    response.headers["ETag"] = etag(EditKind.MODEL, result.id, result.edit_version)
+    response.headers["ETag"] = etag(
+        EditKind.MODEL, result.id, result.edit_version, result.edit_epoch
+    )
     return result
 
 

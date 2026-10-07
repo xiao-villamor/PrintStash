@@ -40,6 +40,7 @@ const editor: ModelMetaEditor = {
 };
 
 const model: ModelRead = {
+  edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   id: 1,
   name: "Calibration cube",

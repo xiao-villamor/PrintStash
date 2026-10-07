@@ -150,6 +150,7 @@ const emptyPage: ModelPageRead = { items: [], next_cursor: null, total: 0 };
 
 function makeListItem(id: number, name: string): ModelListItem {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id,
     name,
@@ -477,6 +478,7 @@ describe("server-owned Model pagination", () => {
 describe("folder navigation", () => {
   function aMultipartModel(id: number, name: string): MultipartModelListItem {
     return {
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       edit_version: 1,
       id,
       name,

@@ -6,10 +6,10 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.models import CollectionRole, DocumentKind
+from app.schemas.editing import EditingBase
 
 
-class DocumentListItem(BaseModel):
-    edit_version: int
+class DocumentListItem(EditingBase):
     id: int
     name: str
     kind: DocumentKind

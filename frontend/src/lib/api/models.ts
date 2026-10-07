@@ -1,3 +1,5 @@
+import type { EditingBase } from "@/types/editing";
+import { editHeaders, requireEditingReceipt } from "./editing";
 import {
   expectOk,
   getJson,
@@ -225,13 +227,17 @@ export function importPrintJobsFromPrinter(
 export function updateModel(
   id: number,
   payload: ModelUpdate,
-  editVersion: number,
+  base: EditingBase,
 ): Promise<ModelRead> {
-  if (!Number.isSafeInteger(editVersion) || editVersion < 1)
-    throw new Error("Invalid Model edit version");
-  return sendJson<ModelRead>(`/api/v1/models/${id}`, "PATCH", payload, {
-    "If-Match": `"model-${id}-v${editVersion}"`,
-    "X-PrintStash-Edit-Contract": "conditional-v1",
+  return sendJson<ModelRead>(
+    `/api/v1/models/${id}`,
+    "PATCH",
+    payload,
+    editHeaders("model", id, base),
+  ).then((saved) => {
+    if (saved.id !== id) throw new Error("Invalid Model acknowledgement");
+    requireEditingReceipt(saved, base);
+    return saved;
   });
 }
 
@@ -242,7 +248,7 @@ export function deleteModel(id: number): Promise<void> {
 export function batchMoveModels(
   modelIds: number[],
   collection: string,
-  expectedVersions: Record<number, number>,
+  expectedVersions: Record<number, EditingBase>,
 ): Promise<ModelEditBatchResult> {
   return sendJson<ModelEditBatchResult>(
     "/api/v1/models/batch/move",
@@ -260,7 +266,7 @@ export function batchTagModels(
   modelIds: number[],
   add: string[],
   remove: string[],
-  expectedVersions: Record<number, number>,
+  expectedVersions: Record<number, EditingBase>,
 ): Promise<ModelEditBatchResult> {
   return sendJson<ModelEditBatchResult>(
     "/api/v1/models/batch/tags",

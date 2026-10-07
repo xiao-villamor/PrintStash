@@ -114,6 +114,7 @@ def _collection_path(session: Session, collection_id: Optional[int]) -> Optional
 
 def _item(session: Session, user: User, doc: Document) -> DocumentListItem:
     return DocumentListItem(
+        edit_epoch=doc.edit_epoch,
         edit_version=doc.edit_version,
         id=doc.id,
         name=doc.name,
@@ -445,7 +446,9 @@ def get_document(
 ) -> DocumentRead:
     doc = _require_doc(session, current_user, document_id, CollectionRole.VIEW)
     result = _read(session, current_user, doc)
-    response.headers["ETag"] = etag(EditKind.DOCUMENT, result.id, result.edit_version)
+    response.headers["ETag"] = etag(
+        EditKind.DOCUMENT, result.id, result.edit_version, result.edit_epoch
+    )
     return result
 
 
@@ -479,7 +482,9 @@ def update_document(
     session.commit()
     session.refresh(doc)
     result = _read(session, current_user, doc)
-    response.headers["ETag"] = etag(EditKind.DOCUMENT, result.id, result.edit_version)
+    response.headers["ETag"] = etag(
+        EditKind.DOCUMENT, result.id, result.edit_version, result.edit_epoch
+    )
     return result
 
 

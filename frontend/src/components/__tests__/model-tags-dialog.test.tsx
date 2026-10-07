@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ModelTagsDialog } from "@/components/model-tags-dialog";
 import { json, renderApp, type RouteAnswer } from "@/test-support/render";
-import { aModel, aModelListItem } from "@/test-support/factories";
+import { anEditingBase, aModel, aModelListItem } from "@/test-support/factories";
 import { clearLogin } from "@/lib/auth-store";
 import type { ModelEditBatchResult, TagRead } from "@/types";
 
@@ -26,7 +26,7 @@ const tags: TagRead[] = [
   { id: 2, name: "Functional", slug: "functional", model_count: 4 },
 ];
 const success: ModelEditBatchResult = {
-  succeeded_versions: { 1: 9 },
+  succeeded_versions: { 1: anEditingBase({ edit_version: 9 }) },
   succeeded_ids: [1],
   failed: [],
   succeeded_count: 1,
@@ -34,7 +34,7 @@ const success: ModelEditBatchResult = {
 };
 
 function renderDialog(route: RouteAnswer = json(success)) {
-  const onSaved = vi.fn<(tags: string[], version: number) => void>();
+  const onSaved = vi.fn<(tags: string[], version: import("@/types").EditingBase) => void>();
   const onClose = vi.fn<() => void>();
   const result = renderApp(
     <ModelTagsDialog model={model} suggestions={tags} open onClose={onClose} onSaved={onSaved} />,
@@ -60,7 +60,7 @@ describe("ModelTagsDialog", () => {
             suggestions={tags}
             open
             onClose={() => {}}
-            onSaved={(_tags, version) => setVersion(version)}
+            onSaved={(_tags, version) => setVersion(version.edit_version)}
           />
         </>
       );
@@ -82,7 +82,7 @@ describe("ModelTagsDialog", () => {
     await waitFor(() =>
       expect(JSON.parse(requestsWithMethod("POST")[0]?.body ?? "{}")).toMatchObject({
         model_ids: [1],
-        expected_versions: { 1: 3 },
+        expected_versions: { 1: anEditingBase({ edit_version: 3 }) },
         add: ["Functional"],
         remove: [],
       }),
@@ -214,12 +214,14 @@ describe("ModelTagsDialog conflict recovery", () => {
     expect(await screen.findByText("Workshop, Remote")).toBeVisible();
     result.route({ "POST /api/v1/models/batch/tags": json(success) });
     await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
-    await waitFor(() => expect(result.onSaved).toHaveBeenCalledWith([], 9));
+    await waitFor(() =>
+      expect(result.onSaved).toHaveBeenCalledWith([], anEditingBase({ edit_version: 9 })),
+    );
     expect(JSON.parse(result.requestsWithMethod("POST")[1].body)).toEqual({
       model_ids: [1],
       add: [],
       remove: ["Workshop", "Remote"],
-      expected_versions: { 1: 7 },
+      expected_versions: { 1: anEditingBase({ edit_version: 7 }) },
     });
   });
 
@@ -353,7 +355,10 @@ describe("ModelTagsDialog conflict recovery", () => {
     expect(screen.getByLabelText("Search or create a tag")).toBeDisabled();
     expect(screen.getByRole("button", { name: "Remove Functional" })).toBeDisabled();
     await act(async () => pending.resolve(json(success)));
-    expect(result.onSaved).toHaveBeenCalledWith(["Workshop", "Functional"], 9);
+    expect(result.onSaved).toHaveBeenCalledWith(
+      ["Workshop", "Functional"],
+      anEditingBase({ edit_version: 9 }),
+    );
   });
 
   it("requires a new review when the reviewed base changes again", async () => {
@@ -378,7 +383,7 @@ describe("ModelTagsDialog conflict recovery", () => {
     expect(screen.getByRole("button", { name: "Save tags" })).toBeDisabled();
     expect(result.requestsWithMethod("POST")).toHaveLength(2);
     expect(JSON.parse(result.requestsWithMethod("POST")[1].body).expected_versions).toEqual({
-      1: 7,
+      1: anEditingBase({ edit_version: 7 }),
     });
   });
 });
