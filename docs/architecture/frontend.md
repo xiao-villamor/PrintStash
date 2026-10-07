@@ -1,6 +1,6 @@
 # Frontend target architecture
 
-Status: implemented ownership contracts through M10, with M11 integration qualification in progress (2026-10-07). The [plan](../frontend-architecture/plan.md) records decisions and dependency order; the [validation matrix](../frontend-architecture/validation.md) and individual milestone records distinguish accepted local results from outstanding final gates. This document describes source behavior, not a released version.
+Status: implemented frontend ownership contracts (2026-10-07), delivered for review in [PR #424](https://github.com/xiao-villamor/PrintStash/pull/424). The [plan](../frontend-architecture/plan.md) records decisions and dependency order; the [validation matrix](../frontend-architecture/validation.md), milestone records and [integration qualification](../frontend-architecture/final-review.md#integrated-source-qualification-8568aa8b) identify tested revisions and review limits. The PR records the final remote check result. This describes source behavior, not a released version.
 
 ## Ownership and module interfaces
 

@@ -695,3 +695,50 @@ all eight readiness medians increased relative to the local baseline; dense EN
 warm exceeds both latency references. Visible dense thumbnail decoding remains
 faster in all four groups. These results do not establish universal performance
 improvement. Final source CI qualification remains pending.
+
+## Integrated source qualification: `8568aa8b`
+
+The final production source is `8568aa8be97b132dc9530fc17eef274486ad523d`.
+[Required CI 37677725555](https://github.com/xiao-villamor/PrintStash/actions/runs/37677725555)
+passed all 17 jobs, including its aggregate PR gate. The local final correction
+selection passed 61 frontend and 58 backend architecture/config/cache cases.
+Frontend lint, app/UI/domain types, formatting (799 files), production build
+(9.89s), scoped backend Ruff and the configured backend Pyright all passed.
+The existing large-chunk warning remains.
+
+[Deep CI 37677790195](https://github.com/xiao-villamor/PrintStash/actions/runs/37677790195)
+is the authoritative extended result for this production source. Its frontend
+coverage job passed 4,458 app / 85 domain / 199 UI tests and every unchanged floor:
+
+| Suite | Statements | Branches | Floor result |
+|---|---:|---:|---|
+| Application | 86.74% | 81.28% | Every app-area floor held, including lib branches |
+| Domain package | 97.20% | 93.91% | Held |
+| UI package | 98.78% | 97.60% | Held |
+
+Both production startup jobs, all four supported-scale jobs, all four mesh
+resource jobs, extension, both native similarity architectures, both printer-core
+resolutions and the onboarding/environment browser jobs are qualified on that
+source. Full backend compatibility/coverage and complete browser outcomes are
+identified by the linked Deep run, with the final result summarized in the PR.
+No incomplete or superseded execution is promoted to a passing result.
+
+Subsequent delivery documentation may have a newer commit; it must preserve
+identical frontend/backend/extension/workflow production and test trees. The
+required PR checks must be green for the latest commit before handoff. The final
+ledger reconciles 927 paths at the production snapshot with zero omitted tracked
+paths in its four declared roots and unchanged historical evidence columns.
+Its 146 current complete reads, 61 historical complete reads, 14 historical
+targeted reads, 387 bounded feature references, 285 inventory-only gaps and 34
+binary/generated/excluded paths remain distinct; this is not a comprehensive
+manual certification of every source or test assertion.
+
+Correctness: documented failure families and final integration defects have
+observable regressions. Maintainability: remote observations, mutation policy,
+URL/history snapshots and session/entry lifetimes have explicit owners;
+dependency and hygiene checks enforce those boundaries. Performance: the final
+comparable checkpoint improves dense thumbnail decoding but regresses readiness
+medians and misses dense EN warm references. These three outcomes are separate.
+Residual generic download feedback, legacy typing/tooling debt, manual-review
+gaps and unmeasured GPU/real-provider behavior remain disclosed above and in
+the inventory/measurement reports.
