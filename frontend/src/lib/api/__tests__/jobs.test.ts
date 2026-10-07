@@ -7,7 +7,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cancelJob, getJobStatus, listJobs, listWorkJobs, retryJob } from "@/lib/api/jobs";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
@@ -16,7 +15,6 @@ const RUNNING = { job_id: "abc", state: "running" };
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
 });
 
 afterEach(() => {

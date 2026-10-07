@@ -26,7 +26,6 @@ import {
   retryPendingImport,
   updatePendingImport,
 } from "@/lib/api/inbox";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
@@ -51,7 +50,7 @@ const ITEM = { id: 1, state: "review", manifest: V2_MANIFEST };
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

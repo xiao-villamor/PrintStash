@@ -70,7 +70,7 @@ import type {
  * These were previously fetched into local `useState` in ~5 places; now they
  * share one TanStack Query cache entry, dedupe in-flight requests, and
  * revalidate on window focus. Mutations go through the api layer, whose keyed
- * invalidation (`invalidateQueriesForPath`) busts these after a
+ * feature-owned invalidation busts these after a
  * create/move/delete, so they refetch automatically.
  *
  * JSON transport always reads the network; Query owns reuse and freshness.
@@ -219,13 +219,11 @@ export function useTags(options?: { enabled?: boolean }) {
 
 /**
  * Same shared-cache treatment for the other read-mostly resources that were
- * each fetched into local `useState` per component. Mutations through the api
- * layer invalidate these by key (see `invalidateQueriesForPath`), so a printer
+ * each fetched into local `useState` per component. Feature commands
+ * invalidate these by key, so a printer
  * added on one screen shows up on every other without a manual reload.
  *
  * Query is the sole freshness owner; the transport consumes the signal.
- * TanStack
- * Query stays the single source of truth, matching the other taxonomy hooks.
  */
 export function printersOptions(api: Pick<QueryApi, "listPrinters"> = defaultQueryApi) {
   return queryOptions({
@@ -423,7 +421,7 @@ export function useModelFacets(filters: ModelListFilters, options?: { enabled?: 
  *  - Results are cached per filter set, so backspacing to a query you just ran
  *    (or revisiting a folder) is instant instead of a fresh round-trip.
  *
- * Mutations invalidate `["models"]` via `invalidateQueriesForPath`, which by
+ * Feature commands invalidate `["models"]`, which by
  * prefix-matching also busts every keyed list here.
  */
 /** Opaque page cursor as issued by the API; `null` requests the first page. */

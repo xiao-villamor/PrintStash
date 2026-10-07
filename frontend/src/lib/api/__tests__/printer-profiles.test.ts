@@ -17,14 +17,13 @@ import {
   listPrinterProfiles,
   updatePrinterProfile,
 } from "@/lib/api/printer-profiles";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, respondWith } from "./_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

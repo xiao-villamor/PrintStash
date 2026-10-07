@@ -36,14 +36,13 @@ import {
 import { isLoggedIn, storeLogin } from "@/lib/auth-store";
 import { queryClient } from "@/lib/query-client";
 import { aMaintenanceWindow, aMaintenanceLog } from "@/test-support/factories";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

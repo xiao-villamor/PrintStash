@@ -1,3 +1,4 @@
+import { refreshLibraryMetadata } from "./metadata";
 import { acceptsEditingSnapshot } from "./editing";
 import { useCallback, useState, useSyncExternalStore } from "react";
 import { queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -64,6 +65,7 @@ export function useModelDetail(id: number, initialModel?: ModelRead) {
         accepted = true;
         return candidate;
       });
+      if (accepted) refreshLibraryMetadata(client, session, { kind: "model", id });
       return accepted;
     },
     [client, id, session, observedEpoch],

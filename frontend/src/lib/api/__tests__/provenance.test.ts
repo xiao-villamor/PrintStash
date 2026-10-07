@@ -30,7 +30,6 @@ import {
   putModelSourceCover,
 } from "@/lib/api/provenance";
 import { getPendingImport, parseInboxManifest } from "@/lib/api/inbox";
-import { invalidateApiCache } from "@/lib/api/request";
 import type { ModelProvenancePatch } from "@/types/provenance";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -42,7 +41,6 @@ function reply(body: string): Response {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
 });
 
 afterEach(() => vi.unstubAllGlobals());

@@ -51,7 +51,6 @@ import { queryClient } from "@/lib/query-client";
 import { aPrinter, anEditingBase } from "@/test-support/factories";
 import { clearLogin } from "@/lib/auth-store";
 import { aPrinterPermission } from "@/test-support/permissions";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
@@ -60,7 +59,7 @@ const PRINTER = { ...anEditingBase(), id: 3, name: "Ender", provider: "moonraker
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

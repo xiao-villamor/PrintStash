@@ -7,7 +7,6 @@ import {
   requestApi,
   authHeaders,
   jsonHeaders,
-  requestMutation,
   sendAction,
   sendJson,
 } from "@/lib/api/request";
@@ -161,7 +160,7 @@ export function starMultipartModel(id: number): Promise<MultipartModelStarRead> 
 
 export async function unstarMultipartModel(id: number): Promise<MultipartModelStarRead> {
   const path = `/api/v1/multipart-models/${id}/star`;
-  return requestMutation<MultipartModelStarRead>(path, { method: "DELETE" });
+  return requestApi<MultipartModelStarRead>(path, { method: "DELETE" });
 }
 
 export function listMultipartModelCandidates(

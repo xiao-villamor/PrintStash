@@ -1,3 +1,4 @@
+import { useTaxonomyCommands } from "@/features/library/taxonomy";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { getErrorMessage, userMessage } from "@/lib/errors";
@@ -149,6 +150,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
     submittedId === inboxId,
   );
   const commands = useInboxCommands({ ...inboxApi, ...api });
+  const taxonomy = useTaxonomyCommands({ createCollection: api.createCollection });
   const item = remote.data ?? null;
   type ReviewDraft = {
     id: number;
@@ -268,7 +270,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
       cursor = page.next_cursor;
     } while (cursor !== null);
     requireSessionVersion(session);
-    const created = await api.createCollection({ name, parent_id: null });
+    const created = await taxonomy.createCollection({ name, parent_id: null });
     requireSessionVersion(session);
     if (routeRef.current !== inboxId) throw new DOMException("Inbox route changed", "AbortError");
     setDestination(String(created.id));

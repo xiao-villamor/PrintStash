@@ -42,15 +42,7 @@ export interface MigrationException {
   reason: string;
   removeBy: string;
 }
-export const MIGRATION_EXCEPTIONS: readonly MigrationException[] = [
-  {
-    from: "src/lib/api/request.ts",
-    target: "src/lib/query-client.ts",
-    symbols: ["queryClient", "invalidateQueriesForPath"],
-    reason: "Legacy HTTP mutations still delegate invalidation to the central Query policy.",
-    removeBy: "M10: migrate the remaining mutation callers to their feature policy.",
-  },
-];
+export const MIGRATION_EXCEPTIONS: readonly MigrationException[] = [];
 
 /** Existing public modules, not a blanket exemption for future feature internals. */
 export const FEATURE_PUBLIC_MODULES = new Set([
@@ -76,6 +68,8 @@ export const FEATURE_PUBLIC_MODULES = new Set([
     "reading-position",
     "saved-views",
     "thumbnails",
+    "taxonomy",
+    "metadata",
     "url",
   ].map((name) => `src/features/library/${name}.ts`),
   "src/features/library/navigation.tsx",

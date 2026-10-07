@@ -10,7 +10,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { queryClient, queryKeys } from "@/lib/query-client";
 import { clearLogin } from "@/lib/auth-store";
-import { invalidateApiCache } from "@/lib/api/request";
 import {
   cancelQueuedJobs,
   createEventsTicket,
@@ -27,7 +26,6 @@ import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wi
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
 });
 
 afterEach(() => {

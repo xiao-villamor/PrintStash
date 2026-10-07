@@ -14,7 +14,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { aCollectionPermission } from "@/test-support/permissions";
-import { invalidateApiCache } from "@/lib/api/request";
 import {
   createCollection,
   createTag,
@@ -41,7 +40,7 @@ import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wi
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

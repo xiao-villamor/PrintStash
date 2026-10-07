@@ -5,7 +5,6 @@
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
 
 import { restartPrintStash } from "@/lib/api/system";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, respondWith } from "./_wire";
 
@@ -13,7 +12,7 @@ describe("restartPrintStash", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
-    invalidateApiCache();
+
     window.localStorage.clear();
   });
 

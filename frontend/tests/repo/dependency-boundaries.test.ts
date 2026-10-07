@@ -440,6 +440,26 @@ describe("inspectDependencies", () => {
     expect(result.diagnostics).toMatchObject([{ code: "parse", from: "src/a.ts", line: 1 }]);
   });
 
+  const legacyFixture = [
+    {
+      from: "src/lib/api/request.ts",
+      target: "src/lib/query-client.ts",
+      symbols: ["queryClient", "invalidateQueriesForPath"],
+      reason: "Synthetic exception engine fixture",
+      removeBy: "M10 fixture",
+    },
+  ];
+  it("prohibits transport Query imports without migration exceptions", () => {
+    expect(MIGRATION_EXCEPTIONS).toEqual([]);
+    const result = inspectDependencies(
+      project({
+        "src/lib/api/request.ts": 'import { queryClient } from "@/lib/query-client";',
+        "src/lib/query-client.ts": "export const queryClient = {};",
+      }),
+      MIGRATION_EXCEPTIONS,
+    );
+    expect(result.diagnostics.map((item) => item.code)).toEqual(["boundary"]);
+  });
   it.each([
     {
       label: "exact",
@@ -480,7 +500,7 @@ describe("inspectDependencies", () => {
         "src/lib/query-client.ts": "export const queryClient = {};",
         "src/lib/queries.ts": "export const queryClient = {};",
       }),
-      MIGRATION_EXCEPTIONS,
+      legacyFixture,
     );
 
     expect(result.diagnostics.map((item) => item.code)).toEqual(expected);
@@ -489,7 +509,7 @@ describe("inspectDependencies", () => {
   it("rejects stale exceptions", () => {
     const result = inspectDependencies(
       project({ "src/lib/api/request.ts": "export const value = 1;" }),
-      MIGRATION_EXCEPTIONS,
+      legacyFixture,
     );
 
     expect(result.diagnostics).toMatchObject([

@@ -1,5 +1,7 @@
 "use client";
 
+import { useTaxonomyCommands } from "@/features/library/taxonomy";
+
 import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
 
 import { useLibraryReadingPosition } from "@/features/library/reading-position";
@@ -107,15 +109,10 @@ import {
   ScanSearch,
 } from "lucide-react";
 import {
-  createCollection,
   listCollectionChildren,
   searchCollections,
-  moveCollection,
-  renameCollection,
-  deleteCollection,
   batchDeleteModels,
   restoreModel,
-  replaceCollectionTags,
 } from "@/lib/api";
 import {
   isMeshFile,
@@ -511,6 +508,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
   const { user, refresh: refreshAuth } = useAuth();
+  const {
+    createCollection,
+    moveCollection,
+    renameCollection,
+    deleteCollection,
+    replaceCollectionTags,
+  } = useTaxonomyCommands();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
   const filtersEnabled = startup.canLoad("filters");
@@ -1077,6 +1081,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const sequence = ++scope.sequence;
     const isCurrent = () =>
       getSessionVersion() === session && scope.entry === entry && scope.sequence === sequence;
+    // The view below explicitly reloads its taxonomy and continuation pages.
+    // Mark other metadata stale without starting duplicate reads of that view.
+    for (const queryKey of [queryKeys.models, queryKeys.collections])
+      void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.vaultStats });
     setRefreshState({ entry, status: "pending" });
     let lookupPending = selectedCollection !== null;
     try {

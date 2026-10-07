@@ -196,7 +196,7 @@ function renderPanel({
   client.setQueryData(queryKeys.spoolmanStatus, spoolmanStatus(spools !== undefined));
   client.setQueryData(queryKeys.spools, spools ?? []);
 
-  return render(
+  const rendered = render(
     <MemoryRouter>
       <QueryClientProvider client={client}>
         <AuthContext.Provider value={adminAuth}>
@@ -219,6 +219,7 @@ function renderPanel({
       </QueryClientProvider>
     </MemoryRouter>,
   );
+  return { ...rendered, client };
 }
 
 beforeEach(() => {
@@ -265,6 +266,19 @@ describe("SendToQueue", () => {
     expect(screen.getByRole("checkbox", { name: "Select Core One" })).toBeEnabled();
   });
 
+  it("refreshes fleet projections after a queue command", async () => {
+    const app = renderPanel();
+    app.client.setQueryData(queryKeys.fleetQueue, []);
+    app.client.setQueryData(queryKeys.fleetSummary, {});
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Send to printer/ }));
+    await user.click(screen.getByRole("button", { name: "Add to queue" }));
+    await user.click(screen.getAllByRole("button", { name: "Add to queue" }).at(-1)!);
+    await waitFor(() =>
+      expect(app.client.getQueryState(queryKeys.fleetQueue)?.isInvalidated).toBe(true),
+    );
+    expect(app.client.getQueryState(queryKeys.fleetSummary)?.isInvalidated).toBe(true);
+  });
   it("adds selected G-code to least-busy fleet queue", async () => {
     renderPanel();
 

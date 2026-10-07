@@ -35,7 +35,6 @@ import {
   restoreBackup,
   uploadBackup,
 } from "@/lib/api/backup";
-import { invalidateApiCache } from "@/lib/api/request";
 import { aJob } from "@/test-support/factories";
 
 import { expectRequest, fetchMock, lastCall, respondWith } from "./_wire";
@@ -69,7 +68,7 @@ function recordClicks(): string[] {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

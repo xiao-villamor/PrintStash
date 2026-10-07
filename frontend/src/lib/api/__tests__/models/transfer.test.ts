@@ -22,7 +22,6 @@ import {
   importLibraryArchive,
 } from "@/lib/api/models";
 import { clearLogin } from "@/lib/auth-store";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastCall, respondWith } from "../_wire";
 
@@ -46,7 +45,7 @@ function stubBrowserSave() {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

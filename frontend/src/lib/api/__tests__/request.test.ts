@@ -36,7 +36,6 @@ import {
   getDerivedText,
   getUrl,
   getWsUrl,
-  invalidateApiCache,
   parseContentDispositionFilename,
   sanitizeDownloadFilename,
   sendAction,
@@ -279,18 +278,6 @@ describe("getJson", () => {
     },
   );
 
-  it("does not reuse a response that preceded explicit invalidation", async () => {
-    const previous = Promise.withResolvers<Response>();
-    fetchMock.mockReturnValueOnce(previous.promise);
-    const oldRead = getJson("/api/v1/tags");
-    invalidateApiCache();
-    previous.resolve(jsonResponse([{ name: "old value" }]));
-    await oldRead;
-    respondWith([{ name: "new value" }]);
-    expect(await getJson("/api/v1/tags")).toEqual([{ name: "new value" }]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
   it("returns fresh JSON on every transport read", async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ id: 1 }))
@@ -319,16 +306,6 @@ describe("getJson", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     // No caller opt-in is required for network freshness.
     expect(initOf(0)).toMatchObject({ cache: "no-store" });
-  });
-
-  it("reads the server after the compatibility invalidation bridge", async () => {
-    respondWith([{ id: 1 }]);
-
-    await getJson("/api/v1/models");
-    invalidateApiCache("/api/v1/models");
-    await getJson("/api/v1/models");
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -805,4 +782,18 @@ describe("public transport", () => {
     expect(new Headers(initOf(0).headers).get("accept")).toBe("application/json");
     expect(initOf(0).credentials).toBe("omit");
   });
+});
+
+describe("transport effect ownership", () => {
+  it.each(["json", "form", "action"] as const)(
+    "leaves Query state untouched after a %s write",
+    async (kind) => {
+      queryClient.setQueryData(queryKeys.models, [{ id: 7 }]);
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));
+      if (kind === "json") await sendJson("/api/v1/models", "POST", {});
+      if (kind === "form") await sendForm("/api/v1/models", new FormData());
+      if (kind === "action") await sendAction("/api/v1/models", "DELETE");
+      expect(queryClient.getQueryState(queryKeys.models)?.isInvalidated).toBe(false);
+    },
+  );
 });

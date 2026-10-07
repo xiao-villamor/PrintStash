@@ -15,7 +15,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getSessionVersion } from "@/lib/session-transport";
 import { getUser, storeLogin } from "@/lib/auth-store";
-import { invalidateApiCache } from "@/lib/api/request";
 import {
   getSharedModel,
   createModelShare,
@@ -32,7 +31,7 @@ import { expectRequest, fetchMock, lastCall, respondWith } from "./_wire";
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

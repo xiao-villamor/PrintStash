@@ -5,8 +5,8 @@
  * Every one of those tests needs the same five providers wired in the same order,
  * a `QueryClient` configured so seeded data stays put, and a `fetch` stub. Spelled
  * out per file that is sixty lines of boilerplate that drifts: one file forgets
- * `retry: false` and gets three network attempts per assertion, another forgets
- * `invalidateApiCache()` and inherits the previous test's 30-second GET cache.
+ * `retry: false` and gets three network attempts per assertion, another shares
+ * a QueryClient and inherits the previous test's private state.
  *
  * So the harness is here, once, and a test names only what it cares about:
  *
@@ -30,7 +30,6 @@ import { vi } from "vitest";
 import { clearLogin, storeLogin } from "@/lib/auth-store";
 import { AuthContext, type AuthState } from "@/lib/auth-context";
 import { I18nProvider } from "@/lib/i18n";
-import { invalidateApiCache } from "@/lib/api/request";
 import { MobileFilterContext } from "@/lib/mobile-filter-context";
 import { Toaster } from "@/components/toaster";
 import { queryClient } from "@/lib/query-client";
@@ -170,7 +169,6 @@ export function renderApp(ui: ReactElement, options: RenderAppOptions = {}): Ren
   // write affordance. Both have to agree, exactly as they do after a real login.
   if (auth.user) storeLogin("", auth.user, { silent: true });
   else clearLogin();
-  invalidateApiCache();
 
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: matchesMedia(query),

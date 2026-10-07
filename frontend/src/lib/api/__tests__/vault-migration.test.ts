@@ -16,7 +16,6 @@ import {
   recoverVaultMigration,
   startVaultMigration,
 } from "@/lib/api/vault-migration";
-import { invalidateApiCache } from "@/lib/api/request";
 import { aVaultMigration } from "@/test-support/factories";
 import { fetchMock, respondWith, expectRequest, lastBody } from "./_wire";
 
@@ -24,7 +23,7 @@ describe("Vault migration API", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
-    invalidateApiCache();
+
     respondWith({
       ...aVaultMigration(),
       policy: { ...aVaultMigration().policy },

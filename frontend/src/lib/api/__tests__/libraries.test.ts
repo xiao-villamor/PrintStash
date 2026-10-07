@@ -28,7 +28,6 @@ import {
 import { getVaultConfig, updateVaultConfig } from "@/lib/api/config";
 import { aVaultConfig } from "@/test-support/factories";
 import { json } from "@/test-support/render";
-import { invalidateApiCache } from "@/lib/api/request";
 
 /**
  * Pin the External Libraries (NAS mirroring) API client to the exact wire
@@ -91,7 +90,7 @@ function lastCall() {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

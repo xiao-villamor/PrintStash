@@ -1,11 +1,4 @@
-import {
-  getJson,
-  jsonHeaders,
-  requestApi,
-  requestMutation,
-  sendJson,
-  type GetJsonOptions,
-} from "@/lib/api/request";
+import { getJson, jsonHeaders, requestApi, sendJson, type GetJsonOptions } from "@/lib/api/request";
 import type { DerivativeRead, WorkOverview, VaultConfigUpdate, VaultConfigRead } from "@/types";
 
 /** Lanes, definitions, executors and recent failures (administrators only). */
@@ -51,7 +44,7 @@ export function regenerateDerivatives(
   options?: { signal?: AbortSignal },
 ): Promise<{ kind: string; mode: "missing" | "all" }> {
   // Settings still owns an unmigrated caller; remove this compatibility adapter in M10.
-  return requestMutation(`/api/v1/admin/work/derivatives/${encodeURIComponent(kind)}/regenerate`, {
+  return requestApi(`/api/v1/admin/work/derivatives/${encodeURIComponent(kind)}/regenerate`, {
     method: "POST",
     headers: jsonHeaders(),
     body: JSON.stringify({ mode }),

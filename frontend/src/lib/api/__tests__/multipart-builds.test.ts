@@ -10,7 +10,6 @@ import {
   queueBuildPart,
   selectBuildRevision,
 } from "../multipart-builds";
-import { invalidateApiCache } from "../request";
 import { expectRequest, fetchMock, lastBody } from "./_wire";
 import { json } from "@/test-support/render";
 import { aBuild } from "@/test-support/factories";
@@ -18,7 +17,7 @@ import { aBuild } from "@/test-support/factories";
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   fetchMock.mockImplementation(async () => json(aBuild()));
 });
 afterEach(() => vi.unstubAllGlobals());

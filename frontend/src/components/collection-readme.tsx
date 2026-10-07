@@ -1,5 +1,7 @@
 "use client";
 
+import { useTaxonomyCommands } from "@/features/library/taxonomy";
+
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -8,7 +10,7 @@ import { FileText, Loader2, Pencil } from "lucide-react";
 
 import { useQueryClient } from "@tanstack/react-query";
 
-import { setCollectionReadme, uploadCollectionImage } from "@/lib/api";
+import { uploadCollectionImage } from "@/lib/api";
 import { invalidateCachedAsset } from "@/lib/asset-cache";
 import { useCollectionReadme } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-client";
@@ -27,6 +29,7 @@ export function CollectionReadme({
 }) {
   useUiLocale();
   const queryClient = useQueryClient();
+  const { setCollectionReadme } = useTaxonomyCommands();
   // Cached per folder, so revisiting one shows its readme with no request. A
   // readme that cannot be read is treated as absent: the folder is still usable.
   const readmeQuery = useCollectionReadme(collectionId, { enabled: hasReadme });

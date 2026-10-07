@@ -6,7 +6,6 @@ import {
   jsonHeaders,
   GetJsonOptions,
   requestApi,
-  requestMutation,
   sendAction,
   sendForm,
   sendFormWithProgress,
@@ -117,7 +116,7 @@ export function starModel(id: number): Promise<ModelStarRead> {
 
 export async function unstarModel(id: number): Promise<ModelStarRead> {
   const path = `/api/v1/models/${id}/star`;
-  return requestMutation<ModelStarRead>(path, { method: "DELETE" });
+  return requestApi<ModelStarRead>(path, { method: "DELETE" });
 }
 
 export function getModel(id: number, options?: GetJsonOptions): Promise<ModelRead> {
@@ -300,7 +299,7 @@ export function restoreModel(
   id: number,
   options: Pick<GetJsonOptions, "signal"> = {},
 ): Promise<ModelRead> {
-  return requestMutation<ModelRead>(`/api/v1/models/${id}/restore`, {
+  return requestApi<ModelRead>(`/api/v1/models/${id}/restore`, {
     method: "POST",
     headers: jsonHeaders(),
     body: "{}",
@@ -315,22 +314,19 @@ export async function purgeModel(
 ): Promise<TrashPurgeRead> {
   const query = confirmStorageRisk ? "?confirm_storage_risk=true" : "";
   return normalizeTrashPurgeRead(
-    await requestMutation<Partial<TrashPurgeRead>>(
-      `/api/v1/models/${id}/purge${query}`,
-      { method: "DELETE", signal: options.signal },
-      `/api/v1/models/${id}/purge`,
-    ),
+    await requestApi<Partial<TrashPurgeRead>>(`/api/v1/models/${id}/purge${query}`, {
+      method: "DELETE",
+      signal: options.signal,
+    }),
   );
 }
 
 export async function purgeExpiredTrash(confirmStorageRisk = false): Promise<TrashPurgeRead> {
   const query = confirmStorageRisk ? "?confirm_storage_risk=true" : "";
   return normalizeTrashPurgeRead(
-    await requestMutation<Partial<TrashPurgeRead>>(
-      `/api/v1/models/trash/expired${query}`,
-      { method: "DELETE" },
-      "/api/v1/models/trash/expired",
-    ),
+    await requestApi<Partial<TrashPurgeRead>>(`/api/v1/models/trash/expired${query}`, {
+      method: "DELETE",
+    }),
   );
 }
 
@@ -356,7 +352,7 @@ export function replaceFileTags(
 
 export async function trashSourceFile(modelId: number, fileId: number): Promise<ModelRead> {
   const path = `/api/v1/models/${modelId}/files/${fileId}`;
-  return requestMutation<ModelRead>(path, { method: "DELETE" });
+  return requestApi<ModelRead>(path, { method: "DELETE" });
 }
 
 export function restoreSourceFile(modelId: number, fileId: number): Promise<ModelRead> {
@@ -365,7 +361,7 @@ export function restoreSourceFile(modelId: number, fileId: number): Promise<Mode
 
 export async function deleteFileRevision(modelId: number, fileId: number): Promise<ModelRead> {
   const path = `/api/v1/models/${modelId}/files/${fileId}/revision`;
-  return requestMutation<ModelRead>(path, {
+  return requestApi<ModelRead>(path, {
     method: "DELETE",
   });
 }

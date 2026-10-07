@@ -17,13 +17,11 @@ import {
 } from "@/lib/api/multipart-models";
 import { clearLogin } from "@/lib/auth-store";
 import { queryClient, queryKeys } from "@/lib/query-client";
-import { invalidateApiCache } from "@/lib/api/request";
 import { expectRequest, fetchMock, lastBody, respondWith, type WireValue } from "./_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
 });
 
 afterEach(() => vi.unstubAllGlobals());

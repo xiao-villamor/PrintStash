@@ -273,8 +273,7 @@ signals without importing feature code; bootstrap wires cleanup and adapters.
 Migrated boundaries are enforced by `frontend/tests/repo/dependency-boundaries.test.ts`
 using the existing Oxc parser and a resolver for TypeScript aliases and workspace
 exports. The [boundary contract](../frontend-architecture/dependency-boundaries.md)
-names the public feature modules and the single legacy transport-invalidation
-exception. The gate checks type-only, static, re-export, literal dynamic and worker
+names the public feature modules. Transport has no Query exception. The gate checks type-only, static, re-export, literal dynamic and worker
 imports, reports runtime and type-involving strongly connected components separately,
 and fails on unresolved computed imports for explicit review. Unused exceptions
 fail too. This is dependency-direction enforcement, not a claim that every legacy
@@ -334,10 +333,11 @@ requires refresh. A full-list rollback must not undo another successful mutation
 Where optimistic UX is justified, roll back only that operation's owned fields.
 The selected favourite-removal policy itself is confirmation-first.
 
-Keep invalidation in feature mutation/event policy. During migration one clearly
-owned compatibility adapter can translate legacy successful writes into affected
-keys; remove it after its last consumer. Do not maintain two independent policies
-for a migrated endpoint.
+Keep invalidation in feature mutation/event policy. The M10 cutover removes the
+HTTP-path invalidation bridge. Taxonomy commands own labels/choices/counts; printer
+catalog commands own catalog/dashboard refresh. Library metadata publication
+revalidates derived reads while preserving the acknowledged detail and controlled
+browse snapshots. Endpoint clients serialize requests and decode receipts only.
 
 Source editing is owned by `features/library/provenance.ts`. The provenance DTO
 contains its Model editing version and nullable cover metadata; components must

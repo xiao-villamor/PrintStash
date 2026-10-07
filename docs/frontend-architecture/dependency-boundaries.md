@@ -64,13 +64,12 @@ by list/detail forms), and Library `builds` (Build query/command owner consumed 
 the Build route). Their exported contracts already serve external consumers;
 registering them preserves the boundary without introducing forwarding barrels.
 
-There is exactly one migration exception: `src/lib/api/request.ts` may import
-`queryClient` and `invalidateQueriesForPath` from `src/lib/query-client.ts` for
-legacy mutation invalidation. The checker matches both resolved paths and the
-exact imported symbol set; wildcard imports, extra symbols, other destinations
-and type-only substitutions do not qualify. Remove the edge and exception by
-M10 when the remaining mutation consumers own their reconciliation policy. A
-stale exception fails the gate.
+M10 removed the transport-invalidation exception: endpoint clients and transport
+cannot import Query policy. The exception engine remains covered with synthetic
+fixtures; the production exception list is empty. Taxonomy commands and Library
+metadata publication are explicit public interfaces because app compositions use
+their effects without exposing private feature internals. A stale exception still
+fails the gate.
 
 ## Resolution and limits
 

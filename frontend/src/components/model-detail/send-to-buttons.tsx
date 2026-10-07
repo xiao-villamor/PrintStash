@@ -1,5 +1,9 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+import { refreshFleet } from "@/features/printers/queries";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+
 import { knownUiText } from "@/lib/locale";
 import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -96,6 +100,7 @@ export function SendToButtons({
   commands?: SendToCommands;
 }) {
   useUiLocale();
+  const commandClient = useQueryClient();
   const auth = useRequireAuth();
   const { user } = useAuth();
   const [internalOpen, setInternalOpen] = useState(false);
@@ -201,6 +206,7 @@ export function SendToButtons({
   }
 
   async function send(allowMismatch = false) {
+    const session = getSessionVersion();
     if (!selectedFile) return;
     const targetPrinterIds =
       deliveryMode === "send" || routingStrategy === "manual"
@@ -257,6 +263,8 @@ export function SendToButtons({
           }
           await commands.createFleetBatch(batch);
         } else await commands.enqueueFleetJob(payload);
+        requireSessionVersion(session);
+        refreshFleet(commandClient, session);
         setShowSend(false);
         toast.success(
           quantity > 1
@@ -305,6 +313,8 @@ export function SendToButtons({
             spool_filament_id: spool ? spool.filament_id : null,
             compatibility_policy: allowMismatch ? "allow_mismatch" : "safe",
           });
+          requireSessionVersion(session);
+          refreshFleet(commandClient, session);
           completed += 1;
           updateTask(taskId, {
             detail: uiMessage("{value1}/{value2} printers completed", {

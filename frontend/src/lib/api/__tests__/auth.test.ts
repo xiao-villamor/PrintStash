@@ -28,7 +28,6 @@ import {
   updateAdminUser,
 } from "@/lib/api/auth";
 import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
@@ -37,7 +36,7 @@ const USER = { id: 1, username: "alice", is_active: true, is_superuser: false };
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

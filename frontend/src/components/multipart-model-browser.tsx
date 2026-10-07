@@ -1,5 +1,7 @@
 "use client";
 
+import { refreshLibraryMetadata } from "@/features/library/metadata";
+
 import type { EditingBase } from "@/types/editing";
 
 import type { LibraryEntry } from "@/features/library/navigation-state";
@@ -1320,8 +1322,10 @@ function MultipartDetail({ id }: { id: number }) {
     if (!model || !canEdit || busy || !isCurrent()) return;
     setBusy(true);
     try {
+      const session = getSessionVersion();
       await deleteMultipartModel(model.id);
       if (!isCurrent()) return;
+      refreshLibraryMetadata(queryClient, session);
       toast.success(t("multipart.deleted"));
       router.push(backHref);
     } catch (cause) {

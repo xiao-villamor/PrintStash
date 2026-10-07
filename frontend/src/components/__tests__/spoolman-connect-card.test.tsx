@@ -99,6 +99,24 @@ describe("SpoolmanConnectCard", () => {
   });
 
   describe("saving the connection", () => {
+    it("revalidates spools after changing the connection", async () => {
+      renderCard({
+        seed: [[queryKeys.spools, []]],
+        routes: {
+          "GET /api/v1/spoolman/spools": json([
+            {
+              id: 7,
+              filament_name: "Replacement PETG",
+              vendor_name: "Test",
+              remaining_weight: 800,
+            },
+          ]),
+        },
+      });
+      await userEvent.click(screen.getByRole("button", { name: /Save/ }));
+      expect(await screen.findByText(/Replacement PETG/)).toBeVisible();
+    });
+
     it("sends the URL the operator typed", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard();

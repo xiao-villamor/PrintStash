@@ -27,7 +27,6 @@ import {
   getVaultConfig,
   updateVaultConfig,
 } from "@/lib/api/config";
-import { invalidateApiCache } from "@/lib/api/request";
 import { aVaultConfig } from "@/test-support/factories";
 import { json } from "@/test-support/render";
 
@@ -36,7 +35,7 @@ import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wi
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

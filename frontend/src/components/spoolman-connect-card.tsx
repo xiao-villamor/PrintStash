@@ -9,6 +9,7 @@ import { AlertTriangle, CheckCircle2, Loader2, PlugZap, Save } from "lucide-reac
 
 import { testSpoolman, updateSpoolman } from "@/lib/api";
 import { useSpoolmanStatus, useSpools } from "@/lib/queries";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { queryKeys } from "@/lib/query-client";
 import { formatGrams } from "@/lib/format";
 import { userMessage } from "@/lib/errors";
@@ -49,11 +50,17 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
   // message (omit for silent toggles).
   const mutate = useCallback(
     async (body: Parameters<typeof updateSpoolman>[0], ok?: string) => {
+      if (!canEdit) return;
+      const session = getSessionVersion();
       setBusy(true);
       setError("");
       setNotice("");
       try {
         const updated = await updateSpoolman(body);
+        requireSessionVersion(session);
+        await qc.cancelQueries({ queryKey: queryKeys.spoolmanStatus, exact: true });
+        requireSessionVersion(session);
+        void qc.invalidateQueries({ queryKey: queryKeys.spools });
         qc.setQueryData<SpoolmanStatus>(queryKeys.spoolmanStatus, updated);
         if (ok) setNotice(ok);
       } catch (e) {
@@ -62,7 +69,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
         setBusy(false);
       }
     },
-    [qc],
+    [qc, canEdit],
   );
 
   const saveConnection = useCallback(

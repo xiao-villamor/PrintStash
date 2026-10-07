@@ -18,7 +18,6 @@ import {
   testSpoolman,
   updateSpoolman,
 } from "@/lib/api/spoolman";
-import { invalidateApiCache } from "@/lib/api/request";
 
 /**
  * Pin the Spoolman API client to the backend router's wire contract: paths,
@@ -55,7 +54,7 @@ function lastCall() {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

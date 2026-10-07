@@ -1,6 +1,5 @@
 /** Interactive searches have bounded waits and preserve navigation cancellation. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { invalidateApiCache } from "@/lib/api/request";
 import {
   cancelInferenceDownload,
   deleteInferenceModel,
@@ -136,7 +135,6 @@ describe("Local model management", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
-    invalidateApiCache();
   });
   afterEach(() => {
     vi.unstubAllGlobals();

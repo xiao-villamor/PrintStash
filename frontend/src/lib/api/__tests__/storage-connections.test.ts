@@ -1,7 +1,6 @@
 /** Storage profiles keep credentials server-side while the browser sends exact wire shapes. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { invalidateApiCache } from "@/lib/api/request";
 import {
   createStorageConnection,
   deleteStorageConnection,
@@ -34,7 +33,7 @@ const connection = {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

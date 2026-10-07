@@ -1,3 +1,4 @@
+import { queryKeys } from "@/lib/query-client";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import {
   queryOptions,
@@ -5,6 +6,7 @@ import {
   useQueries,
   useQuery,
   useQueryClient,
+  type QueryClient,
 } from "@tanstack/react-query";
 import { ApiError } from "@/lib/errors";
 import { isLoggedIn, onAuthChange } from "@/lib/auth-store";
@@ -22,6 +24,8 @@ import {
 
 import {
   getPrinter,
+  createPrinter,
+  deletePrinter,
   listPrinterJobs,
   listPrinterFiles,
   getPrinterDiagnostics,
@@ -324,4 +328,32 @@ export function usePrinterFileMutation() {
         return null;
       }, change.signal),
   });
+}
+
+/** Catalog membership changes revalidate all printer choices and dashboards. */
+export function usePrinterCatalogCommands() {
+  const client = useQueryClient();
+  async function change<T>(write: () => Promise<T>): Promise<T> {
+    return withSessionRequest(async (request) => {
+      const receipt = await write();
+      request.assertCurrent();
+      await client.cancelQueries({ queryKey: printerKeys.all });
+      request.assertCurrent();
+      void client.invalidateQueries({ queryKey: printerKeys.all });
+      return receipt;
+    });
+  }
+  return {
+    createPrinter: (...args: Parameters<typeof createPrinter>) =>
+      change(() => createPrinter(...args)),
+    deletePrinter: (...args: Parameters<typeof deletePrinter>) =>
+      change(() => deletePrinter(...args)),
+  };
+}
+
+/** Queue acknowledgements affect fleet summaries and the printer dashboard. */
+export function refreshFleet(client: QueryClient, session: number): void {
+  if (session !== getSessionVersion()) return;
+  for (const queryKey of [queryKeys.printers, queryKeys.fleetQueue, queryKeys.fleetSummary])
+    void client.invalidateQueries({ queryKey });
 }

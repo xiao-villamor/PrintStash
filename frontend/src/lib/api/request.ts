@@ -1,6 +1,5 @@
 import { emitUnauthorized, getStoredToken } from "@/lib/auth";
 import { ApiError } from "@/lib/errors";
-import { queryClient, invalidateQueriesForPath } from "@/lib/query-client";
 import {
   getSessionVersion,
   expireSessionForFailure,
@@ -414,29 +413,6 @@ export function jsonHeaders(): Record<string, string> {
   return headers;
 }
 
-/**
- * Compatibility bridge for endpoint clients awaiting feature-owned reconciliation.
- * There is no transport cache. Remove this adapter with the final M10 cutover.
- */
-export function invalidateApiCache(path?: string): void {
-  if (path === undefined) void queryClient.invalidateQueries();
-  else invalidateQueriesForPath(path);
-}
-
-/** Compatibility mutation adapter: validate the acknowledgement before invalidation. */
-export function requestMutation<T>(
-  path: string,
-  options: RequestInit,
-  invalidationPath = path,
-): Promise<T> {
-  return requestApi<T>(path, options, async (response, session) => {
-    const value = await handleResponse<T>(response, session);
-    session.assertCurrent();
-    invalidateApiCache(invalidationPath);
-    return value;
-  });
-}
-
 export interface GetJsonOptions {
   signal?: AbortSignal;
 }
@@ -457,33 +433,15 @@ export async function sendJson<T>(
   body: unknown,
   headers: Record<string, string> = {},
 ): Promise<T> {
-  return requestApi<T>(
-    path,
-    {
-      method,
-      headers: { ...jsonHeaders(), ...headers },
-      body: JSON.stringify(body),
-    },
-    async (response, session) => {
-      const value = await handleResponse<T>(response, session);
-      session.assertCurrent();
-      invalidateApiCache(path);
-      return value;
-    },
-  );
+  return requestApi<T>(path, {
+    method,
+    headers: { ...jsonHeaders(), ...headers },
+    body: JSON.stringify(body),
+  });
 }
 
 export function sendForm<T>(path: string, formData: FormData, signal?: AbortSignal): Promise<T> {
-  return requestApi<T>(
-    path,
-    { method: "POST", body: formData, signal },
-    async (response, session) => {
-      const value = await handleResponse<T>(response, session);
-      session.assertCurrent();
-      invalidateApiCache(path);
-      return value;
-    },
-  );
+  return requestApi<T>(path, { method: "POST", body: formData, signal });
 }
 
 /** Multipart transfer with browser upload progress, used for large ZIP archives. */
@@ -529,7 +487,6 @@ export function sendFormWithProgress<T>(
     });
     const value = await handleResponse<T>(response, session);
     session.assertCurrent();
-    invalidateApiCache(path);
     return value;
   }, signal);
 }
@@ -538,6 +495,5 @@ export function sendAction(path: string, method: "POST" | "DELETE"): Promise<voi
   return requestApi(path, { method }, async (response, session) => {
     await expectOk(response, session);
     session.assertCurrent();
-    invalidateApiCache(path);
   });
 }

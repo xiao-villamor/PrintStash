@@ -1,14 +1,13 @@
 /** Cache administration uses explicit mutation routes and fresh effective-policy reads. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { artifactCacheApi } from "@/lib/api/artifact-cache";
-import { invalidateApiCache } from "@/lib/api/request";
 import { anArtifactCache } from "@/test-support/factories";
 import { expectRequest, fetchMock, lastBody } from "./_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   fetchMock.mockImplementation(() =>
     Promise.resolve(new Response(JSON.stringify(anArtifactCache()))),
   );

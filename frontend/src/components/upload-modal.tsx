@@ -1,5 +1,7 @@
 "use client";
 
+import { useTaxonomyCommands } from "@/features/library/taxonomy";
+
 import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
@@ -19,7 +21,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { createTag, capturePendingImport } from "@/lib/api";
+import { capturePendingImport } from "@/lib/api";
 import { useCollectionLookup, useCollectionSearch, useTags } from "@/lib/queries";
 import { CollectionPicker } from "@/components/collection-picker";
 import { toast } from "@/lib/toast";
@@ -123,6 +125,7 @@ export function UploadModal({
 }) {
   useUiLocale();
   const { t } = useI18n();
+  const { createTag } = useTaxonomyCommands();
   const router = useRouter();
   const auth = useRequireAuth();
   const { user } = useAuth();

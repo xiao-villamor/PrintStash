@@ -1,5 +1,9 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+import { refreshLibraryMetadata } from "@/features/library/metadata";
+import { useTaxonomyCommands } from "@/features/library/taxonomy";
+
 import { captureEditingBase } from "@/lib/api/editing";
 
 import { LibraryBackLink } from "@/features/library/navigation";
@@ -44,7 +48,7 @@ import {
 
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
 import type { ViewerMode } from "@/components/model-detail/viewer-toolbar";
-import { createTag, deleteModel, deleteTag, getAssetUrl, getModel, updateModel } from "@/lib/api";
+import { deleteModel, getAssetUrl, getModel, updateModel } from "@/lib/api";
 import { useTags } from "@/lib/queries";
 import { timeAgo } from "@/lib/format";
 import { readMetadataPreferences } from "@/lib/metadata-preferences";
@@ -220,6 +224,8 @@ function ModelDetailPresentation({
   const [sendFileId, setSendFileId] = useState<number | undefined>(undefined);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const { createTag, deleteTag } = useTaxonomyCommands();
+  const metadataClient = useQueryClient();
   const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
   const [deleteTagBusy, setDeleteTagBusy] = useState(false);
   const [viewerMode, setViewerMode] = useState<ViewerMode>("model");
@@ -312,7 +318,9 @@ function ModelDetailPresentation({
   async function doDelete() {
     setDeleting(true);
     try {
+      const deletionSession = getSessionVersion();
       await deleteModel(model.id);
+      refreshLibraryMetadata(metadataClient, deletionSession);
       toast.success(uiText("Model deleted"));
       // Return to the folder the model lived in, not the root — deleting one
       // model shouldn't kick the user out of the collection they were browsing.

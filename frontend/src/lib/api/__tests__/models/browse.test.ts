@@ -25,7 +25,6 @@ import {
   listModels,
   listOutlinerModels,
 } from "@/lib/api/models";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastCall, respondWith } from "../_wire";
 
@@ -34,7 +33,7 @@ type ListParams = NonNullable<Parameters<typeof listModels>[0]>;
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

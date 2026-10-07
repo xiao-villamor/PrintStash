@@ -1,3 +1,4 @@
+import { refreshLibraryMetadata } from "./metadata";
 import { acceptsEditingSnapshot } from "./editing";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
@@ -65,9 +66,10 @@ export function useMultipartPublication(id: number) {
         accepted = true;
         return candidate;
       });
+      if (accepted) refreshLibraryMetadata(client, session, { kind: "multipart", id });
       return accepted;
     },
-    [client, id, isCurrent, observedEpoch],
+    [client, id, isCurrent, observedEpoch, session],
   );
   return { publish, active: session === current, isCurrent };
 }

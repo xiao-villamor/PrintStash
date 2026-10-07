@@ -21,7 +21,6 @@ import {
   testNotificationChannel,
   updateNotificationChannel,
 } from "@/lib/api/notifications";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, respondWith } from "./_wire";
 
@@ -30,7 +29,7 @@ const BASE = { edit_epoch: "a".repeat(32), edit_version: 1 };
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

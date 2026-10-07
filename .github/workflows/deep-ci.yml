@@ -418,6 +418,7 @@ jobs:
               ;;
             storage)
               pnpm exec playwright test --config=playwright.storage.config.ts
+              pnpm exec playwright test --config=playwright.storage-presets.config.ts
               pnpm exec playwright test --config=playwright.delivery.config.ts
               pnpm exec playwright test --config=playwright.critical-backup.config.ts
               ;;

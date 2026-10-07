@@ -10,7 +10,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useRef, useState } from "react";
 import { Link } from "@/lib/link";
 import { PrinterRead, type PrinterCreate, type PrinterStatus } from "@/types";
-import { createPrinter, deletePrinter } from "@/lib/api";
+import { usePrinterCatalogCommands } from "@/features/printers/queries";
 import { usePrinterDashboard, usePrinters } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
@@ -78,10 +78,11 @@ function parseSetupKind(value: string): PrinterSetupKind | null {
 }
 
 export function PrintersPage() {
+  const { deletePrinter } = usePrinterCatalogCommands();
   useUiLocale();
   const { user } = useAuth();
   const locale = useOptionalI18n()?.locale ?? "en";
-  // Shared printers cache: mutations through the api layer invalidate
+  // Shared printers cache: catalog commands invalidate
   // queryKeys.printers, so this list refetches itself after add/delete.
   const printersQuery = usePrinters({ refetchInterval: 15_000 });
   const dashboardQuery = usePrinterDashboard({ refetchInterval: 15_000 });
@@ -798,6 +799,7 @@ function PrinterModelPicker({
 }
 
 function AddPrinterModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const { createPrinter } = usePrinterCatalogCommands();
   useUiLocale();
   const [name, setName] = useState("");
   const [setupKind, setSetupKind] = useState<PrinterSetupKind>("moonraker");

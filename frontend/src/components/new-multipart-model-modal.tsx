@@ -1,3 +1,6 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { refreshLibraryMetadata } from "@/features/library/metadata";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { useState } from "react";
 import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
@@ -29,6 +32,7 @@ export function NewMultipartModelModal({
   useUiLocale();
   const { t } = useI18n();
   const router = useRouter();
+  const client = useQueryClient();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [target, setTarget] = useState<CollectionChoice | null>(collection);
@@ -46,6 +50,7 @@ export function NewMultipartModelModal({
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!name.trim() || busy) return;
+    const session = getSessionVersion();
     setBusy(true);
     setError(null);
     try {
@@ -54,6 +59,8 @@ export function NewMultipartModelModal({
         description: description.trim() || null,
         collection_id: target?.id ?? null,
       });
+      requireSessionVersion(session);
+      refreshLibraryMetadata(client, session);
       closeModal();
       router.push(detailHref(created.id, returnTo));
     } catch (cause) {

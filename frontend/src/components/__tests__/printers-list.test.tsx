@@ -32,7 +32,6 @@ import { MemoryRouter } from "react-router-dom";
 import { PrintersPage } from "@/components/printers-list";
 import { writePrinterCardImagePreference } from "@/lib/printer-card-display";
 import { AuthContext, type AuthState } from "@/lib/auth-context";
-import { invalidateApiCache } from "@/lib/api/request";
 import { queryKeys } from "@/lib/query-client";
 import type { Dashboard, FleetSummary, PrinterCreate, PrinterRead, PrinterUpdate } from "@/types";
 
@@ -158,8 +157,19 @@ function makePrinter(overrides: Partial<PrinterRead> = {}): PrinterRead {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  fetchMock.mockImplementation(() => Promise.resolve(printerResponse(makePrinter())));
-  invalidateApiCache();
+  fetchMock.mockImplementation((input, init) => {
+    if (!init?.method || init.method === "GET") {
+      const body = String(input).includes("/dashboard") ? EMPTY_DASHBOARD : [makePrinter()];
+      return Promise.resolve(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    }
+    return Promise.resolve(printerResponse(makePrinter()));
+  });
+
   window.localStorage.clear();
 });
 
@@ -175,12 +185,19 @@ async function openForm() {
 describe("PrinterSetupForm", () => {
   it("submits only once when add is triggered twice before request resolves", async () => {
     let resolveCreate!: () => void;
-    fetchMock.mockImplementation((_input, init) =>
+    fetchMock.mockImplementation((input, init) =>
       init?.method === "POST"
         ? new Promise<Response>((resolve) => {
             resolveCreate = () => resolve(printerResponse(makePrinter()));
           })
-        : Promise.resolve(printerResponse(makePrinter())),
+        : Promise.resolve(
+            new Response(
+              JSON.stringify(
+                String(input).includes("/dashboard") ? EMPTY_DASHBOARD : [makePrinter()],
+              ),
+              { status: 200, headers: { "content-type": "application/json" } },
+            ),
+          ),
     );
     await openForm();
     await userEvent.type(screen.getByLabelText("Name"), "Voron");

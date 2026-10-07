@@ -1,3 +1,5 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { refreshFleet } from "@/features/printers/queries";
 import { knownUiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
@@ -121,6 +123,7 @@ export function FleetQueuePanel({
     ...deps,
   };
   const [historyLimit, setHistoryLimit] = useState(20);
+  const commandClient = useQueryClient();
   const queueQuery = useFleetQueue({ refetchInterval: 5_000, historyLimit });
   const summaryQuery = useFleetSummary({ refetchInterval: 5_000 });
   const [deleteTarget, setDeleteTarget] = useState<PrintJobRead | null>(null);
@@ -142,9 +145,12 @@ export function FleetQueuePanel({
   const recent = jobs.filter((job) => !ACTIVE.has(job.state) && job.state !== "queued");
 
   async function mutate<T>(jobId: number, action: () => Promise<T>): Promise<boolean> {
+    const session = getSessionVersion();
     setBusy(jobId);
     try {
       await action();
+      if (session !== getSessionVersion()) return false;
+      refreshFleet(commandClient, session);
       await Promise.all([queueQuery.refetch(), summaryQuery.refetch()]);
       return true;
     } catch (error) {

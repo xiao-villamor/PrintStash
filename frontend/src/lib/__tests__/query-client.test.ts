@@ -1,35 +1,11 @@
-/*
- * Which caches a write invalidates — the mapping that decides whether the UI
- * agrees with the database after a mutation.
- *
- * Under-invalidating is the failure users report as "I have to refresh". It is
- * almost always a *derived* cache somebody forgot: a model write changes the
- * vault totals and the collection counts, and a collection rename changes every
- * model card that shows a label. So the rows here are mostly about second-order
- * keys rather than the obvious one.
- *
- * The prefix-collision cases are the sharp ones. `/filament-profiles` and
- * `/printer-profiles` both start with a path a naive check would read as
- * `/printers`, so a substring match busts the wrong cache. Their feature command owner
- * publishes and revalidates its catalogs; the transport must leave them alone.
- *
- * An unrecognised path invalidates nothing rather than everything. Blanket
- * invalidation would hide every one of the bugs above.
- */
+/** Ingest completion retires stale reads without touching a replacement session. */
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-import {
-  invalidateQueriesForPath,
-  queryClient,
-  queryKeys,
-  refreshVaultAfterIngest,
-} from "@/lib/query-client";
+import { queryClient, queryKeys, refreshVaultAfterIngest } from "@/lib/query-client";
 
 import { clearLogin, retirePrivateSessionScope } from "@/lib/auth-store";
 
 import type { QueryKey } from "@tanstack/react-query";
-import type { MockInstance } from "vitest";
 
 /**
  * The keyed-invalidation map is the heart of the TanStack Query <-> backend
@@ -53,147 +29,6 @@ function keyNames(keys: readonly QueryKey[]): string[] {
 function bustedKeys(calls: readonly QueryFilterCall[]): string[] {
   return calls.map(([filters]) => keyName(filters?.queryKey ?? [])).sort();
 }
-
-describe("invalidateQueriesForPath", () => {
-  let spy: MockInstance<typeof queryClient.invalidateQueries>;
-
-  beforeEach(() => {
-    spy = vi.spyOn(queryClient, "invalidateQueries").mockResolvedValue();
-  });
-
-  afterEach(() => {
-    spy.mockRestore();
-  });
-
-  it("refreshes AI capability after a generation activation", () => {
-    invalidateQueriesForPath("/api/v1/config/ai-search/generations/1/activate");
-    expect(bustedKeys(spy.mock.calls)).toEqual(["ai-search"]);
-  });
-
-  it("keeps resource estimates from invalidating configuration", () => {
-    invalidateQueriesForPath("/api/v1/config/ai-search/generations/estimate");
-    expect(bustedKeys(spy.mock.calls)).toEqual([]);
-  });
-
-  it("busts collections AND models on a collection write (labels affect lists)", () => {
-    invalidateQueriesForPath("/api/v1/collections/5");
-    expect(bustedKeys(spy.mock.calls)).toEqual(
-      keyNames([queryKeys.collections, queryKeys.models, queryKeys.multipartModels]),
-    );
-  });
-
-  it("busts tags AND models on a tag write", () => {
-    invalidateQueriesForPath("/api/v1/tags");
-    expect(bustedKeys(spy.mock.calls)).toEqual(
-      keyNames([queryKeys.tags, queryKeys.models, queryKeys.multipartModels]),
-    );
-  });
-
-  it("refreshes taxonomy after a model tag mutation", () => {
-    invalidateQueriesForPath("/api/v1/models/batch/tags");
-    expect(bustedKeys(spy.mock.calls)).toEqual(
-      keyNames([
-        queryKeys.tags,
-        queryKeys.models,
-        queryKeys.vaultStats,
-        queryKeys.collections,
-        queryKeys.multipartModels,
-      ]),
-    );
-  });
-
-  it("busts models, vault stats AND collections on a model write (stats + counts derive from models)", () => {
-    invalidateQueriesForPath("/api/v1/models/12");
-    expect(bustedKeys(spy.mock.calls)).toEqual(
-      keyNames([
-        queryKeys.models,
-        queryKeys.vaultStats,
-        queryKeys.collections,
-        queryKeys.multipartModels,
-      ]),
-    );
-  });
-
-  it("treats files/ingest/gcode paths as model writes", () => {
-    for (const path of ["/api/v1/files/3", "/api/v1/ingest", "/api/v1/gcode-revision/7"]) {
-      spy.mockClear();
-      invalidateQueriesForPath(path);
-      expect(bustedKeys(spy.mock.calls)).toEqual(
-        keyNames([
-          queryKeys.models,
-          queryKeys.vaultStats,
-          queryKeys.collections,
-          queryKeys.multipartModels,
-        ]),
-      );
-    }
-  });
-
-  it("refreshes every multipart query prefix after collection writes", () => {
-    invalidateQueriesForPath("/api/v1/collections/5", "PATCH");
-    expect(bustedKeys(spy.mock.calls)).toEqual(
-      keyNames([queryKeys.collections, queryKeys.models, queryKeys.multipartModels]),
-    );
-  });
-
-  it("refreshes multipart reads for every trash lifecycle route", () => {
-    for (const path of ["/api/v1/trash/12", "/api/v1/restore/12", "/api/v1/purge/12"]) {
-      spy.mockClear();
-      invalidateQueriesForPath(path, "POST");
-      expect(bustedKeys(spy.mock.calls)).toEqual(
-        keyNames([
-          queryKeys.models,
-          queryKeys.collections,
-          queryKeys.vaultStats,
-          queryKeys.multipartModels,
-        ]),
-      );
-    }
-  });
-
-  it("does not invalidate anything for a non-mutating GET", () => {
-    invalidateQueriesForPath("/api/v1/models/12", "GET");
-    invalidateQueriesForPath("/api/v1/multipart-models/4/candidates", "HEAD");
-    expect(spy).not.toHaveBeenCalled();
-  });
-
-  it("busts printers on a printer write", () => {
-    invalidateQueriesForPath("/api/v1/printers/3");
-    expect(bustedKeys(spy.mock.calls)).toEqual(keyNames([queryKeys.printers]));
-  });
-
-  it("leaves filament catalog refresh to its command owner", () => {
-    invalidateQueriesForPath("/api/v1/filament-profiles/9");
-    expect(spy).not.toHaveBeenCalled();
-  });
-
-  it("does NOT mistake /filament-profiles for a printers write", () => {
-    invalidateQueriesForPath("/api/v1/filament-profiles");
-    expect(bustedKeys(spy.mock.calls)).not.toContain(keyName(queryKeys.printers));
-  });
-
-  it("leaves printer catalog refresh to its command owner", () => {
-    invalidateQueriesForPath("/api/v1/printer-profiles/2");
-    expect(spy).not.toHaveBeenCalled();
-  });
-
-  it("leaves synced filament refresh to profiles while retaining Spoolman reads", () => {
-    invalidateQueriesForPath("/api/v1/spoolman/sync-filaments");
-    expect(bustedKeys(spy.mock.calls)).toEqual(
-      keyNames([queryKeys.spoolmanStatus, queryKeys.spools]),
-    );
-  });
-
-  it("busts admin users on an admin user write", () => {
-    invalidateQueriesForPath("/api/v1/admin/users/4");
-    expect(bustedKeys(spy.mock.calls)).toEqual(keyNames([queryKeys.adminUsers]));
-  });
-
-  it("does nothing for an unrecognised path", () => {
-    invalidateQueriesForPath("/api/v1/health");
-    expect(spy).not.toHaveBeenCalled();
-  });
-});
 
 describe("refreshVaultAfterIngest", () => {
   afterEach(() => {
@@ -281,31 +116,6 @@ describe("queryKeys", () => {
 });
 
 describe("outliner mutation refresh", () => {
-  it.each([
-    "/api/v1/models/1",
-    "/api/v1/models/1/star",
-    "/api/v1/models/batch/tags",
-    "/api/v1/models/batch/move",
-    "/api/v1/collections/1",
-    "/api/v1/multipart-models/1",
-    "/api/v1/files/1",
-    "/api/v1/trash",
-    "/api/v1/models/1/restore",
-    "/api/v1/ingest",
-  ])("discards continuation pages after a mutation of %s", (path) => {
-    const key = [...queryKeys.outliner, "entries", { collection_id: 1 }];
-    queryClient.setQueryData(key, {
-      pages: [
-        { items: [{ id: 1 }], next_cursor: "old" },
-        { items: [{ id: 2 }], next_cursor: null },
-      ],
-      pageParams: [null, "old"],
-    });
-    invalidateQueriesForPath(path);
-    expect(queryClient.getQueryData(key)).toBeUndefined();
-    queryClient.clear();
-  });
-
   it("discards pages when an ingest finishes", async () => {
     const key = [...queryKeys.outliner, "collections"];
     queryClient.setQueryData(key, { pages: [{ items: [] }], pageParams: [null] });
