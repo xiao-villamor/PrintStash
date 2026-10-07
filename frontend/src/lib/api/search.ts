@@ -79,7 +79,7 @@ export async function searchLibrary(
   return searchRequest<SearchResponse>(`/api/v1/search?${params}`, { signal });
 }
 export function getSearchStatus(options: GetJsonOptions = {}) {
-  return getJson<SearchStatus>("/api/v1/search/status", { fresh: true, ...options });
+  return getJson<SearchStatus>("/api/v1/search/status", { ...options });
 }
 export async function searchUsingModel(
   modelId: number,
@@ -125,7 +125,7 @@ function writeSearch<T>(
 }
 const configuration = "/api/v1/config/ai-search";
 export function getSearchSettings(options: GetJsonOptions = {}) {
-  return getJson<SearchSettingsRead>(configuration, { fresh: true, ...options });
+  return getJson<SearchSettingsRead>(configuration, { ...options });
 }
 export async function saveSearchSettings(settings: SearchSettings, base: EditingBase) {
   requireEditingBase(base);
@@ -152,7 +152,7 @@ export function importEnvironmentEndpoint(kind: "embedding" | "chat") {
   );
 }
 export function listSearchGenerations(options: GetJsonOptions = {}) {
-  return getJson<SearchGeneration[]>(`${configuration}/generations`, { fresh: true, ...options });
+  return getJson<SearchGeneration[]>(`${configuration}/generations`, { ...options });
 }
 export function prepareSearchGeneration(proposal: GenerationProposal) {
   return writeSearch<SearchGeneration>(`${configuration}/generations`, "POST", proposal);
@@ -179,7 +179,7 @@ export function actOnSearchGeneration(
   );
 }
 export function listInferenceModels(options: GetJsonOptions = {}) {
-  return getJson<InferenceModel[]>("/api/v1/inference/models", { fresh: true, ...options });
+  return getJson<InferenceModel[]>("/api/v1/inference/models", { ...options });
 }
 /** The Job kind of a model download; follow it through the Jobs API. */
 export const MODEL_DOWNLOAD_KIND = "inference.model_download";

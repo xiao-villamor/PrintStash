@@ -13,6 +13,6 @@ export function printStatisticsOptions(
 ) {
   return queryOptions({
     queryKey: statisticsKeys.period(period),
-    queryFn: ({ signal }) => read(period, { fresh: true, signal }),
+    queryFn: ({ signal }) => read(period, { signal }),
   });
 }

@@ -1,8 +1,6 @@
 # M10 packages and platform qualification
 
-Status: active by explicit user direction after the notification checkpoint
-`f7c6abb4`. M9 remains open; advancing this work does not waive its acceptance
-criteria. M11 must reconcile that prerequisite before final completion.
+Status: active after M9 local acceptance at148877a0. The earlier static-delivery checkpoint is preserved; M11 remains pending.
 
 ## First bounded step: static delivery and obsolete chunks
 
@@ -65,3 +63,21 @@ static asset and then restores delivery. Backend behavior is outside these tests
 App/UI/domain types and frontend lint passed; the production browser command built
 the application successfully with the existing locale-shell/large-chunk warnings.
 These are correctness results, not performance comparisons.
+
+## Transport compatibility removal — next bounded step
+
+`GetJsonOptions.fresh` has been a no-op since M1 removed transport caching. Remove
+it from the contract and every first-party call; preserve AbortSignal and network
+freshness. Query owns deduplication/freshness. The separate mutation invalidation
+bridge is not removed in this step: its remaining callers need explicit owners.
+Rollback is API-shape-only; never restore transport caching.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| T1 | returns fresh JSON on every transport read | Happy | Repeated endpoint reads | Second server result observed | Frontend unit | ✅ `request.test.ts` |
+| T2 | keeps concurrent transport reads independent | Edge | Concurrent responses finish out of order | Each caller gets its own response | Frontend unit | ✅ `request.test.ts` |
+| T3 | ignores an old session's 401 on a read | Error | Session replaced before response | Current identity remains; obsolete read rejected | Frontend unit | ✅ `request.test.ts` |
+| T4 | requests network revalidation without a cache mode option | Happy | Plain JSON request | Browser no-store policy sent | Frontend unit | ✅ `request.test.ts` |
+| T5 | cancels the canonical printer choice read on disposal | Edge | Observer unmounts during read | Signal aborted | Frontend unit | ✅ `queries.test.tsx` |
+
+No-op freshness option removal qualified:124 tests across request, shared queries and config API passed in3.94s. Types passed; all callers preserve cancellation. No cache behavior changed.

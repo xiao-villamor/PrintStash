@@ -34,9 +34,7 @@ export function createModelShare(
 }
 
 export function listModelShares(modelId: number): Promise<ShareLinkRead[]> {
-  return getJson<ShareLinkRead[]>(`/api/v1/models/${modelId}/shares`, {
-    fresh: true,
-  });
+  return getJson<ShareLinkRead[]>(`/api/v1/models/${modelId}/shares`, {});
 }
 
 export function revokeShare(shareId: number): Promise<void> {

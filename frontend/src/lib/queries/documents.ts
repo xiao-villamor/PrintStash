@@ -22,7 +22,7 @@ export const documentKeys = {
 export function useDocuments(collection: string | null) {
   return useQuery({
     queryKey: documentKeys.list(collection),
-    queryFn: ({ signal }) => listDocuments(collection, { fresh: true, signal }),
+    queryFn: ({ signal }) => listDocuments(collection, { signal }),
   });
 }
 

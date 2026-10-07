@@ -28,7 +28,7 @@ async function optionalDiscovery<T>(read: Promise<T[]>): Promise<T[]> {
 export function backupSourcesOptions() {
   return queryOptions({
     queryKey: backupCatalogKeys.owned,
-    queryFn: ({ signal }) => listBackupSources({ fresh: true, signal }),
+    queryFn: ({ signal }) => listBackupSources({ signal }),
     retry: false,
     staleTime: 0,
   });
@@ -36,7 +36,7 @@ export function backupSourcesOptions() {
 export function unownedLocalBackupsOptions() {
   return queryOptions({
     queryKey: backupCatalogKeys.local,
-    queryFn: ({ signal }) => optionalDiscovery(listUnownedLocalBackups({ fresh: true, signal })),
+    queryFn: ({ signal }) => optionalDiscovery(listUnownedLocalBackups({ signal })),
     retry: false,
     staleTime: 0,
   });
@@ -44,7 +44,7 @@ export function unownedLocalBackupsOptions() {
 export function unownedS3BackupsOptions() {
   return queryOptions({
     queryKey: backupCatalogKeys.s3,
-    queryFn: ({ signal }) => optionalDiscovery(listUnownedS3Backups({ fresh: true, signal })),
+    queryFn: ({ signal }) => optionalDiscovery(listUnownedS3Backups({ signal })),
     retry: false,
     staleTime: 0,
   });
@@ -52,7 +52,7 @@ export function unownedS3BackupsOptions() {
 export function unownedRemoteBackupsOptions() {
   return queryOptions({
     queryKey: backupCatalogKeys.remote,
-    queryFn: ({ signal }) => optionalDiscovery(listUnownedRemoteBackups({ fresh: true, signal })),
+    queryFn: ({ signal }) => optionalDiscovery(listUnownedRemoteBackups({ signal })),
     retry: false,
     staleTime: 0,
   });

@@ -260,18 +260,13 @@ describe("getJson", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it.each(["cached", "fresh", "abortable"] as const)(
+  it.each(["plain", "abortable"] as const)(
     "ignores an old session's 401 on a %s read",
     async (mode) => {
       const pending = Promise.withResolvers<Response>();
       fetchMock.mockReturnValueOnce(pending.promise);
       storeLogin("", { id: 7, username: "old-owner", email: null, is_superuser: false });
-      const options =
-        mode === "fresh"
-          ? { fresh: true }
-          : mode === "abortable"
-            ? { signal: new AbortController().signal }
-            : undefined;
+      const options = mode === "abortable" ? { signal: new AbortController().signal } : undefined;
       const oldRead = getJson("/api/v1/auth/me", options);
       const outcome = oldRead.catch((error: Error) => error);
       storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
@@ -315,14 +310,14 @@ describe("getJson", () => {
     expect(await Promise.all(reads)).toEqual([{ id: 1 }, { id: 2 }]);
   });
 
-  it("accepts the legacy fresh option on uncached reads", async () => {
+  it("requests network revalidation without a cache mode option", async () => {
     respondWith([]);
 
-    await getJson("/api/v1/printers", { fresh: true });
-    await getJson("/api/v1/printers", { fresh: true });
+    await getJson("/api/v1/printers", {});
+    await getJson("/api/v1/printers", {});
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    // Compatibility options cannot reinstate a transport cache.
+    // No caller opt-in is required for network freshness.
     expect(initOf(0)).toMatchObject({ cache: "no-store" });
   });
 
@@ -356,7 +351,7 @@ describe("authHeaders", () => {
     window.localStorage.setItem("printstash.token", "abc123");
     respondWith([]);
 
-    await getJson("/api/v1/models", { fresh: true });
+    await getJson("/api/v1/models", {});
 
     const headers = new Headers(initOf(0).headers);
     expect(headers.get("Authorization")).toBeNull();
@@ -365,7 +360,7 @@ describe("authHeaders", () => {
   it("omits the Authorization header when there is no token", async () => {
     respondWith([]);
 
-    await getJson("/api/v1/models", { fresh: true });
+    await getJson("/api/v1/models", {});
 
     const headers = new Headers(initOf(0).headers);
     expect(headers.get("Authorization")).toBeNull();

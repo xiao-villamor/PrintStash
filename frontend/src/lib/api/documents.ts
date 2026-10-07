@@ -12,7 +12,7 @@ export function listDocuments(
 }
 
 export function getDocument(id: number, signal?: AbortSignal): Promise<DocumentRead> {
-  return getJson<DocumentRead>(`/api/v1/documents/${id}`, { fresh: true, signal });
+  return getJson<DocumentRead>(`/api/v1/documents/${id}`, { signal });
 }
 
 export function createDocument(payload: {

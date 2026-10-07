@@ -17,7 +17,7 @@ const PAIRINGS_PATH = "/api/v1/browser-pairings";
 export function listProviderConnections(
   options: GetJsonOptions = {},
 ): Promise<ProviderConnectionRead[]> {
-  return getJson<ProviderConnectionRead[]>(CONNECTIONS_PATH, { ...options, fresh: true });
+  return getJson<ProviderConnectionRead[]>(CONNECTIONS_PATH, { ...options });
 }
 
 export function authorizeMyMiniFactory(
@@ -65,7 +65,7 @@ export function createBrowserPairing(
 }
 
 export function listBrowserDevices(options: GetJsonOptions = {}): Promise<BrowserDeviceRead[]> {
-  return getJson<BrowserDeviceRead[]>(PAIRINGS_PATH, { ...options, fresh: true });
+  return getJson<BrowserDeviceRead[]>(PAIRINGS_PATH, { ...options });
 }
 
 export async function renameBrowserDevice(

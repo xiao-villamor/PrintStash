@@ -60,7 +60,7 @@ export function regenerateDerivatives(
 }
 
 export function listDerivatives(fileId: number): Promise<DerivativeRead[]> {
-  return getJson<DerivativeRead[]>(`/api/v1/files/${fileId}/derivatives`, { fresh: true });
+  return getJson<DerivativeRead[]>(`/api/v1/files/${fileId}/derivatives`, {});
 }
 
 export function retryDerivative(fileId: number, kind: string): Promise<DerivativeRead[]> {

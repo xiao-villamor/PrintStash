@@ -20,7 +20,7 @@ import type {
 } from "@/types";
 
 export function getFleetSummary(): Promise<FleetSummary> {
-  return getJson<FleetSummary>("/api/v1/fleet/summary", { fresh: true });
+  return getJson<FleetSummary>("/api/v1/fleet/summary", {});
 }
 
 export function listFleetQueue(historyLimit = 20, historyOffset = 0): Promise<PrintJobRead[]> {
@@ -28,7 +28,7 @@ export function listFleetQueue(historyLimit = 20, historyOffset = 0): Promise<Pr
     history_limit: String(historyLimit),
     history_offset: String(historyOffset),
   });
-  return getJson<PrintJobRead[]>(`/api/v1/fleet/queue?${params}`, { fresh: true });
+  return getJson<PrintJobRead[]>(`/api/v1/fleet/queue?${params}`, {});
 }
 
 export function enqueueFleetJob(payload: QueueJobCreate): Promise<PrintJobRead> {

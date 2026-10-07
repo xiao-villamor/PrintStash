@@ -77,9 +77,7 @@ export async function updatePrinter(
 }
 
 export function getPrinterMaterialState(id: number): Promise<PrinterMaterialStateRead> {
-  return getJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state`, {
-    fresh: true,
-  });
+  return getJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state`, {});
 }
 
 export function updatePrinterManualMaterialState(
@@ -103,7 +101,6 @@ export function listPrinterPermissions(
 ): Promise<PrinterPermissionRead[]> {
   return getJson<PrinterPermissionRead[]>(`/api/v1/printers/${id}/permissions`, {
     ...options,
-    fresh: true,
   });
 }
 
@@ -179,9 +176,7 @@ export function emergencyStopPrinter(id: number): Promise<void> {
 
 export function getPrinterStatus(id: number): Promise<PrinterStatusResponse> {
   // One-shot live snapshot — always fetch fresh.
-  return getJson<PrinterStatusResponse>(`/api/v1/printers/${id}/status`, {
-    fresh: true,
-  });
+  return getJson<PrinterStatusResponse>(`/api/v1/printers/${id}/status`, {});
 }
 
 export function listPrinterFiles(id: number, options?: GetJsonOptions): Promise<PrinterFileRead[]> {

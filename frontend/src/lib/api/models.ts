@@ -92,9 +92,7 @@ export async function listModelPage(params?: ListModelPageParams): Promise<Model
   if (params?.sort) search.set("sort", params.sort);
   if (params?.cursor) search.set("cursor", params.cursor);
   const query = search.toString();
-  return getJson<ModelPageRead>(`/api/v1/models/page${query ? `?${query}` : ""}`, {
-    fresh: true,
-  });
+  return getJson<ModelPageRead>(`/api/v1/models/page${query ? `?${query}` : ""}`, {});
 }
 
 export async function listOutlinerModels(
@@ -102,9 +100,7 @@ export async function listOutlinerModels(
 ): Promise<OutlinerModelRead[]> {
   const search = modelListSearch(params);
   const query = search.toString();
-  return getJson<OutlinerModelRead[]>(`/api/v1/models/outliner${query ? `?${query}` : ""}`, {
-    fresh: true,
-  });
+  return getJson<OutlinerModelRead[]>(`/api/v1/models/outliner${query ? `?${query}` : ""}`, {});
 }
 
 export async function getModelFacets(
@@ -112,9 +108,7 @@ export async function getModelFacets(
 ): Promise<ModelFacetsRead> {
   const search = modelListSearch(params);
   const query = search.toString();
-  return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`, {
-    fresh: true,
-  });
+  return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`, {});
 }
 
 export function starModel(id: number): Promise<ModelStarRead> {

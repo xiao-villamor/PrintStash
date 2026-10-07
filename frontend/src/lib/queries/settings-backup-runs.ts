@@ -13,7 +13,7 @@ export const backupRunKeys = { all: ["backup-runs"] as const };
 export function backupRunsOptions(reader: typeof listBackupRuns = listBackupRuns) {
   return queryOptions({
     queryKey: backupRunKeys.all,
-    queryFn: ({ signal }) => reader({ fresh: true, signal }),
+    queryFn: ({ signal }) => reader({ signal }),
     retry: false,
     staleTime: 0,
   });

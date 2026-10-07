@@ -14,7 +14,7 @@ import type {
 export function getNotificationsSettings(
   options: GetJsonOptions = {},
 ): Promise<NotificationsSettings> {
-  return getJson<NotificationsSettings>("/api/v1/notifications", { ...options, fresh: true });
+  return getJson<NotificationsSettings>("/api/v1/notifications", { ...options });
 }
 
 export async function setNotificationsEnabled(
@@ -89,6 +89,5 @@ export function listNotificationDeliveries(
 ): Promise<NotificationDelivery[]> {
   return getJson<NotificationDelivery[]>(`/api/v1/notifications/deliveries?limit=${limit}`, {
     ...options,
-    fresh: true,
   });
 }

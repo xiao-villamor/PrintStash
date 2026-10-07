@@ -270,7 +270,7 @@ describe("storage provider caller boundary", () => {
           signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
         }),
     );
-    const read = getStorageProviders({ fresh: true, signal: controller.signal });
+    const read = getStorageProviders({ signal: controller.signal });
     controller.abort();
     await expect(read).rejects.toMatchObject({ name: "AbortError" });
     expect(signal?.aborted).toBe(true);

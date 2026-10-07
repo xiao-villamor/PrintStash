@@ -31,7 +31,6 @@ export function listCollectionChildren(
   if (cursor !== null) params.set("cursor", cursor);
   return getJson<CollectionPage>(`/api/v1/collections/children?${params}`, {
     ...options,
-    fresh: true,
   });
 }
 
@@ -43,7 +42,6 @@ export function lookupCollection(
   const params = new URLSearchParams({ path });
   return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?${params}`, {
     ...options,
-    fresh: true,
   });
 }
 
@@ -54,7 +52,6 @@ export function lookupCollectionById(
 ): Promise<CollectionLookupRead> {
   return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?id=${id}`, {
     ...options,
-    fresh: true,
   });
 }
 
@@ -70,7 +67,6 @@ export function searchCollections(
   if (cursor !== null) params.set("cursor", cursor);
   return getJson<CollectionPage>(`/api/v1/collections/search?${params}`, {
     ...options,
-    fresh: true,
   });
 }
 
@@ -101,7 +97,6 @@ export function getCollectionReadme(
 ): Promise<{ readme: string | null }> {
   return getJson<{ readme: string | null }>(`/api/v1/collections/${id}/readme`, {
     ...options,
-    fresh: true,
   });
 }
 
@@ -124,7 +119,6 @@ export function listCollectionPermissions(
 ): Promise<CollectionPermissionRead[]> {
   return getJson<CollectionPermissionRead[]>(`/api/v1/collections/${id}/permissions`, {
     ...options,
-    fresh: true,
   });
 }
 

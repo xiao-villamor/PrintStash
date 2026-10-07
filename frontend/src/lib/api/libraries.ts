@@ -17,7 +17,7 @@ import {
 import { JobAccepted } from "@/types/models";
 
 export function listExternalLibraries(options?: GetJsonOptions): Promise<ExternalLibrary[]> {
-  return getJson<ExternalLibrary[]>("/api/v1/libraries", { fresh: true, ...options });
+  return getJson<ExternalLibrary[]>("/api/v1/libraries", { ...options });
 }
 
 export function createExternalLibrary(
@@ -89,5 +89,5 @@ export function scanExternalLibraryPath(id: number, path: string): Promise<JobAc
 }
 
 export function discoverLibraryLocations(): Promise<string[]> {
-  return getJson<string[]>("/api/v1/libraries/locations", { fresh: true });
+  return getJson<string[]>("/api/v1/libraries/locations", {});
 }

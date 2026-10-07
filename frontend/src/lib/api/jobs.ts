@@ -4,7 +4,6 @@ import type { JobStatus } from "@/types";
 /** One Job, uncached: a cached status never sees its Job finish. */
 export function getJobStatus(jobId: string, options: GetJsonOptions = {}): Promise<JobStatus> {
   return getJson<JobStatus>(`/api/v1/jobs/${encodeURIComponent(jobId)}`, {
-    fresh: true,
     ...options,
   });
 }
@@ -21,7 +20,7 @@ export function listJobs(
   const params = new URLSearchParams();
   trackedJobIds.forEach((jobId) => params.append("tracked_job_id", jobId));
   const query = params.size ? `?${params.toString()}` : "";
-  return getJson<JobStatus[]>(`/api/v1/jobs${query}`, { fresh: true, ...options });
+  return getJson<JobStatus[]>(`/api/v1/jobs${query}`, { ...options });
 }
 
 /** Administrator's live queue, including system-owned preview and maintenance Jobs. */

@@ -19,17 +19,17 @@ export function listOutlinerCollections(
   query: OutlinerParams,
   signal?: AbortSignal,
 ): Promise<OutlinerCollectionPage> {
-  return getJson(`/api/v1/outliner/collections?${params(query)}`, { fresh: true, signal });
+  return getJson(`/api/v1/outliner/collections?${params(query)}`, { signal });
 }
 export function listOutlinerEntries(
   query: OutlinerParams,
   signal?: AbortSignal,
 ): Promise<OutlinerEntryPage> {
-  return getJson(`/api/v1/outliner/entries?${params(query)}`, { fresh: true, signal });
+  return getJson(`/api/v1/outliner/entries?${params(query)}`, { signal });
 }
 export function searchOutliner(
   query: OutlinerParams,
   signal?: AbortSignal,
 ): Promise<OutlinerSearchPage> {
-  return getJson(`/api/v1/outliner/search?${params(query)}`, { fresh: true, signal });
+  return getJson(`/api/v1/outliner/search?${params(query)}`, { signal });
 }

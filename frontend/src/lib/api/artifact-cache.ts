@@ -42,12 +42,12 @@ export interface ArtifactCacheRead {
 }
 
 export const artifactCacheApi = {
-  read: () => getJson<ArtifactCacheRead>("/api/v1/config/artifact-cache", { fresh: true }),
+  read: () => getJson<ArtifactCacheRead>("/api/v1/config/artifact-cache", {}),
   save: (policy: ArtifactCachePolicy) =>
     sendJson<ArtifactCacheRead>("/api/v1/config/artifact-cache", "PUT", policy),
   reset: async () => {
     await sendAction("/api/v1/config/artifact-cache", "DELETE");
-    return getJson<ArtifactCacheRead>("/api/v1/config/artifact-cache", { fresh: true });
+    return getJson<ArtifactCacheRead>("/api/v1/config/artifact-cache", {});
   },
   clear: () => sendJson<ArtifactCacheRead>("/api/v1/config/artifact-cache/clear", "POST", {}),
 };

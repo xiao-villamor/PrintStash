@@ -83,9 +83,9 @@ const base = "/api/v1/storage/migrations";
 const path = (id: string) => `${base}/${encodeURIComponent(id)}`;
 type MigrationRequestOptions = Pick<GetJsonOptions, "signal">;
 export const listVaultMigrations = (options: MigrationRequestOptions = {}) =>
-  getJson<VaultMigrationRun[]>(base, { fresh: true, ...options });
+  getJson<VaultMigrationRun[]>(base, { ...options });
 export const getVaultMigration = (id: string, options: MigrationRequestOptions = {}) =>
-  getJson<VaultMigrationRun>(path(id), { fresh: true, ...options });
+  getJson<VaultMigrationRun>(path(id), { ...options });
 export const preflightVaultMigration = (
   body: VaultMigrationPreflight,
   options: MigrationRequestOptions = {},
@@ -177,7 +177,7 @@ export interface VaultMigrationReport extends VaultMigrationRun {
   recent_failures: VaultMigrationFailure[];
 }
 export const getVaultMigrationReport = (id: string, options: MigrationRequestOptions = {}) =>
-  getJson<VaultMigrationReport>(`${path(id)}/report`, { fresh: true, ...options });
+  getJson<VaultMigrationReport>(`${path(id)}/report`, { ...options });
 export async function downloadVaultMigrationReport(
   id: string,
   options: MigrationRequestOptions = {},

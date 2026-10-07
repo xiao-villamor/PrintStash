@@ -24,7 +24,7 @@ export interface BackupRun {
 }
 
 export function listBackupRuns(options: GetJsonOptions = {}): Promise<BackupRun[]> {
-  return getJson<BackupRun[]>("/api/v1/backups/runs", { ...options, fresh: true });
+  return getJson<BackupRun[]>("/api/v1/backups/runs", { ...options });
 }
 
 /** Queues a retry Job for one failed destination; follow it by `job_id`. */

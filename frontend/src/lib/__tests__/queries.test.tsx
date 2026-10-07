@@ -3,7 +3,7 @@
  * broken.
  *
  * **Freshness.** Collections, tags, printers, profiles and vault stats all pass
- * `fresh: true`, because every one of them changes as a *result* of something the
+ * Query-owned freshness, because every one of them changes as a *result* of something the
  * user just did. A cached collection list after creating a collection shows the
  * user their new folder missing.
  *
@@ -289,32 +289,30 @@ describe("taxonomy hooks", () => {
     expect(stubs.lookupCollectionById).not.toHaveBeenCalled();
   });
 
-  it("useTags fetches with fresh:true", async () => {
+  it("loads the tag catalog", async () => {
     const { result } = renderHook(() => useTags(), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(stubs.listTags).toHaveBeenCalledWith({ fresh: true });
+    expect(stubs.listTags).toHaveBeenCalledWith({});
   });
 });
 
 describe("resource hooks", () => {
-  it("usePrinterProfiles / useFilamentProfiles / useVaultStats pass fresh:true", async () => {
+  it("loads the resource catalogs", async () => {
     const pp = renderHook(() => usePrinterProfiles(), { wrapper: wrapper() });
     await waitFor(() => expect(pp.result.current.isSuccess).toBe(true));
     expect(stubs.listPrinterProfiles).toHaveBeenCalledWith({
-      fresh: true,
       signal: expect.any(AbortSignal),
     });
 
     const fp = renderHook(() => useFilamentProfiles(), { wrapper: wrapper() });
     await waitFor(() => expect(fp.result.current.isSuccess).toBe(true));
     expect(stubs.listFilamentProfiles).toHaveBeenCalledWith({
-      fresh: true,
       signal: expect.any(AbortSignal),
     });
 
     const vs = renderHook(() => useVaultStats(), { wrapper: wrapper() });
     await waitFor(() => expect(vs.result.current.isSuccess).toBe(true));
-    expect(stubs.getVaultStats).toHaveBeenCalledWith({ fresh: true });
+    expect(stubs.getVaultStats).toHaveBeenCalledWith({});
   });
 });
 
@@ -332,12 +330,11 @@ describe("usePrinters enabled gate", () => {
     expect(signal?.aborted).toBe(true);
     response.resolve([printer]);
   });
-  it("fetches when enabled (default) with fresh:true", async () => {
+  it("fetches when enabled by default", async () => {
     const { result } = renderHook(() => usePrinters(), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual([printer]);
     expect(stubs.listPrinters).toHaveBeenCalledWith(undefined, {
-      fresh: true,
       signal: expect.any(AbortSignal),
     });
   });
@@ -632,7 +629,6 @@ describe("canonical Vault configuration reader", () => {
     const { result } = renderHook(() => useVaultConfig(), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(stubs.getVaultConfig).toHaveBeenCalledWith({
-      fresh: true,
       signal: expect.any(AbortSignal),
     });
   });

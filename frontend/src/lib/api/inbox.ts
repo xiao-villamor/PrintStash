@@ -97,15 +97,12 @@ export function listPendingImports(
   signal?: AbortSignal,
 ): Promise<InboxItem[]> {
   return getJson<InboxItem[]>(`/api/v1/inbox?include_completed=${includeCompleted}`, {
-    fresh: true,
     signal,
   });
 }
 
 export function getPendingImport(id: number, signal?: AbortSignal): Promise<InboxItem> {
-  return getJson<InboxItemWire>(`/api/v1/inbox/${id}`, { fresh: true, signal }).then(
-    parsedInboxItem,
-  );
+  return getJson<InboxItemWire>(`/api/v1/inbox/${id}`, { signal }).then(parsedInboxItem);
 }
 
 /**

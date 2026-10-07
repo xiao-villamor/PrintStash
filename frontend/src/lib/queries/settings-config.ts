@@ -13,7 +13,7 @@ import type { VaultConfigRead, VaultConfigUpdate } from "@/types";
 export function vaultConfigOptions(reader: typeof getVaultConfig = getVaultConfig) {
   return queryOptions({
     queryKey: queryKeys.vaultConfig,
-    queryFn: ({ signal }) => reader({ fresh: true, signal }),
+    queryFn: ({ signal }) => reader({ signal }),
   });
 }
 export interface ConfigCommand {

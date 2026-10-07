@@ -10,14 +10,13 @@ export function listMultipartBuilds(
 ): Promise<MultipartBuild[]> {
   return getJson(`${base}?archived=${archived}&offset=${offset}&limit=50`, {
     ...options,
-    fresh: true,
   });
 }
 export function getMultipartBuild(
   id: number,
   options: GetJsonOptions = {},
 ): Promise<MultipartBuild> {
-  return getJson(`${base}/${id}`, { ...options, fresh: true });
+  return getJson(`${base}/${id}`, { ...options });
 }
 export function createMultipartBuild(body: {
   name: string;

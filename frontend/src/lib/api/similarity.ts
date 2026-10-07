@@ -22,7 +22,7 @@ function writeSimilarity<T>(
   return requestApi<T>(path, { method, headers: jsonHeaders(), body: JSON.stringify(body) });
 }
 export function getSimilarityStatus(options?: GetJsonOptions) {
-  return getJson<SimilarityStatus>("/api/v1/similarity/status", { fresh: true, ...options });
+  return getJson<SimilarityStatus>("/api/v1/similarity/status", { ...options });
 }
 export function saveSimilaritySettings(patch: Partial<SimilaritySettings>) {
   return writeSimilarity<SimilaritySettings>("/api/v1/similarity/settings", "PATCH", patch);
@@ -33,11 +33,11 @@ export function startSimilarityRun(scope: SimilarityRun["scope"], ids: number[] 
 export function listSimilarityRuns(beforeId?: number, options?: GetJsonOptions) {
   return getJson<{ items: SimilarityRun[]; next_cursor: number | null }>(
     `/api/v1/similarity/runs${beforeId ? `?before_id=${beforeId}` : ""}`,
-    { fresh: true, ...options },
+    { ...options },
   );
 }
 export function getSimilarityRun(id: number, options?: GetJsonOptions) {
-  return getJson<SimilarityRun>(`/api/v1/similarity/runs/${id}`, { fresh: true, ...options });
+  return getJson<SimilarityRun>(`/api/v1/similarity/runs/${id}`, { ...options });
 }
 export function cancelSimilarityRun(id: number) {
   return writeSimilarity<SimilarityRun>(`/api/v1/similarity/runs/${id}/cancel`, "POST", {});
@@ -51,13 +51,11 @@ export function listSimilarityCandidates(
     if (value !== undefined) query.set(key, String(value));
   }
   return getJson<SimilarityPage>(`/api/v1/similarity/candidates?${query}`, {
-    fresh: true,
     ...options,
   });
 }
 export function getSimilarityCandidate(id: number, options?: GetJsonOptions) {
   return getJson<SimilarityCandidate>(`/api/v1/similarity/candidates/${id}`, {
-    fresh: true,
     ...options,
   });
 }

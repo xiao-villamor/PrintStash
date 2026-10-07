@@ -17,7 +17,7 @@ export interface StorageConnectionCreate {
 }
 
 export function listStorageConnections(options: GetJsonOptions = {}): Promise<StorageConnection[]> {
-  return getJson<StorageConnection[]>("/api/v1/storage-connections", { ...options, fresh: true });
+  return getJson<StorageConnection[]>("/api/v1/storage-connections", { ...options });
 }
 
 export function createStorageConnection(

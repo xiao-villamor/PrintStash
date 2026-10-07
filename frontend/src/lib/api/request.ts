@@ -439,8 +439,6 @@ export function requestMutation<T>(
 
 export interface GetJsonOptions {
   signal?: AbortSignal;
-  /** Compatibility only: JSON transport always reads the network. Remove in M10. */
-  fresh?: boolean;
 }
 
 export function getJson<T>(path: string, options?: GetJsonOptions): Promise<T> {

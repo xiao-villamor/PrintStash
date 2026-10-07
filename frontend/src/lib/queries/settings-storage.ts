@@ -26,14 +26,14 @@ export function storageConnectionsOptions(
 ) {
   return queryOptions({
     queryKey: storageConnectionKeys.all,
-    queryFn: ({ signal }) => reader({ fresh: true, signal }),
+    queryFn: ({ signal }) => reader({ signal }),
     retry: false,
   });
 }
 export function storageProvidersOptions(reader: typeof getStorageProviders = getStorageProviders) {
   return queryOptions({
     queryKey: storageProviderKeys.all,
-    queryFn: ({ signal }) => reader({ fresh: true, signal }),
+    queryFn: ({ signal }) => reader({ signal }),
     retry: false,
   });
 }

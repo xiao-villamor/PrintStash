@@ -48,7 +48,6 @@ export function listMultipartModels(
   options?: GetJsonOptions,
 ): Promise<MultipartModelListItem[]> {
   return getJson<MultipartModelListItem[]>(`/api/v1/multipart-models${multipartSearch(params)}`, {
-    fresh: true,
     ...options,
   });
 }
@@ -178,6 +177,6 @@ export function listMultipartModelCandidates(
   const query = search.toString();
   return getJson<MultipartModelCandidate[]>(
     `/api/v1/multipart-models/${id}/candidates${query ? `?${query}` : ""}`,
-    { fresh: true },
+    {},
   );
 }

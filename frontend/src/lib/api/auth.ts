@@ -44,11 +44,11 @@ export function getMe(options?: GetJsonOptions): Promise<UserRead> {
 }
 
 export function listApiKeys(options: GetJsonOptions = {}): Promise<ApiKeyRead[]> {
-  return getJson<ApiKeyRead[]>("/api/v1/auth/api-keys", { ...options, fresh: true });
+  return getJson<ApiKeyRead[]>("/api/v1/auth/api-keys", { ...options });
 }
 
 export function listAdminUsers(options: GetJsonOptions = {}): Promise<UserRead[]> {
-  return getJson<UserRead[]>("/api/v1/admin/users", { ...options, fresh: true });
+  return getJson<UserRead[]>("/api/v1/admin/users", { ...options });
 }
 
 export function createAdminUser(payload: UserCreate): Promise<UserRead> {

@@ -5,7 +5,6 @@ import type { SearchSubjectType } from "@/types/search";
 export function getCaption(type: SearchSubjectType, id: number, options: GetJsonOptions = {}) {
   return getJson<SubjectCaption>(`/api/v1/subjects/${type}/${id}/caption`, {
     ...options,
-    fresh: true,
   });
 }
 export function patchCaption(type: SearchSubjectType, id: number, body: CaptionPatch) {

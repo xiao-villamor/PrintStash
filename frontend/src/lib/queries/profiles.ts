@@ -26,13 +26,13 @@ export const profileKeys = {
 export function filamentProfilesOptions(read: typeof listFilamentProfiles = listFilamentProfiles) {
   return queryOptions({
     queryKey: profileKeys.filaments,
-    queryFn: ({ signal }) => read({ fresh: true, signal }),
+    queryFn: ({ signal }) => read({ signal }),
   });
 }
 export function printerProfilesOptions(read: typeof listPrinterProfiles = listPrinterProfiles) {
   return queryOptions({
     queryKey: profileKeys.printers,
-    queryFn: ({ signal }) => read({ fresh: true, signal }),
+    queryFn: ({ signal }) => read({ signal }),
   });
 }
 

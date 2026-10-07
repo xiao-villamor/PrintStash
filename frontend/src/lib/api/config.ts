@@ -68,11 +68,11 @@ export function completeSetup(
 }
 
 export function getVaultConfig(options: GetJsonOptions = {}): Promise<VaultConfigRead> {
-  return getJson<VaultConfigRead>("/api/v1/config", { ...options, fresh: true });
+  return getJson<VaultConfigRead>("/api/v1/config", { ...options });
 }
 
 export function getHealthDetails<T>(options: GetJsonOptions = {}): Promise<T> {
-  return getJson<T>("/api/v1/health/details", { ...options, fresh: true });
+  return getJson<T>("/api/v1/health/details", { ...options });
 }
 
 export function enrollStorageRoot(
@@ -105,7 +105,6 @@ export function getLatestRelease(
   const query = refresh ? "?refresh=true" : "";
   return getJson<ReleaseStatus>(`/api/v1/health/releases/latest${query}`, {
     ...options,
-    fresh: true,
   });
 }
 

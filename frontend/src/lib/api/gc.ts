@@ -32,7 +32,7 @@ export interface GcPlan {
 }
 
 export function getActiveGcPlan(options: GetJsonOptions = {}): Promise<GcPlan | null> {
-  return getJson<GcPlan | null>("/api/v1/admin/gc", { ...options, fresh: true });
+  return getJson<GcPlan | null>("/api/v1/admin/gc", { ...options });
 }
 
 export function createGcPlan(options: Pick<GetJsonOptions, "signal"> = {}): Promise<GcPlan> {

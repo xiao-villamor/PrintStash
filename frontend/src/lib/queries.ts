@@ -73,8 +73,7 @@ import type {
  * invalidation (`invalidateQueriesForPath`) busts these after a
  * create/move/delete, so they refetch automatically.
  *
- * The `queryFn`s pass `{ fresh: true }` to bypass the legacy in-memory cache in
- * `request.ts`, making TanStack Query the single source of truth for them.
+ * JSON transport always reads the network; Query owns reuse and freshness.
  */
 
 /**
@@ -214,7 +213,7 @@ export function useTags(options?: { enabled?: boolean }) {
   return useQuery<TagRead[]>({
     queryKey: queryKeys.tags,
     enabled: options?.enabled,
-    queryFn: () => api.listTags({ fresh: true }),
+    queryFn: () => api.listTags({}),
   });
 }
 
@@ -224,13 +223,14 @@ export function useTags(options?: { enabled?: boolean }) {
  * layer invalidate these by key (see `invalidateQueriesForPath`), so a printer
  * added on one screen shows up on every other without a manual reload.
  *
- * `fresh: true` bypasses the legacy in-memory cache in `request.ts` so TanStack
+ * Query is the sole freshness owner; the transport consumes the signal.
+ * TanStack
  * Query stays the single source of truth, matching the other taxonomy hooks.
  */
 export function printersOptions(api: Pick<QueryApi, "listPrinters"> = defaultQueryApi) {
   return queryOptions({
     queryKey: queryKeys.printers,
-    queryFn: ({ signal }) => api.listPrinters(undefined, { fresh: true, signal }),
+    queryFn: ({ signal }) => api.listPrinters(undefined, { signal }),
   });
 }
 
@@ -247,7 +247,7 @@ export function usePrinterDashboard(options?: { enabled?: boolean; refetchInterv
   const api = useQueryApi();
   return useQuery<Dashboard>({
     queryKey: queryKeys.printerDashboard,
-    queryFn: () => api.getDashboard({ fresh: true }),
+    queryFn: () => api.getDashboard({}),
     enabled: options?.enabled ?? true,
     refetchInterval: options?.refetchInterval,
   });
@@ -287,7 +287,7 @@ export function useVaultStats() {
   const api = useQueryApi();
   return useQuery<VaultStatsRead>({
     queryKey: queryKeys.vaultStats,
-    queryFn: () => api.getVaultStats({ fresh: true }),
+    queryFn: () => api.getVaultStats({}),
   });
 }
 

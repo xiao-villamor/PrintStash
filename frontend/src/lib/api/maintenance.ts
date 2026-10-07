@@ -12,11 +12,11 @@ export function startVaultAudit(mode: VaultAuditMode): Promise<VaultAuditRun> {
 }
 
 export function getLatestVaultAudit(): Promise<VaultAuditRun> {
-  return getJson<VaultAuditRun>("/api/v1/maintenance/audits/latest", { fresh: true });
+  return getJson<VaultAuditRun>("/api/v1/maintenance/audits/latest", {});
 }
 
 export function getVaultAudit(id: number): Promise<VaultAuditRun> {
-  return getJson<VaultAuditRun>(`/api/v1/maintenance/audits/${id}`, { fresh: true });
+  return getJson<VaultAuditRun>(`/api/v1/maintenance/audits/${id}`, {});
 }
 
 export function cancelVaultAudit(id: number): Promise<VaultAuditRun> {
@@ -44,7 +44,7 @@ export function verifyBackup(
 }
 
 export function listAuditPolicies(): Promise<AuditPolicy[]> {
-  return getJson<AuditPolicy[]>("/api/v1/maintenance/audit-policies", { fresh: true });
+  return getJson<AuditPolicy[]>("/api/v1/maintenance/audit-policies", {});
 }
 
 export function saveAuditPolicy(policy: AuditPolicy): Promise<AuditPolicy> {
@@ -70,5 +70,5 @@ export function skipAuditSlot(mode: VaultAuditMode): Promise<AuditPolicy> {
 }
 
 export function listVaultAudits(): Promise<VaultAuditRun[]> {
-  return getJson<VaultAuditRun[]>("/api/v1/maintenance/audits", { fresh: true });
+  return getJson<VaultAuditRun[]>("/api/v1/maintenance/audits", {});
 }

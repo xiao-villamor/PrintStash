@@ -58,7 +58,7 @@ export function librarySourcesOptions(
     queryKey: librarySourceKeys.all,
     queryFn: async ({ signal }): Promise<LibrarySources> => {
       try {
-        return { kind: "enabled", items: await reader({ fresh: true, signal }) };
+        return { kind: "enabled", items: await reader({ signal }) };
       } catch (error) {
         const failure = parseApiError(error);
         if (failure.status === 404 && failure.code === "feature_disabled")
