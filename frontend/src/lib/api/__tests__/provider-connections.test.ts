@@ -120,13 +120,38 @@ describe("listBrowserDevices", () => {
 });
 
 describe("renameBrowserDevice", () => {
-  it("PATCHes the name", async () => {
-    respondWith({ id: 1, name: "Laptop" });
+  it.each([
+    {
+      label: "nonadvancing version",
+      receipt: { id: 1, edit_epoch: "a".repeat(32), edit_version: 1 },
+    },
+    { label: "another history", receipt: { id: 1, edit_epoch: "b".repeat(32), edit_version: 2 } },
+    { label: "another device", receipt: { id: 2, edit_epoch: "a".repeat(32), edit_version: 2 } },
+  ])("refuses an invalid browser acknowledgement: $label", async ({ receipt }) => {
+    respondWith(receipt);
+    await expect(
+      renameBrowserDevice(
+        1,
+        { name: "Laptop" },
+        { base: { edit_epoch: "a".repeat(32), edit_version: 1 } },
+      ),
+    ).rejects.toThrow(/acknowledgement|identity_mismatch/);
+  });
 
-    await renameBrowserDevice(1, { name: "Laptop" });
+  it("sends the captured browser base", async () => {
+    respondWith({ id: 1, name: "Laptop", edit_epoch: "a".repeat(32), edit_version: 2 });
+
+    await renameBrowserDevice(
+      1,
+      { name: "Laptop" },
+      { base: { edit_epoch: "a".repeat(32), edit_version: 1 } },
+    );
 
     expectRequest("/api/v1/browser-pairings/1", "PATCH");
     expect(lastBody()).toEqual({ name: "Laptop" });
+    const headers = new Headers(lastCall().init?.headers);
+    expect(headers.get("If-Match")).toBe(`"browser-device-1-e${"a".repeat(32)}-v1"`);
+    expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
   });
 });
 

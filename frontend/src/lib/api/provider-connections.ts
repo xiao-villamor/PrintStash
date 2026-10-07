@@ -1,3 +1,5 @@
+import { editHeaders, requireEditingReceipt } from "./editing";
+import type { EditingBase } from "@/types/editing";
 import { getJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
 import type {
   BrowserDevicePatch,
@@ -66,17 +68,20 @@ export function listBrowserDevices(options: GetJsonOptions = {}): Promise<Browse
   return getJson<BrowserDeviceRead[]>(PAIRINGS_PATH, { ...options, fresh: true });
 }
 
-export function renameBrowserDevice(
+export async function renameBrowserDevice(
   deviceId: number,
   body: BrowserDevicePatch,
-  options: { signal?: AbortSignal } = {},
+  options: { base: EditingBase; signal?: AbortSignal },
 ): Promise<BrowserDeviceRead> {
-  return requestApi<BrowserDeviceRead>(`${PAIRINGS_PATH}/${deviceId}`, {
+  const saved = await requestApi<BrowserDeviceRead>(`${PAIRINGS_PATH}/${deviceId}`, {
     method: "PATCH",
-    headers: jsonHeaders(),
+    headers: { ...jsonHeaders(), ...editHeaders("browser-device", deviceId, options.base) },
     body: JSON.stringify(body),
     signal: options.signal,
   });
+  requireEditingReceipt(saved, options.base);
+  if (saved.id !== deviceId) throw new Error("browser_identity_mismatch");
+  return saved;
 }
 
 export function revokeBrowserDevice(

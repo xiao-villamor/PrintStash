@@ -65,8 +65,10 @@ mounted drafts with disabled actions; authorization failures hide private rows.
 The backend now offers an additive conditional browser-name contract through
 `modules/ingestion/browser_edits.py`. Its version excludes last-use telemetry;
 its opaque history distinguishes replacement credentials and restored databases.
-Legacy renames remain compatible. The first-party editor still needs captured
-bases and explicit conflict review before this workflow is accepted. Evidence: `docs/frontend-m9-provider-validation.md`.
+Legacy renames remain compatible. The first-party editor captures the original base with its draft, requires explicit
+review after conflicts or uncertain writes, and allows revised saves only within
+the reviewed pairing history. A replacement pairing requires adopting current
+values. Denied or missing devices retire private drafts. Evidence: `docs/frontend-m9-provider-validation.md`.
 
 ### Implemented administration source seam (M9 increment)
 

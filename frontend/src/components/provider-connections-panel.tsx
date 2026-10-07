@@ -26,6 +26,7 @@ import {
   useProviderConnectionCommands,
   type ProviderConnectionsTransport,
 } from "@/lib/queries/settings-providers";
+import { captureEditingBase } from "@/lib/api/editing";
 import { getSessionVersion } from "@/lib/session-transport";
 import { onAuthChange } from "@/lib/auth-store";
 import { parseApiError, userMessage } from "@/lib/errors";
@@ -151,16 +152,23 @@ export function ProviderConnectionsPanel({
       if (current(session)) setBusy(null);
     }
   }
-  async function saveDeviceName(device: BrowserDeviceRead, name: string): Promise<void> {
-    const trimmed = name.trim();
-    if (!trimmed || trimmed === device.name) return;
+  async function saveDeviceName(
+    device: BrowserDeviceRead,
+    name: string,
+  ): Promise<BrowserDeviceRead> {
     const session = getSessionVersion();
     setBusy(`rename-${device.id}`);
-    setError("");
     try {
-      await commands.rename(device.id, trimmed, session);
-    } catch (cause) {
-      if (current(session)) setError(userMessage(cause));
+      return await commands.rename(device.id, name, captureEditingBase(device), session);
+    } finally {
+      if (current(session)) setBusy(null);
+    }
+  }
+  async function reviewDevice(id: number): Promise<BrowserDeviceRead> {
+    const session = getSessionVersion();
+    setBusy(`review-${id}`);
+    try {
+      return await commands.reviewDevice(id, session);
     } finally {
       if (current(session)) setBusy(null);
     }
@@ -375,6 +383,7 @@ export function ProviderConnectionsPanel({
                     device={device}
                     busy={busy}
                     onSave={saveDeviceName}
+                    onReview={reviewDevice}
                     onRevoke={(device) => {
                       setError("");
                       setRevokeTarget(device);
@@ -443,55 +452,187 @@ function ConnectionHeader({
   );
 }
 
+type BrowserReview =
+  | { phase: "idle" }
+  | { phase: "required" }
+  | { phase: "ready"; snapshot: BrowserDeviceRead }
+  | { phase: "denied" };
+
 function BrowserDeviceRow({
   device,
   busy,
   onSave,
+  onReview,
   onRevoke,
   labels,
 }: {
   device: BrowserDeviceRead;
   busy: string | null;
-  onSave: (device: BrowserDeviceRead, name: string) => Promise<void>;
+  onSave: (device: BrowserDeviceRead, name: string) => Promise<BrowserDeviceRead>;
+  onReview: (id: number) => Promise<BrowserDeviceRead>;
   onRevoke: (device: BrowserDeviceRead) => void;
   labels: { name: string; save: string; revoke: string; revoked: string };
 }) {
-  const nameRef = useRef<HTMLInputElement>(null);
-  const revoked = device.revoked_at !== null;
+  const { t } = useI18n();
+  // No copied server list: this snapshot exists only after a deliberate edit/adoption.
+  const [draft, setDraft] = useState<{ base: BrowserDeviceRead; name: string } | null>(null);
+  const [review, setReview] = useState<BrowserReview>({ phase: "idle" });
+  const [error, setError] = useState<string | null>(null);
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    const release = onAuthChange(() => {
+      setDraft(null);
+      setReview({ phase: "idle" });
+      setError(null);
+    });
+    return () => {
+      live.current = false;
+      release();
+    };
+  }, []);
+  const current = (session: number) => live.current && session === getSessionVersion();
+  const revoked = device.revoked_at !== null || draft?.base.revoked_at != null;
+  const name = draft?.name ?? device.name;
+  const snapshot = review.phase === "ready" ? review.snapshot : null;
+  const replaced = snapshot !== null && snapshot.edit_epoch !== (draft?.base ?? device).edit_epoch;
+  const edited = name.trim() !== (draft?.base ?? device).name;
+
+  function failure(cause: unknown) {
+    if ([401, 403, 404].includes(parseApiError(cause).status)) {
+      setDraft(null);
+      setReview({ phase: "denied" });
+    } else setReview({ phase: "required" });
+    setError(userMessage(cause));
+  }
+  async function save(revised: boolean) {
+    if (!draft || !edited || busy !== null || !name.trim()) return;
+    if (revised ? !snapshot || replaced || snapshot.revoked_at !== null : review.phase !== "idle")
+      return;
+    const session = getSessionVersion();
+    setError(null);
+    try {
+      await onSave(revised && snapshot ? snapshot : draft.base, name.trim());
+      if (current(session)) {
+        setDraft(null);
+        setReview({ phase: "idle" });
+      }
+    } catch (cause) {
+      if (current(session)) failure(cause);
+    }
+  }
+  async function reviewCurrent() {
+    const session = getSessionVersion();
+    setError(null);
+    setReview({ phase: "required" });
+    try {
+      const next = await onReview(device.id);
+      if (current(session)) setReview({ phase: "ready", snapshot: next });
+    } catch (cause) {
+      if (current(session)) failure(cause);
+    }
+  }
+  if (review.phase === "denied") return <p role="alert">{error}</p>;
   return (
-    <div className="flex flex-col gap-2 rounded border border-border p-3 sm:flex-row sm:items-center">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-          <Input
-            aria-label={labels.name}
-            ref={nameRef}
-            defaultValue={device.name}
-            disabled={revoked || busy === `rename-${device.id}`}
-            maxLength={128}
-          />
+    <div className="space-y-3 rounded border border-border p-3">
+      <form
+        className="flex flex-col gap-2 sm:flex-row sm:items-center"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void save(false);
+        }}
+      >
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            <Input
+              aria-label={labels.name}
+              value={name}
+              onChange={(event) =>
+                setDraft({ base: draft?.base ?? device, name: event.target.value })
+              }
+              disabled={revoked || busy !== null}
+              maxLength={128}
+              required
+              pattern={".*\\S.*"}
+            />
+          </div>
+          {revoked && <p className="mt-1 text-xs text-muted-foreground">{labels.revoked}</p>}
         </div>
-        {revoked && <p className="mt-1 text-xs text-muted-foreground">{labels.revoked}</p>}
-      </div>
-      {!revoked && (
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void onSave(device, nameRef.current?.value ?? device.name)}
-            loading={busy === `rename-${device.id}`}
-            aria-label={labels.save}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => onRevoke(device)}
-            aria-label={labels.revoke}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+        {!revoked && (
+          <div className="flex gap-2">
+            <Button
+              type="submit"
+              variant="outline"
+              size="sm"
+              disabled={!edited || review.phase !== "idle" || busy !== null}
+              loading={busy === `rename-${device.id}`}
+              aria-label={labels.save}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              onClick={() => onRevoke(device)}
+              aria-label={labels.revoke}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        )}
+      </form>
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      )}
+      {review.phase !== "idle" && (
+        <div role="status" className="space-y-2 text-sm">
+          <p>{t("settings.pairedBrowsers.reviewRequired")}</p>
+          {snapshot && <p>{t("settings.pairedBrowsers.currentName", { name: snapshot.name })}</p>}
+          {replaced && <p>{t("settings.pairedBrowsers.replaced")}</p>}
+          {snapshot?.revoked_at && <p>{labels.revoked}</p>}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy !== null}
+              onClick={() => void reviewCurrent()}
+            >
+              {t("Review current values")}
+            </Button>
+            {snapshot && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setDraft({ base: snapshot, name: snapshot.name });
+                    setReview({ phase: "idle" });
+                    setError(null);
+                  }}
+                >
+                  {t("Use current values")}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={
+                    busy !== null ||
+                    replaced ||
+                    snapshot.revoked_at !== null ||
+                    !edited ||
+                    !name.trim()
+                  }
+                  onClick={() => void save(true)}
+                >
+                  {t("Save revised changes")}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

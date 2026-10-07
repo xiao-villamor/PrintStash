@@ -182,3 +182,5 @@ including browser Forward/Back. It seeds and cleans up a unique scale fixture.
 
 - `profiles.spec.ts`: two editors per preset kind recover a conditional conflict
   while preserving the other editor’s notes, verified after reload.
+
+- `provider-connections.spec.ts`: issue a pairing code, claim without an account session, resolve competing browser-name drafts through explicit review, then confirm revocation.

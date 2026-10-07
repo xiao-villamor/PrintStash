@@ -4268,5 +4268,8 @@
   "aiSearch.historyChanged": "El historial de la base de datos ha cambiado. Usa la configuración actual antes de iniciar otra edición.",
   "aiSearch.reviewEnabled": "Activado",
   "aiSearch.reviewDisabled": "Desactivado",
-  "settings.providerConnections.loadFailed": "No se pudieron cargar las cuentas de proveedores o los navegadores vinculados."
+  "settings.providerConnections.loadFailed": "No se pudieron cargar las cuentas de proveedores o los navegadores vinculados.",
+  "settings.pairedBrowsers.reviewRequired": "Revisa el nombre actual antes de volver a guardar. Se conserva tu borrador.",
+  "settings.pairedBrowsers.currentName": "Nombre actual del navegador: {name}",
+  "settings.pairedBrowsers.replaced": "Esta vinculación ha cambiado. Usa los valores actuales antes de iniciar otra edición."
 }

@@ -1,7 +1,8 @@
 # M9 provider accounts and paired browsers
 
-Status: active. Prerequisite M8 is accepted at `ea144c7c`. This is one M9 workflow,
-not acceptance of all administration/entry routes.
+Status: locally accepted provider/browser workflow, pending final branch CI.
+Prerequisite M8 is accepted at `ea144c7c`. This does not accept the remaining
+M9 administration/entry routes.
 
 ## Current evidence and intended increment
 
@@ -22,9 +23,8 @@ and revoke; loading/error/denial must never become empty/disconnected success.
 Use caller-owned abort signals for transports. Keep the navigation handoff local
 to the active panel. No generic CRUD hook or new runtime is required.
 
-The device-name form also lacks a conditional-write contract. That backend/client
-contract remains required before this workflow can close; read/lifetime fixes do
-not waive it. Other remaining M9 seams are notifications, remote connection/source
+The original device-name form also lacked a conditional-write contract. The
+backend/client increments below now cover it. Remaining M9 seams are notifications, remote connection/source
 edit contracts, and Settings health/release/trash/GC reads. These are subsequent
 bounded workflows, not parallel implementation tracks.
 
@@ -39,7 +39,7 @@ credential storage, pairing and authorization contracts remain authoritative.
 | PC2 | retries failed provider reads explicitly | Error | Provider GET fails | Error plus retry; accepted later read renders connections | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::retries failed provider reads explicitly` |
 | PC3 | cancels provider reads after disposal | Edge | Held read; panel unmounts | Request signal aborted; no late state publication | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::cancels provider reads after disposal` |
 | PC4 | refuses a retired OAuth navigation | Edge | OAuth POST settles after unmount | No navigation | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::refuses a retired OAuth navigation` |
-| PC5 | refuses commands from an earlier session | Error | Session changes while command awaits | No old callback, code, credential or new-session write | Frontend unit | ❌ missing |
+| PC5 | refuses commands from an earlier session | Error | Session changes while command awaits | No old callback, code, credential or new-session write | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::refuses an OAuth handoff from an earlier session`, `src/components/__tests__/provider-connections-panel.test.tsx::refuses a credential receipt from an earlier session`, `src/components/__tests__/provider-connections-panel.test.tsx::refuses pairing receipts from an earlier session` |
 | PC6 | preserves a confirmed connection against an older read | Edge | Read overlaps Cults acceptance | Canonical connection stays accepted | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::preserves a confirmed connection against an older read` |
 | PC7 | keeps credentials outside shared caches | Happy | Cults password submitted | Transport receives credentials; Query data/mutations contain no secret | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::connects Cults from newly entered credentials without retaining them` |
 | PC8 | keeps pairing codes local to the active panel | Happy | Pairing accepted | Code shown locally; not in Query data/mutations | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::shows a temporary pairing code and never a device credential` |
@@ -47,9 +47,9 @@ credential storage, pairing and authorization contracts remain authoritative.
 | PC10 | reconciles device revocation from the server | Happy | Confirmed revoke | Authoritative revoked device rendered; no fabricated timestamp | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::reconciles device revocation from the server` |
 | PC11 | blocks duplicate overlapping gestures | Edge | One command pending | No second write | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::blocks duplicate overlapping gestures` |
 | PC12 | retires unauthorized private rows | Error | Refetch returns 401/403 | No connection/device details or actions remain visible | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::retires unauthorized private rows` |
-| PC13 | retains the device-name draft across reads | Edge | Device list refreshes during editing | Draft and original editing base preserved | Frontend unit | ❌ missing |
-| PC14 | rejects a competing browser name edit | Error | Two editors use the same base | Conflict; retained draft and explicit authorized review | Integration / Playwright | ❌ missing |
-| PC15 | preserves extension pairing compatibility | Happy | Existing pairing/claim/revoke contracts | Existing extension/server clients remain usable | Contract / Playwright | ❌ missing |
+| PC13 | retains the device-name draft across reads | Edge | Device list refreshes during editing | Draft and original editing base preserved | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::retains the original browser base during refresh` |
+| PC14 | rejects a competing browser name edit | Error | Two editors use the same base | Conflict; retained draft and explicit authorized review | Integration / Playwright | ✅ `tests/e2e-real/provider-connections.spec.ts::detects competing edits in real browsers` |
+| PC15 | preserves extension pairing compatibility | Happy | Existing pairing/claim/revoke contracts | Existing extension/server clients remain usable | Frontend unit / Playwright | ✅ `browser-extension/tests/core.test.ts::claims a pairing code and retains only the returned browser credential`, `tests/e2e-real/provider-connections.spec.ts::detects competing edits in real browsers` |
 | PC16 | retains browser-name input after a transient read failure | Error | Edited name, then 503 refresh | Draft remains visible and read-only; retry restores actions | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::retains browser-name input after a transient read failure` |
 
 | PC17 | preserves a failed revocation confirmation | Error | Revoke rejected | Failure visible inside retained dialog; device stays active | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::preserves a failed revocation confirmation` |
@@ -79,16 +79,15 @@ Preserved failure evidence:
   error translator intentionally sanitizes that text. The fixture now uses the
   same stable error code as the disconnect test (1 failed, 25 passed, 5.66 s).
 
-PC5 is still incomplete: the pairing-session regression passes, but this is not
-proof for every credential/OAuth command. PC13–PC15 remain required; no claim
-of a complete provider workflow or M9 acceptance. The pre-change backend inspection confirmed
+At the read-owner checkpoint PC5 and PC13–PC15 remained incomplete. The frontend
+cutover below closes those rows; M9 as a whole remains open. The pre-change backend inspection confirmed
 `rename_device` overwrote `name` unconditionally. The following additive backend
-increment addresses that contract; the first-party editor still needs cutover.
+increment addresses that contract; the frontend cutover is recorded below.
 `last_used_at` is telemetry and must not serve as the editing base. Pairing can reuse revoked rows, so the eventual
 contract must also distinguish a new pairing incarnation.
 
 
-## Browser-name conditional contract: next increment
+## Browser-name conditional contract
 
 Use the existing `conditional-v1` / `If-Match` protocol. A device editing base
 contains a persisted monotonic version and an opaque history identifier bound to
@@ -124,7 +123,7 @@ never leave an opted-in client writing without a precondition.
 | BD13 | versions direct writes | Edge | SQL name changes away then back | Old base rejected despite matching name | Integration | ✅ `integration/api/v1/provider_connections/test_browser_edits.py::TestBrowserEditing::test_versions_direct_writes` |
 | BD14 | preserves device data through migration | Edge | Previous revision, device rows | Upgrade/downgrade/upgrade retain credentials and names; triggers installed | Integration | ✅ `integration/db/migrations/test_browser_edit_versions.py::TestBrowserEditMigration::test_preserves_device_data_through_migration` |
 | BD15 | arbitrates simultaneous device edits | Edge | Independent sessions share base on SQLite/PostgreSQL | Exactly one winner, one conflict | Integration | ✅ `integration/modules/ingestion/test_browser_edits.py::TestRename::test_arbitrates_simultaneous_device_edits` |
-| BD16 | retains a draft for explicit review | Error | Save conflict or uncertain response | No automatic retry; review current state before revised save | Frontend unit / Playwright | ❌ missing |
+| BD16 | retains a draft for explicit review | Error | Save conflict or uncertain response | No automatic retry; review current state before revised save | Frontend unit / Playwright | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::requires review after a browser conflict`, `src/components/__tests__/provider-connections-panel.test.tsx::keeps review failure recoverable` |
 | BD17 | refuses retired account authority | Error | Account disabled/deleted/trashed/session version changed after authentication | No name change; forbidden | Integration | ✅ `integration/modules/ingestion/test_browser_edits.py::TestRename::test_refuses_retired_account_authority` |
 | BD18 | rolls back an uncommitted browser rename | Error | Transaction rolled back | Name and editing base unchanged | Integration | ✅ `integration/modules/ingestion/test_browser_edits.py::TestRename::test_rolls_back_an_uncommitted_browser_rename` |
 | BD19 | renders the browser migration offline | Edge | SQLite/PostgreSQL offline SQL | Additive column and version trigger rendered without connection | Integration | ✅ `integration/db/migrations/test_browser_edit_versions.py::TestBrowserEditMigration::test_renders_browser_upgrade_without_a_connection` |
@@ -155,6 +154,59 @@ pairing/claim clients remain compatible with these additive response fields.
   (**1 failed, 11 deselected, 24.65 s**); SQLite/PostgreSQL regression rerun:
   **2 passed, 10 deselected, 59.03 s**.
 
-Frontend draft/base cutover and real-browser verification remain open (BD16,
-PC13–PC15). This is an additive server checkpoint, not acceptance of the browser
-editing workflow. Full backend/coverage/PR CI and performance were not run here.
+This additive server checkpoint alone did not accept the browser editing
+workflow; the following frontend cutover provides the missing evidence. Full backend/coverage/PR CI and performance were not run here.
+
+
+### Frontend cutover coverage matrix before implementation
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| BF1 | sends the captured browser base | Happy | Device draft saved | Native signal and exact conditional headers; unchanged name payload | Frontend unit | ✅ `src/lib/api/__tests__/provider-connections.test.ts::sends the captured browser base` |
+| BF2 | refuses an invalid browser acknowledgement | Error | Wrong ID/history or nonadvancing version | No accepted receipt | Frontend unit | ✅ `src/lib/api/__tests__/provider-connections.test.ts::refuses an invalid browser acknowledgement: $label` |
+| BF3 | retains the original browser base during refresh | Edge | Draft typed, then newer GET | Original base submitted with retained draft | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::retains the original browser base during refresh` |
+| BF4 | requires review after a browser conflict | Error | 412 or uncertain save | Draft retained; ordinary save disabled; no retry until explicit review | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::requires review after a browser conflict` |
+| BF5 | saves explicitly revised browser changes | Happy | Fresh review accepted | Revised draft sent once with reviewed base | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::saves explicitly revised browser changes` |
+| BF6 | adopts a replacement browser pairing | Edge | Review returns another history | Revised save disabled; adopt current values before another edit | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::adopts a replacement browser pairing` |
+| BF7 | retires an inaccessible browser editor | Error | Review denies/misses device | Private draft removed; no save | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::retires an inaccessible browser editor: %s` |
+| BF8 | refuses an obsolete browser receipt | Edge | Session changed during rename | No old receipt published | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::refuses an obsolete browser receipt` |
+| BF9 | keeps review failure recoverable | Error | Review GET temporarily fails | Retained draft; explicit retry; no write | Frontend unit | ✅ `src/components/__tests__/provider-connections-panel.test.tsx::keeps review failure recoverable` |
+| BF10 | detects competing edits in real browsers | Error | Two UI editors share original base | First wins; second reviews/revises deliberately | Playwright | ✅ `tests/e2e-real/provider-connections.spec.ts::detects competing edits in real browsers` |
+
+
+### Frontend cutover and workflow acceptance
+
+The first-party client always sends the captured conditional base and rejects
+wrong-identity, wrong-history and non-advancing acknowledgements. BrowserDeviceRow
+owns only an edit intent and review state. A fresh list does not replace the
+intent's original snapshot. Errors preserve it for explicit review; revised
+saves use the reviewed base, and a different pairing history requires adoption.
+Denied/missing devices retire the private draft. OAuth, pairing, credential and
+name receipts from a retired session cannot publish into the current panel.
+
+Validation:
+- Initial frontend reproduction: **2 failed, 16 skipped, 5.08 s**, proving missing
+  captured bases and missing review after conflict.
+- A native input pattern was initially over-escaped (**3 failed, 15 passed,
+  7.77 s**); correcting the JSX string expression restored form submission.
+- Expanded tests exposed a fixture that spread a complete device over the submitted
+  name (**1 failed, 37 passed, 6.07 s**). The command now receives the immutable
+  editing pair explicitly; the fixture preserves the actual payload name.
+- Affected component/API files: **40 passed, 6.62 s**, followed by the additional
+  missing-device review case: **4 passed, 24 skipped, 3.70 s**, covering
+  401/403/404 and a successful read without the device. No suite-wide coverage claim.
+- Real Chromium, real FastAPI: **1 passed**, **8.1 s** test / **1.0 min** total.
+  The test issues the code through the UI, claims it without an account session,
+  drives two editors through conflict/review/revised save, then confirms revocation.
+- Existing extension pairing adapter with the new additive response fields:
+  **3 passed, 28 skipped, 1.60 s**. This is focused adapter compatibility,
+  not a claim that the full loaded-extension suite was run.
+- Frontend format (775 files), lint, app/UI/domain typechecks passed. Build passed
+  in **2.43 s**, retaining the existing locale-shell/large-chunk notices.
+  Extension's changed test passes scoped lint and formatting.
+
+Correctness is supported by the observable contract checks above. Maintainability
+improves through one read/command owner and an explicit draft/base/review lifecycle;
+there is no component copy of the remote lists or invented revocation timestamp.
+No performance improvement is claimed. Full branch CI, coverage and final delivery
+remain pending, as do the other M9 workflows named at the start of this document.

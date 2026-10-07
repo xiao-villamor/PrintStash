@@ -971,3 +971,9 @@ The subsequent browser-name backend increment adds conditional-v1 support,
 monotonic versions and a pairing-incarnation editing history. Its API, migration
 and independent-session tests are recorded in the provider matrix. The frontend
 cutover remains required; M9 has not been closed.
+
+The provider/browser frontend cutover is now locally accepted: captured editing
+bases, explicit review/adoption/revised saves, session retirement, extension
+adapter compatibility and a real two-editor browser flow. See the complete matrix
+in `frontend-m9-provider-validation.md`. Next M9 seam: notifications; subsequent
+remote source/connection edit contracts and remaining Settings reads stay open.

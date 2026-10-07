@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-- Add optional conditional browser-name edits to the API. Obsolete drafts cannot
-  overwrite a newer name or a replacement pairing when callers supply the editing
-  base. Duplicate names now return a conflict without changing the device.
+- Detect competing browser-name edits. Preserve drafts for explicit review before
+  retrying, and require adopting a replacement pairing before editing it. The API
+  supports conditional edits while retaining legacy callers; duplicate names now
+  return a conflict without changing the device.
 
 - Provider connections now distinguish loading and failed reads from disconnected
   accounts. Leaving the panel cancels obsolete work; transient read failures keep

@@ -12,7 +12,14 @@ export function requireEditingBase(base: EditingBase): void {
 }
 
 export function editHeaders(
-  kind: "model" | "multipart" | "document" | "printer" | "filament-profile" | "printer-profile",
+  kind:
+    | "model"
+    | "multipart"
+    | "document"
+    | "printer"
+    | "filament-profile"
+    | "printer-profile"
+    | "browser-device",
   id: number,
   base: EditingBase,
 ) {

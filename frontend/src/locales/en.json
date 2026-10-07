@@ -4268,5 +4268,8 @@
   "aiSearch.historyChanged": "The database history changed. Adopt the current settings before starting a new edit.",
   "aiSearch.reviewEnabled": "Enabled",
   "aiSearch.reviewDisabled": "Disabled",
-  "settings.providerConnections.loadFailed": "Provider accounts or paired browsers could not be loaded."
+  "settings.providerConnections.loadFailed": "Provider accounts or paired browsers could not be loaded.",
+  "settings.pairedBrowsers.reviewRequired": "This browser name needs review before another save. Your draft is preserved.",
+  "settings.pairedBrowsers.currentName": "Current browser name: {name}",
+  "settings.pairedBrowsers.replaced": "This pairing has changed. Use current values before starting another edit."
 }

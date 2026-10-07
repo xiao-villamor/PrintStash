@@ -1,8 +1,9 @@
+import type { EditingBase } from "@/types/editing";
 /** User-scoped provider/device reads; credentials and pairing receipts are never cached. */
 import { useEffect, useRef } from "react";
 import { queryOptions, useQueryClient } from "@tanstack/react-query";
 import * as providerApi from "@/lib/api/provider-connections";
-import { parseApiError } from "@/lib/errors";
+import { ApiError, parseApiError } from "@/lib/errors";
 import { onAuthChange } from "@/lib/auth-store";
 import { requireSessionVersion } from "@/lib/session-transport";
 import type {
@@ -96,16 +97,30 @@ export function useProviderConnectionCommands(api: ProviderConnectionsTransport 
         );
         return result;
       }),
-    rename: (id: number, name: string, session: number) =>
+    rename: (id: number, name: string, base: EditingBase, session: number) =>
       run(session, async (signal, current) => {
-        const result = await api.renameBrowserDevice(id, { name }, { signal });
+        const result = await api.renameBrowserDevice(id, { name }, { base, signal });
         current();
         await client.cancelQueries({ queryKey: providerConnectionKeys.devices });
         current();
         client.setQueryData<BrowserDeviceRead[]>(providerConnectionKeys.devices, (rows) =>
-          rows?.map((row) => (row.id === result.id ? result : row)),
+          rows?.map((row) =>
+            row.id === result.id &&
+            !(row.edit_epoch === result.edit_epoch && row.edit_version > result.edit_version)
+              ? result
+              : row,
+          ),
         );
         return result;
+      }),
+    reviewDevice: (id: number, session: number) =>
+      run(session, async (signal, current) => {
+        const rows = await api.listBrowserDevices({ signal });
+        current();
+        const snapshot = rows.find((row) => row.id === id);
+        if (!snapshot)
+          throw new ApiError(404, "browser_device_not_found", "browser_device_not_found");
+        return snapshot;
       }),
     disconnect: (provider: CaptureProvider, session: number) =>
       run(session, async (signal, current) => {

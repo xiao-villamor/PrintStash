@@ -46,7 +46,7 @@ test("claims a pairing code and retains only the returned browser credential", a
       }
       return Response.json({
         credential: "device-secret",
-        device: { id: 3, name: "Browser extension" },
+        device: { id: 3, name: "Browser extension", edit_epoch: "a".repeat(32), edit_version: 1 },
       });
     },
     vault: "https://prints.example.com",
@@ -56,7 +56,7 @@ test("claims a pairing code and retains only the returned browser credential", a
   assert.deepEqual(claimed, {
     base: "https://prints.example.com",
     deviceCredential: "device-secret",
-    device: { id: 3, name: "Browser extension" },
+    device: { id: 3, name: "Browser extension", edit_epoch: "a".repeat(32), edit_version: 1 },
   });
   const claimCall = itemAt(calls, 1);
   assert.equal(claimCall.url, "https://prints.example.com/api/v1/browser-pairings/claim");
