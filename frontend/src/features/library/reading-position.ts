@@ -43,6 +43,11 @@ export function useLibraryReadingPosition(
   const location = useLocation();
   const current = enabled && entry?.session === getSessionVersion() && entry.key === location.key;
   const operation = useRef(0);
+  const captured = useRef<{
+    entry: LibraryEntry;
+    layout: LibraryLayout;
+    position: LibraryReadingPosition;
+  } | null>(null);
   function beginRecovery(): Recovery {
     const saved = current && entry ? readLibraryPosition(entry, layout) : undefined;
     return saved
@@ -156,12 +161,13 @@ export function useLibraryReadingPosition(
       if (!current || !entry || !main) return;
       const list = listRef.current;
       const previous = readLibraryPosition(entry, layout);
+      const offsetChanged =
+        previous?.main !== main.scrollTop || previous.list !== (list?.scrollTop ?? null);
       // A scroll event queued before the click may arrive after its snapshot.
       // Keep that anchor when no actual offset changed; real scrolling retires it.
-      let anchor: LibraryReadingPosition["anchor"] =
-        previous?.main === main.scrollTop && previous.list === (list?.scrollTop ?? null)
-          ? previous.anchor
-          : null;
+      let anchor: LibraryReadingPosition["anchor"] = !offsetChanged
+        ? (previous?.anchor ?? null)
+        : null;
       let adjacent = anchor ? (previous?.adjacent ?? null) : null;
       // Scan visible entries only at a gesture, never for every scroll event.
       if (captureAnchor) {
@@ -202,10 +208,55 @@ export function useLibraryReadingPosition(
         adjacent,
         pages: { models: pagination.models.count, folders: pagination.folders.count },
       });
-      return readLibraryPosition(entry, layout);
+      const position = readLibraryPosition(entry, layout);
+      if (
+        position &&
+        (captureAnchor ||
+          offsetChanged ||
+          captured.current?.entry !== entry ||
+          captured.current.layout !== layout)
+      )
+        captured.current = { entry, layout, position };
+      return position;
     },
     [current, entry, layout, mainRef, listRef, pagination.models.count, pagination.folders.count],
   );
+
+  // An own confirmed removal promotes the saved neighbor in navigation-state.
+  // Apply that promotion to the mounted view once its old card has actually left
+  // the displayed snapshot. No new fetch, history entry or animation is involved.
+  useLayoutEffect(() => {
+    const previous = captured.current;
+    const main = mainRef.current;
+    if (
+      !current ||
+      !entry ||
+      !main ||
+      previous?.entry !== entry ||
+      previous.layout !== layout ||
+      recovery.status !== "ready"
+    )
+      return;
+    const saved = readLibraryPosition(entry, layout);
+    const before = previous.position.anchor;
+    const after = saved?.anchor;
+    if (
+      !before ||
+      !after ||
+      before.key === after.key ||
+      previous.position.adjacent?.key !== after.key
+    )
+      return;
+    if (main.querySelector(`[data-library-entry="${CSS.escape(before.key)}"]`)) return;
+    const anchor = main.querySelector<HTMLElement>(
+      `[data-library-entry="${CSS.escape(after.key)}"]`,
+    );
+    const container = after.container === "list" ? listRef.current : main;
+    if (!anchor || !container) return;
+    container.scrollTop +=
+      anchor.getBoundingClientRect().top - container.getBoundingClientRect().top - after.offset;
+    capturePosition(true, anchor);
+  }, [current, entry, layout, recovery.status, pagination, mainRef, listRef, capturePosition]);
 
   async function refresh(replace: () => Promise<void>) {
     const saved = capturePosition(true);
@@ -241,7 +292,9 @@ export function useLibraryReadingPosition(
       capturePosition(
         event.type === "click",
         event.target instanceof Element
-          ? event.target.closest<HTMLElement>("[data-library-entry]")
+          ? (event.target.closest<HTMLElement>("[data-library-entry]") ??
+              event.target.closest("article")?.querySelector<HTMLElement>("[data-library-entry]") ??
+              null)
           : null,
       );
     };

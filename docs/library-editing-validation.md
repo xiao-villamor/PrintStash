@@ -5,9 +5,9 @@ M4 requirements recorded before conditional writer migration.
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 |---|---|---|---|---|---|---|
 | 1 | sends the editor's Model version | Happy | Model v7 edited | conditional-v1 and exact If-Match at HTTP boundary | Frontend unit | ✅ `src/lib/api/__tests__/models/model.test.ts::sends the editor's Model version` |
-| 2 | sends the editor's Multipart version | Happy | Multipart v7 composition edited | exact If-Match at HTTP boundary | Frontend unit | ❌ missing |
+| 2 | sends the editor's Multipart version | Happy | Multipart v7 composition edited | exact If-Match at HTTP boundary | Frontend unit | ✅ `src/lib/api/__tests__/multipart-models.test.ts::saves the complete multipart draft atomically` |
 | 3 | preserves a Model draft on edit conflict | Error | another editor saved first | draft retained; explicit latest-version review | Frontend unit | ✅ `src/components/model-detail/__tests__/index.test.tsx::preserves a Model draft on edit conflict` |
-| 4 | preserves a Multipart draft on edit conflict | Error | another editor saved first | composition retained; no automatic retry | Frontend unit | ❌ missing |
+| 4 | preserves a Multipart draft on edit conflict | Error | another editor saved first | composition retained; no automatic retry | Frontend unit | ✅ `src/components/__tests__/multipart-model-browser.test.tsx::preserves a Multipart draft on edit conflict` |
 | 5 | retains a concurrent change when undo conflicts | Error | acknowledged batch version now stale | conflict preserved without overwriting current value | Frontend unit | ✅ `src/features/library/__tests__/batch-edits.test.tsx::retains a concurrent change when undo conflicts` |
 | 6 | confirms an ambiguous Model save before retry | Error | save response lost | authoritative read; no blind second write | Playwright | ✅ `tests/e2e/model-detail.spec.ts::confirms an ambiguous Model save before retry` |
 | 7 | preserves the editing base across a background refresh | Edge | authorized refresh during editing | original edit version and draft preserved | Frontend unit | ✅ `src/components/model-detail/__tests__/index.test.tsx::preserves the editing base across a background refresh` |
@@ -37,3 +37,15 @@ Six new component cases failed before this increment. Clearing the description p
 A lost/malformed response, timeout or server failure cannot establish whether the write committed. The editor keeps its draft and blocks the ordinary Save action until the user reviews a fresh authorized read. That review can be explicitly adopted without a second write or used as the base for an intentional conditional retry. There is no automatic retry and no automatic claim of success based on matching field values. A failed review leaves the editor blocked. Definite validation failures retain the ordinary editable recovery path.
 
 Validation: all **59 Model detail component tests passed**. Both Chromium flows passed: a dropped PATCH acknowledgement followed by review/adoption with exactly one write, and a true conflict followed by an intentional conditional retry. Remaining M4 work includes Multipart/provenance writers and final removal of the optional version compatibility path. Earlier batch and detail-owner work has its own qualified matrices; the historical checkpoint paragraph above records that earlier slice, not current outstanding scope.
+
+## Current M4 reconciliation
+
+The checkpoints above are historical validation records. Model, Multipart,
+Document, Source and movement clients now require the complete editing identity;
+the optional Model version argument has been removed. Multipart composition,
+auxiliary editing, batch undo and detail ownership have their own completed
+matrices. [Restore qualification](library-restore-editing-validation.md) records
+the integrated incarnation-qualified protocol, including explicitly reviewed
+cross-history retries. The real Favorites reading-position contract is now qualified in
+[mutation validation](library-mutations-validation.md). The current broad backend
+gate has an outstanding failure; M4 remains active and M5 has not started.

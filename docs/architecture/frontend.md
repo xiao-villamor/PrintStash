@@ -305,3 +305,11 @@ a new persisted entity column, per-row request, cache or migration. Contributor
 changes to an editing DTO must update conditional clients, acknowledgement
 validation, factories and OpenAPI in one increment. Qualification is recorded in
 [the restoration matrix](../library-restore-editing-validation.md).
+
+Own confirmed Favorites removal uses the existing navigation-position metadata.
+Card actions identify their associated item, including buttons beside its link.
+The reading-position owner observes the acknowledged neighbor promotion and
+applies it to the mounted view only after the old card leaves the displayed
+snapshot. It does not scroll early when confirmation precedes rendering, and
+a queued event with unchanged offsets cannot discard the promotion. Native
+scroll bounds still apply. See [the mutation matrix](../library-mutations-validation.md).

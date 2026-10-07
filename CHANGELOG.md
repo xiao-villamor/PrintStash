@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preserve the reading position when a confirmed Favorites removal takes its
+  card out of the current grid, including delayed rendering and queued scroll events.
+
 - Bind conditional Model, Multipart and Document edits to the database history
   as well as the entity version. Restored backups cannot reauthorize old drafts
   when a counter recurs; delayed old-history receipts cannot replace a restored

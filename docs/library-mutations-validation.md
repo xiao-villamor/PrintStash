@@ -41,3 +41,39 @@ The two grid list thumbnail containers now use viewport admission, complementing
 the M6 card/Cover changes; the integrated functional browser test decodes the
 visible image while asserting the four-request bound and distant-image deferral.
 No performance timing claim is made from that functional test.
+
+## M4 confirmed-removal reading position
+
+The parent matrix requires real-backend confirmation with a preserved reading
+position, beyond the earlier single-card mock assertion. This is the own-mutation
+contract in M4, not Back/Forward restoration from M5.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| F1 | preserves the reading position after a confirmed favorite removal | Happy | Scrolled Favorites grid; actual server commit precedes a held acknowledgement | Pending card remains; confirmation removes it without moving the neighboring reading card | Playwright real | ✅ `tests/e2e-real/favorites.spec.ts::preserves the reading position after a confirmed favorite removal` |
+| F2 | applies the promoted anchor only after the confirmed card leaves the DOM | Edge | Confirmation precedes the displayed snapshot update | Neighbor keeps its saved offset; no premature scrolling | Frontend unit | ✅ `src/features/library/__tests__/reading-position.test.tsx::applies the promoted anchor only for the active session after DOM removal` |
+| F3 | ignores a confirmed removal after session retirement | Error | Gesture from the retired session completes | Current scroll position is untouched | Frontend unit | ✅ `src/features/library/__tests__/reading-position.test.tsx::applies the promoted anchor only for the retired session after DOM removal` |
+| F4 | retains the promoted anchor across a queued unchanged scroll event | Edge | Old scroll event arrives between confirmation and DOM removal | Neighbor restores exactly once after removal | Frontend unit | ✅ `src/features/library/__tests__/reading-position.test.tsx::applies the promoted anchor only for the active with queued scroll session after DOM removal` |
+
+The real-browser probe isolates the confirmation interval: focusing the clicked
+button can scroll before acknowledgement, so that separate movement is excluded.
+A 346 px neighbor displacement remained after confirmation. Earlier harness
+attempts used the wrong star verb, included the return URL in an entity selector,
+or measured a different interval; they are not product reproductions.
+
+The reading-position owner now records a card action against its associated item,
+including buttons beside the link. It remembers the gesture's reading metadata,
+observes the existing confirmed-removal neighbor promotion, and adjusts the
+mounted scroll container only after the removed card leaves the DOM. An unchanged
+queued scroll event cannot replace the promotion before it is applied. Real
+scrolling, session retirement and entry/layout changes still retire old intent.
+There is no new event bus, fetch, cache, timer, animation or history entry.
+
+Qualification: the active-session owner case failed before the fix while its
+retired-session control passed. A second queued-scroll case failed before its
+correction. Final owner/navigation/mutation run: **35 passed in 6.08 s**. Real
+Chromium after the final correction: **1 passed in 11.4 s** (1.5 min including
+startup). App/UI/domain types and frontend lint passed. This closes the F1–F4
+behaviours; M4 itself awaits the wider backend gate's outstanding failure.
+Rollback this scroll adjustment and its card-action capture together; retain
+confirmed Query publication and the existing navigation metadata contract.

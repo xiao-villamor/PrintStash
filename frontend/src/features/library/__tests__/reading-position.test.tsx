@@ -3,10 +3,15 @@ import "@testing-library/jest-dom/vitest";
 import { useRef, useState } from "react";
 import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearLogin } from "@/lib/auth-store";
 import { json, renderApp } from "@/test-support/render";
-import { useLibraryEntry, type LibraryLayout } from "../navigation-state";
+import {
+  acknowledgeFavoriteRemoval,
+  useLibraryEntry,
+  type LibraryLayout,
+} from "../navigation-state";
+import { getSessionVersion } from "@/lib/session-transport";
 import { useLibraryReadingPosition } from "../reading-position";
 import { useCollectionChildren } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-client";
@@ -248,4 +253,97 @@ describe("Explicit Library refresh", () => {
     expect(main.scrollTop).toBe(0);
     expect(screen.getByLabelText("Loaded pages")).toHaveTextContent("1");
   });
+});
+
+function FavoriteRemoval({
+  confirmed,
+  displayed,
+}: {
+  confirmed: Promise<void>;
+  displayed: Promise<void>;
+}) {
+  const entry = useLibraryEntry("/?favorites=true", true);
+  const main = useRef<HTMLElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const [phase, setPhase] = useState("pending");
+  const [removed, setRemoved] = useState(false);
+  useLibraryReadingPosition(entry, "grid", main, list, true, {
+    ready: true,
+    models: { count: 1, more: false, pending: false, failed: false, next: () => {} },
+    folders: { count: 1, more: false, pending: false, failed: false, next: () => {} },
+  });
+  async function remove() {
+    const session = getSessionVersion();
+    await confirmed;
+    acknowledgeFavoriteRemoval("/models/2", session);
+    setPhase("acknowledged");
+    await displayed;
+    setRemoved(true);
+  }
+  return (
+    <main ref={main}>
+      <output>{phase}</output>
+      <article>
+        <a href="/models/1" data-library-entry="/models/1">
+          Earlier
+        </a>
+      </article>
+      {!removed && (
+        <article>
+          <a href="/models/2" data-library-entry="/models/2">
+            Removed
+          </a>
+          <button onClick={() => void remove()}>Unstar</button>
+        </article>
+      )}
+      <article>
+        <a href="/models/3" data-library-entry="/models/3">
+          Neighbor
+        </a>
+      </article>
+    </main>
+  );
+}
+
+describe("Confirmed favorite reading position", () => {
+  afterEach(() => vi.restoreAllMocks());
+  it.each([
+    { label: "active", retire: false, queuedScroll: false, expected: 0 },
+    { label: "active with queued scroll", retire: false, queuedScroll: true, expected: 0 },
+    { label: "retired", retire: true, queuedScroll: false, expected: 100 },
+  ])(
+    "applies the promoted anchor only for the $label session after DOM removal",
+    async ({ retire, queuedScroll, expected }) => {
+      const confirmed = Promise.withResolvers<void>();
+      const displayed = Promise.withResolvers<void>();
+      renderApp(<FavoriteRemoval confirmed={confirmed.promise} displayed={displayed.promise} />);
+      const main = screen.getByRole("main");
+      const earlier = screen.getByRole("link", { name: "Earlier" });
+      const removed = screen.getByRole("link", { name: "Removed" });
+      const neighbor = screen.getByRole("link", { name: "Neighbor" });
+      vi.spyOn(main, "getBoundingClientRect").mockImplementation(() => new DOMRect(0, 0, 100, 500));
+      vi.spyOn(earlier, "getBoundingClientRect").mockImplementation(
+        () => new DOMRect(0, 100 - main.scrollTop, 100, 100),
+      );
+      vi.spyOn(removed, "getBoundingClientRect").mockImplementation(
+        () => new DOMRect(0, 200 - main.scrollTop, 100, 100),
+      );
+      vi.spyOn(neighbor, "getBoundingClientRect").mockImplementation(
+        () => new DOMRect(0, (removed.isConnected ? 300 : 200) - main.scrollTop, 100, 100),
+      );
+      main.scrollTop = 100;
+      fireEvent.scroll(main);
+      fireEvent.click(screen.getByRole("button", { name: "Unstar" }));
+      if (retire) act(() => clearLogin());
+      await act(async () => confirmed.resolve());
+      expect(screen.getByText("acknowledged")).toBeVisible();
+      expect(removed).toBeInTheDocument();
+      expect(main.scrollTop).toBe(100);
+      if (queuedScroll) fireEvent.scroll(main);
+      await act(async () => displayed.resolve());
+      expect(screen.queryByRole("link", { name: "Removed" })).toBeNull();
+      expect(main.scrollTop).toBe(expected);
+      expect(neighbor.getBoundingClientRect().top).toBe(200 - expected);
+    },
+  );
 });
