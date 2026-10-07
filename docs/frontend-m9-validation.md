@@ -251,3 +251,77 @@ a backup, purged a real Model, restored it and downloaded matching Artifact byte
 Dedicated ports3327/4327 and `/tmp/printstash-m9-backup-data`; no backend production
 changes. No performance improvement claimed. M9 remains open: storage migration,
 remaining Settings/notification and entry-route ownership must still be reconciled.
+
+
+## Vault migration (M9 increment)
+
+This increment consolidates migration reads and command receipts without changing
+backend migration gates or adding automatic mutation retries. The existing report
+render already checks `report.id === run.id`; a wrong-run report display is **not**
+a confirmed defect. Migration DTOs have no comparable revision counter: cancellation
+protects client read/receipt races, but backend plan/state checks remain authoritative.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| V1 | aborts migration startup when its view is disposed | Edge | Pending history GET, navigate away | Native request signal is aborted | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::aborts migration startup when its view is disposed` |
+| V2 | exposes backup discovery failure without reporting an empty catalog | Error | Backup sources 503, recoverable migration exists | Visible read failure; recovery remains available | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::exposes backup discovery failure without reporting an empty catalog` |
+| V3 | retires migration confirmations with their private session | Edge | Reviewed destructive confirmation, session ends | Dialog disappears; no POST from old intent | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::retires migration confirmations with their private session` |
+| V4 | cancels an obsolete status read before publishing an acknowledged pause | Edge | Pending status GET races pause ACK | Abort signal; paused UI survives late response | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::cancels an obsolete status read before publishing an acknowledged pause` |
+| V5 | keeps migration commands disabled after access is denied | Error | Warm data then 403 | Private run and destructive controls hidden | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::keeps migration commands disabled after access is denied` |
+| V6 | requires renewed review after the confirmed migration changes | Edge | Open confirmation then changed state or plan | No destructive POST from obsolete confirmation | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::requires renewed review after the confirmed migration changes` |
+| V7 | stops automatic status retries after a read failure | Error | Active migration polling returns 503 | Error visible; explicit refresh recovers | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::stops automatic status retries after a read failure` |
+| V8 | preserves migration destination edits across catalog refresh | Edge | Draft destination then provider catalog refresh | User-entered values remain | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::preserves migration destination edits across catalog refresh` |
+| V9.1 | starts the reviewed plan before copying | Happy | Reviewed plan digest | POST contains the reviewed digest | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::starts the reviewed plan before copying` |
+| V9.2 | blocks an expired plan | Edge | Expired plan | Start disabled | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::blocks an expired plan` |
+| V9.3 | retains the source throughout its grace period | Edge | Active migration before deadline | Source cleanup disabled | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::retains the source throughout its grace period` |
+| V9.4 | keeps cleanup disabled without successful Full audit even after grace | Edge | Grace elapsed without passing full audit | Source cleanup disabled | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::keeps cleanup disabled without successful Full audit even after grace` |
+| V9.5 | requires recovery before resuming a stopped copy | Edge | Recovery-required copying run | Recovery offered; resume absent | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::requires recovery before resuming a stopped copy` |
+| V9.6 | rechecks state after an uncertain cutover response | Error | 409 cutover with ambiguous recovery | Recovery state replaces the prior ready projection | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::rechecks state after an uncertain cutover response` |
+| V9.7 | shows completed source cleanup | Happy | Eligible source cleanup | Confirmed cleaned state visible | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::shows completed source cleanup` |
+| V9.8 | discards only the confirmed candidate | Happy | Explicit candidate discard | Cleanup payload does not authorize source removal | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::discards only the confirmed candidate` |
+| V9.9 | retains source indefinitely through an explicit action | Happy | Active retained source | Retain command preserves credentials | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::retains source indefinitely through an explicit action` |
+| V9.10 | requires confirmation before removing credentials for manual cleanup | Edge | Manual cleanup requested | Only confirmation authorizes credential removal | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::requires confirmation before removing credentials for manual cleanup` |
+| V9.11 | retries a reported recoverable object failure | Happy | Retryable failed objects | Single explicit retry request | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::retries a reported recoverable object failure` |
+| V9.12 | shows the requested Full audit result | Happy | Full audit accepted | Persisted audit outcome visible | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::shows the requested Full audit result` |
+| V9.13 | sends fresh candidate credentials without displaying them in the checked plan | Happy | Secret-bearing destination | Secrets sent once; checked plan does not render them | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::sends fresh candidate credentials without displaying them in the checked plan` |
+| V9.14 | rejects bandwidth below the supported minimum before requesting a plan | Edge | Bandwidth below 1024 | No preflight POST | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::rejects bandwidth below the supported minimum before requesting a plan` |
+| V9.15 | blocks destinations unavailable for Vault use | Edge | Provider unavailable for Vault | Preflight disabled | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::blocks destinations unavailable for Vault use` |
+| V9.16 | surfaces report download failure without losing saved progress | Error | Report GET fails | Failure visible; run progress retained | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::surfaces report download failure without losing saved progress` |
+| V10 | preserves Artifact bytes through restart and cutover | Happy | Real backend migration with online delta | Baseline and delta byte identity after verified cutover | Playwright | ✅ `frontend/tests/e2e-real/migration/vault-migration.spec.ts::verified migration resumes after restart with online delta Artifacts` |
+| V11 | preserves the selected migration across history reorder | Edge | Current run, refreshed history starts with another run | Existing selected run remains displayed | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::preserves the selected migration across history reorder` |
+| V12 | retains required provider defaults when editing a destination | Edge | Local provider supplies mandatory default root | Preflight includes default root plus edited paths | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::retains required provider defaults when editing a destination` |
+| V13 | hides a migration when command recovery confirms revoked access | Error | Pause rejected with 403; status also denied | Private run and command controls disappear | Frontend unit | ✅ `frontend/src/components/__tests__/vault-migration-panel.test.tsx::hides a migration when command recovery confirms revoked access` |
+
+Validation: the first three new lifetime/catalog tests failed against the previous
+panel (3 failures, 4.11s). The first refactor pass had 62 passing tests and one
+manual-refresh regression; history refresh now publishes its coherent snapshot
+into run projections. The expanded tests then exposed a denied refresh retaining
+private data; the owner now records that read through Query. Command recovery
+also records denial in the run query (its regression failed before that change).
+
+The real browser initially failed before preflight: the draft's first edit erased
+the provider's required default `root`. A focused test reproduced that regression;
+editing now starts from the complete provider defaults. An intermediate test then
+incorrectly decoded the last GET's empty body; its assertion was corrected to read
+the actual preflight POST. The selected-run refresh test also reproduced navigation
+to a differently ordered history entry and now preserves the entry identity.
+
+Final affected component/API/repository run: **83 tests across 4 files passed in
+16.73s**. The failed-read test uses production focus-refresh defaults: a focused
+regression exposed an extra automatic status retry, then explicit detail focus/
+reconnect policy kept failed polling stopped until Refresh. These invocations
+exercise overlapping tests; their counts must not be added together.
+
+Real migration browser: **1/1 passed**, 49.7s scenario (1.5min invocation), including
+API restart, explicit recovery/resume, verified cutover, full audit, report download
+and equality of baseline/online-delta Artifact bytes. The initial browser failure
+and trace are retained. Later denied-recovery/focus policy corrections were covered
+by the component suite; this is not a claim of final-SHA browser/CI qualification.
+
+App/UI/domain types, full frontend formatting (767 files), and production build
+passed; build took 1.56s and retained the existing large-chunk warning. Lint caught
+an unnecessary effect for entry selection; entry identity is now captured once
+during rendering. The affected entry/history tests and lint were rerun after that
+correction. No backend implementation changed and no performance improvement is
+claimed. The active-storage configuration/inventory consumers still need their M9
+integration review; this increment does not close the milestone.

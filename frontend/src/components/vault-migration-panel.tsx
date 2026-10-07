@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowRightLeft, RefreshCw } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,31 +7,25 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Localized } from "@/components/ui/localized";
 import { StorageProviderPicker, defaultProviderValues } from "@/components/storage-provider-picker";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getStorageProviders } from "@/lib/api/config";
-import { listBackupSources, type BackupMeta } from "@/lib/api/backup";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/lib/auth-context";
+import { onAuthChange } from "@/lib/auth-store";
+import { getSessionVersion } from "@/lib/session-transport";
+import { backupSourcesOptions } from "@/lib/queries/settings-backup-catalog";
+import { storageProvidersOptions, storageReadDenied } from "@/lib/queries/settings-storage";
 import {
-  pauseVaultMigration,
-  resumeVaultMigration,
-  retryVaultMigration,
-  auditVaultMigration,
-  retainVaultMigration,
-  downloadVaultMigrationReport,
-  getVaultMigrationReport,
-  type VaultMigrationReport,
-  cleanupVaultMigration,
-  cutoverVaultMigration,
-  getVaultMigration,
-  listVaultMigrations,
-  preflightVaultMigration,
-  recoverVaultMigration,
-  startVaultMigration,
-  type VaultMigrationRun,
-  type VaultMigrationState,
-} from "@/lib/api/vault-migration";
+  migrationHistoryOptions,
+  migrationRunOptions,
+  migrationReportOptions,
+  useMigrationCommand,
+  type MigrationAction,
+} from "@/lib/queries/settings-vault-migration";
+import type { BackupMeta } from "@/lib/api/backup";
+import type { VaultMigrationRun, VaultMigrationState } from "@/lib/api/vault-migration";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { parseApiError } from "@/lib/errors";
 import { providerFormError } from "@/lib/storage-provider-form";
-import type { StorageProvider, StorageProviderConfigValues } from "@/types";
+import type { StorageProviderConfigValues } from "@/types";
 
 const labels = {
   planned: "migration.planReady",
@@ -99,164 +93,133 @@ const finalizing: VaultMigrationState[] = [
   "activating",
 ];
 type Confirmation = "start" | "cutover" | "source" | "discard" | "manual";
-type MigrationAction =
-  | Confirmation
-  | "recover"
-  | "start"
-  | "resume"
-  | "pause"
-  | "retry"
-  | "audit"
-  | "retain";
+type ReviewedMigration = {
+  kind: Confirmation;
+  target: VaultMigrationRun;
+  backup: BackupMeta | undefined;
+};
 
 export function VaultMigrationPanel() {
   const { t, locale } = useI18n();
-  const [runs, setRuns] = useState<VaultMigrationRun[]>([]);
-  const [run, setRun] = useState<VaultMigrationRun | null>(null);
-  const [report, setReport] = useState<VaultMigrationReport | null>(null);
-  const [providers, setProviders] = useState<StorageProvider[]>([]);
-  const [providerId, setProviderId] = useState("local");
-  const [values, setValues] = useState<StorageProviderConfigValues>({});
-  const [backups, setBackups] = useState<BackupMeta[]>([]);
+  const { user } = useAuth();
+  const [session] = useState(getSessionVersion);
+  const [retired, setRetired] = useState(false);
+  const mounted = useRef(true);
+  const current = () => mounted.current && session === getSessionVersion();
+  const enabled = !retired && !!user?.is_superuser;
+  const history = useQuery({ ...migrationHistoryOptions(), enabled });
+  const providersQuery = useQuery({ ...storageProvidersOptions(), enabled });
+  const backupsQuery = useQuery({ ...backupSourcesOptions(), enabled });
+  const runs =
+    enabled && !storageReadDenied(parseApiError(history.error)) ? (history.data ?? []) : [];
+  // undefined selects the newest run on entry; null deliberately starts a new plan.
+  const [selection, setSelection] = useState<string | null | undefined>();
+  const runId = selection === undefined ? (runs[0]?.id ?? null) : selection;
+  // Capture the entry identity once; later history updates do not navigate the view.
+  if (enabled && selection === undefined && history.data)
+    setSelection(history.data[0]?.id ?? null);
+  const listed = runs.find((row) => row.id === runId);
+  const command = useMigrationCommand();
+  const detail = useQuery({
+    ...migrationRunOptions(runId),
+    enabled: enabled && runId !== null && !command.pending,
+    initialData: listed,
+    initialDataUpdatedAt: history.dataUpdatedAt,
+  });
+  const denied =
+    !enabled ||
+    storageReadDenied(parseApiError(history.error)) ||
+    storageReadDenied(parseApiError(detail.error));
+  const run = denied
+    ? null
+    : ((history.dataUpdatedAt > detail.dataUpdatedAt ? listed : detail.data) ?? listed ?? null);
+  const reportQuery = useQuery({
+    ...migrationReportOptions(runId, run),
+    enabled: enabled && !denied && runId !== null && !command.pending,
+  });
+  const report = !reportQuery.isError ? reportQuery.data : undefined;
+  const providers = providersQuery.isError ? [] : (providersQuery.data ?? []);
+  const backups = backupsQuery.isError ? [] : (backupsQuery.data ?? []);
+  const [providerDraft, setProviderId] = useState<string | null>(null);
+  const providerId =
+    providerDraft ?? providers.find((row) => row.id === "local")?.id ?? providers[0]?.id ?? "";
+  const selectedProvider = providers.find((provider) => provider.id === providerId);
+  const [draftValues, setValues] = useState<StorageProviderConfigValues | null>(null);
+  const values = draftValues ?? (selectedProvider ? defaultProviderValues(selectedProvider) : {});
   const [backupId, setBackupId] = useState("");
-  const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(Date.now);
-  const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const busy = command.pending || refreshing;
+  const loading =
+    enabled && (history.isPending || providersQuery.isPending || backupsQuery.isPending);
   const [retentionDays, setRetentionDays] = useState(7);
   const [concurrency, setConcurrency] = useState(1);
   const [bandwidth, setBandwidth] = useState("");
-  const [error, setError] = useState<MessageKey | null>(null);
-  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
-  const mounted = useRef(true);
+  const [actionError, setError] = useState<MessageKey | null>(null);
+  const readError =
+    history.error ??
+    detail.error ??
+    providersQuery.error ??
+    backupsQuery.error ??
+    reportQuery.error;
+  const error = actionError ?? (readError ? errorMessage(parseApiError(readError).code) : null);
+  const [review, setReview] = useState<ReviewedMigration | null>(null);
+  const confirmation = review?.kind ?? null;
+  const setConfirmation = (kind: Confirmation | null) =>
+    setReview(kind && run ? { kind, target: run, backup: selectedBackup } : null);
   const selectedBackup = backups.find((backup) => backupKey(backup) === backupId);
-  const selectedProvider = providers.find((provider) => provider.id === providerId);
   const providerAvailable =
     selectedProvider?.available &&
     selectedProvider.selectable &&
     selectedProvider.uses?.vault?.available !== false;
-  const running = busy;
+  const running = busy || denied || history.isError || detail.isError;
+  const fullAuditState = run?.full_audit?.state;
   const date = (value: string) => new Date(value).toLocaleString(locale);
-  const update = useCallback((next: VaultMigrationRun) => {
-    if (!mounted.current) return;
-    setRun(next);
-    setRuns((current) => [next, ...current.filter((item) => item.id !== next.id)]);
-  }, []);
-
   useEffect(() => {
     mounted.current = true;
-    let stopped = false;
-    const clock = window.setInterval(() => setNow(Date.now()), 60_000);
-    void Promise.allSettled([
-      listVaultMigrations(),
-      getStorageProviders(),
-      listBackupSources(),
-    ]).then(([migrations, catalogue, sources]) => {
-      if (stopped) return;
-      if (migrations.status === "fulfilled") {
-        setRuns(migrations.value);
-        setRun(migrations.value[0] ?? null);
-      } else setError("migration.failure");
-      if (catalogue.status === "fulfilled") {
-        setProviders(catalogue.value);
-        const initial =
-          catalogue.value.find((provider) => provider.id === "local") ?? catalogue.value[0];
-        if (initial) {
-          setProviderId(initial.id);
-          setValues(defaultProviderValues(initial));
-        }
-      }
-      if (sources.status === "fulfilled") setBackups(sources.value);
-      setLoading(false);
+    const release = onAuthChange(() => {
+      setRetired(true);
+      setReview(null);
+      setValues(null);
+      setBackupId("");
+      setError(null);
     });
+    // This local clock is for expiry/grace labels, not remote status polling.
+    const clock = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => {
-      stopped = true;
-      window.clearInterval(clock);
       mounted.current = false;
+      release();
+      window.clearInterval(clock);
     };
   }, []);
-
-  const runId = run?.id;
-  const runState = run?.state;
-  const fullAuditState = run?.full_audit?.state;
-  const failedObjects = run?.failed_objects;
-
-  useEffect(() => {
-    if (!runId || !runState) return;
-    const polling =
-      ["copying", ...finalizing].includes(runState) ||
-      ["pending", "running"].includes(fullAuditState ?? "");
-    if (!polling) return;
-    let pending = false;
-    let stopped = false;
-    const timer = window.setInterval(() => {
-      if (pending) return;
-      pending = true;
-      void getVaultMigration(runId)
-        .then((next) => {
-          if (!stopped) update(next);
-        })
-        .catch((cause) => {
-          if (!stopped) setError(errorMessage(parseApiError(cause).code));
-        })
-        .finally(() => {
-          pending = false;
-        });
-    }, 2000);
-    return () => {
-      stopped = true;
-      window.clearInterval(timer);
-    };
-  }, [runId, runState, fullAuditState, update]);
-
-  useEffect(() => {
-    if (!runId) return;
-    let stopped = false;
-    void getVaultMigrationReport(runId)
-      .then((next) => {
-        if (!stopped) setReport(next);
-      })
-      .catch(() => {
-        /* The main run remains readable when the detailed report is unavailable. */
-      });
-    return () => {
-      stopped = true;
-    };
-  }, [runId, runState, failedObjects]);
-
-  async function downloadReport() {
-    if (!run) return;
-    setBusy(true);
-    try {
-      await downloadVaultMigrationReport(run.id);
-    } catch (cause) {
-      setError(errorMessage(parseApiError(cause).code));
-    } finally {
-      if (mounted.current) setBusy(false);
-    }
-  }
-
   async function refresh() {
-    setBusy(true);
+    if (!current() || busy) return;
+    setRefreshing(true);
     setError(null);
     setNow(Date.now());
     try {
-      const current = await listVaultMigrations();
-      if (!mounted.current) return;
-      setRuns(current);
-      setRun(current.find((item) => item.id === run?.id) ?? current[0] ?? null);
-      const [sources, catalogue] = await Promise.all([listBackupSources(), getStorageProviders()]);
-      if (mounted.current) {
-        setBackups(sources);
-        setProviders(catalogue);
-      }
+      await Promise.all([
+        command.execute({ kind: "refresh" }),
+        providersQuery.refetch(),
+        backupsQuery.refetch(),
+      ]);
     } catch (cause) {
-      if (mounted.current) setError(errorMessage(parseApiError(cause).code));
+      if (current()) setError(errorMessage(parseApiError(cause).code));
     } finally {
-      if (mounted.current) setBusy(false);
+      if (current()) setRefreshing(false);
     }
   }
-
+  async function downloadReport() {
+    if (!run || running) return;
+    setError(null);
+    try {
+      await command.execute({ kind: "download", target: run });
+    } catch (cause) {
+      if (current()) setError(errorMessage(parseApiError(cause).code));
+    }
+  }
   async function preflight() {
+    if (!current() || running) return;
     if (!selectedBackup || !selectedProvider || !providerAvailable) return;
     if (providerFormError(selectedProvider, values, "vault")) {
       setError("migration.formError");
@@ -274,7 +237,6 @@ export function VaultMigrationPanel() {
       setError("migration.policyInvalid");
       return;
     }
-    setBusy(true);
     setError(null);
     try {
       const destination = Object.fromEntries(
@@ -282,8 +244,9 @@ export function VaultMigrationPanel() {
           ([name, value]) => name !== "secret_fields_set" && value !== "",
         ),
       );
-      update(
-        await preflightVaultMigration({
+      const next = await command.execute({
+        kind: "preflight",
+        payload: {
           destination: { ...destination, provider: providerId },
           backup_id: selectedBackup.backup_id,
           backup_source_ref: selectedBackup.source_ref,
@@ -292,64 +255,30 @@ export function VaultMigrationPanel() {
             concurrency,
             bandwidth_bytes_per_second: bandwidth === "" ? null : Number(bandwidth),
           },
-        }),
-      );
-      // Candidate secrets are write-only and are never retained in a plan view.
-      setValues({});
+        },
+      });
+      if (current() && next) {
+        setSelection(next.id);
+        setValues(null);
+      }
     } catch (cause) {
-      setError(errorMessage(parseApiError(cause).code));
-    } finally {
-      if (mounted.current) setBusy(false);
+      if (current()) setError(errorMessage(parseApiError(cause).code));
     }
   }
-
-  async function act(action: MigrationAction) {
-    if (!run || running) return;
-    setBusy(true);
+  async function act(action: MigrationAction, target = run, backup = selectedBackup) {
+    if (!target || running || !current()) return;
     setError(null);
     try {
-      const next =
-        action === "start"
-          ? await startVaultMigration(run.id, run.plan_digest)
-          : action === "resume"
-            ? await resumeVaultMigration(run.id)
-            : action === "pause"
-              ? await pauseVaultMigration(run.id)
-              : action === "retry"
-                ? await retryVaultMigration(run.id)
-                : action === "audit"
-                  ? await auditVaultMigration(run.id)
-                  : action === "retain"
-                    ? await retainVaultMigration(run.id)
-                    : action === "manual"
-                      ? await retainVaultMigration(run.id, true)
-                      : action === "cutover"
-                        ? await cutoverVaultMigration(run.id)
-                        : action === "recover"
-                          ? await recoverVaultMigration(run.id)
-                          : await cleanupVaultMigration(
-                              run.id,
-                              action === "source",
-                              action === "source" && selectedBackup
-                                ? {
-                                    backup_id: selectedBackup.backup_id,
-                                    backup_source_ref: selectedBackup.source_ref,
-                                  }
-                                : undefined,
-                            );
-      update(next);
-      setConfirmation(null);
-      if (next.state === "active") setBackupId("");
-    } catch (cause) {
-      if (mounted.current) setError(errorMessage(parseApiError(cause).code));
-      setConfirmation(null);
-      try {
-        update(await getVaultMigration(run.id));
-      } catch {
-        /* A failed status read cannot prove completion. */
+      const next = await command.execute({ kind: action, target, backup });
+      if (current()) {
+        setReview(null);
+        if (next?.state === "active") setBackupId("");
       }
-    } finally {
-      if (mounted.current) setBusy(false);
+    } catch (cause) {
+      if (current()) {
+        setError(errorMessage(parseApiError(cause).code));
+        setReview(null);
+      }
     }
   }
 
@@ -369,7 +298,7 @@ export function VaultMigrationPanel() {
         id="migration-backup"
         className={inputClasses}
         value={backupId}
-        disabled={running || backups.length === 0}
+        disabled={running || backupsQuery.isError || backups.length === 0}
         onChange={(event) => setBackupId(event.target.value)}
       >
         <option value="">{t("migration.chooseBackup")}</option>
@@ -380,7 +309,13 @@ export function VaultMigrationPanel() {
         ))}
       </select>
       <p className="text-xs text-muted-foreground">
-        {t(backups.length ? "migration.backupHelp" : "migration.backupEmpty")}
+        {t(
+          backupsQuery.isError
+            ? "migration.failure"
+            : backups.length
+              ? "migration.backupHelp"
+              : "migration.backupEmpty",
+        )}
       </p>
       <a
         href="/settings?section=backup"
@@ -412,7 +347,7 @@ export function VaultMigrationPanel() {
           <Button
             variant="ghost"
             size="sm"
-            disabled={loading || running}
+            disabled={loading || busy || !enabled}
             onClick={() => void refresh()}
             aria-label={t("migration.reload")}
           >
@@ -454,7 +389,8 @@ export function VaultMigrationPanel() {
                   value={run?.id ?? ""}
                   disabled={running}
                   onChange={(event) => {
-                    setRun(runs.find((item) => item.id === event.target.value) ?? null);
+                    setSelection(event.target.value || null);
+                    setReview(null);
                     setError(null);
                   }}
                 >
@@ -467,7 +403,7 @@ export function VaultMigrationPanel() {
                 </select>
               </div>
             )}
-            {!run ? (
+            {denied || (history.isError && !history.data) ? null : !run ? (
               <div className="space-y-5 p-4 sm:p-5">
                 <h4 className="text-sm font-semibold">{t("migration.destination")}</h4>
                 <StorageProviderPicker
@@ -480,7 +416,7 @@ export function VaultMigrationPanel() {
                     setValues(defaultProviderValues(provider));
                   }}
                   onValueChange={(name, value) =>
-                    setValues((current) => ({ ...current, [name]: value }))
+                    setValues((current) => ({ ...(current ?? values), [name]: value }))
                   }
                 />
                 <details className="border-t pt-4">
@@ -496,7 +432,7 @@ export function VaultMigrationPanel() {
                           min={0}
                           max={3650}
                           value={retentionDays}
-                          disabled={busy}
+                          disabled={running}
                           onChange={(event) => setRetentionDays(Number(event.target.value))}
                         />
                       </label>
@@ -507,7 +443,7 @@ export function VaultMigrationPanel() {
                           min={1}
                           max={4}
                           value={concurrency}
-                          disabled={busy}
+                          disabled={running}
                           onChange={(event) => setConcurrency(Number(event.target.value))}
                         />
                       </label>
@@ -517,7 +453,7 @@ export function VaultMigrationPanel() {
                           type="number"
                           min={1024}
                           value={bandwidth}
-                          disabled={busy}
+                          disabled={running}
                           onChange={(event) => setBandwidth(event.target.value)}
                         />
                       </label>
@@ -770,7 +706,7 @@ export function VaultMigrationPanel() {
                                 {t("migration.continueBackground")}
                               </p>
                               <Button
-                                disabled={busy}
+                                disabled={running}
                                 variant="outline"
                                 onClick={() => void act("pause")}
                               >
@@ -782,7 +718,7 @@ export function VaultMigrationPanel() {
                               <p className="text-xs text-muted-foreground">
                                 {t("migration.paused")}
                               </p>
-                              <Button disabled={busy} onClick={() => void act("resume")}>
+                              <Button disabled={running} onClick={() => void act("resume")}>
                                 {t("migration.resume")}
                               </Button>
                             </>
@@ -795,7 +731,7 @@ export function VaultMigrationPanel() {
                         </p>
                       )}
                       {run.retryable && run.failed_objects > 0 && (
-                        <Button disabled={busy} onClick={() => void act("retry")}>
+                        <Button disabled={running} onClick={() => void act("retry")}>
                           {t("migration.retry")}
                         </Button>
                       )}
@@ -806,7 +742,7 @@ export function VaultMigrationPanel() {
                           </p>
                           <Button
                             loading={busy}
-                            disabled={busy}
+                            disabled={running}
                             onClick={() => setConfirmation("cutover")}
                           >
                             {t("migration.switch")}
@@ -845,7 +781,9 @@ export function VaultMigrationPanel() {
                           )}
                           <Button
                             variant="outline"
-                            disabled={busy || ["pending", "running"].includes(fullAuditState ?? "")}
+                            disabled={
+                              running || ["pending", "running"].includes(fullAuditState ?? "")
+                            }
                             onClick={() => void act("audit")}
                           >
                             {t("migration.fullAudit")}
@@ -874,21 +812,21 @@ export function VaultMigrationPanel() {
                                   <div className="flex flex-wrap gap-2">
                                     <Button
                                       variant="outline"
-                                      disabled={!cleanupAllowed || !selectedBackup || busy}
+                                      disabled={!cleanupAllowed || !selectedBackup || running}
                                       onClick={() => setConfirmation("source")}
                                     >
                                       {t("migration.cleanup")}
                                     </Button>
                                     <Button
                                       variant="outline"
-                                      disabled={busy}
+                                      disabled={running}
                                       onClick={() => void act("retain")}
                                     >
                                       {t("migration.retain")}
                                     </Button>
                                     <Button
                                       variant="ghost"
-                                      disabled={busy}
+                                      disabled={running}
                                       onClick={() => setConfirmation("manual")}
                                     >
                                       {t("migration.manual")}
@@ -903,7 +841,11 @@ export function VaultMigrationPanel() {
                     </>
                   )}
                   <div className="flex flex-wrap items-center gap-3">
-                    <Button variant="outline" disabled={busy} onClick={() => void downloadReport()}>
+                    <Button
+                      variant="outline"
+                      disabled={running}
+                      onClick={() => void downloadReport()}
+                    >
                       {t("migration.report")}
                     </Button>
                     <a
@@ -964,7 +906,7 @@ export function VaultMigrationPanel() {
                       variant="outline"
                       disabled={running}
                       onClick={() => {
-                        setRun(null);
+                        setSelection(null);
                         setError(null);
                         setBackupId("");
                         setValues(selectedProvider ? defaultProviderValues(selectedProvider) : {});
@@ -979,13 +921,13 @@ export function VaultMigrationPanel() {
           </>
         )}
         <ConfirmModal
-          open={confirmation !== null}
+          open={confirmation !== null && !denied}
           onClose={() => {
             if (!busy) setConfirmation(null);
           }}
           busy={busy}
           onConfirm={() => {
-            if (confirmation) void act(confirmation);
+            if (review) void act(review.kind, review.target, review.backup);
           }}
           title={t(
             confirmation === "start"
@@ -999,12 +941,12 @@ export function VaultMigrationPanel() {
                     : "migration.discardTitle",
           )}
           description={
-            confirmation === "start" && run
+            confirmation === "start" && review
               ? t("migration.startDescription", {
-                  source: run.source_provider_ref,
-                  destination: run.destination_provider_ref,
-                  backup: run.backup_summary.backup_id,
-                  date: date(run.backup_summary.verified_at),
+                  source: review.target.source_provider_ref,
+                  destination: review.target.destination_provider_ref,
+                  backup: review.target.backup_summary.backup_id,
+                  date: date(review.target.backup_summary.verified_at),
                 })
               : t(
                   confirmation === "manual"

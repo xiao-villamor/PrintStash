@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Give Vault migration reads and command receipts one owner, retain reviewed
+  confirmation targets, cancel abandoned reads, surface catalog failures and stop
+  status polling after read errors until explicit recovery. Preserve destination
+  defaults and the selected migration when refreshing history.
+
 - Fence backup confirmations to the reviewed source, keep accepted Jobs after
   navigation, and publish backup/configuration receipts without stale read races.
   Preserve acknowledged policy parts after a later connection fails and refresh

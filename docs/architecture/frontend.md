@@ -55,6 +55,18 @@ publish each policy transaction; a later failure does not erase earlier ACKs.
 This does not imply an atomic backend policy transaction. Process catalogs read
 again on return, so accepted work completed away from the view is recoverable.
 
+### Implemented migration process owner (M9 increment)
+
+`settings-vault-migration.ts` owns history, per-run status, reports and explicit
+migration commands. Active runs use foreground Query polling; a failed read stops
+that polling until explicit recovery. The minute clock in the panel only updates
+expiry/grace labels. The panel retains selection, destination/policy drafts and
+reviewed confirmation snapshots. Provider and backup catalogs use their existing
+shared owners. Commands cancel obsolete reads before dispatch and publication;
+uncertain replies trigger a status read, never an automatic replay. Credentials
+stay in the local form and active call. Backend digest/state/identity/audit/backup
+checks remain authoritative; these DTOs do not expose a comparable edit revision.
+
 ## Proposed directory tree
 
 ```text
