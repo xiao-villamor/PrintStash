@@ -1,3 +1,4 @@
+import { ApiError } from "@/lib/errors";
 import { useAuth } from "@/lib/auth-context";
 import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
@@ -630,7 +631,8 @@ export default function StatisticsPage() {
   const [period, setPeriod] = useState<StatsPeriod>("30d");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [visibleWidgets, setVisibleWidgets] = useState<Set<WidgetId>>(loadVisibleWidgets);
-  const { data, isLoading, isError, refetch } = usePrintStatistics(period);
+  const { data, error, isLoading, isError, refetch } = usePrintStatistics(period);
+  const denied = error instanceof ApiError && [401, 403, 404].includes(error.status);
   const config = useVaultConfig({ enabled: !!user?.is_superuser, retry: false });
   const currency = config.isError ? null : (config.data?.currency ?? null);
 
@@ -723,7 +725,9 @@ export default function StatisticsPage() {
           </CardContent>
         </Card>
       )}
-      {data && <StatsContent stats={data} currency={currency} visibleWidgets={visibleWidgets} />}
+      {data && !denied && (
+        <StatsContent stats={data} currency={currency} visibleWidgets={visibleWidgets} />
+      )}
     </PageContainer>
   );
 }

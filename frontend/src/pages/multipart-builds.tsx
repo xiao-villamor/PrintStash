@@ -1,17 +1,22 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { useCallback, useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n, type MessageKey } from "@/lib/i18n";
-import { getModel, getMultipartModel, listPrinters } from "@/lib/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { onAuthChange } from "@/lib/auth-store";
+import { getSessionVersion } from "@/lib/session-transport";
+import { ApiError } from "@/lib/errors";
+import { usePrinters } from "@/lib/queries";
+import { modelDetailOptions } from "@/features/library/model-detail";
+import { multipartDetailOptions } from "@/features/library/multipart";
+import { buildListOptions, buildDetailOptions, useBuildCommands } from "@/features/library/builds";
 import {
   archiveMultipartBuild,
   confirmBuildResult,
   createMultipartBuild,
   duplicateMultipartBuild,
-  getMultipartBuild,
-  listMultipartBuilds,
   queueBuildPart,
   selectBuildRevision,
 } from "@/lib/api/multipart-builds";
@@ -20,7 +25,7 @@ import type {
   MultipartBuildPart,
   MultipartBuildAttempt,
 } from "@/types/multipart-builds";
-import type { FileRead, PrinterRead } from "@/types";
+import type { PrinterRead } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -28,6 +33,9 @@ import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 
 const selectClass = "h-10 w-full rounded-md border border-input bg-background px-3 text-sm";
+function denied(error: Error | null) {
+  return error instanceof ApiError && [401, 403, 404].includes(error.status);
+}
 function errorKey(message: string): MessageKey {
   if (/version_conflict|idempotency_conflict/.test(message)) return "build.conflict";
   if (/permission|scope/.test(message)) return "build.denied";
@@ -40,10 +48,17 @@ function errorKey(message: string): MessageKey {
 export default function MultipartBuildsPage() {
   useUiLocale();
   const { id } = useParams();
+  const [search] = useSearchParams();
+  const [session] = useState(getSessionVersion);
+  const currentSession = useSyncExternalStore(onAuthChange, getSessionVersion);
   const { user, loading } = useAuth();
-  if (loading) return null;
+  if (loading || session !== currentSession) return null;
   if (!user) return <Navigate to="/login" replace />;
-  return id ? <BuildDetail key={id} id={Number(id)} /> : <BuildList />;
+  return id ? (
+    <BuildDetail key={id} id={Number(id)} />
+  ) : (
+    <BuildList key={search.get("multipart") ?? "history"} />
+  );
 }
 
 function BuildList() {
@@ -51,64 +66,57 @@ function BuildList() {
   const { t } = useI18n();
   const [search] = useSearchParams();
   const compositionId = Number(search.get("multipart"));
-  const [rows, setRows] = useState<MultipartBuild[]>([]);
   const [archived, setArchived] = useState(false);
   const [offset, setOffset] = useState(0);
-  const [name, setName] = useState("");
+  const [nameDraft, setName] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(1);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<number | null>(null);
   const [error, setError] = useState<MessageKey | null>(null);
-  const refresh = useCallback(
-    () => listMultipartBuilds(archived, offset).then(setRows),
-    [archived, offset],
-  );
-  useEffect(() => {
-    void refresh().catch((reason) =>
-      setError(errorKey(reason instanceof Error ? reason.message : "")),
-    );
-  }, [refresh]);
-  useEffect(() => {
-    if (!compositionId) return;
-    let active = true;
-    void getMultipartModel(compositionId).then(
-      (model) => {
-        if (active) setName(model.name);
-      },
-      (reason) => {
-        if (active) setError(errorKey(reason instanceof Error ? reason.message : ""));
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [compositionId]);
+  const history = useQuery(buildListOptions(archived, offset));
+  const composition = useQuery(multipartDetailOptions(compositionId > 0 ? compositionId : null));
+  const commands = useBuildCommands();
+  const name = nameDraft ?? composition.data?.name ?? "";
+  const rows = denied(history.error) ? [] : (history.data ?? []);
+  const readError = history.error ?? composition.error;
+  const displayedError = error ?? (readError ? errorKey(readError.message) : null);
   if (created) return <Navigate to={`/builds/${created}`} />;
   return (
     <PageContainer>
       <PageHeader title={t("build.title")} description={t("build.help")} />
-      {error && (
+      {displayedError && (
         <p role="alert" className="text-destructive">
-          {t(error)}
+          {t(displayedError)}
         </p>
       )}
-      {compositionId > 0 && (
+      {compositionId > 0 && !denied(composition.error) && (
         <form
           className="max-w-xl space-y-4 rounded-lg border border-border p-5"
           onSubmit={(event) => {
             event.preventDefault();
+            if (!commands.isCurrent()) return;
             setBusy(true);
             setError(null);
-            void createMultipartBuild({
-              name,
-              object_quantity: quantity,
-              multipart_model_id: compositionId,
-            })
-              .then(
-                (build) => setCreated(build.id),
-                (reason) => setError(errorKey(reason instanceof Error ? reason.message : "")),
+            void commands
+              .run(() =>
+                createMultipartBuild({
+                  name,
+                  object_quantity: quantity,
+                  multipart_model_id: compositionId,
+                }),
               )
-              .finally(() => setBusy(false));
+              .then(
+                (build) => {
+                  if (build && commands.isCurrent()) setCreated(build.id);
+                },
+                (reason) => {
+                  if (commands.isCurrent())
+                    setError(errorKey(reason instanceof Error ? reason.message : ""));
+                },
+              )
+              .finally(() => {
+                if (commands.isCurrent()) setBusy(false);
+              });
           }}
         >
           <h2 className="font-semibold">{t("build.create")}</h2>
@@ -151,17 +159,20 @@ function BuildList() {
         </label>
         <Button
           variant="outline"
-          onClick={() =>
-            void refresh().catch((reason) =>
-              setError(errorKey(reason instanceof Error ? reason.message : "")),
-            )
-          }
+          onClick={() => {
+            void history.refetch();
+            if (compositionId > 0) void composition.refetch();
+          }}
         >
           {t("build.refresh")}
         </Button>
       </div>
-      {rows.length === 0 ? (
-        <p className="text-muted-foreground">{t("build.empty")}</p>
+      {history.isPending ? (
+        <p role="status">{t("build.loading")}</p>
+      ) : rows.length === 0 ? (
+        history.isSuccess ? (
+          <p className="text-muted-foreground">{t("build.empty")}</p>
+        ) : null
       ) : (
         <ul className="divide-y divide-border rounded-lg border border-border">
           {rows.map((build) => (
@@ -200,50 +211,37 @@ function BuildList() {
 function BuildDetail({ id }: { id: number }) {
   useUiLocale();
   const { t } = useI18n();
-  const [build, setBuild] = useState<MultipartBuild | null>(null);
-  const [printers, setPrinters] = useState<PrinterRead[]>([]);
+  const client = useQueryClient();
+  const detail = useQuery(buildDetailOptions(id, client));
+  const printerQuery = usePrinters();
+  const printers = denied(printerQuery.error)
+    ? []
+    : (printerQuery.data ?? []).filter((printer) => printer.access.can_print);
+  const build = denied(detail.error) ? undefined : detail.data;
+  const commands = useBuildCommands();
   const [error, setError] = useState<MessageKey | null>(null);
   const [copyName, setCopyName] = useState("");
   const [copyId, setCopyId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    let active = true;
-    const refresh = () =>
-      void getMultipartBuild(id).then(
-        (value) => {
-          if (active)
-            setBuild((current) => (current && current.version > value.version ? current : value));
-        },
-        (reason) => {
-          if (active) setError(errorKey(reason instanceof Error ? reason.message : ""));
-        },
-      );
-    refresh();
-    void listPrinters().then(
-      (items) => {
-        if (active) setPrinters(items.filter((printer) => printer.access.can_print));
-      },
-      (reason) => {
-        if (active) setError(errorKey(reason instanceof Error ? reason.message : ""));
-      },
-    );
-    const timer = window.setInterval(refresh, 5000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [id]);
-  const mutate = async (operation: () => Promise<MultipartBuild>) => {
+  const readError = detail.error ?? printerQuery.error;
+  const displayedError = error ?? (readError ? errorKey(readError.message) : null);
+  const mutate = async (operation: () => Promise<MultipartBuild>): Promise<boolean> => {
+    if (!commands.isCurrent()) return false;
     setBusy(true);
     setError(null);
     try {
-      const value = await operation();
-      setBuild((current) => (current && current.version > value.version ? current : value));
+      return (await commands.run(operation, id)) !== null;
     } catch (reason) {
-      setError(errorKey(reason instanceof Error ? reason.message : ""));
+      if (commands.isCurrent()) setError(errorKey(reason instanceof Error ? reason.message : ""));
+      return false;
     } finally {
-      setBusy(false);
+      if (commands.isCurrent()) setBusy(false);
     }
+  };
+  const refresh = () => {
+    setError(null);
+    void detail.refetch();
+    void printerQuery.refetch();
   };
   if (copyId) return <Navigate to={`/builds/${copyId}`} />;
   const canEdit = build?.effective_role === "edit" || build?.effective_role === "admin";
@@ -252,20 +250,26 @@ function BuildDetail({ id }: { id: number }) {
       <Link className="text-primary underline" to="/builds">
         {t("build.title")}
       </Link>
-      {error && (
+      {displayedError && (
         <p role="alert" className="text-destructive">
-          {t(error)}
+          {t(displayedError)}
         </p>
       )}
       {!build ? (
-        <p role="status">{t("build.loading")}</p>
+        detail.isPending ? (
+          <p role="status">{t("build.loading")}</p>
+        ) : (
+          <Button variant="outline" onClick={refresh}>
+            {t("build.refresh")}
+          </Button>
+        )
       ) : (
         <>
           <PageHeader
             title={build.name}
             description={`${build.composition_name} · ${t("build.objectCount", { count: String(build.object_quantity) })}`}
             actions={
-              <Button variant="outline" onClick={() => void mutate(() => getMultipartBuild(id))}>
+              <Button variant="outline" onClick={refresh}>
                 {t("build.refresh")}
               </Button>
             }
@@ -296,14 +300,23 @@ function BuildDetail({ id }: { id: number }) {
                 className="flex max-w-xl flex-wrap items-end gap-3"
                 onSubmit={(event) => {
                   event.preventDefault();
+                  if (!commands.isCurrent()) return;
                   setBusy(true);
                   setError(null);
-                  void duplicateMultipartBuild(id, copyName)
+                  void commands
+                    .run(() => duplicateMultipartBuild(id, copyName))
                     .then(
-                      (copy) => setCopyId(copy.id),
-                      (reason) => setError(errorKey(reason instanceof Error ? reason.message : "")),
+                      (copy) => {
+                        if (copy && commands.isCurrent()) setCopyId(copy.id);
+                      },
+                      (reason) => {
+                        if (commands.isCurrent())
+                          setError(errorKey(reason instanceof Error ? reason.message : ""));
+                      },
                     )
-                    .finally(() => setBusy(false));
+                    .finally(() => {
+                      if (commands.isCurrent()) setBusy(false);
+                    });
                 }}
               >
                 <label className="grow space-y-2">
@@ -348,13 +361,16 @@ function BuildPart({
   part: MultipartBuildPart;
   printers: PrinterRead[];
   disabled: boolean;
-  mutate: (operation: () => Promise<MultipartBuild>) => Promise<void>;
+  mutate: (operation: () => Promise<MultipartBuild>) => Promise<boolean>;
 }) {
   useUiLocale();
   const { t } = useI18n();
   const { user } = useAuth();
-  const [files, setFiles] = useState<FileRead[]>([]);
-  const [loadError, setLoadError] = useState(false);
+  const model = useQuery(modelDetailOptions(part.selected_model_id));
+  const files = model.isError
+    ? []
+    : (model.data?.files ?? []).filter((file) => file.file_type === "gcode");
+  const loadError = model.isError;
   const [units, setUnits] = useState(1);
   const [countOverride, setCountOverride] = useState<number | null>(null);
   const [printer, setPrinter] = useState("");
@@ -364,27 +380,6 @@ function BuildPart({
     Math.max(1, Math.min(100, Math.ceil(part.unreserved_units / Math.max(1, units))));
   const excess = Math.max(count * units - part.unreserved_units, 0);
   const excessAccepted = acceptedExcess === excess;
-  useEffect(() => {
-    if (!part.selected_model_id) return;
-    let active = true;
-    void getModel(part.selected_model_id).then(
-      (model) => {
-        if (active) {
-          setFiles(model.files.filter((file) => file.file_type === "gcode"));
-          setLoadError(false);
-        }
-      },
-      () => {
-        if (active) {
-          setFiles([]);
-          setLoadError(true);
-        }
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, [part.selected_model_id]);
   return (
     <section
       className="space-y-5 rounded-lg border border-border bg-card p-5"
@@ -416,15 +411,16 @@ function BuildPart({
             className={selectClass}
             disabled={disabled}
             value={part.selected_choice_id ?? ""}
-            onChange={(event) =>
+            onChange={(event) => {
+              const choiceId = Number(event.target.value);
               void mutate(() =>
                 selectBuildRevision(build.id, part.id, {
                   version: build.version,
-                  choice_id: Number(event.target.value),
+                  choice_id: choiceId,
                   revision_id: null,
                 }),
-              )
-            }
+              );
+            }}
           >
             <option value="">{t("build.unavailable")}</option>
             {part.choices.map((choice, index) => (
@@ -444,14 +440,15 @@ function BuildPart({
             className={selectClass}
             disabled={disabled || loadError}
             value={part.revision_id ?? ""}
-            onChange={(event) =>
+            onChange={(event) => {
+              const revisionId = Number(event.target.value) || null;
               void mutate(() =>
                 selectBuildRevision(build.id, part.id, {
                   version: build.version,
-                  revision_id: Number(event.target.value) || null,
+                  revision_id: revisionId,
                 }),
-              )
-            }
+              );
+            }}
           >
             <option value="">{t("build.noRevision")}</option>
             {files
@@ -465,7 +462,14 @@ function BuildPart({
           </select>
         </label>
       </div>
-      {loadError && <p role="alert">{t("build.revisionRequired")}</p>}
+      {loadError && (
+        <div>
+          <p role="alert">{t("build.revisionRequired")}</p>
+          <Button variant="outline" onClick={() => void model.refetch()}>
+            {t("build.refresh")}
+          </Button>
+        </div>
+      )}
       <p className="text-xs text-muted-foreground">{t("build.revisionHelp")}</p>
       <form
         className="space-y-4 border-t border-border pt-4"
@@ -564,7 +568,7 @@ function BuildPart({
           <h3 className="font-medium">{t("build.history")}</h3>
           {part.attempts.map((attempt) => (
             <Result
-              key={`${attempt.id}:${attempt.version}:${attempt.state}`}
+              key={attempt.id}
               buildId={build.id}
               attempt={attempt}
               disabled={disabled}
@@ -586,12 +590,17 @@ function Result({
   buildId: number;
   attempt: MultipartBuildAttempt;
   disabled: boolean;
-  mutate: (operation: () => Promise<MultipartBuild>) => Promise<void>;
+  mutate: (operation: () => Promise<MultipartBuild>) => Promise<boolean>;
 }) {
   useUiLocale();
   const { t } = useI18n();
-  const [valid, setValid] = useState(attempt.valid_units ?? attempt.suggested_valid_units);
-  const [key, setKey] = useState(() => crypto.randomUUID());
+  const [draft, setDraft] = useState<{
+    base: MultipartBuildAttempt;
+    valid: number;
+    key: string;
+  } | null>(null);
+  const valid = draft?.valid ?? attempt.valid_units ?? attempt.suggested_valid_units;
+  const changed = draft !== null && draft.base.version !== attempt.version;
   const terminal = ["completed", "failed", "cancelled", "unavailable"].includes(attempt.state);
   const stateKey: MessageKey =
     attempt.state === "completed"
@@ -609,13 +618,18 @@ function Result({
       aria-label={t("build.attempt", { id: String(attempt.historical_job_id) })}
       onSubmit={(event) => {
         event.preventDefault();
+        if (disabled || changed) return;
+        const submitted = draft ?? { base: attempt, valid, key: crypto.randomUUID() };
+        setDraft(submitted);
         void mutate(() =>
           confirmBuildResult(buildId, attempt.id, {
-            version: attempt.version,
-            valid_units: valid,
-            idempotency_key: key,
+            version: submitted.base.version,
+            valid_units: submitted.valid,
+            idempotency_key: submitted.key,
           }),
-        );
+        ).then((confirmed) => {
+          if (confirmed) setDraft(null);
+        });
       }}
     >
       <div className="grow">
@@ -639,12 +653,31 @@ function Result({
               disabled={disabled}
               value={valid}
               onChange={(event) => {
-                setValid(Number(event.target.value));
-                setKey(crypto.randomUUID());
+                setDraft({
+                  base: draft?.base ?? attempt,
+                  valid: Number(event.target.value),
+                  key: crypto.randomUUID(),
+                });
               }}
             />
           </label>
-          <Button type="submit" variant="outline" disabled={disabled}>
+          {changed && (
+            <div className="space-y-2">
+              <p role="alert">{t("build.conflict")}</p>
+              <p>
+                {t("build.valid")}: {attempt.valid_units ?? attempt.suggested_valid_units}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={disabled}
+                onClick={() => setDraft({ base: attempt, valid, key: crypto.randomUUID() })}
+              >
+                {t("library.reviewLatest")}
+              </Button>
+            </div>
+          )}
+          <Button type="submit" variant="outline" disabled={disabled || changed}>
             {t(attempt.valid_units === null ? "build.confirm" : "build.correct")}
           </Button>
         </>

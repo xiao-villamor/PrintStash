@@ -1,6 +1,6 @@
 # Frontend architecture migration plan
 
-2026-10-07. **Implementation in progress. M0–M7 are closed locally in dependency order. M8 is active. Final delivery and CI remain open.**
+2026-10-07. **Implementation in progress. M0–M8 are closed locally in dependency order. M9 is active. Final delivery and CI remain open.**
 The approved scope covers the entire first-party frontend incrementally, including
 workspace packages, the browser extension and integration contracts. Execution was authorized after consolidating the plan and its accepted answers. A smaller library fix is not completion
 of this plan.
@@ -195,7 +195,10 @@ progressive restoration and Shift selection after append are qualified.
 M7 is locally closed with its [async workflow qualification](../frontend-m7-validation.md):
 shared Inbox/Job ownership, socket retirement, real reconnect and upload recovery,
 ZIP review lifetime and early Job handoff are qualified.
-M8 is now the only active target.
+M8 is locally closed with its [remaining Library qualification](../frontend-m8-validation.md):
+shared Build ownership, captured manufacturing confirmation, read denial/recovery
+and preserved detail/Documents/Search/Similarity/Profile/Statistics contracts.
+M9 is now the only active target.
 Parallel work may divide the active goal's bounded
 review and verification tasks; it must not substitute a later goal for an
 unfinished prerequisite. A goal closes only when its prerequisites and its own

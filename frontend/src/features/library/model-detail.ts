@@ -7,10 +7,14 @@ import { getSessionVersion } from "@/lib/session-transport";
 import { queryKeys } from "@/lib/query-client";
 import type { ModelRead, ModelPrintJobRead } from "@/types";
 
-export function modelDetailOptions(id: number) {
+export function modelDetailOptions(id: number | null) {
   return queryOptions({
-    queryKey: queryKeys.model(id),
-    queryFn: ({ signal }) => getModel(id, { signal }),
+    queryKey: id === null ? [...queryKeys.models, "unselected"] : queryKeys.model(id),
+    queryFn: ({ signal }) => {
+      if (id === null) throw new Error("Model id is required");
+      return getModel(id, { signal });
+    },
+    enabled: id !== null,
     staleTime: 60_000,
     retry: false,
   });

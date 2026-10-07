@@ -11,7 +11,7 @@ import {
   useProfileCommands,
 } from "@/lib/queries/profiles";
 import { getSessionVersion } from "@/lib/session-transport";
-import { userMessage } from "@/lib/errors";
+import { ApiError, userMessage } from "@/lib/errors";
 import { FilamentProfileRead, PrinterProfileRead } from "@/types";
 
 import { useSpoolmanStatus } from "@/lib/queries";
@@ -176,8 +176,13 @@ export function FilamentProfilesCard() {
   const filamentQuery = useQuery({ ...filamentProfilesOptions(), enabled: auth.isAuthenticated });
   const printerQuery = useQuery({ ...printerProfilesOptions(), enabled: auth.isAuthenticated });
   const commands = useProfileCommands();
-  const filaments = filamentQuery.data ?? [];
-  const printers = printerQuery.data ?? [];
+  const filamentDenied =
+    filamentQuery.error instanceof ApiError && [401, 403, 404].includes(filamentQuery.error.status);
+  const printerDenied =
+    printerQuery.error instanceof ApiError && [401, 403, 404].includes(printerQuery.error.status);
+  const filaments = filamentDenied ? [] : (filamentQuery.data ?? []);
+  const printers = printerDenied ? [] : (printerQuery.data ?? []);
+  const activeDenied = activeTab === "filaments" ? filamentDenied : printerDenied;
   const activeQuery = activeTab === "filaments" ? filamentQuery : printerQuery;
   const loading = activeQuery.isPending;
   const [filamentEdits, setFilamentEdits] = useState<Record<number, FilamentDraft>>({});
@@ -331,7 +336,7 @@ export function FilamentProfilesCard() {
   }
 
   async function autoSaveFilament(profile: FilamentProfileRead) {
-    if (!auth.isAuthenticated) return;
+    if (!auth.isAuthenticated || filamentDenied) return;
     // Synced presets mirror Spoolman and are read-only here.
     if (profile.spoolman_filament_id != null) return;
     const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
@@ -453,7 +458,7 @@ export function FilamentProfilesCard() {
   }
 
   async function autoSavePrinter(profile: PrinterProfileRead) {
-    if (!auth.isAuthenticated) return;
+    if (!auth.isAuthenticated || printerDenied) return;
     const edit = printerEdits[profile.id] ?? printerEdit(profile);
     if (
       rowStatus[`p${profile.id}`] === "saving" ||
@@ -500,7 +505,10 @@ export function FilamentProfilesCard() {
     <Localized>
       <div className="animate-panel-in space-y-4">
         <ConfirmModal
-          open={deleteTarget !== null}
+          open={
+            deleteTarget !== null &&
+            !(deleteTarget.kind === "filament" ? filamentDenied : printerDenied)
+          }
           onClose={() => {
             if (!deleteBusy) setDeleteTarget(null);
           }}
@@ -575,7 +583,7 @@ export function FilamentProfilesCard() {
                   size="xs"
                   onClick={handleSyncSpoolman}
                   loading={syncing}
-                  disabled={!auth.isAuthenticated}
+                  disabled={!auth.isAuthenticated || activeDenied}
                 >
                   {!syncing && <RefreshCw className="h-3.5 w-3.5" />}
                   {translateUiText(locale, "Sync Spoolman")}
@@ -584,7 +592,7 @@ export function FilamentProfilesCard() {
               <Button
                 type="button"
                 size="xs"
-                disabled={!auth.isAuthenticated}
+                disabled={!auth.isAuthenticated || activeDenied}
                 aria-expanded={activeTab === "filaments" ? showAddFilament : showAddPrinter}
                 onClick={() => {
                   if (!auth.isAuthenticated) {
@@ -607,7 +615,7 @@ export function FilamentProfilesCard() {
             </div>
           </div>
 
-          {activeTab === "filaments" ? (
+          {activeDenied ? null : activeTab === "filaments" ? (
             <section aria-labelledby="filament-presets-heading">
               <div className="flex items-center justify-between border-b px-5 py-3">
                 <div>

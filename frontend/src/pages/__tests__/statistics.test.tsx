@@ -83,6 +83,23 @@ afterEach(() => {
 
 describe("StatisticsPage", () => {
   describe("read recovery", () => {
+    it.each([
+      [403, false],
+      [503, true],
+    ] as const)("protects cached statistics during HTTP %s", async (status, retained) => {
+      const app = renderStatistics();
+      await screen.findByText("34.50", { exact: false });
+      app.route({ "GET /api/v1/models/stats/prints": json({ detail: "unavailable" }, status) });
+
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: queryKeys.printStats("30d") });
+      });
+
+      await screen.findByText("Failed to load statistics.");
+      expect(screen.queryByText("34.50", { exact: false }) !== null).toBe(retained);
+      expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+    });
+
     it("retries failed statistics for the selected period", async () => {
       const user = userEvent.setup();
       const app = renderStatistics({

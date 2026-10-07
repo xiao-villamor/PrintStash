@@ -34,7 +34,7 @@ Manual review for this increment: `features/library/model-detail.ts`; route `pag
 
 Removal: route-local Model/error state, detail-local server Model, duplicate derivative callback fetch, optimistic detail star copy, printer history/file fetch effects. Metadata and composition drafts remain local by design. Publication consumes exact server versions; it never invents a version increment.
 
-Remaining: provenance/Multipart conditional writers; ambiguous mutation outcome recovery; source/revision child gesture disposal and legacy mutation invalidation bridge; frontend-only print history owner still receives confirmed jobs from the existing form. Browser qualification and final static gate recorded when complete.
+Historical checkpoint remainder: provenance/Multipart conditional writers, ambiguous mutation recovery and source/revision lifetime qualification were subsequently consolidated in [M4 acceptance](frontend-m4-closure-validation.md) and the source recovery matrices. M8 reconciles current detail/child assertions in [its record](frontend-m8-validation.md). The remaining legacy transport invalidation bridge and compatibility facades retain their explicit M10 deadline; this earlier checkpoint does not close them.
 
 The first full Chromium detail run passed 13/14; the cached-preview test stopped at its obsolete expectation that Back returns a bare `/`. M2 intentionally canonicalizes that history entry to `/?type=all&sort=date-desc`. The test now captures the canonical entry and requires exact restoration, retaining both preview assertions. This was an assertion migration, not evidence of a viewer-loading failure. The corrected test is rerun before checkpointing.
 

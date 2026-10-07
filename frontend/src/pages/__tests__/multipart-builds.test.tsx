@@ -1,5 +1,5 @@
 /* Manufacturing controls show confirmed output, preserve failed attempts, and reject stale edits. */
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import MultipartBuildsPage from "@/pages/multipart-builds";
@@ -13,6 +13,9 @@ import {
   aPrinter,
 } from "@/test-support/factories";
 import { adminSession, json, renderApp, type RouteTable } from "@/test-support/render";
+import { Link } from "react-router-dom";
+import { focusManager } from "@tanstack/react-query";
+import { storeLogin } from "@/lib/auth-store";
 import type { MultipartBuild } from "@/types/multipart-builds";
 
 function renderBuild(build = aBuild(), extra: RouteTable = {}) {
@@ -28,9 +31,283 @@ function renderBuild(build = aBuild(), extra: RouteTable = {}) {
     },
   });
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  focusManager.setFocused(undefined);
+  vi.unstubAllGlobals();
+});
 
 describe("Multipart manufacturing", () => {
+  it("recovers an unavailable build on the same route", async () => {
+    const app = renderBuild(aBuild(), {
+      "GET /api/v1/multipart-builds/1": json({ detail: "unavailable" }, 503),
+    });
+    await screen.findByRole("alert");
+    app.route({ "GET /api/v1/multipart-builds/1": json(aBuild()) });
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(await screen.findByRole("heading", { name: "Kitchen table" })).toBeVisible();
+  });
+
+  it("retires an abandoned build read", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = renderBuild(aBuild(), {
+      "GET /api/v1/multipart-builds/1": (_url, init) => {
+        signal = init?.signal;
+        return pending.promise;
+      },
+    });
+    await waitFor(() =>
+      expect(app.requests().some((r) => r.url.endsWith("multipart-builds/1"))).toBe(true),
+    );
+
+    app.unmount();
+
+    try {
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      pending.resolve(json(aBuild()));
+    }
+  });
+
+  it("removes a cached build after access is denied", async () => {
+    const app = renderBuild();
+    await screen.findByRole("heading", { name: "Kitchen table" });
+    app.route({ "GET /api/v1/multipart-builds/1": json({ detail: "permission_denied" }, 403) });
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("heading", { name: "Kitchen table" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Queue pieces" })).not.toBeInTheDocument();
+  });
+
+  it("preserves a result draft across a changed attempt", async () => {
+    const app = renderBuild(aBuild({ parts: [aBuildPart({ attempts: [aBuildAttempt()] })] }));
+    const input = await screen.findByLabelText("Confirmed usable");
+    fireEvent.change(input, { target: { value: "3" } });
+    app.route({
+      "GET /api/v1/multipart-builds/1": json(
+        aBuild({
+          version: 1,
+          parts: [aBuildPart({ attempts: [aBuildAttempt({ version: 1, valid_units: 2 })] })],
+        }),
+      ),
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await waitFor(() => expect(screen.getByLabelText("Confirmed usable")).toHaveValue(3));
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Correct result" })).toBeDisabled();
+  });
+
+  it("confirms a reviewed result against its new base", async () => {
+    const app = renderBuild(aBuild({ parts: [aBuildPart({ attempts: [aBuildAttempt()] })] }));
+    fireEvent.change(await screen.findByLabelText("Confirmed usable"), { target: { value: "3" } });
+    app.route({
+      "GET /api/v1/multipart-builds/1": json(
+        aBuild({
+          version: 1,
+          parts: [aBuildPart({ attempts: [aBuildAttempt({ version: 1, valid_units: 2 })] })],
+        }),
+      ),
+      "POST /api/v1/multipart-builds/1/attempts/1/confirm": json(
+        aBuild({
+          version: 2,
+          parts: [
+            aBuildPart({
+              valid_units: 3,
+              missing_units: 1,
+              attempts: [aBuildAttempt({ version: 2, valid_units: 3 })],
+            }),
+          ],
+        }),
+      ),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await userEvent.click(screen.getByRole("button", { name: "Correct result" }));
+
+    expect(await screen.findByText("1 missing")).toBeVisible();
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body)).toMatchObject({
+      version: 1,
+      valid_units: 3,
+      idempotency_key: expect.any(String),
+    });
+  });
+
+  it("keeps a confirmed build after an obsolete read", async () => {
+    const app = renderBuild(aBuild(), {
+      "POST /api/v1/multipart-builds/1/parts/1/queue": json(
+        aBuild({ version: 1, parts: [aBuildPart({ active_units: 4, unreserved_units: 0 })] }),
+      ),
+    });
+    await screen.findByRole("button", { name: "Queue pieces" });
+    const pending = Promise.withResolvers<Response>();
+    app.route({ "GET /api/v1/multipart-builds/1": () => pending.promise });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await userEvent.click(screen.getByRole("button", { name: "Queue pieces" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Queue pieces" })).toBeDisabled(),
+    );
+
+    await act(async () => pending.resolve(json(aBuild())));
+
+    expect(screen.getByRole("button", { name: "Queue pieces" })).toBeDisabled();
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
+  });
+
+  it("keeps confirmed progress when a later read is older", async () => {
+    const app = renderBuild(aBuild(), {
+      "POST /api/v1/multipart-builds/1/parts/1/queue": json(
+        aBuild({ version: 2, parts: [aBuildPart({ active_units: 4, unreserved_units: 0 })] }),
+      ),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Queue pieces" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Queue pieces" })).toBeDisabled(),
+    );
+    app.route({ "GET /api/v1/multipart-builds/1": json(aBuild({ version: 1 })) });
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(screen.getByRole("button", { name: "Queue pieces" })).toBeDisabled();
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
+  });
+
+  it("rejects a receipt for another build", async () => {
+    renderBuild(aBuild(), {
+      "POST /api/v1/multipart-builds/1/parts/1/queue": json(
+        aBuild({ id: 2, name: "Wrong build", version: 1 }),
+      ),
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Queue pieces" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not be completed");
+    expect(screen.getByRole("heading", { name: "Kitchen table" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Wrong build" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a result receipt key after an uncertain response", async () => {
+    const app = renderBuild(aBuild({ parts: [aBuildPart({ attempts: [aBuildAttempt()] })] }), {
+      "POST /api/v1/multipart-builds/1/attempts/1/confirm": () =>
+        Promise.reject(new TypeError("Failed to fetch")),
+    });
+    fireEvent.change(await screen.findByLabelText("Confirmed usable"), { target: { value: "3" } });
+    await userEvent.click(screen.getByRole("button", { name: "Confirm result" }));
+    await screen.findByRole("alert");
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
+    app.route({
+      "POST /api/v1/multipart-builds/1/attempts/1/confirm": json(
+        aBuild({
+          version: 1,
+          parts: [
+            aBuildPart({
+              valid_units: 3,
+              missing_units: 1,
+              attempts: [aBuildAttempt({ version: 1, valid_units: 3 })],
+            }),
+          ],
+        }),
+      ),
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Confirm result" }));
+
+    expect(await screen.findByText("1 missing")).toBeVisible();
+    const posts = app.requestsWithMethod("POST");
+    expect(posts).toHaveLength(2);
+    expect(JSON.parse(posts[1].body)).toEqual(JSON.parse(posts[0].body));
+  });
+
+  it("keeps a transiently unavailable build recoverable", async () => {
+    const app = renderBuild();
+    await screen.findByRole("heading", { name: "Kitchen table" });
+    app.route({ "GET /api/v1/multipart-builds/1": json({ detail: "unreachable" }, 503) });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await screen.findByRole("alert");
+    expect(screen.getByRole("heading", { name: "Kitchen table" })).toBeVisible();
+    app.route({
+      "GET /api/v1/multipart-builds/1": json(aBuild({ version: 1, name: "Recovered build" })),
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    expect(await screen.findByRole("heading", { name: "Recovered build" })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("pauses manufacturing observation while hidden", async () => {
+    vi.useFakeTimers();
+    const app = renderBuild();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(screen.getByRole("heading", { name: "Kitchen table" })).toBeVisible();
+    app.route({
+      "GET /api/v1/multipart-builds/1": json(aBuild({ version: 1, name: "Updated build" })),
+    });
+    const reads = () =>
+      app.requestsWithMethod("GET").filter((r) => r.url.endsWith("multipart-builds/1"));
+    const before = reads().length;
+    act(() => focusManager.setFocused(false));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_100);
+    });
+
+    expect(reads()).toHaveLength(before);
+    act(() => focusManager.setFocused(true));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_100);
+    });
+    expect(screen.getByRole("heading", { name: "Updated build" })).toBeVisible();
+  });
+
+  it("stops automatic reads after manufacturing access denial", async () => {
+    vi.useFakeTimers();
+    act(() => focusManager.setFocused(true));
+    const app = renderBuild();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(screen.getByRole("heading", { name: "Kitchen table" })).toBeVisible();
+    app.route({ "GET /api/v1/multipart-builds/1": json({ detail: "permission_denied" }, 403) });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(screen.getByRole("alert")).toBeVisible();
+    const reads = () =>
+      app.requestsWithMethod("GET").filter((r) => r.url.endsWith("multipart-builds/1"));
+    const before = reads().length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_100);
+    });
+
+    expect(reads()).toHaveLength(before);
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  });
+
+  it("rejects a retired manufacturing gesture", async () => {
+    const app = renderBuild(aBuild(), {
+      "POST /api/v1/multipart-builds/1/parts/1/queue": json(aBuild({ version: 1 })),
+    });
+    const gesture = await screen.findByRole("button", { name: "Queue pieces" });
+    act(() => storeLogin("", { id: 90, username: "replacement", email: null, is_superuser: true }));
+
+    await userEvent.click(gesture);
+
+    expect(app.requestsWithMethod("POST")).toEqual([]);
+    expect(screen.queryByRole("heading", { name: "Kitchen table" })).not.toBeInTheDocument();
+  });
+
   it("shows one missing piece after three confirmed legs", async () => {
     renderBuild(
       aBuild({ parts: [aBuildPart({ valid_units: 3, missing_units: 1, unreserved_units: 1 })] }),
@@ -311,6 +588,104 @@ describe("Manufacturing discovery", () => {
       },
     });
   }
+  it("keeps the selected build history after an older page resolves", async () => {
+    const pending = Promise.withResolvers<Response>();
+    renderList(
+      {
+        "GET /api/v1/multipart-builds?archived=false&offset=0&limit=50": () => pending.promise,
+        "GET /api/v1/multipart-builds?archived=true&offset=0&limit=50": json([
+          aBuild({ id: 2, name: "Archived table", archived_at: "2026-01-01T00:00:00Z" }),
+        ]),
+      },
+      "/builds",
+    );
+    await userEvent.click(screen.getByRole("checkbox"));
+    await screen.findByRole("link", { name: "Archived table" });
+
+    await act(async () => pending.resolve(json([aBuild({ name: "Obsolete table" })])));
+
+    expect(screen.getByRole("link", { name: "Archived table" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Obsolete table" })).not.toBeInTheDocument();
+  });
+
+  it("removes denied build history from the current view", async () => {
+    const app = renderList({ "GET /api/v1/multipart-builds": json([aBuild()]) }, "/builds");
+    await screen.findByRole("link", { name: "Kitchen table" });
+    app.route({ "GET /api/v1/multipart-builds": json({ detail: "permission_denied" }, 403) });
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("link", { name: "Kitchen table" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/No builds here yet/)).not.toBeInTheDocument();
+  });
+
+  it("distinguishes failed build history from empty history", async () => {
+    renderList({ "GET /api/v1/multipart-builds": json({ detail: "unavailable" }, 503) }, "/builds");
+
+    await screen.findByRole("alert");
+
+    expect(screen.queryByText(/No builds here yet/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  });
+
+  it("preserves a creation name while composition arrives", async () => {
+    const pending = Promise.withResolvers<Response>();
+    renderList({ "GET /api/v1/multipart-models/7": () => pending.promise });
+    fireEvent.change(screen.getByLabelText("Build name"), { target: { value: "My chosen build" } });
+
+    await act(async () => pending.resolve(json(aMultipartModel({ name: "Remote default" }))));
+
+    expect(screen.getByLabelText("Build name")).toHaveValue("My chosen build");
+  });
+
+  it("retires creation feedback with its composition route", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderApp(
+      <>
+        <Link to="/builds?multipart=8">Other composition</Link>
+        <MultipartBuildsPage />
+      </>,
+      {
+        at: "/builds?multipart=7",
+        routePath: "/builds/:id?",
+        auth: adminSession(),
+        routes: {
+          "GET /api/v1/multipart-builds": json([]),
+          "GET /api/v1/multipart-models/7": json(aMultipartModel()),
+          "GET /api/v1/multipart-models/8": json(aMultipartModel({ id: 8, name: "Chair" })),
+          "POST /api/v1/multipart-builds": () => pending.promise,
+          "GET /api/v1/multipart-builds/2": json(aBuild({ id: 2, name: "Obsolete creation" })),
+          "GET /api/v1/printers": json([]),
+          "GET /api/v1/models/1": json(aModel({ files: [aRevision()] })),
+        },
+      },
+    );
+    await screen.findByDisplayValue("Table");
+    await userEvent.click(screen.getByRole("button", { name: "Create build" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    await userEvent.click(screen.getByRole("link", { name: "Other composition" }));
+    fireEvent.change(screen.getByLabelText("Build name"), { target: { value: "New chair draft" } });
+
+    await act(async () => pending.resolve(json(aBuild({ id: 2, name: "Obsolete creation" }))));
+
+    expect(screen.getByLabelText("Build name")).toHaveValue("New chair draft");
+    expect(screen.queryByRole("heading", { name: "Obsolete creation" })).not.toBeInTheDocument();
+  });
+
+  it("hides a denied creation composition", async () => {
+    const app = renderList();
+    await screen.findByDisplayValue("Table");
+    app.route({ "GET /api/v1/multipart-models/7": json({ detail: "permission_denied" }, 403) });
+
+    await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
+
+    await screen.findByRole("alert");
+    expect(screen.queryByLabelText("Build name")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create build" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+  });
+
   it("creates a named manufacturing run with the requested object count", async () => {
     const app = renderList({ "POST /api/v1/multipart-builds": json(aBuild({ id: 2 })) });
     const user = userEvent.setup();

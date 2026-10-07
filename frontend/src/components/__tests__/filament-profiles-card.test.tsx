@@ -105,6 +105,28 @@ afterEach(() => {
 
 describe("FilamentProfilesCard", () => {
   describe("listing presets", () => {
+    it.each(["filament", "printer"] as const)("hides a denied %s catalog", async (kind) => {
+      const app = renderCard();
+      if (kind === "printer") await userEvent.click(screen.getByRole("tab", { name: /Printers/ }));
+      const label = kind === "filament" ? "Filament preset name 1" : "Printer preset name 1";
+      await screen.findByLabelText(label);
+      const path =
+        kind === "filament" ? "GET /api/v1/filament-profiles" : "GET /api/v1/printer-profiles";
+      const queryKey = kind === "filament" ? queryKeys.filamentProfiles : queryKeys.printerProfiles;
+      app.route({ [path]: json({ detail: "permission_denied" }, 403) });
+
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey });
+      });
+
+      await screen.findByRole("alert");
+      expect(screen.queryByLabelText(label)).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+      app.route({ [path]: json(kind === "filament" ? [aFilamentProfile()] : [aPrinterProfile()]) });
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(await screen.findByLabelText(label)).toBeVisible();
+    });
+
     it("lists the filament presets", async () => {
       renderCard();
 

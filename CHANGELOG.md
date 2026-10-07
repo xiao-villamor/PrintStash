@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Keep manufacturing result drafts during background updates and require explicit
+  review after a concurrent confirmation. Reconcile confirmed Builds against late
+  reads, cancel abandoned reads, recover failed history/detail views, and reuse
+  canonical secondary catalogs. Hide cached profile/statistics data after access
+  denial while retaining recovery after transient failures.
+
 - Recover ZIP review after read failures, cancel abandoned manifest reads, and
   retire selections and delayed receipts with their review/session. Reconcile
   early-discovered archive Jobs into the original upload task so it reaches Ready

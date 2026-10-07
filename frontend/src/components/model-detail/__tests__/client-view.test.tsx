@@ -1,7 +1,7 @@
 /** The SPA route shares one authorized Model read and distinguishes recovery from lost access. */
 
 import "@testing-library/jest-dom/vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import userEvent from "@testing-library/user-event";
@@ -100,7 +100,10 @@ describe("ModelDetailClientView", () => {
     });
 
     expect(screen.getByText("Benchy")).toBeVisible();
-    expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+    const error = await screen.findByText("Couldn’t load this model");
+    expect(
+      within(error.closest('[role="alert"]')!).getByRole("button", { name: "Retry" }),
+    ).toBeVisible();
   });
 
   it("retires a pending read when the route closes", async () => {

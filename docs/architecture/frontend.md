@@ -393,3 +393,25 @@ cancel an abandoned read and offer Retry on failure. Attachment reconciles early
 server discovery into the named local workflow, preserving review metadata.
 Never let a delayed receipt close a replacement review. M7 browser closure
 qualification is recorded separately.
+
+### Manufacturing reads and confirmation (M8)
+
+`features/library/builds.ts` owns Build list/detail identities and acknowledged
+publication. Build versions are the existing manufacturing contract; do not apply
+Model edit epochs to them. Reads consume cancellation and poll only in the
+foreground, stopping on error. A confirmed command cancels obsolete detail reads,
+validates identity/version and preserves a newer already-known record. History
+and Fleet invalidation belongs here, not in HTTP transport.
+
+The Builds page owns filters, creation/duplicate forms and per-attempt result
+drafts. A draft captures its attempt version and idempotency key; background data
+cannot remount or overwrite it. Explicit latest review changes its base/key while
+preserving entered units. Retrying an uncertain result keeps the original key.
+Canonical Model/Multipart/printer queries supply secondary catalogs. No local
+server-response arrays or independent polling interval should return. Definitive
+read denial hides protected cached content; transient failure offers recovery.
+
+Profiles and Statistics apply the same denial distinction. Profile edits and
+Search settings still lack a backend conditional-write contract; preserving local
+drafts alone must never be described as external concurrency protection. M8's
+[qualification](../frontend-m8-validation.md) records these boundaries.
