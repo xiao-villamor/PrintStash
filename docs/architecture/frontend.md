@@ -53,7 +53,10 @@ MutationCache. OIDC captures its base at the first local edit; background reads
 cannot silently change that base. Conflicts and uncertain receipts preserve the
 draft and require an explicit fresh review before revised save or adoption.
 Review state retires with the session; only sanitized server values are displayed.
-Other configuration forms still use the additive legacy path. The optional client
+The library-source feature toggle also sends its observed base and retains its
+intended enabled/disabled value through conflicts or uncertain receipts. An
+authorized review permits explicit revised save or adoption without another write.
+SetupFolder, StorageConfigCard and Settings still use the additive legacy path. The optional client
 base must become required when their M9 cutover is complete; this is not yet
 application-wide conflict protection.
 

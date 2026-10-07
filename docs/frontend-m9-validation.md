@@ -657,3 +657,37 @@ After preserving omission of the compatibility base in injected-writer options,
 the final owner selection passed **11 tests in 2.70 s**, and typecheck passed again.
 Remaining configuration writers include Settings (including the direct trash
 retention write), StorageConfigCard, ExternalLibrariesPanel and SetupFolder.
+
+
+## Library source toggle configuration cutover (M9 increment)
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|----------------------|----------|----------------------|-----------------------------|------|--------|
+| LT1 | sends the observed configuration base when enabling sources | Happy | Off configuration observed, explicit toggle | Conditional base forwarded to writer | Unit | ✅ |
+| LT2 | reviews a rejected source toggle before retrying | Error | Conflict or unconfirmed write, then authorized fresh config | No blind retry; original intent explicitly sent with reviewed base | Unit | ✅ |
+| LT3 | retains a blocked source toggle when review fails | Error | Latest config GET fails | No revised-save action or second write | Unit | ✅ |
+| LT4 | adopts the reviewed source setting without another write | Happy | Operator accepts latest setting | Toggle reflects remote value; no second command | Unit | ✅ |
+| LT5 | revises a conflicting source activation in the browser | Integration | Another config command commits before toggle | 412; explicit review; accepted activation | Real browser | ✅ |
+| LT6 | hides source review after access is denied | Auth | Review GET returns 403 | Private toggle/review removed; no new write | Unit | ✅ |
+| LT7 | retires a pending source review on logout | Auth | Logout before latest read completes | No retired review or revised-save action | Unit | ✅ |
+
+Validation:
+
+- Before production changes: **5 failed / 58 deselected in 8.09 s**.
+- Full affected component file: **62 passed / 1 failed in 9.46 s**. The new
+  adoption assertion matched both the feature switch and an individual source
+  switch. Selectors now name the feature switch explicitly.
+- Corrected toggle cases: **5 passed / 58 deselected in 3.57 s**. Added review
+  permission/session cases: **2 passed / 63 deselected in 2.92 s**. The rest of
+  the component file was not rerun after a selector-only test correction.
+- Real backend/browser conditional activation: **1 passed in 39.8 s** including
+  process startup. Another configuration command invalidates the visible base;
+  activation receives 412, then explicit review/revised save succeeds.
+- Frontend typecheck, lint, format (768 files), production build and diff checks
+  passed. Build retains the existing >500 kB chunk warning. No full test suite or
+  backend schema gate was repeated. These times describe test execution, not
+  application performance.
+
+This completes the source-feature toggle's conditional client path. SetupFolder,
+StorageConfigCard and Settings (including direct trash retention) remain to
+migrate; the transport's optional base still marks that unfinished cutover.

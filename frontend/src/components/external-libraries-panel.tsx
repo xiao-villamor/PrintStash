@@ -24,6 +24,8 @@ import { vaultConfigOptions, useVaultConfigCommand } from "@/lib/queries/setting
 import { storageConnectionsOptions, storageReadDenied } from "@/lib/queries/settings-storage";
 import { useAuth } from "@/lib/auth-context";
 import { onAuthChange } from "@/lib/auth-store";
+import { captureEditingBase } from "@/lib/api/editing";
+import type { VaultConfigRead } from "@/types";
 import { getSessionVersion } from "@/lib/session-transport";
 import { parseApiError, userMessage } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
@@ -39,6 +41,16 @@ import type {
   ExternalLibraryWatchMode,
   LibrarySourceKind,
 } from "@/types";
+
+type SourceToggleReview =
+  | { phase: "idle" }
+  | { phase: "required" | "loading"; next: boolean; problem: "conflict" | "unconfirmed" }
+  | {
+      phase: "ready";
+      next: boolean;
+      problem: "conflict" | "unconfirmed";
+      snapshot: VaultConfigRead;
+    };
 
 const BTN_PRIMARY =
   "inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-primary text-primary-foreground text-xs font-medium uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed";
@@ -354,6 +366,7 @@ function AdminLibrarySourcesPanel({
     sources.data?.kind === "enabled";
   const busyId = command.busyId;
   const enableBusy = configCommand.isPending;
+  const [toggleReview, setToggleReview] = useState<SourceToggleReview>({ phase: "idle" });
   const [deleteTarget, setDeleteTarget] = useState<{
     source: ExternalLibrary;
     session: number;
@@ -377,17 +390,55 @@ function AdminLibrarySourcesPanel({
   const [watchMode, setWatchMode] = useState<ExternalLibraryWatchMode>("auto");
   const [mode, setMode] = useState<ExternalLibraryCollectionMode>("mirror");
 
-  async function toggleFeature(next: boolean) {
-    if (!allowed || config.isError || !config.data || enableBusy) return;
+  async function toggleFeature(next: boolean, reviewed?: VaultConfigRead) {
+    if (
+      !allowed ||
+      config.isError ||
+      !config.data ||
+      enableBusy ||
+      (toggleReview.phase !== "idle" && !reviewed)
+    )
+      return;
     const session = getSessionVersion();
     try {
-      await configCommand.mutateAsync({ session, payload: { external_libraries_enabled: next } });
-      if (current(session))
+      await configCommand.mutateAsync({
+        session,
+        payload: { external_libraries_enabled: next },
+        base: captureEditingBase(reviewed ?? config.data),
+      });
+      if (current(session)) {
+        setToggleReview({ phase: "idle" });
         toast.success(
           next ? uiText("Library sources enabled.") : uiText("Library sources disabled."),
         );
+      }
     } catch (error) {
       if (current(session)) {
+        if (storageReadDenied(parseApiError(error))) setConfigWriteDenied(true);
+        const status = parseApiError(error).status;
+        if (status === 412 || status === 428 || status === 0 || status >= 500)
+          setToggleReview({
+            phase: "required",
+            next,
+            problem: status === 412 || status === 428 ? "conflict" : "unconfirmed",
+          });
+        toast.error(error);
+      }
+    }
+  }
+  async function reviewToggle() {
+    if (toggleReview.phase === "idle" || toggleReview.phase === "loading" || enableBusy) return;
+    const session = getSessionVersion();
+    const { next, problem } = toggleReview;
+    setToggleReview({ phase: "loading", next, problem });
+    try {
+      const result = await config.refetch({ throwOnError: true });
+      if (!result.data) throw new Error("Configuration review has no data");
+      if (current(session))
+        setToggleReview({ phase: "ready", next, problem, snapshot: result.data });
+    } catch (error) {
+      if (current(session)) {
+        setToggleReview({ phase: "required", next, problem });
         if (storageReadDenied(parseApiError(error))) setConfigWriteDenied(true);
         toast.error(error);
       }
@@ -576,7 +627,7 @@ function AdminLibrarySourcesPanel({
             role="switch"
             aria-label={uiText("Library sources enabled")}
             aria-checked={enabled}
-            disabled={!allowed || config.isError || enableBusy}
+            disabled={!allowed || config.isError || enableBusy || toggleReview.phase !== "idle"}
             onClick={() => toggleFeature(!enabled)}
             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
               enabled ? "bg-primary" : "bg-outline-variant"
@@ -590,6 +641,50 @@ function AdminLibrarySourcesPanel({
           </button>
         </div>
 
+        {toggleReview.phase !== "idle" && (
+          <div role="alert" className="space-y-3 p-4">
+            <p>
+              {uiText(
+                toggleReview.problem === "conflict"
+                  ? "library.editConflict"
+                  : "library.saveUnconfirmed",
+              )}
+            </p>
+            <Button
+              variant="outline"
+              disabled={enableBusy || toggleReview.phase === "loading"}
+              onClick={() => void reviewToggle()}
+            >
+              {uiText("library.reviewLatest")}
+            </Button>
+            {toggleReview.phase === "ready" && (
+              <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+                <h3 className="text-sm font-semibold">{uiText("library.latestVersion")}</h3>
+                <p>
+                  {uiText("Library sources")}:{" "}
+                  {uiText(
+                    toggleReview.snapshot.external_libraries_enabled ? "Enabled" : "Disabled",
+                  )}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={enableBusy || config.isError}
+                    onClick={() => setToggleReview({ phase: "idle" })}
+                  >
+                    {uiText("library.useLatest")}
+                  </Button>
+                  <Button
+                    disabled={enableBusy || config.isError}
+                    onClick={() => void toggleFeature(toggleReview.next, toggleReview.snapshot)}
+                  >
+                    {uiText("library.retryDraft")}
+                  </Button>
+                </div>
+              </section>
+            )}
+          </div>
+        )}
         {config.isError && (
           <div role="alert" className="p-4">
             <p>{t("librarySources.configFailed")}</p>

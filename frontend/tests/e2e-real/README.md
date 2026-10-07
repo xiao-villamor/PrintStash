@@ -167,3 +167,6 @@ including browser Forward/Back. It seeds and cleans up a unique scale fixture.
 - `sso-settings.spec.ts`: conditional edits across two tabs preserve the losing
   draft and require explicit review before saving against the latest version;
   SSO configuration still persists without returning client secrets.
+
+- `external-libraries.spec.ts`: conditional source activation detects a competing
+  configuration edit and requires explicit review before the revised command.

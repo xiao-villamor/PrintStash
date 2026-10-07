@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Detect competing configuration edits when enabling or disabling library sources.
+  Preserve the intended toggle through conflicts or uncertain responses and require
+  an authorized review before retry; retire review state when access is lost.
+
 - Protect SSO configuration drafts from competing edits. Keep local input after a
   conflict or unconfirmed save, show the latest authorized values on review, and
   require an explicit revised save. Late receipts cannot replace newer observed

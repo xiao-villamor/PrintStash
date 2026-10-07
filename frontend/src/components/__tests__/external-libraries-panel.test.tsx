@@ -104,8 +104,11 @@ function stubApi(over: Partial<ExternalLibrariesApi> = {}): ExternalLibrariesApi
       .mockResolvedValue(aVaultConfig({ external_libraries_enabled: true })),
     updateConfig: vi
       .fn<ExternalLibrariesApi["updateConfig"]>()
-      .mockImplementation(async (payload) =>
-        aVaultConfig({ external_libraries_enabled: payload.external_libraries_enabled ?? true }),
+      .mockImplementation(async (payload, options) =>
+        aVaultConfig({
+          external_libraries_enabled: payload.external_libraries_enabled ?? true,
+          edit_version: (options?.base?.edit_version ?? 1) + 1,
+        }),
       ),
     list: vi.fn<() => Promise<ExternalLibrary[]>>().mockResolvedValue([aVolume()]),
     enroll: vi
@@ -203,6 +206,144 @@ describe("ExternalLibrariesPanel", () => {
       expect(api.list).not.toHaveBeenCalled();
     });
 
+    it("sends the observed configuration base when enabling sources", async () => {
+      const { api } = renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValue(aVaultConfig({ edit_version: 4, external_libraries_enabled: false })),
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      await waitFor(() =>
+        expect(api.updateConfig).toHaveBeenCalledWith(
+          { external_libraries_enabled: true },
+          expect.objectContaining({
+            base: { edit_epoch: aVaultConfig().edit_epoch, edit_version: 4 },
+          }),
+        ),
+      );
+    });
+    it.each([412, 503])("%s: reviews a rejected source toggle before retrying", async (status) => {
+      const updateConfig = vi
+        .fn<ExternalLibrariesApi["updateConfig"]>()
+        .mockRejectedValueOnce(new Error(`HTTP ${status}: {"detail":"edit_conflict"}`))
+        .mockResolvedValue(aVaultConfig({ edit_version: 3, external_libraries_enabled: true }));
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValueOnce(aVaultConfig({ external_libraries_enabled: false }))
+          .mockResolvedValue(aVaultConfig({ edit_version: 2, external_libraries_enabled: false })),
+        updateConfig,
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      const review = await screen.findByRole("button", { name: "Review latest version" });
+      expect(screen.getByRole("switch", { name: "Library sources enabled" })).toBeDisabled();
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+      await userEvent.click(review);
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Save my draft against this version" }),
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("switch", { name: "Library sources enabled" })).toHaveAttribute(
+          "aria-checked",
+          "true",
+        ),
+      );
+      expect(updateConfig).toHaveBeenLastCalledWith(
+        { external_libraries_enabled: true },
+        expect.objectContaining({
+          base: { edit_epoch: aVaultConfig().edit_epoch, edit_version: 2 },
+        }),
+      );
+    });
+    it("retains a blocked source toggle when review fails", async () => {
+      const updateConfig = vi
+        .fn<ExternalLibrariesApi["updateConfig"]>()
+        .mockRejectedValue(new Error('HTTP 412: {"detail":"edit_conflict"}'));
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValueOnce(aVaultConfig({ external_libraries_enabled: false }))
+          .mockRejectedValue(new Error('HTTP 503: {"detail":"unavailable"}')),
+        updateConfig,
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByText("Library source settings could not be loaded.");
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("switch", { name: "Library sources enabled" })).toBeDisabled();
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+    });
+    it("adopts the reviewed source setting without another write", async () => {
+      const updateConfig = vi
+        .fn<ExternalLibrariesApi["updateConfig"]>()
+        .mockRejectedValue(new Error('HTTP 412: {"detail":"edit_conflict"}'));
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValueOnce(aVaultConfig({ external_libraries_enabled: false }))
+          .mockResolvedValue(aVaultConfig({ edit_version: 2, external_libraries_enabled: true })),
+        updateConfig,
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Use latest version" }));
+      expect(screen.getByRole("switch", { name: "Library sources enabled" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(screen.getByRole("switch", { name: "Library sources enabled" })).toBeEnabled();
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+    });
+    it("hides source review after access is denied", async () => {
+      const updateConfig = vi
+        .fn<ExternalLibrariesApi["updateConfig"]>()
+        .mockRejectedValue(new Error('HTTP 412: {"detail":"edit_conflict"}'));
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValueOnce(aVaultConfig({ external_libraries_enabled: false }))
+          .mockRejectedValue(new Error('HTTP 403: {"detail":"forbidden"}')),
+        updateConfig,
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByText("Library source settings could not be loaded.");
+      expect(
+        screen.queryByRole("switch", { name: "Library sources enabled" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+    });
+    it("retires a pending source review on logout", async () => {
+      const pending = Promise.withResolvers<ReturnType<typeof aVaultConfig>>();
+      const updateConfig = vi
+        .fn<ExternalLibrariesApi["updateConfig"]>()
+        .mockRejectedValue(new Error('HTTP 412: {"detail":"edit_conflict"}'));
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValueOnce(aVaultConfig({ external_libraries_enabled: false }))
+          .mockReturnValue(pending.promise),
+        updateConfig,
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await act(async () => {
+        clearLogin();
+        pending.resolve(aVaultConfig({ edit_version: 2, external_libraries_enabled: true }));
+      });
+      expect(
+        screen.queryByRole("region", { name: "Latest saved version" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+    });
     it("enables the feature when the operator turns it on", async () => {
       const user = userEvent.setup();
       const { api } = renderPanel({

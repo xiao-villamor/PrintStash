@@ -17,6 +17,59 @@ import { test, expect } from "./helpers";
 const externalRoot = process.env.PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT;
 const markerName = ".printstash-external-root.json";
 
+test.describe("library source configuration", () => {
+  test("revises a conflicting source activation in the browser", async ({ page }) => {
+    const originalResponse = await page.request.get("/api/v1/config");
+    expect(originalResponse.ok()).toBeTruthy();
+    const original = await originalResponse.json();
+    try {
+      expect(
+        (
+          await page.request.put("/api/v1/config", { data: { external_libraries_enabled: false } })
+        ).ok(),
+      ).toBeTruthy();
+      await page.goto("/settings?section=libraries");
+      const toggle = page.getByRole("switch", { name: "Library sources enabled" });
+      await expect(toggle).toHaveAttribute("aria-checked", "false");
+      expect(
+        (
+          await page.request.put("/api/v1/config", {
+            data: { currency: original.currency === "EUR" ? "USD" : "EUR" },
+          })
+        ).ok(),
+      ).toBeTruthy();
+      const [conflict] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().includes("/api/v1/config") && r.request().method() === "PUT",
+        ),
+        toggle.click(),
+      ]);
+      expect(conflict.status()).toBe(412);
+      await expect(toggle).toBeDisabled();
+      await page.getByRole("button", { name: "Review latest version" }).click();
+      const [accepted] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().includes("/api/v1/config") && r.request().method() === "PUT",
+        ),
+        page.getByRole("button", { name: "Save my draft against this version" }).click(),
+      ]);
+      expect(accepted.status()).toBe(200);
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+    } finally {
+      expect(
+        (
+          await page.request.put("/api/v1/config", {
+            data: {
+              external_libraries_enabled: original.external_libraries_enabled,
+              currency: original.currency,
+            },
+          })
+        ).ok(),
+      ).toBeTruthy();
+    }
+  });
+});
+
 test.describe("mounted library source root recovery", () => {
   test("preserves mounted names through upload", async ({ page }) => {
     if (!externalRoot) {
