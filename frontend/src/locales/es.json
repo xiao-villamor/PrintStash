@@ -4238,5 +4238,8 @@
   "librarySources.configFailed": "No se pudo cargar la configuración de las fuentes de biblioteca.",
   "librarySources.sourcesFailed": "No se pudieron cargar las fuentes de biblioteca.",
   "librarySources.connectionsFailed": "No se pudieron cargar las conexiones de las fuentes remotas.",
-  "librarySources.adminRequired": "Se requiere acceso de superusuario."
+  "librarySources.adminRequired": "Se requiere acceso de superusuario.",
+  "Selected source unavailable": "La fuente seleccionada no está disponible",
+  "Could not load upload destinations.": "No se pudieron cargar los destinos de subida.",
+  "Choose an available destination before uploading.": "Elige un destino disponible antes de subir."
 }

@@ -32,6 +32,18 @@ that only forwards `useQuery`. Extract mutation coordination when list/detail
 consumers need the same confirmed result. Keep a one-off endpoint or presentational
 component simple.
 
+### Implemented administration source seam (M9 increment)
+
+`lib/queries/settings-library-sources.ts` owns the source catalog and exact
+create/update/enroll/remove/scan gestures; `settings-config.ts` and
+`settings-storage.ts` own their shared configuration/connection projections.
+Settings, Similarity, first-folder setup and Upload consume those owners.
+First-folder setup retains only the accepted source identity for scan retry.
+Upload retains a local selected destination, never a second source catalog;
+loss of eligibility blocks submission until recovery or explicit selection.
+Accepted scans belong to TaskCenter even after their originating form closes.
+These increments do not yet complete the broader administration migration.
+
 ## Proposed directory tree
 
 ```text

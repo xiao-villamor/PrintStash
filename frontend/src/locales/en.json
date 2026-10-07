@@ -4238,5 +4238,8 @@
   "librarySources.configFailed": "Library source settings could not be loaded.",
   "librarySources.sourcesFailed": "Library sources could not be loaded.",
   "librarySources.connectionsFailed": "Remote source connections could not be loaded.",
-  "librarySources.adminRequired": "Superuser access is required."
+  "librarySources.adminRequired": "Superuser access is required.",
+  "Selected source unavailable": "Selected source unavailable",
+  "Could not load upload destinations.": "Could not load upload destinations.",
+  "Choose an available destination before uploading.": "Choose an available destination before uploading."
 }

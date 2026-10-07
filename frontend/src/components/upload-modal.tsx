@@ -4,7 +4,10 @@ import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { vaultConfigOptions } from "@/lib/queries/settings-config";
+import { librarySourcesOptions } from "@/lib/queries/settings-library-sources";
 import {
   ChevronDown,
   File as FileIcon,
@@ -16,7 +19,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { createTag, capturePendingImport, getVaultConfig, listExternalLibraries } from "@/lib/api";
+import { createTag, capturePendingImport } from "@/lib/api";
 import { useCollectionLookup, useCollectionSearch, useTags } from "@/lib/queries";
 import { CollectionPicker } from "@/components/collection-picker";
 import { toast } from "@/lib/toast";
@@ -40,7 +43,7 @@ import {
   MESH_ACCEPT,
   type BulkItem,
 } from "@/lib/bulk-upload";
-import { CollectionNodeRead, ExternalLibrary } from "@/types";
+import { CollectionNodeRead } from "@/types";
 import { ApiError } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
 import {
@@ -144,8 +147,39 @@ export function UploadModal({
   // Mounted-source write-back: when library sources are enabled, new uploads can target a
   // writable mounted source.
   // instead of vault storage. Empty string = vault.
-  const [libraries, setLibraries] = useState<ExternalLibrary[]>([]);
+  const config = useQuery({
+    ...vaultConfigOptions(),
+    enabled: open && !!user?.is_superuser,
+    staleTime: 0,
+  });
+  const sources = useQuery({
+    ...librarySourcesOptions(),
+    enabled:
+      open && !!user?.is_superuser && !!config.data?.external_libraries_enabled && !config.isError,
+    staleTime: 0,
+  });
+  const libraries =
+    user?.is_superuser &&
+    config.data?.external_libraries_enabled &&
+    !config.isError &&
+    !sources.isError &&
+    sources.data?.kind === "enabled"
+      ? sources.data.items.filter(
+          (library) =>
+            library.enabled &&
+            library.binding_state === "bound" &&
+            (library.source_kind ?? "mounted") === "mounted",
+        )
+      : [];
   const [targetLibraryId, setTargetLibraryId] = useState<number | "">("");
+  const sourceSelected = targetLibraryId !== "";
+  const selectedAvailable = libraries.some((library) => library.id === targetLibraryId);
+  const destinationBlocked =
+    sourceSelected && (!selectedAvailable || config.isFetching || sources.isFetching);
+  const sourceMode = mode === "files" || mode === "bulk";
+  const catalogFailed =
+    !!user?.is_superuser &&
+    (config.isError || (!!config.data?.external_libraries_enabled && sources.isError));
   // Shared taxonomy lists from the TanStack Query cache (deduped with the grid
   // and detail views; refetched after any create/delete).
   const { data: tags = [] } = useTags();
@@ -225,38 +259,6 @@ export function UploadModal({
     setPickedCollection(null);
     applySeed(seed);
   }
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    getVaultConfig()
-      .then((cfg) => {
-        if (cancelled || !cfg.external_libraries_enabled) {
-          setLibraries([]);
-          return;
-        }
-        return listExternalLibraries().then((libs) => {
-          if (cancelled) return;
-          const writableLibraries = libs.filter(
-            (library) =>
-              library.enabled &&
-              library.binding_state === "bound" &&
-              (library.source_kind ?? "mounted") === "mounted",
-          );
-          setLibraries(writableLibraries);
-          setTargetLibraryId((selectedId) => {
-            if (selectedId === "") return selectedId;
-            return writableLibraries.some((library) => library.id === selectedId) ? selectedId : "";
-          });
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setLibraries([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
 
   const filteredTags = useMemo(() => {
     const q = tagInput.toLowerCase().trim();
@@ -382,7 +384,7 @@ export function UploadModal({
 
   function doSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || (sourceMode && destinationBlocked)) return;
     if (mode === "url") {
       if (!urlValue.trim()) return;
       void runUrlImport();
@@ -713,12 +715,13 @@ export function UploadModal({
               </div>
 
               {/* Destination (mounted-source write-back) — only when an eligible source exists */}
-              {(mode === "files" || mode === "bulk") && libraries.length > 0 && (
+              {sourceMode && (libraries.length > 0 || sourceSelected) && (
                 <div>
                   <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
                     {uiText("Store in")}
                   </label>
                   <select
+                    aria-label={uiText("Store in")}
                     value={targetLibraryId}
                     onChange={(e) =>
                       setTargetLibraryId(e.target.value === "" ? "" : Number(e.target.value))
@@ -726,6 +729,11 @@ export function UploadModal({
                     className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   >
                     <option value="">{uiText("Vault storage")}</option>
+                    {sourceSelected && !selectedAvailable && (
+                      <option value={targetLibraryId} disabled>
+                        {uiText("Selected source unavailable")}
+                      </option>
+                    )}
                     {libraries.map((lib) => (
                       <option key={lib.id} value={lib.id}>
                         {uiText("{value1} (library source)", { value1: String(lib.name ?? "") })}
@@ -835,6 +843,26 @@ export function UploadModal({
               </div>
             </>
           )}
+          {sourceMode && (catalogFailed || (sourceSelected && !selectedAvailable)) && (
+            <div role="alert" className="space-y-2 text-sm text-destructive">
+              {catalogFailed && <p>{uiText("Could not load upload destinations.")}</p>}
+              {sourceSelected && !selectedAvailable && (
+                <p>{uiText("Choose an available destination before uploading.")}</p>
+              )}
+              {catalogFailed && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    if (config.isError) void config.refetch();
+                    else void sources.refetch();
+                  }}
+                >
+                  {uiText("Retry")}
+                </Button>
+              )}
+            </div>
+          )}
           <div className="flex justify-end gap-3 pt-2">
             <Button type="button" variant="outline" onClick={close} className="min-h-11">
               {uiText("Cancel")}
@@ -843,6 +871,7 @@ export function UploadModal({
               type="submit"
               disabled={
                 submitting ||
+                (sourceMode && destinationBlocked) ||
                 (!user?.is_superuser && !collectionPath) ||
                 // A destination that has not resolved yet would land at the root.
                 (collectionPath !== "" && chosenCollection === null) ||

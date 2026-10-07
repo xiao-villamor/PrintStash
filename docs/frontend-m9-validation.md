@@ -90,3 +90,45 @@ first upload and actual mounted-folder discovery. Dedicated ports3337/4337 and
 This closes only this bounded workflow; M9 remains active and Upload's source
 selection is next. Rollback the SetupFolder consumer and typed command receipts
 as one increment; preserve the existing source owner and M7 accepted-work execution.
+
+## Upload destination preflight (before tests)
+
+Replace UploadModal's copied config/source effect with the established Query
+owners. Retain the selected identity until an explicit selection/reset; a missing,
+unbound or unreadable selected source blocks submission instead of retargeting it.
+Only administrators read source administration catalogs. Catalog errors remain
+recoverable; Vault uploads remain available when no source was selected. Preserve
+M7's accepted upload lifetime and the existing file/collection/tag draft.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| U1 | avoids administrative source reads for members | Permission | Member opens Upload | No config/source GET | Frontend unit | ✅ uploading.test.tsx |
+| U2 | requires destination review when a refresh deletes/unbinds it | Conflict | Source selected; catalog loses eligibility | File retained; no dispatch until explicit Vault/other source selection | Frontend unit | ✅ uploading.test.tsx |
+| U3 | recovers a failed destination catalog | Error | Catalog503 then retry succeeds | Visible error/retry, source choices recovered, file retained | Frontend unit | ✅ uploading.test.tsx |
+| U4 | follows canonical source updates while open | Happy | Shared source projection receives confirmed change | Upload options update without closing/reopening | Frontend unit | ✅ uploading.test.tsx |
+| U5 | dispatches to the selected eligible source | Happy | Valid selected root and file | Actual artifact-upload request carries exact library identity | Frontend unit / real browser | ✅ uploading.test.tsx + real write-back |
+| U6 | blocks a selected destination after denied/transient refresh | Permission/Error | Warm selected source then403/503 | No source name disclosed on denied read; no upload; explicit retry restores eligibility | Frontend unit | ✅ uploading.test.tsx |
+
+### Upload destination qualification
+
+Initial invocation24passed/6failed11.82s: five genuine new regressions plus one
+new assertion used the wrong artifact-upload field (`library_id` rather than
+`target_library_id`). Corrected that assertion against the actual typed boundary;
+its old-code control passed1/1. No production change was needed for that existing
+positive behavior. Historical silent fallback expectations were deliberately
+replaced by the approved explicit-destination contract.
+
+Affected gate101/4files16.14s passed; added warm403/503 controls, then final
+115/6files17.10s passed (three UploadModal mirrors,GettingStarted,i18n coverage,
+suite hygiene). App/UI/domain types,lint,format764files and build1.57s passed.
+Existing >500kB bundle warning remains; this increment makes no speed/size claim.
+Real exact-root reenrollment followed by external write-back passed1/1,9.5s
+scenario48.5s invocation, against dedicated ports3327/4327 and isolated data root.
+
+Removed UploadModal's effect-owned config/source copies and silent reset. The
+catalog uses the shared options; only administrators subscribe to admin reads.
+A selected unavailable destination retains its identity and files, hides denied
+source details, blocks dispatch, and offers explicit retry/selection. Existing
+Vault submissions and M7's accepted upload lifetime remain qualified. Rollback
+this consumer and its observable destination tests together, retaining the
+shared source owner. M9 remains active; aggregate backup ownership is next.

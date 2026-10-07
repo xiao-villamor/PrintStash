@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep an upload's selected source when it becomes unavailable and require an
+  explicit available destination before dispatch. Share source updates, recover
+  failed catalog reads, and avoid admin-only reads for member uploads.
+
 - Stop first-folder setup from dispatching later steps after navigation or a session
   change, share its confirmed source with Settings, and retain accepted scans in
   the task center.
