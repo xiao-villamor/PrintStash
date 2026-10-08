@@ -364,8 +364,10 @@ def _patch_engine(
         _administrator_restore_counts,
         _page_descendants,
     )
+    from app.modules.search.lexical_index import canonical_passage
     from app.modules.similarity.candidates import _endpoint_queries, _evidence_predicate
 
+    canonical_passage.cache_clear()
     _administrator_restore_counts.cache_clear()
     _page_descendants.cache_clear()
     _subtree_counts_template.cache_clear()

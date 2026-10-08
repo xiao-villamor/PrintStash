@@ -289,6 +289,9 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 161 | scopes counts for the next reader | Error | Administrator followed by a restricted viewer | Only the viewer's authorized branch is counted and returned | Integration | ✅ `test_scopes_counts_for_the_next_reader` |
 | 162 | preserves granted roots after administrator restoration | Error | Cached all-view statement was used by an administrator | Restricted reader sees only granted root and no private unfiled count | Integration | ✅ `test_preserves_granted_roots_during_restoration` |
 | 163 | starts an admitted image without another visibility gate | Edge | Application viewport scheduler has admitted the image | Native loading starts eagerly while application transfer bounds remain active | Frontend unit | ✅ `protected-thumbnail.test.tsx::starts an admitted image without another visibility gate` |
+| 164 | waits for native layout before positioning the first indicator | Edge | Tab bar mounts before the browser lays out the page | Initial measurement follows ResizeObserver delivery, avoiding synchronous page layout | UI unit | ✅ 200 UI cases passed |
+| 165 | composes independent library search scopes | Edge | Two ranked reads in one SQL statement, SQLite and PostgreSQL | Each local rank CTE preserves its allowed Model identities | Integration | ❌ Pending PostgreSQL |
+| 166 | reads a new recipe after reusing the canonical predicate | Edge | Recipe 2 replaces recipe 1 after an initial read | The reused SQL predicate selects the new live row | Integration | ✅ Passed |
 
 
 
@@ -479,3 +482,19 @@ diagnostic improved deep reload from 514 to 488 ms; desktop remained over budget
 and must be reassessed with the backend change. This is not final acceptance.
 256 SQLite/PostgreSQL/read-growth cases, 47 thumbnail/cache/admission cases and
 23 browser readiness cases passed. Backend/frontend lint and typechecks passed.
+
+### Lexical pagination and native tab layout
+
+The actual search-page profile identified deep SQL cloning in the SQLite rank
+materialization. A locally named nested CTE preserves materialization without
+cloning the entire authorization/search expression. The canonical recipe predicate
+also reuses its immutable SQL structure, with no cached query results. A repeated
+30-read diagnostic profile changed from 2.34 s to 0.99 s; this is instrumented API
+evidence, not browser acceptance. Independently composed scopes and recipe changes
+are covered explicitly, including PostgreSQL composition.
+
+The tab indicator now takes its initial geometry from ResizeObserver after native
+layout instead of forcing the whole page to lay out during React commit. The
+matched desktop deep-tree diagnostic changed warm median from 506 to 494 ms
+(10 samples). A separate layout-effect thumbnail admission experiment did not
+improve pagination and was discarded. Final exact-image acceptance remains pending.

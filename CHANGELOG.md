@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Avoid deep-cloning lexical search queries for each page; keep rank materialization
+  local to each query and reuse immutable current-recipe predicates. Measure tab
+  indicators after native layout instead of forcing layout during React commit.
+
 - Reuse bounded subtree count query structure with current roots and permissions.
   Decode admitted thumbnails without a second native visibility wait.
 
