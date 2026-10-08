@@ -492,7 +492,7 @@ Mesh metadata and thumbnails publish before optional fingerprints. Pending analy
 ### Compact thumbnail encoding
 
 Mesh thumbnail recipe 12 and G-code thumbnail recipe 2 encode WebP color at
-quality 90 with lossless alpha. The configured dimensions, framing and source
+quality 90, method 4, with lossless alpha. The configured dimensions, framing and source
 Artifacts are preserved. Native rendering and imported previews share one encoder;
 only validated bytes explicitly originating from the current renderer skip a
 second encode. Existing derivatives remain visible while normal derivative Jobs

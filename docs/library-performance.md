@@ -235,6 +235,9 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 113 | saves search preferences beside another SQLite writer | Error | New/existing preferences; unrelated writer commits after lookup | Preferences persist without HTTP-500-causing stale snapshot | Integration | ✅ `integration/modules/search/test_preferences.py::TestUpdate::test_saves_preferences_beside_another_sqlite_writer` |
 | 114 | retains stages after thumbnail encoding failure | Error | Codec raises after rendering | Diagnostic retains stages and the original encoding error | Unit | ✅ `unit/scripts/test_bench_thumbnails.py::TestBenchmarkFile::test_retains_stages_after_encoding_failure` |
 | 115 | persists editable filters without repeated parsing | Happy | Real authenticated browser saves search consent | Successful save and editable parsed filters | Real-backend Playwright | ✅ `tests/e2e-real/ai-search/nl-filters.spec.ts::persists editable filters without repeated parsing` |
+| 116 | backfill progresses during foreground arrivals | Edge | Real DBOS/native mesh processing under coverage | Both backfills and queued foreground work finish inside the unchanged deadline | E2E | ✅ `e2e/test_ingestion_fairness.py::TestIngestionFairness::test_backfill_progresses_during_sustained_interactive_arrivals` |
+| 117 | canonical profile uses bounded encoder effort | Happy | Shared preview profile | Quality 90 and method 4 pinned by the public profile contract | Unit | ✅ `packages/printstash-core/tests/mesh/test_preview_profile.py::TestPreviewProfile::test_canonical_thumbnail_profile_is_stable` |
+| 118 | completes full-capacity backfill | Edge | Real native processing with foreground arrivals | Full-capacity backfill finishes inside the unchanged deadline | E2E | ✅ `e2e/test_ingestion_fairness.py::TestIngestionFairness::test_full_capacity_backfill_eventually_completes` |
 
 The matrix remains open until final gates and deployment acceptance finish.
 
@@ -268,7 +271,7 @@ immediate intent. This preserves useful
 filter interactions without competing with restoration for offscreen data.
 
 A separate codec diagnostic on 91 authorized thumbnails compared WebP qualities
-90/85/80 at 640 px and quality 85 at 480/320 px. Quality 90 at the existing
+90/85/80 at 640 px and quality 85 at 480/320 px. Quality 90 with method 6 at the existing
 640×480 resolution reduced total bytes from 4,603,434 to 1,254,838 (72.7%);
 median size fell from 43,332 to 12,624 bytes. All 91 alpha planes remained
 byte-identical; alpha-weighted visible RGB PSNR was 43.41 dB median and 34.30 dB
@@ -283,3 +286,16 @@ commits between the preference lookup and its update. Preference writes now rese
 the SQLite writer before reading, using the existing transaction helper. Both first
 save and existing preferences pass the two-connection test; the authenticated
 browser consent/filter flow also passes. PostgreSQL keeps its existing row lock.
+
+A subsequent encoder-effort diagnostic selected method 4. Across the same 91
+original previews it produced 1,284,894 bytes (72.1% below the lossless baseline),
+with a 12,860-byte median and 39,256-byte maximum. Median encoding took 70.7 ms,
+compared with 1,123.7 ms for method 6 in the earlier codec run. The three paired
+probe images took 25–40 ms versus 1,279–1,511 ms. Alpha was exact in all 91 images;
+visible PSNR was 43.58 dB median and 34.32 dB minimum. These remain diagnostics,
+separate from acceptance. Method 4 avoids spending much more CPU for method 6's
+additional 2.4% byte reduction.
+
+The native fairness regression under backend coverage passed both cases in 73.95 s
+with method 4. The existing 110 s fixture deadline was unchanged. Focused core
+checks passed 218 cases and backend compression/fixture checks passed 28 cases.

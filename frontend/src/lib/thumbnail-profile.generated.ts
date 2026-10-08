@@ -14,6 +14,6 @@ export const THUMBNAIL_PROFILE = {
     quality: 90,
     alphaQuality: 100,
     exact: true,
-    method: 6,
+    method: 4,
   },
 } as const;
