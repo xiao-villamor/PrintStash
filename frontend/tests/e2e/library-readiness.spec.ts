@@ -434,7 +434,7 @@ test.describe("Library readiness", () => {
           path: Array.from({ length: index + 1 }, (_, part) => `nested-${part + 1}`).join("/"),
           parent_id: index || null,
         }),
-        direct_entry_count: 0,
+        direct_entry_count: index === 7 ? 1 : 0,
         subtree_entry_count: 0,
         visible_child_count: index < 7 ? 1 : 0,
       }));
@@ -454,7 +454,25 @@ test.describe("Library readiness", () => {
                 revealed: null,
               },
             })),
-            entries: [],
+            entries: [
+              {
+                collection_id: 8,
+                page: {
+                  items: [
+                    {
+                      ...aOutlinerModel({
+                        id: 88,
+                        name: "Nested Model",
+                        collection_id: 8,
+                        collection: nodes[7].path,
+                      }),
+                      kind: "model",
+                    },
+                  ],
+                  next_cursor: null,
+                },
+              },
+            ],
           },
         }),
       );
@@ -470,6 +488,23 @@ test.describe("Library readiness", () => {
       });
       await page.goto("/");
       if (width === 390) await page.getByRole("button", { name: "Filters", exact: true }).click();
+      const tree = page.locator(width === 390 ? '[role="dialog"]' : "aside");
+      const positions: number[] = [];
+      for (const node of nodes) {
+        const row = tree.getByRole("button", { name: node.name, exact: true });
+        await expect(row).toBeVisible();
+        positions.push((await row.boundingBox())!.x);
+      }
+      for (let index = 1; index < positions.length; index++) {
+        // Every level must remain visibly nested, including levels beyond two.
+        expect(positions[index] - positions[index - 1]).toBeGreaterThanOrEqual(8);
+      }
+      const leaf = tree.getByRole("button", { name: "Nested Model", exact: true });
+      await expect(leaf).toBeVisible();
+      const parentIcon = tree.getByRole("button", { name: "Nested 8", exact: true }).locator("svg");
+      expect(
+        (await leaf.locator("svg").boundingBox())!.x - (await parentIcon.boundingBox())!.x,
+      ).toBeGreaterThanOrEqual(8);
       const target = page
         .locator(width === 390 ? '[role="dialog"]' : "aside")
         .getByRole("button", { name: "Nested 8", exact: true });

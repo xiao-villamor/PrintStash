@@ -92,7 +92,7 @@ meaning. No rejected historical run becomes accepted through this correction.
 
 
 The original deep-tree DOM observer found restored rows but did not verify that
-their buttons had usable width. Seven nested levels could consume the entire
+their buttons had usable width. Eight nested levels could consume the entire
 sidebar width. Historic deep-tree times therefore describe content restoration,
 not proof of an entirely usable view. The browser regression test now actually
 clicks the deepest collection on desktop and mobile. Preserve the historic
@@ -129,7 +129,7 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 12 | Meets host budgets | Happy | All reference-host cohorts | Every median and p95 inside defaults | Performance | ❌ final acceptance pending |
 | 13 | does not complete after an expected thumbnail fails | Error | Image 503 | Failed state without success | Playwright | ✅ |
 | 14 | restores the mobile tree before opening without declaring a hidden tree complete | Happy | Saved mobile expansion | Fetch before opening; completion after visible tree | Playwright | ✅ |
-| 15 | keeps a deeply nested collection selectable | Edge | Seven nested levels | Label width exceeds 40px; click changes destination | Playwright | ✅ |
+| 15 | keeps a deeply nested collection selectable | Edge | Eight nested levels | Label width exceeds 40px; click changes destination | Playwright | ✅ |
 | 16 | test_continues_restored_folder_pages_with_their_original_cursor | Edge | Truncated folder page | Compatible cursor continues without omissions | Backend integration | ✅ |
 | 17 | test_continues_restored_entry_pages_with_their_original_cursor | Edge | Truncated mixed entry page | Compatible cursor continues without duplicates | Backend integration | ✅ |
 | 18 | test_restores_with_postgresql | Happy | Real PostgreSQL | Restoration and continuation preserve order | Backend integration | ✅ |
@@ -243,6 +243,8 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 121 | classifies notices like the Task Center listing | Edge | Owned/system derivatives, scheduled backup, owned import | Notice visibility matches real scoped list | Integration | ✅ `integration/modules/work/test_events.py::TestJobChanged::test_classifies_notices_like_the_task_center_listing` |
 | 122 | refreshes administrator maintenance independently | Happy | System-only Job notice, Background work page open | Administration overview updates | Frontend unit | ✅ `src/components/__tests__/background-work-panel.test.tsx::refreshes administrator maintenance independently` |
 
+| 123 | preserves deep tree indentation | Edge | Eight expanded levels at desktop/mobile widths | Every child is visibly indented; deepest folder remains clickable | Playwright | ✅ `library-readiness.spec.ts::keeps a deeply nested collection selectable` |
+
 
 The matrix remains open until final gates and deployment acceptance finish.
 
@@ -323,3 +325,11 @@ Model previews served by the real API total 1,284,894 bytes (median 12,860), all
 640×480, and match the alpha/quality-validated method-4 outputs byte for byte.
 All 92 original Artifact files retain their hashes and sizes; database integrity
 and the Model/collection/file/user counts remain unchanged.
+
+The expanded-tree browser regression now checks actual indentation through eight
+levels on desktop and mobile, including Model leaf icon placement. The former
+depth cap collapsed deeper levels to a one-pixel border. Each level now retains
+compact indentation; row actions appear beside the count on hover or keyboard
+focus so hidden controls do not consume label width. Deep rows retain a usable
+minimum width with horizontal scrolling. The real 27-branch/91-Model tree was
+also inspected at desktop and mobile widths against the real API.

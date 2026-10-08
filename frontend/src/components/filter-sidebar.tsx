@@ -130,7 +130,7 @@ function DraggableModelLeaf({
         onKeyDown={(event) => {
           if (event.key === "Enter") router.push(`/models/${model.id}`);
         }}
-        className={`flex items-center gap-2 rounded px-2 py-1 text-xs cursor-grab active:cursor-grabbing select-none hover:bg-muted transition-colors ${
+        className={`flex items-center gap-2 rounded pl-7 pr-2 py-1 text-xs cursor-grab active:cursor-grabbing select-none hover:bg-muted transition-colors ${
           isDraggingThisModel ? "opacity-30 pointer-events-none" : "text-muted-foreground"
         }`}
         title={model.name}
@@ -156,7 +156,7 @@ function MultipartLeaf({ multipart }: { multipart: OutlinerModelRead }) {
         onKeyDown={(event) => {
           if (event.key === "Enter") router.push(`/multipart-models/${multipart.id}`);
         }}
-        className="flex cursor-default select-none items-center gap-2 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
+        className="flex cursor-default select-none items-center gap-2 rounded pl-7 pr-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
         title={uiText("{value1} · Multipart set", { value1: String(multipart.name) })}
         data-outliner-entry={`/multipart-models/${multipart.id}`}
       >
@@ -292,15 +292,7 @@ function EntryLevel({ collectionId, ctx }: { collectionId: number | null; ctx: T
   );
 }
 
-function CollectionLevel({
-  parentId,
-  ctx,
-  depth = 0,
-}: {
-  parentId: number | null;
-  ctx: TreeContext;
-  depth?: number;
-}) {
+function CollectionLevel({ parentId, ctx }: { parentId: number | null; ctx: TreeContext }) {
   useUiLocale();
   const query = useOutlinerCollections(
     {
@@ -341,7 +333,7 @@ function CollectionLevel({
       {[...nodes.values()]
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((node) => (
-          <CollectionTreeRow key={node.id} node={node} ctx={ctx} depth={depth} />
+          <CollectionTreeRow key={node.id} node={node} ctx={ctx} />
         ))}
       <PageControls
         query={query}
@@ -425,15 +417,7 @@ function SearchResults({
   );
 }
 
-function CollectionTreeRow({
-  node,
-  ctx,
-  depth,
-}: {
-  node: OutlinerCollection;
-  ctx: TreeContext;
-  depth: number;
-}) {
+function CollectionTreeRow({ node, ctx }: { node: OutlinerCollection; ctx: TreeContext }) {
   useUiLocale();
   const [confirming, setConfirming] = useState(false);
   const { selected, onSelect, onIntent, expanded, toggle, dragging, onDelete } = ctx;
@@ -536,7 +520,7 @@ function CollectionTreeRow({
         ) : (
           <div
             ref={rowRef}
-            className={`group/row relative flex items-center gap-1 rounded px-2 py-1 transition-colors ${
+            className={`group/row relative flex min-w-32 items-center gap-1 rounded px-2 py-1 transition-colors ${
               isOver && dragging !== null && canDrop
                 ? "z-10 bg-accent"
                 : isSelected
@@ -583,51 +567,49 @@ function CollectionTreeRow({
               )}
               <span className="truncate">{node.name}</span>
             </button>
-            <span
-              {...listeners}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="p-0.5 text-muted-foreground/30 hover:text-muted-foreground cursor-grab active:cursor-grabbing opacity-0 group-hover/row:opacity-100 flex-shrink-0"
-              title={uiText("Drag to reorder")}
-            >
-              <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 16 16">
-                <circle cx="5" cy="4" r="1.2" />
-                <circle cx="11" cy="4" r="1.2" />
-                <circle cx="5" cy="8" r="1.2" />
-                <circle cx="11" cy="8" r="1.2" />
-                <circle cx="5" cy="12" r="1.2" />
-                <circle cx="11" cy="12" r="1.2" />
-              </svg>
-            </span>
-            {onDelete && (
-              <button
-                type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setConfirming(true);
-                }}
-                className="p-0.5 text-muted-foreground/30 hover:text-red-500 opacity-0 group-hover/row:opacity-100 flex-shrink-0 rounded transition-colors"
-                title={uiText("Delete collection")}
+            <span className="relative flex-shrink-0">
+              <span
+                className={`absolute right-full top-1/2 -translate-y-1/2 mr-1 flex items-center rounded invisible group-hover/row:visible group-focus-within/row:visible ${isSelected ? "bg-accent" : "bg-sidebar"}`}
               >
-                <Trash2 className="h-2.5 w-2.5" />
-              </button>
-            )}
-            <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
-              {node.subtree_entry_count}
+                <span
+                  {...listeners}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="p-0.5 text-muted-foreground/30 hover:text-muted-foreground cursor-grab active:cursor-grabbing flex-shrink-0"
+                  title={uiText("Drag to reorder")}
+                >
+                  <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 16 16">
+                    <circle cx="5" cy="4" r="1.2" />
+                    <circle cx="11" cy="4" r="1.2" />
+                    <circle cx="5" cy="8" r="1.2" />
+                    <circle cx="11" cy="8" r="1.2" />
+                    <circle cx="5" cy="12" r="1.2" />
+                    <circle cx="11" cy="12" r="1.2" />
+                  </svg>
+                </span>
+                {onDelete && (
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirming(true);
+                    }}
+                    className="p-0.5 text-muted-foreground/30 hover:text-red-500 flex-shrink-0 rounded transition-colors"
+                    title={uiText("Delete collection")}
+                  >
+                    <Trash2 className="h-2.5 w-2.5" />
+                  </button>
+                )}
+              </span>
+              <span className="block min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
+                {node.subtree_entry_count}
+              </span>
             </span>
           </div>
         )}
         {isOpen && hasNestedItems && !confirming && (
-          <div
-            className={
-              depth < 2
-                ? "ml-2 border-l border-border pl-1 min-w-0"
-                : "border-l border-border min-w-0"
-            }
-          >
-            {node.visible_child_count > 0 && (
-              <CollectionLevel parentId={node.id} ctx={ctx} depth={depth + 1} />
-            )}
+          <div className="ml-1 border-l border-border pl-1 min-w-0">
+            {node.visible_child_count > 0 && <CollectionLevel parentId={node.id} ctx={ctx} />}
             {node.direct_entry_count > 0 && <EntryLevel collectionId={node.id} ctx={ctx} />}
           </div>
         )}
@@ -1051,7 +1033,7 @@ export function FilterSidebarContent({
                       count={roots.data?.pages[0]?.parent_direct_entry_count ?? 0}
                       ctx={treeContext}
                     />
-                    <div className="ml-2 border-l border-border pl-1 min-w-0">
+                    <div className="ml-1 border-l border-border pl-1 min-w-0">
                       <CollectionLevel parentId={null} ctx={treeContext} />
                     </div>
                   </>

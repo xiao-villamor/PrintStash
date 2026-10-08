@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Preserve visible nesting at every collection-tree depth and align Model leaves
+  beneath their parent, keeping deep rows selectable on narrow screens.
+- Ignore system-only maintenance notices in Task Center instead of repeatedly
+  downloading an unchanged Jobs list.
+
 - Serialize search-preference writes before reading SQLite state, avoiding failures
   when background processing commits concurrently.
 - Reduce thumbnail transfer size with quality-90 WebP color and lossless transparency,
