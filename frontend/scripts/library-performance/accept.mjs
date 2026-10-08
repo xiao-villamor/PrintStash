@@ -2,7 +2,7 @@ import { chromium } from "@playwright/test";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { installObserver } from "./observer.mjs";
+import { installObserver, observeInteraction, currentNavigationStart } from "./observer.mjs";
 import { budgets, summarize, assertAcceptance } from "./budgets.mjs";
 
 const [configPath, outputPath] = process.argv.slice(2);
@@ -68,6 +68,9 @@ async function prepared(scenario, device, locale, target = scenario.target) {
       sameSite: "Strict",
     },
   ]);
+  await context.addInitScript(
+    `window.currentNavigationStart = ${currentNavigationStart.toString()}`,
+  );
   await context.addInitScript(installObserver, {
     user: session.user,
     locale,
@@ -93,12 +96,11 @@ async function observed(c, kind) {
     if (!baseline && kind !== "page")
       await c.page.waitForFunction(
         () => {
-          const start = performance
-            .getEntriesByType("mark")
-            .filter((e) => /^printstash:navigation:\d+:start$/.test(e.name))
-            .at(-1);
+          const start = window.currentNavigationStart();
           return (
-            start && performance.getEntriesByName(start.name.replace(/start$/, "complete")).length
+            start &&
+            start.startTime >= window.libraryObservation.started &&
+            performance.getEntriesByName(start.name.replace(/start$/, "complete")).length
           );
         },
         null,
@@ -106,7 +108,7 @@ async function observed(c, kind) {
       );
     return c.page.evaluate(() => {
       const marks = performance.getEntriesByType("mark");
-      const start = marks.filter((e) => /^printstash:navigation:\d+:start$/.test(e.name)).at(-1);
+      const start = window.currentNavigationStart();
       const prefix = start?.name.replace(/start$/, "");
       const phases = Object.fromEntries(
         marks
@@ -120,6 +122,7 @@ async function observed(c, kind) {
         ...window.libraryObservation,
         phases,
         worker: !!navigator.serviceWorker.controller,
+        document: performance.getEntriesByType("navigation").map((entry) => entry.toJSON()),
         resources: performance
           .getEntriesByType("resource")
           .filter(
@@ -141,7 +144,7 @@ async function observed(c, kind) {
       state: window.libraryObservation,
       marks: performance
         .getEntriesByType("mark")
-        .map((e) => ({ name: e.name, start: e.startTime })),
+        .map((e) => ({ name: e.name, start: e.startTime, detail: e.detail })),
     }));
     await writeFile(`${output}/failure-${kind}.json`, JSON.stringify(evidence, null, 2));
     await c.page.screenshot({ path: `${output}/failure-${kind}.png` });
@@ -161,7 +164,10 @@ async function begin(c, target) {
   await c.page.evaluate((target) => window.observeLibrary(target), target);
 }
 async function closeTree(c) {
-  if (c.device === "mobile") await c.page.keyboard.press("Escape");
+  if (c.device === "mobile") {
+    await c.page.keyboard.press("Escape");
+    await c.page.getByRole("dialog", { name: /^(Filters|Filtros)$/ }).waitFor({ state: "hidden" });
+  }
 }
 async function journey(c, scenario, kind) {
   const plan = scenario.journeys[kind];
@@ -179,25 +185,28 @@ async function journey(c, scenario, kind) {
       .locator(c.device === "mobile" ? '[role="dialog"]' : "aside")
       .getByRole("button", { name: plan.button, exact: true });
     await button.scrollIntoViewIfNeeded();
-    await begin(c, plan.target);
+    await button.evaluate(observeInteraction, { event: "click", target: plan.target });
     await button.click();
   } else if (kind === "back") {
     await closeTree(c);
     await c.page.locator(`main [data-library-entry="${plan.model}"]`).first().click();
-    await c.page.getByRole("heading", { name: plan.modelName, exact: true }).waitFor();
-    await begin(c, plan.target);
-    await c.page.goBack({ waitUntil: "domcontentloaded" });
+    await c.page.waitForURL((url) => url.pathname === plan.model);
+    await c.page.getByRole("heading", { name: plan.modelName, exact: true, level: 1 }).waitFor();
+    await c.page.evaluate((target) => {
+      window.observeLibrary(target);
+      history.back();
+    }, plan.target);
   } else if (kind === "page") {
     await closeTree(c);
     const button = c.page.getByRole("button", { name: /^(Load more|Cargar más)$/, exact: true });
     await button.scrollIntoViewIfNeeded();
-    await begin(c, plan.target);
+    await button.evaluate(observeInteraction, { event: "click", target: plan.target });
     await button.click();
   } else if (kind === "search") {
     await closeTree(c);
     const input = c.page.locator("[data-model-search]");
     await input.focus();
-    await begin(c, plan.target);
+    await input.evaluate(observeInteraction, { event: "input", target: plan.target });
     await input.fill(plan.target.query);
   }
   return observed(c, kind);

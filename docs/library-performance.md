@@ -77,6 +77,12 @@ restarts. First installation now keeps the page; a later worker update still
 reloads once. Earlier fresh-context timings do not include this stronger clock
 contract and must not be presented as comparable final acceptance.
 
+The navigation timer is armed before automation waits but starts at the browser's
+actual click/input event. Back requires the Model route and its level-one heading;
+a previous card title cannot stand in for an opened Model. Application marks must
+belong to the measured navigation. Earlier navigation diagnostics that included
+automation actionability waits or reused prior marks are not acceptance evidence.
+
 ## Coverage matrix
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
@@ -146,5 +152,20 @@ contract and must not be presented as comparable final acceptance.
 | 63 | preserves Models plus G-code after grouping deletion | Happy | Picker with more than one page | Selected Models and revisions survive deleting the set | Real-backend Playwright | ✅ |
 | 64 | keeps a shared Model independently accessible | Edge | One Model used in two sets | Both references and independent navigation work | Real-backend Playwright | ✅ |
 | 65 | moves a model reached through keyboard pagination beyond 500 entries | Edge | Late page, concurrent edit and duplicate display names | Exact seeded Model moved after conflict review and found in its destination | Real-backend Playwright | ✅ |
+| 66 | starts interaction timing at the actual click/input | Edge | Automation waits before dispatch | Waiting is excluded; actual browser event starts a new observation | Playwright | ✅ |
+| 67 | rejects phases from a previous navigation | Error | Earlier complete marks remain | Acceptance rejects stale phases | Repo | ✅ |
+| 68 | test_rechecks_the_actor_after_a_previous_badge_read | Error | A prior reader or newly granted role | Each query applies current actor permissions | Backend integration | ✅ |
+| 69 | keeps the events connection across a pending destination | Edge | Next page is loading | One connection, no inactive probe, fresh authority on arrival | Frontend unit | ✅ |
+
+| 70 | selects committed navigation instead of preparation order | Edge | Concurrently prepared generation has a later start time | Only the committed, matching history entry supplies phases; inactive entries rejected | Playwright | ✅ |
+| 71 | completes the committed mobile search destination | Happy | Search followed by opening the drawer | Current history destination has a completion mark | Playwright | ✅ |
 
 The matrix remains open until final gates and deployment acceptance finish.
+
+The application publishes the currently committed navigation separately from its
+preparation time. Concurrent React work can prepare generations out of commit
+order; accepting the last start mark alone was incorrect. The acceptance reader
+also requires its history key to match the browser's current entry. Thumbnail
+readiness reuses the decoded state owned by `ProtectedThumbnail`, avoiding a
+second per-image decode pass across frames; the independent browser observer
+still calls `decode()` itself.

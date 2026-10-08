@@ -39,6 +39,7 @@ export function summarize(samples, kind, { diagnostic = false, baseline = false 
       ])
         if (!Number.isFinite(sample.phases?.[phase]))
           throw new Error(`${kind}: missing phase ${phase}`);
+      if (sample.phases.start < 0) throw new Error(`${kind}: stale navigation phases`);
       if (
         sample.phases.complete <
         Math.max(sample.phases.cards, sample.phases.tree, sample.phases.media)

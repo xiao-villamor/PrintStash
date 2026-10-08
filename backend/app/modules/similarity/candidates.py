@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 
 from printstash_core.mesh.similarity.verification import Verification
 from sqlalchemy import and_, case, true, update
@@ -45,6 +46,13 @@ class CandidatePage:
 
 def current_evidence(candidate=SimilarityCandidate):
     """Correlated SQL predicate; source lifecycle invalidation needs no sweep."""
+    return _evidence_predicate(candidate, ALGORITHM_VERSION)
+
+
+@lru_cache(maxsize=1)
+def _evidence_predicate(candidate, algorithm_version: str):
+    # Reuse immutable SQL construction, never query results or user permissions.
+    # Every execution still reads current source, lifecycle and evidence rows.
     a, b = aliased(GeometryFingerprint), aliased(GeometryFingerprint)
     fa, fb = aliased(File), aliased(File)
     ma, mb = aliased(Model), aliased(Model)
@@ -67,7 +75,7 @@ def current_evidence(candidate=SimilarityCandidate):
             fb.sha256 == observation.input_hash_b,
             a.source_sha256 == fa.sha256,
             b.source_sha256 == fb.sha256,
-            candidate.algorithm_version == ALGORITHM_VERSION,
+            candidate.algorithm_version == algorithm_version,
             a.algorithm_version == candidate.algorithm_version,
             b.algorithm_version == candidate.algorithm_version,
             col(a.state).in_(("ready", "partial")),

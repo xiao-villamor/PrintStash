@@ -67,6 +67,17 @@ describe("reference host acceptance", () => {
       ),
     ).toThrow("missing phase start");
   });
+  it("rejects phases from a previous navigation", () => {
+    expect(() =>
+      summarize(
+        Array.from({ length: 20 }, () => ({
+          ...sample(),
+          phases: { ...sample().phases, start: -1 },
+        })),
+        "back",
+      ),
+    ).toThrow("stale navigation phases");
+  });
   it("rejects an image failure", () => {
     expect(() =>
       summarize(

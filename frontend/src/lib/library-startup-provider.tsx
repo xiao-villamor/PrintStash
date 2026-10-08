@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useAuth } from "@/lib/auth-context";
@@ -74,6 +74,15 @@ export function LibraryStartupProvider({
     },
     [id],
   );
+
+  // Concurrent renders may prepare generations in a different order from commits.
+  // Consumers must identify the committed history destination, not the largest id
+  // or the most recently prepared start timestamp.
+  useLayoutEffect(() => {
+    performance.mark("printstash:navigation:current", {
+      detail: { navigation: id, historyKey: location.key, active },
+    });
+  }, [id, location.key, active]);
 
   useEffect(() => {
     if (!active) return;

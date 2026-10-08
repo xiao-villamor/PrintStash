@@ -5,11 +5,13 @@
 - Restore remembered Library branches in bounded batches, prioritize visible thumbnails,
   and keep deeply nested folders selectable on narrow screens. Load the multipart
   editor separately from Library cards, reuse restoration counts and permission scopes,
-  and avoid repeated thumbnail access lookups.
+  and avoid repeated thumbnail access lookups and image decoding. Reuse immutable
+  similarity SQL construction while checking current permissions on every read.
 - Keep the first visit intact when the service worker installs, while still refreshing
   an existing installation after a worker update.
 - Measure each Library destination through restored tree rows and decoded viewport
   images, with a reproducible reference-host acceptance command and explicit failures.
+  Tie timings to committed history entries and actual input events.
 
 - Keep the collection tree visible when selecting folders, preserving open branches
   and downloaded sibling pages without reloading them on every click.

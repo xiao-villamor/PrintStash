@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 
@@ -54,12 +54,16 @@ function admitNearViewport(node: Element, admit: () => void, rootMargin: string)
 export function useViewportAdmission() {
   const { complete } = useLibraryStartup();
   const margin = complete ? "200px" : "0px";
-  const [node, ref] = useState<HTMLElement | null>(null);
   const [admitted, setAdmitted] = useState(false);
-  useEffect(() => {
-    if (!node || admitted) return;
-    return admitNearViewport(node, () => setAdmitted(true), margin);
-  }, [node, admitted, margin]);
+  // Attach during commit: storing the node in state required another render
+  // before intersection observation could even begin.
+  const ref = useCallback(
+    (node: HTMLElement | null) => {
+      if (!node || admitted) return;
+      return admitNearViewport(node, () => setAdmitted(true), margin);
+    },
+    [admitted, margin],
+  );
   return { ref, admitted };
 }
 

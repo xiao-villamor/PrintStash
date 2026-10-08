@@ -1,34 +1,94 @@
 /** Diagnostic fault injection verifies readiness; acceptance timings use real API responses. */
 import { expect, test, type Page } from "@playwright/test";
 import { useMockApi } from "./_setup";
-import { installObserver } from "../../scripts/library-performance/observer.mjs";
+import {
+  currentNavigationStart,
+  installObserver,
+  observeInteraction,
+} from "../../scripts/library-performance/observer.mjs";
 import { aCollectionNode, aModelListItem } from "../../src/test-support/factories";
 
 declare global {
   interface Window {
     libraryObservation: { started: number; complete: number | null; errors: string[] };
     releaseReadinessDecode: () => void;
+    currentNavigationStart: () => PerformanceMark | null;
     completedDrawer: { left: number; running: number } | null;
   }
 }
 
 useMockApi();
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(`window.currentNavigationStart = ${currentNavigationStart.toString()}`);
+});
 
 async function phases(page: Page, phase: string) {
-  return page.evaluate(
-    (name) =>
-      performance
-        .getEntriesByType("mark")
-        .filter(
-          (entry) =>
-            /^printstash:navigation:\d+:/.test(entry.name) && entry.name.endsWith(`:${name}`),
-        )
-        .map((entry) => entry.startTime),
-    phase,
-  );
+  return page.evaluate((name) => {
+    const start = window.currentNavigationStart();
+    return start
+      ? performance
+          .getEntriesByName(start.name.replace(/start$/, name))
+          .map((entry) => entry.startTime)
+      : [];
+  }, phase);
 }
 
 test.describe("Library readiness", () => {
+  test("selects committed navigation instead of preparation order", async ({ page }) => {
+    await page.route("**/", (route) =>
+      route.fulfill({ contentType: "text/html", body: "<main>Ready</main>" }),
+    );
+    await page.goto("/");
+    await page.evaluate(() => {
+      history.replaceState({ key: "destination" }, "");
+      performance.mark("printstash:navigation:3:start");
+      performance.mark("printstash:navigation:4:start");
+      performance.mark("printstash:navigation:current", {
+        detail: { navigation: 4, historyKey: "previous", active: true },
+      });
+      performance.mark("printstash:navigation:current", {
+        detail: { navigation: 3, historyKey: "destination", active: true },
+      });
+    });
+    expect(await page.evaluate(`(${currentNavigationStart.toString()})()?.name`)).toBe(
+      "printstash:navigation:3:start",
+    );
+    await page.evaluate(() => history.replaceState({ key: "next" }, ""));
+    expect(await page.evaluate(currentNavigationStart)).toBeNull();
+    await page.evaluate(() => {
+      history.replaceState({ key: "destination" }, "");
+      performance.mark("printstash:navigation:current", {
+        detail: { navigation: 3, historyKey: "destination", active: false },
+      });
+    });
+    expect(await page.evaluate(currentNavigationStart)).toBeNull();
+  });
+
+  test("completes the committed mobile search destination", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/?c=maraio");
+    await page.getByRole("button", { name: "Filters", exact: true }).click();
+    await expect.poll(() => phases(page, "complete")).toHaveLength(1);
+    await page.keyboard.press("Escape");
+    await page.getByRole("dialog", { name: "Filters", exact: true }).waitFor({ state: "hidden" });
+    await page.locator("[data-model-search]").fill("skadis");
+    await expect(page).toHaveURL(/q=skadis/);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Filters", exact: true }).click();
+    await expect
+      .poll(async () => {
+        const name = await page.evaluate<string | null>(
+          `(${currentNavigationStart.toString()})()?.name ?? null`,
+        );
+        if (!name) return false;
+        return page.evaluate(
+          (name) => performance.getEntriesByName(name.replace(/start$/, "complete")).length > 0,
+          name,
+        );
+      })
+      .toBe(true);
+  });
+
   test("waits for the restored tree before completing", async ({ page }) => {
     const gate = Promise.withResolvers<void>();
     await page.addInitScript(() =>
@@ -281,6 +341,42 @@ test.describe("Library readiness", () => {
     expect(observed.complete).toBeGreaterThanOrEqual(80);
     expect(observed.errors).toEqual([]);
   });
+
+  for (const event of ["click", "input"] as const) {
+    test(`starts interaction timing at the actual ${event}`, async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.route("**/", (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: '<aside class="bg-sidebar" style="width:200px;height:100px">Tree</aside><main><h1>All Models</h1><input data-model-search><button>Next</button></main>',
+        }),
+      );
+      const target = {
+        expanded: [],
+        collection: null,
+        titles: { en: "All Models", es: "Todos los modelos" },
+        branches: [],
+        leaves: [],
+        entries: [],
+        folders: [],
+      };
+      await page.addInitScript(installObserver, { user: { id: 1 }, locale: "en", target });
+      await page.goto("/");
+      await page.waitForFunction(() => window.libraryObservation.complete !== null);
+      const previous = await page.evaluate(() => window.libraryObservation.started);
+      const control =
+        event === "click" ? page.getByRole("button", { name: "Next" }) : page.locator("input");
+      await control.evaluate(observeInteraction, { event, target });
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      expect(await page.evaluate(() => window.libraryObservation.started)).toBe(previous);
+      const armed = await page.evaluate(() => performance.now());
+      if (event === "click") await control.click();
+      else await control.fill("query");
+      expect(await page.evaluate(() => window.libraryObservation.started)).toBeGreaterThan(armed);
+    });
+  }
 
   for (const device of ["desktop", "mobile"]) {
     test(`the independent observer waits for usable ${device} library controls`, async ({

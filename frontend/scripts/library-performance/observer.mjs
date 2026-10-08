@@ -180,3 +180,38 @@ export function installObserver({ user, locale, target }) {
   };
   window.observeLibrary(target, startedAt - performance.timeOrigin);
 }
+
+/** Arm before automation waits; measure from the browser's actual input event. */
+export function observeInteraction(element, { event, target }) {
+  element.addEventListener(
+    event,
+    () => {
+      const started = performance.now();
+      const pending = [...document.querySelectorAll('[data-library-thumbnail="pending"]')].filter(
+        (image) => {
+          const bounds = image.getBoundingClientRect();
+          return (
+            bounds.width > 0 &&
+            bounds.height > 0 &&
+            bounds.top < innerHeight &&
+            bounds.bottom > 0 &&
+            bounds.left < innerWidth &&
+            bounds.right > 0
+          );
+        },
+      ).length;
+      window.observeLibrary(target, started);
+      window.libraryObservation.sourcePendingImages = pending;
+    },
+    { once: true, capture: true },
+  );
+}
+
+/** Runs in the page: only the committed history destination can supply phases. */
+export function currentNavigationStart() {
+  const current = performance.getEntriesByName("printstash:navigation:current").at(-1)?.detail;
+  if (!current?.active || current.historyKey !== (history.state?.key ?? "default")) return null;
+  return (
+    performance.getEntriesByName(`printstash:navigation:${current.navigation}:start`)[0] ?? null
+  );
+}

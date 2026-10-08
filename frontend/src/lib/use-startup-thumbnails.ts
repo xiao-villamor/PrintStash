@@ -13,9 +13,6 @@ export function useStartupThumbnails(
     const element = root.current;
     if (!element || !ready) return;
     let frame = 0;
-    let alive = true;
-    const decoded = new WeakSet<HTMLImageElement>();
-    const decoding = new WeakSet<HTMLImageElement>();
     const check = () => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
@@ -44,20 +41,10 @@ export function useStartupThumbnails(
           const image =
             thumbnail instanceof HTMLImageElement ? thumbnail : thumbnail.querySelector("img");
           if (status !== "ready" || !image?.complete || image.naturalWidth <= 0) return false;
-          if (!decoded.has(image) && !decoding.has(image)) {
-            decoding.add(image);
-            Promise.resolve(image.decode?.()).then(
-              () => {
-                if (!alive) return;
-                decoded.add(image);
-                check();
-              },
-              () => {
-                if (alive) settle("media", "failed");
-              },
-            );
-          }
-          return decoded.has(image);
+          // ProtectedThumbnail publishes ready only after decoding this source.
+          // Decoding again here made every() serialize images across animation
+          // frames, although their bytes were already ready for painting.
+          return true;
         });
         if (complete) {
           settle("media", "ready");
@@ -82,7 +69,6 @@ export function useStartupThumbnails(
     window.addEventListener("resize", check);
     check();
     return () => {
-      alive = false;
       observer.disconnect();
       element.removeEventListener("load", check, true);
       element.removeEventListener("error", check, true);

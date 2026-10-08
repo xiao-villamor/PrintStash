@@ -84,6 +84,22 @@ async function settled() {
 }
 
 describe("useLibraryAuthority", () => {
+  it("keeps the events connection across a pending destination", async () => {
+    const opened = vi.fn<() => Promise<EventSocket>>(async () => socket);
+    setEventSocketFactory(opened);
+    const app = renderApp(<Probe />, { routes: { [revisionPath]: json(same) } });
+    await settled();
+    expect(opened).toHaveBeenCalledTimes(1);
+    app.rerender(<Probe presentation={null} />);
+    act(() => socket.resync());
+    await settled();
+    expect(app.requests().filter((x) => x.url.includes("/revision"))).toHaveLength(1);
+    app.rerender(<Probe presentation={{ ...page }} />);
+    await settled();
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(app.requests().filter((x) => x.url.includes("/revision"))).toHaveLength(2);
+  });
+
   it("checks authority after mounting a cached page", async () => {
     const app = renderApp(<Probe />, { routes: { [revisionPath]: json(same) } });
     await settled();

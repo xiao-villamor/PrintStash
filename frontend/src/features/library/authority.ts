@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { getLibraryRevision } from "@/lib/api/library-browse";
 import { onAuthChange, retirePrivateSessionScope } from "@/lib/auth-store";
@@ -152,12 +152,19 @@ export function useLibraryAuthority(
     };
   }, [active, boundary, client, owner, receiptSequence, refetch, sessionVersion]);
 
+  const activePresentation = useRef(active);
+  useLayoutEffect(() => {
+    activePresentation.current = active;
+  }, [active]);
   useEffect(() => {
-    if (!active) return;
+    if (!enabled || sessionVersion !== mountedSession) return;
+    // Keep the session transport while the next page is loading. Reopening it
+    // on every destination competes with thumbnails and repeats the resync probe.
     return subscribeEvents((notice) => {
-      if (notice.type === "resync") void refetch({ cancelRefetch: false });
+      if (notice.type === "resync" && activePresentation.current)
+        void refetch({ cancelRefetch: false });
     });
-  }, [active, refetch]);
+  }, [enabled, mountedSession, sessionVersion, refetch]);
 
   const observation = query.data;
   const current =
