@@ -173,16 +173,18 @@ test.describe("Library readiness", () => {
       subtree_entry_count: 0,
       visible_child_count: 0,
     }));
-    await page.route("**/api/v1/outliner/collections?**", (route) =>
-      route.fulfill({
+    const rootsGate = Promise.withResolvers<void>();
+    await page.route("**/api/v1/outliner/collections?**", async (route) => {
+      await rootsGate.promise;
+      await route.fulfill({
         json: {
           items: nodes,
           next_cursor: null,
           parent_direct_entry_count: 0,
           revealed: null,
         },
-      }),
-    );
+      });
+    });
     const catalogs: string[] = [];
     page.on("request", (request) => {
       const path = new URL(request.url()).pathname;
@@ -193,6 +195,15 @@ test.describe("Library readiness", () => {
       await page.goto("/?c=maraio", { waitUntil: "domcontentloaded" });
       await page.getByRole("button", { name: "Filters", exact: true }).click();
       const drawer = page.getByRole("dialog", { name: "Filters", exact: true });
+      await expect(drawer.getByRole("region", { name: "Filters", exact: true })).toBeVisible();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      expect(catalogs).toEqual([]);
+      rootsGate.resolve();
       await expect(drawer.getByRole("button", { name: "Folder 0", exact: true })).toBeVisible();
       await expect.poll(() => phases(page, "tree")).toHaveLength(1);
       expect(await phases(page, "complete")).toEqual([]);
@@ -200,6 +211,77 @@ test.describe("Library readiness", () => {
       await drawer.getByRole("region", { name: "Filters", exact: true }).scrollIntoViewIfNeeded();
       await expect.poll(() => catalogs.length).toBe(3);
     } finally {
+      rootsGate.resolve();
+      await page.evaluate(() => window.releaseReadinessDecode());
+    }
+  });
+
+  test("prioritizes an explicitly focused filter while the mobile tree is pending", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.addInitScript(() => {
+      sessionStorage.setItem("ps-filter-expanded", "[]");
+      const original = HTMLImageElement.prototype.decode;
+      let release!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      Object.assign(window, { releaseReadinessDecode: release });
+      HTMLImageElement.prototype.decode = async function () {
+        await original.call(this);
+        await pending;
+      };
+    });
+    const nodes = Array.from({ length: 24 }, (_, index) => ({
+      ...aCollectionNode({ id: index + 100, name: `Folder ${index}`, path: `folder-${index}` }),
+      direct_entry_count: 0,
+      subtree_entry_count: 0,
+      visible_child_count: 0,
+    }));
+    const rootsGate = Promise.withResolvers<void>();
+    await page.route("**/api/v1/outliner/collections?**", async (route) => {
+      await rootsGate.promise;
+      await route.fulfill({
+        json: {
+          items: nodes,
+          next_cursor: null,
+          parent_direct_entry_count: 0,
+          revealed: null,
+        },
+      });
+    });
+    const catalogs: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (["/api/v1/tags", "/api/v1/printers", "/api/v1/models/facets"].includes(path))
+        catalogs.push(path);
+    });
+    try {
+      await page.goto("/?c=maraio", { waitUntil: "domcontentloaded" });
+      await page.getByRole("button", { name: "Filters", exact: true }).click();
+      const drawer = page.getByRole("dialog", { name: "Filters", exact: true });
+      await expect(drawer.getByRole("region", { name: "Filters", exact: true })).toBeVisible();
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      expect(catalogs).toEqual([]);
+      // An inactive document can change activeElement without dispatching focusin.
+      await page.bringToFront();
+      await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+      const filter = drawer.getByRole("button", { name: "Any location", exact: true });
+      await expect(filter).toBeEnabled();
+      await expect(async () => {
+        await filter.focus();
+        await expect(filter).toBeFocused();
+      }).toPass();
+      await expect.poll(() => catalogs.length).toBe(3);
+      expect(await phases(page, "complete")).toEqual([]);
+    } finally {
+      rootsGate.resolve();
       await page.evaluate(() => window.releaseReadinessDecode());
     }
   });

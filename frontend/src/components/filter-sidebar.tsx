@@ -717,11 +717,6 @@ export function FilterSidebarContent({
   const settleStartup = startup.settle;
   const requestSecondary = startup.request;
   const { ref: filtersRef, admitted: filtersVisible } = useViewportAdmission();
-  useEffect(() => {
-    // Opening the mobile tree does not imply intent for offscreen catalogs.
-    // Visible filter controls get their data immediately, even during restore.
-    if (readinessEnabled && filtersOpen && filtersVisible) requestSecondary("filters");
-  }, [readinessEnabled, filtersOpen, filtersVisible, requestSecondary]);
   const contentRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!readinessEnabled) return;
@@ -757,6 +752,17 @@ export function FilterSidebarContent({
   } = useOutlinerRestoration(params, selectedCollection, outlinerQ === "", expanded);
   const roots = useOutlinerCollections(params, outlinerQ === "" && !restoring);
   const [levels, setLevels] = useState<ReadonlyMap<string, StartupOutcome>>(() => new Map());
+  const treeLayoutReady =
+    roots.data !== undefined &&
+    !restoring &&
+    levels.size > 0 &&
+    [...levels.values()].every((state) => state === "ready");
+  useEffect(() => {
+    // A short loading placeholder can temporarily expose controls that the
+    // restored tree will push below the viewport. Observe the settled layout.
+    if (readinessEnabled && filtersOpen && treeLayoutReady && filtersVisible)
+      requestSecondary("filters");
+  }, [readinessEnabled, filtersOpen, treeLayoutReady, filtersVisible, requestSecondary]);
   const report = useCallback((key: string, status: StartupOutcome | null) => {
     setLevels((current) => {
       if (status === null ? !current.has(key) : current.get(key) === status) return current;
@@ -1053,7 +1059,9 @@ export function FilterSidebarContent({
 
           {filtersOpen && (
             <div
-              ref={filtersRef}
+              ref={treeLayoutReady ? filtersRef : undefined}
+              onFocusCapture={() => requestSecondary("filters")}
+              onPointerDownCapture={() => requestSecondary("filters")}
               className="space-y-6"
               aria-label={uiText("Filters")}
               role="region"
