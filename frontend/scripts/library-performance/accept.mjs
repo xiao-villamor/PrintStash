@@ -2,7 +2,12 @@ import { chromium } from "@playwright/test";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createHash } from "node:crypto";
-import { installObserver, observeInteraction, currentNavigationStart } from "./observer.mjs";
+import {
+  installObserver,
+  observeInteraction,
+  currentNavigationStart,
+  openAvailableLibraryTree,
+} from "./observer.mjs";
 import { budgets, summarize, assertAcceptance } from "./budgets.mjs";
 
 const [configPath, outputPath] = process.argv.slice(2);
@@ -29,15 +34,33 @@ await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const sessions = new Map();
 const cohorts = [];
+const measurement = {
+  protocol: "immediate-mobile-tree-v2",
+  authentication: "real-login-session-restored",
+  node: process.version,
+  files: Object.fromEntries(
+    await Promise.all(
+      ["accept.mjs", "observer.mjs", "budgets.mjs"].map(async (name) => [
+        name,
+        createHash("sha256")
+          .update(await readFile(new URL(name, import.meta.url)))
+          .digest("hex"),
+      ]),
+    ),
+  ),
+};
 const identity = {
   ...config.identity,
   configSha256: createHash("sha256").update(source).digest("hex"),
   browser: browser.version(),
+  measurement,
   diagnostic,
   baseline,
 };
 async function prepared(scenario, device, locale, target = scenario.target) {
   const base = scenario.base;
+  // Restore an authorized real-login session into otherwise empty contexts.
+  // Each document still validates it through the real /auth/me endpoint.
   if (!sessions.has(base)) {
     const login = await fetch(`${base}/api/v1/auth/login`, {
       method: "POST",
@@ -71,6 +94,9 @@ async function prepared(scenario, device, locale, target = scenario.target) {
   await context.addInitScript(
     `window.currentNavigationStart = ${currentNavigationStart.toString()}`,
   );
+  await context.addInitScript(
+    `window.openAvailableLibraryTree = ${openAvailableLibraryTree.toString()}`,
+  );
   await context.addInitScript(installObserver, {
     user: session.user,
     locale,
@@ -79,18 +105,22 @@ async function prepared(scenario, device, locale, target = scenario.target) {
   return { context, page: await context.newPage(), base, device, locale };
 }
 async function openedTree(c) {
-  if (c.device !== "mobile") return;
-  const drawer = c.page.getByRole("dialog", { name: /^(Filters|Filtros)$/ });
-  if ((await drawer.isVisible()) && (await drawer.getAttribute("data-state")) === "open") return;
-  if (await drawer.isVisible()) await drawer.waitFor({ state: "hidden" });
-  await c.page.getByRole("button", { name: /^(Filters|Filtros)$/, exact: true }).click();
+  if (c.device === "mobile")
+    await c.page.waitForFunction(openAvailableLibraryTree, null, { polling: "raf" });
 }
+
 async function observed(c, kind) {
   try {
-    await openedTree(c);
     await c.page.waitForFunction(
-      () => window.libraryObservation.complete !== null || window.libraryObservation.errors.length,
-      null,
+      (mobile) => {
+        // Continue across a first-install document restart. Opening is an
+        // immediate browser gesture, without the driver's actionability delay.
+        if (mobile) window.openAvailableLibraryTree();
+        return (
+          window.libraryObservation.complete !== null || window.libraryObservation.errors.length
+        );
+      },
+      c.device === "mobile",
       { timeout: 20000, polling: "raf" },
     );
     if (!baseline && kind !== "page")

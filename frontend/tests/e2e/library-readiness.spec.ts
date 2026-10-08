@@ -1,10 +1,12 @@
 /** Diagnostic fault injection verifies readiness; acceptance timings use real API responses. */
+import { writeFile } from "node:fs/promises";
 import { expect, test, type Page } from "@playwright/test";
 import { useMockApi } from "./_setup";
 import {
   currentNavigationStart,
   installObserver,
   observeInteraction,
+  openAvailableLibraryTree,
 } from "../../scripts/library-performance/observer.mjs";
 import { aCollectionNode, aModelListItem } from "../../src/test-support/factories";
 
@@ -22,6 +24,25 @@ test.beforeEach(async ({ page }) => {
   await page.addInitScript(`window.currentNavigationStart = ${currentNavigationStart.toString()}`);
 });
 
+test.afterEach(async ({ page }, info) => {
+  if (info.status === info.expectedStatus) return;
+  const state = await page.evaluate(() => ({
+    history: history.state,
+    marks: performance
+      .getEntriesByType("mark")
+      .filter((entry): entry is PerformanceMark => entry instanceof PerformanceMark)
+      .map((entry) => ({ ...entry.toJSON(), detail: entry.detail })),
+    images: [...document.querySelectorAll("[data-library-thumbnail]")].map((node) => ({
+      state: node.getAttribute("data-library-thumbnail"),
+      complete: node.querySelector("img")?.complete,
+      width: node.querySelector("img")?.naturalWidth,
+    })),
+  }));
+  const path = info.outputPath("readiness-state.json");
+  await writeFile(path, JSON.stringify(state, null, 2));
+  await info.attach("readiness-state", { path, contentType: "application/json" });
+});
+
 async function phases(page: Page, phase: string) {
   return page.evaluate((name) => {
     const start = window.currentNavigationStart();
@@ -34,6 +55,21 @@ async function phases(page: Page, phase: string) {
 }
 
 test.describe("Library readiness", () => {
+  test("opens only an immediately usable mobile tree control", async ({ page }) => {
+    await page.setContent(`<main>
+      <button style="display:none">Filters</button>
+      <button id="visible-filter" disabled onclick="this.dataset.clicked='yes'">Filters</button>
+      <div id="cover" style="position:fixed;inset:0;background:white"></div>
+    </main>`);
+    expect(await page.evaluate(openAvailableLibraryTree)).toBe(false);
+    await page.locator("#visible-filter").evaluate((node) => node.removeAttribute("disabled"));
+    expect(await page.evaluate(openAvailableLibraryTree)).toBe(false);
+    await page.locator("#cover").evaluate((node) => node.remove());
+    expect(await page.evaluate(openAvailableLibraryTree)).toBe(true);
+    await expect(page.locator("#visible-filter")).toHaveAttribute("data-clicked", "yes");
+    await expect(page.locator("button").first()).not.toHaveAttribute("data-clicked", "yes");
+  });
+
   test("selects committed navigation instead of preparation order", async ({ page }) => {
     await page.route("**/", (route) =>
       route.fulfill({ contentType: "text/html", body: "<main>Ready</main>" }),

@@ -78,6 +78,8 @@ function browseReceipts(client: QueryClient) {
 
 export interface LibraryAuthorityOptions {
   enabled?: boolean;
+  /** Connect notifications after initial critical rendering; authority probes stay immediate. */
+  eventsReady?: boolean;
   /** The browse owner replaces its page explicitly; a notice never reorders it. */
   onRefresh: () => void | Promise<void>;
   /** Called after scope retirement. Re-verify getMe/roles here; handle its failure. */
@@ -93,7 +95,7 @@ export interface LibraryAuthorityOptions {
  */
 export function useLibraryAuthority(
   presentation: LibraryBrowsePage | null,
-  { enabled = true, onRefresh, onAuthorityRetired }: LibraryAuthorityOptions,
+  { enabled = true, eventsReady = true, onRefresh, onAuthorityRetired }: LibraryAuthorityOptions,
 ) {
   const client = useQueryClient();
   const owner = browseReceipts(client);
@@ -152,19 +154,22 @@ export function useLibraryAuthority(
     };
   }, [active, boundary, client, owner, receiptSequence, refetch, sessionVersion]);
 
+  const [hasPresentation, setHasPresentation] = useState(active && eventsReady);
+  if (active && eventsReady && !hasPresentation) setHasPresentation(true);
+  const connectEvents = enabled && hasPresentation && sessionVersion === mountedSession;
   const activePresentation = useRef(active);
   useLayoutEffect(() => {
     activePresentation.current = active;
   }, [active]);
   useEffect(() => {
-    if (!enabled || sessionVersion !== mountedSession) return;
+    if (!connectEvents) return;
     // Keep the session transport while the next page is loading. Reopening it
     // on every destination competes with thumbnails and repeats the resync probe.
     return subscribeEvents((notice) => {
       if (notice.type === "resync" && activePresentation.current)
         void refetch({ cancelRefetch: false });
     });
-  }, [enabled, mountedSession, sessionVersion, refetch]);
+  }, [connectEvents, refetch]);
 
   const observation = query.data;
   const current =

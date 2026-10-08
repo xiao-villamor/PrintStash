@@ -23,6 +23,62 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("ProtectedThumbnail", () => {
+  it("waits for load when early decoding cannot start yet", async () => {
+    const decoder = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new DOMException("Loading not started", "EncodingError"))
+      .mockResolvedValue(undefined);
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "decode");
+    Object.defineProperty(HTMLImageElement.prototype, "decode", {
+      configurable: true,
+      value: decoder,
+    });
+    try {
+      render(
+        <ProtectedThumbnail
+          path="/pending/decode"
+          alt="Pending"
+          placeholder={<span>Missing</span>}
+        />,
+      );
+      const image = await screen.findByAltText("Pending");
+      await waitFor(() => expect(decoder).toHaveBeenCalledOnce());
+      expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("pending");
+      await act(async () => fireEvent.load(image));
+      expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("ready");
+    } finally {
+      if (descriptor) Object.defineProperty(HTMLImageElement.prototype, "decode", descriptor);
+      else Reflect.deleteProperty(HTMLImageElement.prototype, "decode");
+    }
+  });
+
+  it("publishes a decoded cached image without another load event", async () => {
+    const decoded = Promise.withResolvers<void>();
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "decode");
+    Object.defineProperty(HTMLImageElement.prototype, "decode", {
+      configurable: true,
+      value: () => decoded.promise,
+    });
+    try {
+      render(
+        <ProtectedThumbnail
+          path="/cached/decode"
+          alt="Cached"
+          placeholder={<span>Missing</span>}
+        />,
+      );
+      const image = await screen.findByAltText("Cached");
+      expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("pending");
+      await act(async () => decoded.resolve());
+      await waitFor(() =>
+        expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("ready"),
+      );
+    } finally {
+      if (descriptor) Object.defineProperty(HTMLImageElement.prototype, "decode", descriptor);
+      else Reflect.deleteProperty(HTMLImageElement.prototype, "decode");
+    }
+  });
+
   it("reports an image ready only after decode", async () => {
     const decoded = Promise.withResolvers<void>();
     render(<ProtectedThumbnail path="/thumbnail" alt="Part" placeholder={<span>Missing</span>} />);

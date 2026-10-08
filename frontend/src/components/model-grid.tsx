@@ -1000,6 +1000,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     });
   }, [refreshAuth]);
   const authority = useLibraryAuthority(browseReady ? (modelQuery.data?.pages[0] ?? null) : null, {
+    eventsReady: startup.canLoad("activity"),
     onRefresh: () => reading.refresh(refresh),
     onAuthorityRetired,
   });

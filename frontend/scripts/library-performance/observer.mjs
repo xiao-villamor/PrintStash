@@ -215,3 +215,28 @@ export function currentNavigationStart() {
     performance.getEntriesByName(`printstash:navigation:${current.navigation}:start`)[0] ?? null
   );
 }
+
+/** A zero-reaction-time mobile gesture; readiness is still observed independently. */
+export function openAvailableLibraryTree() {
+  const drawer = [...document.querySelectorAll('[role="dialog"]')].find((node) =>
+    /^(Filters|Filtros)$/.test(node.getAttribute("aria-label") ?? ""),
+  );
+  if (drawer) return drawer.getAttribute("data-state") === "open";
+  const button = [...document.querySelectorAll("main button")].find((node) => {
+    if (
+      !/^(Filters|Filtros)$/.test((node.getAttribute("aria-label") ?? node.textContent).trim()) ||
+      node.disabled
+    )
+      return false;
+    const bounds = node.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return false;
+    const hit = document.elementFromPoint(
+      bounds.left + bounds.width / 2,
+      bounds.top + bounds.height / 2,
+    );
+    return hit !== null && node.contains(hit);
+  });
+  if (!button) return false;
+  button.click();
+  return true;
+}

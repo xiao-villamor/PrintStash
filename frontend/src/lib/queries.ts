@@ -157,11 +157,23 @@ export function useCollectionChildren(parentId: number | null, options?: { enabl
 /** The collection at `path` and its ancestors; idle while `path` is null. */
 export function useCollectionLookup(path: string | null) {
   const api = useQueryApi();
+  const client = useQueryClient();
   return useQuery<CollectionLookupRead>({
     queryKey: queryKeys.collectionLookup(path),
-    queryFn: ({ signal }) => {
+    queryFn: async ({ signal }) => {
       if (path === null || path === "") throw new Error("Collection lookup requires a path");
-      return api.lookupCollection(path, { signal });
+      const lookup = await api.lookupCollection(path, { signal });
+      signal.throwIfAborted();
+      // An authorized leaf already proves the entire child page is empty. Seed
+      // the ordinary Query entry, so navigation avoids a serial redundant read
+      // while mutations/focus still use its normal invalidation and freshness.
+      if (lookup.collection.child_count === 0)
+        client.setQueryData<InfiniteData<CollectionPage, string | null>>(
+          queryKeys.collectionChildren(lookup.collection.id),
+          (existing) =>
+            existing ?? { pages: [{ items: [], next_cursor: null }], pageParams: [null] },
+        );
+      return lookup;
     },
     enabled: path !== null && path !== "",
     placeholderData: keepPreviousData,

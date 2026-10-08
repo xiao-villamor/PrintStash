@@ -27,7 +27,11 @@ The config supplies explicit expected destinations, ordered entry identities,
 branch/leaf names and media availability (`available`, `pending`, `missing`).
 The observer checks the destination and corpus before accepting images. It
 calls `decode()` and observes painted frames independently of application marks.
-Application marks are also mandatory in the after run. Pending derivatives are
+Application marks are also mandatory in the after run. New browser contexts
+restore a session obtained through a real API login while starting with empty
+browser caches; each document validates it through the real `/auth/me` endpoint.
+Reports record hashes of the measurement scripts as well as the application image
+and commit. Pending derivatives are
 reported separately from missing derivatives and failed expected downloads.
 
 For disposable fixture servers, `tests.factories.library_startup` now supports
@@ -156,9 +160,18 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 67 | rejects phases from a previous navigation | Error | Earlier complete marks remain | Acceptance rejects stale phases | Repo | ✅ |
 | 68 | test_rechecks_the_actor_after_a_previous_badge_read | Error | A prior reader or newly granted role | Each query applies current actor permissions | Backend integration | ✅ |
 | 69 | keeps the events connection across a pending destination | Edge | Next page is loading | One connection, no inactive probe, fresh authority on arrival | Frontend unit | ✅ |
-
 | 70 | selects committed navigation instead of preparation order | Edge | Concurrently prepared generation has a later start time | Only the committed, matching history entry supplies phases; inactive entries rejected | Playwright | ✅ |
 | 71 | completes the committed mobile search destination | Happy | Search followed by opening the drawer | Current history destination has a completion mark | Playwright | ✅ |
+| 72 | waits for the first presentation before connecting events | Edge | Initial page still pending | No event ticket competes with the first page; later pages retain their connection | Frontend unit | ✅ |
+| 73 | publishes a decoded cached image without another load event | Happy | Cached source with pending decode | Ready after decode resolution without requiring another load | Frontend unit | ✅ |
+| 74 | waits for load when early decoding cannot start yet | Edge | Decoder rejects before load starts | Pending until load, then decoded image becomes ready | Frontend unit | ✅ |
+| 75 | opens only an immediately usable mobile tree control | Edge | Hidden, disabled or covered filter button | No click until visible enabled control passes hit testing | Playwright | ✅ |
+| 76 | refreshes a changed library deliberately | Happy | Foreground event after library revision changes | Old page stays until explicit refresh; no stale continuation | Playwright | ✅ |
+| 77 | checks permissions immediately while deferring the first events connection | Edge | Initial viewport unfinished | Authority checked immediately; one connection after readiness retained through later navigation | Frontend unit | ✅ |
+| 78 | reuses an authorized empty child level and refetches it after invalidation | Happy | Lookup confirms zero children, then collection changes | No serial empty read; invalidation retrieves new children | Frontend integration | ✅ |
+| 79 | preserves already downloaded child pages when looking up a leaf | Edge | Child pages and cursors already cached | Existing pages remain intact | Frontend integration | ✅ |
+| 80 | does not seed a leaf response that completes after cancellation | Error | Cancelled lookup resolves late | No cache data published | Frontend integration | ✅ |
+| 81 | still reads children when the selected collection is not a leaf | Happy | Lookup reports children | Normal bounded child read publishes results | Frontend integration | ✅ |
 
 The matrix remains open until final gates and deployment acceptance finish.
 
@@ -169,3 +182,17 @@ also requires its history key to match the browser's current entry. Thumbnail
 readiness reuses the decoded state owned by `ProtectedThumbnail`, avoiding a
 second per-image decode pass across frames; the independent browser observer
 still calls `decode()` itself.
+
+Mobile acceptance opens the tree at the first frame where its button is enabled,
+visible and passes hit testing. This models the agreed immediate second gesture
+without adding driver actionability waits. It does not shorten drawer motion or
+change the independent full-view checks. The before and after cohorts must both
+use this protocol; older mobile samples that used Playwright click waits remain
+separate and must not be mixed into the comparison.
+
+An authorized lookup that reports zero child collections seeds the ordinary empty
+child-page Query entry. It does not replace already downloaded pages or seed a
+cancelled response; normal invalidation still refetches that entry. This removes
+one serial round trip when opening a leaf collection. The first event connection
+waits for secondary reads to be admitted, while authority checks remain immediate;
+once connected, it remains open across pending destinations.

@@ -41,16 +41,19 @@ let socket: Socket;
 function Probe({
   presentation = page,
   enabled = true,
+  eventsReady = true,
   refresh = () => {},
   retired = () => {},
 }: {
   presentation?: LibraryBrowsePage | null;
   enabled?: boolean;
+  eventsReady?: boolean;
   refresh?: () => void;
   retired?: () => void;
 }) {
   const state = useLibraryAuthority(presentation, {
     enabled,
+    eventsReady,
     onRefresh: refresh,
     onAuthorityRetired: retired,
   });
@@ -84,6 +87,37 @@ async function settled() {
 }
 
 describe("useLibraryAuthority", () => {
+  it("checks permissions immediately while deferring the first events connection", async () => {
+    const opened = vi.fn<() => Promise<EventSocket>>(async () => socket);
+    setEventSocketFactory(opened);
+    const app = renderApp(<Probe eventsReady={false} />, {
+      routes: { [revisionPath]: json(same) },
+    });
+    await settled();
+    expect(app.requests().filter((x) => x.url.includes("/revision"))).toHaveLength(1);
+    expect(opened).not.toHaveBeenCalled();
+    app.rerender(<Probe />);
+    await waitFor(() => expect(opened).toHaveBeenCalledTimes(1));
+    app.rerender(<Probe eventsReady={false} />);
+    act(() => socket.resync());
+    await settled();
+    expect(app.requests().filter((x) => x.url.includes("/revision"))).toHaveLength(2);
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for the first presentation before connecting events", async () => {
+    const opened = vi.fn<() => Promise<EventSocket>>(async () => socket);
+    setEventSocketFactory(opened);
+    const app = renderApp(<Probe presentation={null} />, {
+      routes: { [revisionPath]: json(same) },
+    });
+    await settled();
+    expect(opened).not.toHaveBeenCalled();
+    app.rerender(<Probe />);
+    await settled();
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the events connection across a pending destination", async () => {
     const opened = vi.fn<() => Promise<EventSocket>>(async () => socket);
     setEventSocketFactory(opened);

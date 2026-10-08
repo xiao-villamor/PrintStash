@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import { useAuthenticatedAsset } from "@/lib/use-authenticated-asset-url";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
 import { cn } from "@/lib/utils";
@@ -30,17 +30,34 @@ export function ProtectedThumbnail({
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const failed = asset.status === "failed" || (url !== null && failedSource === url);
 
-  async function decode(image: HTMLImageElement) {
+  const decode = useCallback(async (image: HTMLImageElement, loaded = false) => {
     const source = image.getAttribute("src");
     if (!source) return;
+    const finalAttempt = loaded || image.complete;
     try {
       // decode() exists on the supported browser floor. jsdom has no decoder.
       await image.decode?.();
-      if (image.isConnected && image.getAttribute("src") === source) setDecoded(source);
+      if (image.isConnected && image.getAttribute("src") === source) {
+        setDecoded(source);
+        setFailedSource((failed) => (failed === source ? null : failed));
+      }
     } catch {
-      if (image.isConnected && image.getAttribute("src") === source) setFailedSource(source);
+      // A newly assigned lazy image can reject decode before its load starts.
+      // Its load/error event owns the final outcome; a valid retry clears failure.
+      if (finalAttempt && image.isConnected && image.getAttribute("src") === source)
+        setFailedSource(source);
     }
-  }
+  }, []);
+  const bindImage = useCallback(
+    (image: HTMLImageElement | null) => {
+      if (!image || image.getAttribute("src") !== url) return;
+      // Admission already owns network priority. Start decoding as soon as this
+      // source is attached, without waiting for a later image load event.
+      if (image.decode !== undefined || (image.complete && image.naturalWidth > 0))
+        void decode(image);
+    },
+    [decode, url],
+  );
 
   return (
     <div
@@ -62,11 +79,9 @@ export function ProtectedThumbnail({
           )}
           onError={(event) => setFailedSource(event.currentTarget.getAttribute("src"))}
           onLoad={(event) => {
-            void decode(event.currentTarget);
+            void decode(event.currentTarget, true);
           }}
-          ref={(image) => {
-            if (image?.complete && image.naturalWidth > 0) void decode(image);
-          }}
+          ref={bindImage}
         />
       ) : (
         placeholder
