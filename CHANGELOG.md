@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Start selected collection reads before rendering their destination, cancel abandoned
+  reads, and keep pointer prefetch scheduling outside the grid's rendering path.
+- Optimize the restored tree's rendering with explicit locale dependencies, preserving
+  live language changes, drag-and-drop and pagination. Reuse immutable card projection
+  statements with fresh page/user parameters; avoid constructing unused tree ancestry.
+
 - Reuse immutable ancestry and similarity query structure while reading current
   permissions on every request. Avoid rerendering an unselected departing grid
   before starting a collection navigation.

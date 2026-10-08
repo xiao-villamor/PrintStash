@@ -6,6 +6,21 @@ import { useIntentPrefetch } from "@/lib/use-intent-prefetch";
 afterEach(() => vi.useRealTimers());
 
 describe("useIntentPrefetch", () => {
+  it("keeps pointer intent outside the rendering path", () => {
+    vi.useFakeTimers();
+    const loads: string[] = [];
+    let renders = 0;
+    const { result } = renderHook(() => {
+      renders++;
+      return useIntentPrefetch((path) => loads.push(path), true);
+    });
+    const initialRenders = renders;
+    act(() => result.current("parts"));
+    act(() => vi.advanceTimersByTime(150));
+    expect(loads).toEqual(["parts"]);
+    expect(renders).toBe(initialRenders);
+  });
+
   it("waits for sustained intent", () => {
     vi.useFakeTimers();
     const loads: string[] = [];
@@ -25,6 +40,39 @@ describe("useIntentPrefetch", () => {
     act(() => result.current("current"));
     act(() => vi.advanceTimersByTime(150));
     expect(loads).toEqual(["current"]);
+  });
+  it("preserves sustained intent when focus follows the pointer", () => {
+    vi.useFakeTimers();
+    const loads: string[] = [];
+    const { result } = renderHook(() => useIntentPrefetch((path) => loads.push(path), true));
+    act(() => result.current("parts"));
+    act(() => vi.advanceTimersByTime(100));
+    act(() => result.current("parts"));
+    act(() => vi.advanceTimersByTime(50));
+    expect(loads).toEqual(["parts"]);
+  });
+  it("uses the current reader after the intent began", () => {
+    vi.useFakeTimers();
+    const loads: string[] = [];
+    const { result, rerender } = renderHook(
+      ({ prefix }) => useIntentPrefetch((path) => loads.push(`${prefix}:${path}`), true),
+      { initialProps: { prefix: "old" } },
+    );
+    act(() => result.current("parts"));
+    rerender({ prefix: "current" });
+    act(() => vi.advanceTimersByTime(150));
+    expect(loads).toEqual(["current:parts"]);
+  });
+  it("cancels the pending timer on unmount", () => {
+    vi.useFakeTimers();
+    const loads: string[] = [];
+    const { result, unmount } = renderHook(() =>
+      useIntentPrefetch((path) => loads.push(path), true),
+    );
+    act(() => result.current("parts"));
+    unmount();
+    act(() => vi.advanceTimersByTime(150));
+    expect(loads).toEqual([]);
   });
   it("cancels abandoned intent", () => {
     vi.useFakeTimers();

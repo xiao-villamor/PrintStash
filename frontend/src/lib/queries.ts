@@ -21,7 +21,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { InfiniteData, QueryKey } from "@tanstack/react-query";
+import type { InfiniteData, QueryClient, QueryKey } from "@tanstack/react-query";
 
 import {
   getCollectionReadme,
@@ -154,11 +154,13 @@ export function useCollectionChildren(parentId: number | null, options?: { enabl
   });
 }
 
-/** The collection at `path` and its ancestors; idle while `path` is null. */
-export function useCollectionLookup(path: string | null) {
-  const api = useQueryApi();
-  const client = useQueryClient();
-  return useQuery<CollectionLookupRead>({
+/** Shared lookup and empty child-page publication for observers and explicit navigation. */
+export function collectionLookupOptions(
+  path: string | null,
+  client: QueryClient,
+  api: Pick<QueryApi, "lookupCollection"> = defaultQueryApi,
+) {
+  return queryOptions({
     queryKey: queryKeys.collectionLookup(path),
     queryFn: async ({ signal }) => {
       if (path === null || path === "") throw new Error("Collection lookup requires a path");
@@ -175,6 +177,15 @@ export function useCollectionLookup(path: string | null) {
         );
       return lookup;
     },
+  });
+}
+
+/** The collection at `path` and its ancestors; idle while `path` is null. */
+export function useCollectionLookup(path: string | null) {
+  const api = useQueryApi();
+  const client = useQueryClient();
+  return useQuery({
+    ...collectionLookupOptions(path, client, api),
     enabled: path !== null && path !== "",
     placeholderData: keepPreviousData,
   });

@@ -24,7 +24,7 @@ from sqlmodel import Session
 import app.modules.library.model_views.listing as models_listing
 import app.modules.library.model_views.pagination as models_pagination
 import app.modules.library.model_views.trash as models_trash
-from app.db.models import FileType, Metadata, Model, PrintJobState, User
+from app.db.models import FileType, Metadata, Model, ModelStar, PrintJobState, User
 from app.schemas.models import ModelFilters, ModelSort
 from tests.factories import (
     build_file,
@@ -422,6 +422,51 @@ class TestListTrashed:
 
 
 class TestReadItemsByIds:
+    def test_rebinds_favorites_for_the_current_reader(
+        self, db_session, make_user, make_model
+    ):
+        first = make_user(superuser=True)
+        second = make_user(superuser=True)
+        model = make_model("Shared card")
+        db_session.add(ModelStar(user_id=first.id, model_id=model.id))
+        db_session.commit()
+
+        assert models_listing.read_items_by_ids(db_session, first, [model.id])[
+            0
+        ].starred
+        assert not models_listing.read_items_by_ids(db_session, second, [model.id])[
+            0
+        ].starred
+        db_session.add(ModelStar(user_id=second.id, model_id=model.id))
+        db_session.commit()
+        assert models_listing.read_items_by_ids(db_session, second, [model.id])[
+            0
+        ].starred
+
+    def test_rebinds_artifact_projection_for_each_page(
+        self, db_session, make_user, make_model
+    ):
+        actor = make_user(superuser=True)
+        first = make_model("First card")
+        second = make_model("Second card")
+        first_file = build_file(db_session, first, file_type=FileType.STL)
+        db_session.commit()
+        page = models_listing.read_items_by_ids(db_session, actor, [first.id])
+        assert (page[0].id, page[0].file_count, page[0].mesh_file_id) == (
+            first.id,
+            1,
+            first_file.id,
+        )
+
+        second_file = build_file(db_session, second, file_type=FileType.STL)
+        db_session.commit()
+        page = models_listing.read_items_by_ids(db_session, actor, [second.id])
+        assert (page[0].id, page[0].file_count, page[0].mesh_file_id) == (
+            second.id,
+            1,
+            second_file.id,
+        )
+
     @pytest.mark.parametrize("statistics", ("none", "empty", "small"))
     @pytest.mark.parametrize("unrelated_tags", (False, True))
     def test_bounds_card_work_to_requested_identities(

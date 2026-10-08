@@ -356,8 +356,10 @@ def _patch_engine(
     # Query templates contain no rows, but keep their construction lifetime
     # inside each case when a test changes mapper or database configuration.
     from app.modules.library.collection_tree import _label_ancestry
+    from app.modules.library.model_views.projections import _list_related_queries
     from app.modules.similarity.candidates import _endpoint_queries, _evidence_predicate
 
+    _list_related_queries.cache_clear()
     _label_ancestry.cache_clear()
     _endpoint_queries.cache_clear()
     _evidence_predicate.cache_clear()

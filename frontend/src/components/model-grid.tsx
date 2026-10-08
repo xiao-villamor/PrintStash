@@ -1,5 +1,6 @@
 "use client";
 
+import { useLibraryNavigationReads } from "@/features/library/navigation-reads";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
 
 import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
@@ -777,8 +778,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     rememberLastView(docView);
   }, [docView]);
 
+  const startNavigationReads = useLibraryNavigationReads();
   function handleCollectionChange(path: string | null) {
     if (path === selectedCollection) return;
+    startNavigationReads(path, {
+      ...folderModelFilters(path),
+      view: libraryView,
+      limit: PAGE_SIZE,
+      sort: sortKey,
+    });
     // An already empty selection must not render the departing grid urgently
     // before Router can commit the destination and start its critical reads.
     setSelectedIds((current) => (current.size === 0 ? current : new Set()));

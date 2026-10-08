@@ -787,6 +787,25 @@ class TestRestore:
         assert leaves[grandchild.id]["items"][0]["edit_epoch"] == model.edit_epoch
         assert leaves[grandchild.id]["items"][0]["edit_version"] == model.edit_version
 
+    def test_restores_empty_expanded_branches_without_filters(
+        self, client, auth_headers, make_collection
+    ):
+        root = make_collection("Empty root")
+        child = make_collection("Empty child", parent=root)
+        response = client.post(
+            RESTORE,
+            headers=auth_headers,
+            json={"expanded_paths": [root.path, child.path]},
+        )
+        assert response.status_code == 200, response.text
+        pages = {
+            row["parent_id"]: row["page"] for row in response.json()["collections"]
+        }
+        assert [row["id"] for row in pages[None]["items"]] == [root.id]
+        assert [row["id"] for row in pages[root.id]["items"]] == [child.id]
+        assert pages[child.id]["items"] == []
+        assert all(page["parent_direct_entry_count"] == 0 for page in pages.values())
+
     def test_returns_the_restored_parent_label_for_entries(
         self, client, auth_headers, make_collection, make_model
     ):

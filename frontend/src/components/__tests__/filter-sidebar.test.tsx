@@ -3,6 +3,7 @@
  * Counts describe the whole visible branch; pages describe only downloaded
  * rows. Global name search is independent of which branches are open.
  */
+import { setLocale } from "@/lib/locale";
 import { queryKeys } from "@/lib/query-client";
 import { outlinerRoutes } from "@/test-support/outliner";
 
@@ -145,6 +146,14 @@ async function openFolder(user: ReturnType<typeof userEvent.setup>, name: string
 }
 
 describe("FilterSidebar", () => {
+  it("translates an already mounted Multipart Model leaf", async () => {
+    renderSidebar({ multipartModels: [multipartSet()] });
+    const leaf = await screen.findByRole("button", { name: "Dragon figure" });
+    expect(leaf).toHaveAttribute("title", "Dragon figure · Multipart set");
+    act(() => setLocale("es"));
+    expect(leaf).toHaveAttribute("title", "Dragon figure · Conjunto multiparte");
+  });
+
   it("keeps the gesture version when an outliner read changes during dragging", async () => {
     const user = userEvent.setup();
     const models = [aOutlinerModel({ id: 1, name: "Original model", edit_version: 7 })];

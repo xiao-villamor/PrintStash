@@ -249,12 +249,15 @@ def _filtered(query: OutlinerQuery) -> bool:
 
 
 def _folders(
-    session: Session, user: User, query: OutlinerQuery, subtree, *, visible=None
+    session: Session, user: User, query: OutlinerQuery, entries, *, visible=None
 ):
     if visible is None:
         visible = _visible(session, user)
     folders = select(col(Collection.id)).where(col(Collection.id).in_(visible))
     if _filtered(query):
+        # Empty folders remain navigable without filters; ancestry is needed
+        # only to keep branches containing matching descendants.
+        _, subtree = _counts(entries)
         folders = folders.where(
             col(Collection.id).in_(select(subtree.c.id).where(subtree.c.count > 0))
         )
@@ -396,8 +399,7 @@ def collections(
 ) -> OutlinerCollectionPage:
     _require_parent(session, user, query.parent_id)
     entries = _entries(session, user, query, counts_only=True)
-    _, subtree = _counts(entries)
-    eligible = _folders(session, user, query, subtree)
+    eligible = _folders(session, user, query, entries)
     source = select(
         col(Collection.id),
         col(Collection.name),
@@ -485,8 +487,7 @@ def _entry_rows(session: Session, user: User, query: OutlinerQuery, *, searching
         assert query.q is not None
         needle = query.q.strip()
         source = source.where(entries.c.name.icontains(needle, autoescape=True))
-        _, subtree = _counts(entries)
-        folder_ids = _folders(session, user, query, subtree)
+        folder_ids = _folders(session, user, query, entries)
         folders = select(
             col(Collection.id),
             col(Collection.name),
@@ -563,8 +564,7 @@ def restore(
     # Aggregates materialize only collection IDs, never names or edit tokens for
     # every Model in the library. Rich rows are needed only for the entry pages.
     entries = _entries(session, user, query, counts_only=True, visible=visible)
-    _, subtree = _counts(entries)
-    eligible = _folders(session, user, query, subtree, visible=visible)
+    eligible = _folders(session, user, query, entries, visible=visible)
     # Known parents are authorized already. Classify the bounded returned
     # branches with their IDs; do not recompute the entire permission scope in
     # each CASE expression for every collection in the library.

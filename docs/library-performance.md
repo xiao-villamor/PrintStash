@@ -268,6 +268,19 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 140 | rechecks labels after a previous reader | Error | An administrator and a restricted reader request the same path before a grant expands | Each label includes only that reader's currently visible ancestry | Integration | ✅ `test_rechecks_labels_after_a_previous_reader` |
 | 141 | rechecks candidate visibility after lifecycle changes | Error | Candidate endpoint is trashed after its badge was read | The next badge read excludes the now hidden pair | Integration | ✅ `test_rechecks_candidate_visibility_after_lifecycle_changes` |
 | 142 | clears Model selection when entering another collection | Edge | Selected Model, sidebar navigation to a different collection | No hidden Model selection remains after navigation | Frontend unit | ✅ `model-grid.test.tsx::clears Model selection when entering another collection` |
+| 143 | keeps pointer intent outside the rendering path | Edge | Sustained folder pointer intent | The read begins after 150 ms without rendering the grid | Frontend unit | ✅ `use-intent-prefetch.test.tsx::keeps pointer intent outside the rendering path` |
+| 144 | preserves sustained intent when focus follows the pointer | Edge | Same folder receives hover then focus | The original 150 ms intent is preserved | Frontend unit | ✅ `use-intent-prefetch.test.tsx::preserves sustained intent when focus follows the pointer` |
+| 145 | uses the current reader after the intent began | Edge | Reader changes during the intent delay | Only the current reader receives the destination | Frontend unit | ✅ `use-intent-prefetch.test.tsx::uses the current reader after the intent began` |
+| 146 | cancels the pending timer on unmount | Edge | Library leaves before intent settles | No speculative request begins afterward | Frontend unit | ✅ `use-intent-prefetch.test.tsx::cancels the pending timer on unmount` |
+| 147 | starts the selected destination before its view mounts | Happy | Explicit folder selection; next view not mounted | Lookup and browse begin immediately and are reused on mount | Frontend unit | ✅ `navigation-reads.test.tsx::starts the selected destination before its view mounts` |
+| 148 | deduplicates repeated selection before the destination mounts | Edge | Same folder selected twice during a pending read | One read supplies the mounted destination | Frontend unit | ✅ `navigation-reads.test.tsx::deduplicates repeated selection before the destination mounts` |
+| 149 | cancels an unmounted destination when a newer one is selected | Edge | Consecutive folder selections | Abandoned response cannot enter its Query cache | Frontend unit | ✅ `navigation-reads.test.tsx::cancels an unmounted destination when a newer one is selected` |
+| 150 | cancels unread work when the library unmounts | Edge | Lookup and browse pending on exit | Both unused transfers are cancelled | Frontend unit | ✅ `navigation-reads.test.tsx::cancels unread work when the library unmounts` |
+| 151 | discards destination reads from a retired session | Error | Session retires while the next folder is loading | No retired user data enters the new cache | Frontend unit | ✅ `navigation-reads.test.tsx::discards destination reads from a retired session` |
+| 152 | rebinds favorites for the current reader | Error | Two readers share a Model, then a favorite changes | Each read returns that user's current favorite | Integration | ✅ `test_rebinds_favorites_for_the_current_reader` |
+| 153 | rebinds artifact projection for each page | Edge | Different Model pages receive new Artifacts | Counts and mesh identity belong to the requested page | Integration | ✅ `test_rebinds_artifact_projection_for_each_page` |
+| 154 | restores empty expanded branches without filters | Happy | Empty parent and child are expanded | Both levels remain navigable with zero content counts | Integration | ✅ `test_restores_empty_expanded_branches_without_filters` |
+| 155 | translates an already mounted Multipart Model leaf | Edge | EN to ES while the optimized tree remains mounted | Existing leaf receives the Spanish accessible title | Frontend unit | ✅ `filter-sidebar.test.tsx::translates an already mounted Multipart Model leaf` |
 
 
 
@@ -402,3 +415,28 @@ and lifecycle changes; the final isolation reset was verified by three focused c
 The tree action browser selectors now target the row's accessible action rather
 than its former direct-sibling position; destination selection searches the bounded
 picker. All six affected real-browser flows pass. Host acceptance is still pending.
+
+
+The next measured increment starts explicit navigation reads before Router publishes
+its destination; the mounted lookup and ordered browse reuse those same Query entries.
+Repeated selection deduplicates, abandoned unmounted reads are cancelled, and session
+retirement discards both reads. Sustained pointer intent remains a 150 ms timer and
+no longer schedules a grid render. Seven card-projection statements now bind the
+current reader/page at execution instead of rebuilding their SQL structure. An
+isolated ten-call profile improved browse from 306 to 239 ms; results and permissions
+are never shared across requests. Unfiltered tree reads skip unused ancestry construction.
+
+Only annotated tree components use compiler memoization in the default build. A
+new test caught an imperative translation being retained after EN→ES; the optimized
+components now consume the locale-bound translator explicitly. The broad compiler
+mode failed the functional diagnostic and remains outside production acceptance.
+A manual leaf-only memoization experiment and parallel restore batches did not
+improve the measured path and were removed or rejected.
+
+Focused verification for this increment: 204 grid/navigation/intent cases, 68 tree
+cases, 38 navigation/readiness browser cases, 35 card projection cases, 151 API and
+PostgreSQL cases, and the new empty-restoration case passed. Typecheck, lint and
+production build passed. Diagnostic comparisons use a separate nginx frontend on
+the same real API; they are not final acceptance. The tree comparison reduced the
+mobile deep reload median from 533 to 493 ms; desktop remains about 530 ms before
+the new backend changes. Full exact-image acceptance remains pending.

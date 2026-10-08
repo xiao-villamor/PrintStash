@@ -110,6 +110,7 @@ function DraggableModelLeaf({
   model: OutlinerModelRead;
   isDraggingThisModel: boolean;
 }) {
+  "use memo";
   useUiLocale();
   const router = useRouter();
   const { attributes, listeners, setNodeRef } = useDraggable({
@@ -144,7 +145,8 @@ function DraggableModelLeaf({
 }
 
 function MultipartLeaf({ multipart }: { multipart: OutlinerModelRead }) {
-  useUiLocale();
+  "use memo";
+  const { t: uiText } = useI18n();
   const router = useRouter();
 
   return (
@@ -174,6 +176,7 @@ function OutlinerLeaves({
   entries: OutlinerEntry[];
   dragging: DragPayload | null;
 }) {
+  "use memo";
   return entries.map((entry) =>
     entry.kind === "model" ? (
       <DraggableModelLeaf
@@ -269,7 +272,8 @@ function useTreeReadiness(ctx: TreeContext, key: string, status: StartupOutcome)
 }
 
 function EntryLevel({ collectionId, ctx }: { collectionId: number | null; ctx: TreeContext }) {
-  useUiLocale();
+  "use memo";
+  const { t: uiText } = useI18n();
   const query = useOutlinerEntries(
     { ...ctx.params, collection_id: collectionId ?? undefined },
     !ctx.restoring,
@@ -293,7 +297,8 @@ function EntryLevel({ collectionId, ctx }: { collectionId: number | null; ctx: T
 }
 
 function CollectionLevel({ parentId, ctx }: { parentId: number | null; ctx: TreeContext }) {
-  useUiLocale();
+  "use memo";
+  const { t: uiText } = useI18n();
   const query = useOutlinerCollections(
     {
       ...ctx.params,
@@ -418,7 +423,8 @@ function SearchResults({
 }
 
 function CollectionTreeRow({ node, ctx }: { node: OutlinerCollection; ctx: TreeContext }) {
-  useUiLocale();
+  "use memo";
+  const { t: uiText } = useI18n();
   const [confirming, setConfirming] = useState(false);
   const { selected, onSelect, onIntent, expanded, toggle, dragging, onDelete } = ctx;
 
@@ -696,8 +702,8 @@ export function FilterSidebarContent({
   libraryView,
   onLibraryViewChange,
 }: FilterSidebarProps) {
-  useUiLocale();
-  const { t } = useI18n();
+  "use memo";
+  const { t, locale } = useI18n();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
   const requestSecondary = startup.request;
@@ -928,7 +934,7 @@ export function FilterSidebarContent({
             : "bg-slate-400";
 
   const statusLabel = (status: string) =>
-    knownUiText(status.charAt(0).toUpperCase() + status.slice(1));
+    knownUiText(status.charAt(0).toUpperCase() + status.slice(1), locale);
 
   const statusTextColor = (s: string) =>
     s === "printing"
@@ -981,12 +987,12 @@ export function FilterSidebarContent({
           <section>
             <div className="flex items-center justify-between mb-2 pl-2 pr-1">
               <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                {uiText("Collections")}
+                {t("Collections")}
               </h3>
               <button
                 onClick={onCreateCollection}
                 className="p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
-                title={uiText("Create Collection")}
+                title={t("Create Collection")}
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
@@ -1014,14 +1020,14 @@ export function FilterSidebarContent({
                   <>
                     {restoreEnabled && restore.isError && (
                       <div role="status" className="py-1 text-xs text-muted-foreground">
-                        {uiText("Could not load this list.")}
+                        {t("Could not load this list.")}
                         <Button
                           variant="ghost"
                           size="sm"
                           disabled={restore.isFetching}
                           onClick={() => void restore.refetch()}
                         >
-                          {uiText("Retry")}
+                          {t("Retry")}
                         </Button>
                       </div>
                     )}
@@ -1048,14 +1054,14 @@ export function FilterSidebarContent({
               onFocusCapture={() => requestSecondary("filters")}
               onPointerDownCapture={() => requestSecondary("filters")}
               className="space-y-6"
-              aria-label={uiText("Filters")}
+              aria-label={t("Filters")}
               role="region"
             >
               {/* Printer */}
               {canViewPrinters && (
                 <section>
                   <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
-                    {uiText("Printer")}
+                    {t("Printer")}
                   </h3>
                   <div className="space-y-0.5">
                     <button
@@ -1082,7 +1088,7 @@ export function FilterSidebarContent({
                           strokeWidth="2"
                         />
                       </svg>
-                      {uiText("Any location")}
+                      {t("Any location")}
                     </button>
                     <div className="space-y-0.5">
                       <button
@@ -1113,13 +1119,13 @@ export function FilterSidebarContent({
                             strokeWidth="2"
                           />
                         </svg>
-                        <span className="font-medium">{uiText("On a printer")}</span>
+                        <span className="font-medium">{t("On a printer")}</span>
                       </button>
                       {printerExpanded && (
                         <div className="ml-4 border-l border-border">
                           {printers.length === 0 ? (
                             <p className="pl-4 py-1 text-2xs text-muted-foreground font-mono">
-                              {uiText("No printers configured")}
+                              {t("No printers configured")}
                             </p>
                           ) : (
                             printers.map((printer) => (
@@ -1164,7 +1170,7 @@ export function FilterSidebarContent({
                       }`}
                     >
                       <Folder className="h-4 w-4 mr-2 text-primary" />
-                      {uiText("Vault only")}
+                      {t("Vault only")}
                     </button>
                   </div>
                 </section>
@@ -1177,13 +1183,13 @@ export function FilterSidebarContent({
               {tags.length > 0 && (
                 <section>
                   <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
-                    {uiText("Tags")}
+                    {t("Tags")}
                   </h3>
                   <div className="relative mb-2">
                     <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                     <input
                       type="text"
-                      placeholder={uiText("Filter tags...")}
+                      placeholder={t("Filter tags...")}
                       value={tagFilter}
                       onChange={(e) => {
                         setTagFilter(e.target.value);
@@ -1203,7 +1209,7 @@ export function FilterSidebarContent({
                   </div>
                   {filteredTags.length === 0 ? (
                     <p className="text-3xs text-muted-foreground font-mono px-1 py-2">
-                      {uiText("No matching tags.")}
+                      {t("No matching tags.")}
                     </p>
                   ) : (
                     <div className="flex flex-wrap gap-1.5">
@@ -1237,8 +1243,8 @@ export function FilterSidebarContent({
                       className="mt-2 w-full text-center font-mono text-3xs text-muted-foreground hover:text-foreground transition-colors py-1"
                     >
                       {showAllTags
-                        ? uiText("Show fewer")
-                        : uiText("Show all {value1} tags", { value1: String(filteredTags.length) })}
+                        ? t("Show fewer")
+                        : t("Show all {value1} tags", { value1: String(filteredTags.length) })}
                     </button>
                   )}
                 </section>
