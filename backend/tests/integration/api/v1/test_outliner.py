@@ -737,6 +737,23 @@ class TestOutlinerEditingBase:
 
 
 class TestRestore:
+    @pytest.mark.parametrize(
+        "with_folder", [False, True], ids=["unfiled-only", "with-folder"]
+    )
+    def test_restores_unfiled_counts_and_entries(
+        self, client, auth_headers, make_model, make_collection, with_folder
+    ):
+        model = make_model("Unfiled")
+        if with_folder:
+            make_collection("Folder")
+
+        response = client.post(RESTORE, headers=auth_headers, json={})
+
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["collections"][0]["page"]["parent_direct_entry_count"] == 1
+        assert [row["id"] for row in body["entries"][0]["page"]["items"]] == [model.id]
+
     def test_restores_deep_expanded_branches_in_one_bounded_response(
         self, client, auth_headers, make_collection, make_model
     ):
@@ -766,6 +783,9 @@ class TestRestore:
         }
         assert [row["id"] for row in leaves[grandchild.id]["items"]] == [model.id]
         assert pages[grandchild.id]["parent_direct_entry_count"] == 1
+        assert leaves[grandchild.id]["items"][0]["name"] == model.name
+        assert leaves[grandchild.id]["items"][0]["edit_epoch"] == model.edit_epoch
+        assert leaves[grandchild.id]["items"][0]["edit_version"] == model.edit_version
 
     def test_returns_the_restored_parent_label_for_entries(
         self, client, auth_headers, make_collection, make_model
@@ -863,6 +883,7 @@ class TestRestore:
         parent = make_collection("Private")
         granted = make_collection("Granted", parent=parent)
         model = make_model("Visible", collection=granted)
+        make_model("Private unfiled model")
         viewer = make_user("restore-viewer")
         grant_role(viewer, granted, CollectionRole.VIEW)
 
@@ -881,6 +902,8 @@ class TestRestore:
             (granted.id, "Granted")
         ]
         assert root["revealed"]["id"] == granted.id
+        assert root["parent_direct_entry_count"] == 0
+        assert response.json()["entries"][0]["page"]["items"] == []
         assert response.json()["entries"][1]["page"]["items"][0]["id"] == model.id
         assert "Private" not in response.text
 
@@ -979,6 +1002,7 @@ class TestRestore:
         assert [
             (row["id"], row["subtree_entry_count"]) for row in pages[root.id]["items"]
         ] == [(child.id, 1)]
+        assert pages[root.id]["items"][0]["model_count"] == 2
         assert [
             row["id"] for row in response.json()["entries"][2]["page"]["items"]
         ] == [chosen.id]
@@ -1026,6 +1050,7 @@ class TestRestore:
         assert [
             row["kind"] for row in response.json()["entries"][1]["page"]["items"]
         ] == expected
+        assert response.json()["collections"][0]["page"]["items"][0]["model_count"] == 1
 
     def test_reveals_the_selected_folder_outside_a_restored_page(
         self, client, auth_headers, make_collection

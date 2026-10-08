@@ -386,19 +386,24 @@ test.describe("vault route", () => {
     ).toHaveLength(1);
   });
 
-  test("mobile vault skips the desktop outliner request", async ({ page }) => {
+  test("mobile vault prepares bounded tree roots before opening the drawer", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    const outlinerRequests: string[] = [];
-    page.on("request", (request) => {
-      if (new URL(request.url()).pathname.startsWith("/api/v1/outliner/")) {
-        outlinerRequests.push(request.url());
-      }
+    const roots: URL[] = [];
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (url.pathname === "/api/v1/outliner/collections" && response.ok()) roots.push(url);
     });
 
     await page.goto("/");
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
+    await expect.poll(() => roots.length).toBeGreaterThan(0);
+    expect(roots.every((url) => url.searchParams.get("limit") === "50")).toBe(true);
+    await expect(page.getByRole("dialog", { name: "Filters", exact: true })).toBeHidden();
+    const restoredReads = roots.length;
+    await page.getByRole("button", { name: "Filters", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Filters", exact: true })).toBeVisible();
     await page.waitForTimeout(200);
-    expect(outlinerRequests).toEqual([]);
+    expect(roots).toHaveLength(restoredReads);
   });
 });
 

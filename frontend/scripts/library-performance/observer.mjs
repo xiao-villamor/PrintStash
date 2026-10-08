@@ -102,6 +102,15 @@ export function installObserver({ user, locale, target }) {
         branchNames,
         leafNames,
       };
+      const search = document.querySelector("[data-model-search]");
+      const filters = document.querySelector(
+        `button[aria-label="${locale === "en" ? "Filters" : "Filtros"}"]`,
+      );
+      const controlsReady =
+        visible(search) &&
+        !search.disabled &&
+        !search.readOnly &&
+        (innerWidth >= 768 || (visible(filters) && !filters.disabled));
       const delta = () => performance.now() - started;
       if (content && state.content === null) state.content = delta();
       if (treeReady && state.tree === null) state.tree = delta();
@@ -151,7 +160,7 @@ export function installObserver({ user, locale, target }) {
           if (!decoded.has(image)) media = false;
         }
       if (media && state.media === null) state.media = delta();
-      if (content && treeReady && media && !state.errors.length) {
+      if (content && treeReady && media && controlsReady && !state.errors.length) {
         consecutive++;
         if (consecutive >= 2) {
           state.complete = delta();
