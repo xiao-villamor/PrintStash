@@ -57,6 +57,23 @@ export function summarize(samples, kind, { diagnostic = false, baseline = false 
   const p95 = values[Math.ceil(values.length * 0.95) - 1];
   return { n: values.length, median, p95, accepted: median <= budget.median && p95 <= budget.p95 };
 }
+/** Candidate completion needs stable corpus identities, not ambiguous labels. */
+export function assertTreeIdentities(target) {
+  for (const [paths, names] of [
+    ["branchPaths", "branches"],
+    ["leafPaths", "leaves"],
+  ]) {
+    const values = target[paths];
+    if (
+      !Array.isArray(values) ||
+      values.length !== target[names].length ||
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- Validate foreign corpus JSON before measuring; require nonempty unique strings without coercion.
+      values.some((value) => typeof value !== "string" || value.length === 0) ||
+      new Set(values).size !== values.length
+    )
+      throw new Error(`Corpus requires unique ${paths} for every expected row`);
+  }
+}
 export function assertAcceptance(cohorts, { baseline = false } = {}) {
   const names = new Set();
   const failures = [];

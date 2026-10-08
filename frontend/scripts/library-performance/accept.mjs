@@ -8,7 +8,7 @@ import {
   currentNavigationStart,
   openAvailableLibraryTree,
 } from "./observer.mjs";
-import { budgets, summarize, assertAcceptance } from "./budgets.mjs";
+import { budgets, summarize, assertAcceptance, assertTreeIdentities } from "./budgets.mjs";
 import { loadLibraryDocument } from "./navigation.mjs";
 
 const [configPath, outputPath] = process.argv.slice(2);
@@ -26,6 +26,16 @@ if (
   throw new Error("Record full commit, image digest and corpus identity before measuring");
 if (!diagnostic && config.identity.dirty !== false)
   throw new Error("Acceptance requires a clean source commit");
+if (!baseline)
+  for (const scenario of config.scenarios)
+    for (const target of [
+      scenario.target,
+      ...Object.values(scenario.journeys ?? {}).flatMap((journey) => [
+        journey.from,
+        journey.target,
+      ]),
+    ])
+      assertTreeIdentities(target);
 const username = process.env.PERF_USERNAME,
   password = process.env.PERF_PASSWORD;
 if (!username || !password)
@@ -36,7 +46,7 @@ const browser = await chromium.launch({ headless: true });
 const sessions = new Map();
 const cohorts = [];
 const measurement = {
-  protocol: "browser-reload-immediate-mobile-tree-v3",
+  protocol: "browser-reload-corpus-identities-v4",
   authentication: "real-login-session-restored",
   node: process.version,
   files: Object.fromEntries(

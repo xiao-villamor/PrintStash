@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertAcceptance,
+  assertTreeIdentities,
   budgets,
   summarize,
 } from "../../scripts/library-performance/budgets.mjs";
@@ -162,4 +163,44 @@ describe("reference host acceptance", () => {
       ),
     ).toMatchObject({ accepted: false });
   });
+});
+
+/** A repeated display label does not identify a restored tree row. */
+describe("corpus tree identities", () => {
+  it("accepts distinct paths with repeated labels", () => {
+    expect(() =>
+      assertTreeIdentities({
+        branches: ["Parts", "Parts"],
+        branchPaths: ["a", "b"],
+        leaves: ["Model", "Model"],
+        leafPaths: ["/models/1", "/models/2"],
+      }),
+    ).not.toThrow();
+  });
+  it.each([undefined, [], ["a", "a"], ["a", ""], ["a", 1]])(
+    "rejects incomplete branch identities %j",
+    (branchPaths) => {
+      expect(() =>
+        assertTreeIdentities({
+          branches: ["Parts", "Parts"],
+          branchPaths,
+          leaves: [],
+          leafPaths: [],
+        }),
+      ).toThrow("Corpus requires unique branchPaths");
+    },
+  );
+  it.each([undefined, [], ["/models/1", "/models/1"], ["/models/1", ""], ["/models/1", 1]])(
+    "rejects incomplete leaf identities %j",
+    (leafPaths) => {
+      expect(() =>
+        assertTreeIdentities({
+          branches: [],
+          branchPaths: [],
+          leaves: ["Model", "Model"],
+          leafPaths,
+        }),
+      ).toThrow("Corpus requires unique leafPaths");
+    },
+  );
 });

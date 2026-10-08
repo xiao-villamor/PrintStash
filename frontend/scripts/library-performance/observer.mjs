@@ -50,10 +50,10 @@ export function installObserver({ user, locale, target }) {
         (url.searchParams.get("c") ?? null) === expected.collection &&
         (url.searchParams.get("q") ?? "") === (expected.query ?? "") &&
         title === expected.titles[locale] &&
-        (expected.folders
-          ? JSON.stringify(folders.map((e) => e.getAttribute("data-collection-path"))) ===
-            JSON.stringify(expected.folders)
-          : JSON.stringify(identities) === JSON.stringify(expected.entries.map((e) => e.path)));
+        (!expected.folders ||
+          JSON.stringify(folders.map((e) => e.getAttribute("data-collection-path"))) ===
+            JSON.stringify(expected.folders)) &&
+        JSON.stringify(identities) === JSON.stringify(expected.entries.map((e) => e.path));
       const tree =
         [...document.querySelectorAll("aside.bg-sidebar")].find(visible) ??
         [...document.querySelectorAll('[role="dialog"]')].find(
@@ -69,11 +69,27 @@ export function installObserver({ user, locale, target }) {
       const leafNames = tree
         ? [...tree.querySelectorAll('[role="button"][title]')].map((e) => e.title)
         : [];
-      const branchButtons = expected.branches.map((name) =>
-        [...(tree?.querySelectorAll("button") ?? [])].find(
-          (button) => (button.getAttribute("aria-label") ?? button.textContent?.trim()) === name,
-        ),
-      );
+      const buttons = [...(tree?.querySelectorAll("button") ?? [])];
+      // Old-image baselines have no identity attributes. Candidate acceptance
+      // requires corpus paths; duplicate display names cannot satisfy them.
+      const branchButtons = expected.branchPaths
+        ? expected.branchPaths.map((path) =>
+            buttons.find((button) => button.getAttribute("data-outliner-collection") === path),
+          )
+        : expected.branches.map((name) =>
+            buttons.find(
+              (button) =>
+                (button.getAttribute("aria-label") ?? button.textContent?.trim()) === name,
+            ),
+          );
+      const leafPaths = tree
+        ? [...tree.querySelectorAll("[data-outliner-entry]")].map((node) =>
+            node.getAttribute("data-outliner-entry"),
+          )
+        : [];
+      const leavesReady = expected.leafPaths
+        ? expected.leafPaths.every((path) => leafPaths.includes(path))
+        : expected.leaves.every((name) => leafNames.includes(name));
       const treeReady =
         !!tree &&
         branchButtons.every((button) => {
@@ -86,7 +102,7 @@ export function installObserver({ user, locale, target }) {
             bounds.right <= innerWidth
           );
         }) &&
-        expected.leaves.every((name) => leafNames.includes(name));
+        leavesReady;
       if (
         content &&
         branchButtons.every(Boolean) &&
@@ -121,7 +137,7 @@ export function installObserver({ user, locale, target }) {
       state.visibleImages = 0;
       state.pendingDerivatives = 0;
       state.missingDerivatives = 0;
-      if (content && !expected.folders)
+      if (content)
         for (const entry of expected.entries) {
           const link = links.find((a) => a.getAttribute("data-library-entry") === entry.path);
           const card = link?.closest("article") ?? link;

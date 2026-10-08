@@ -134,6 +134,7 @@ function DraggableModelLeaf({
           isDraggingThisModel ? "opacity-30 pointer-events-none" : "text-muted-foreground"
         }`}
         title={model.name}
+        data-outliner-entry={`/models/${model.id}`}
       >
         <Box className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/40" />
         <span className="truncate">{model.name}</span>
@@ -157,6 +158,7 @@ function MultipartLeaf({ multipart }: { multipart: OutlinerModelRead }) {
         }}
         className="flex cursor-default select-none items-center gap-2 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
         title={uiText("{value1} · Multipart set", { value1: String(multipart.name) })}
+        data-outliner-entry={`/multipart-models/${multipart.id}`}
       >
         <Boxes className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
         <span className="truncate">{multipart.name}</span>
@@ -571,6 +573,7 @@ function CollectionTreeRow({
               onClick={() => onSelect(node.path)}
               className="flex flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate"
               title={node.name}
+              data-outliner-collection={node.path}
               {...attributes}
             >
               {isOpen || isSelected ? (

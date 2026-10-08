@@ -13,7 +13,7 @@ Baseline: `8d70c5560958a3b1cdbd96773f8bf53a078736fe`. Work preserves the revisio
 | Additional page | 300 | 500 |
 | Local search including debounce | 650 | 1000 |
 
-The `browser-reload-immediate-mobile-tree-v3` protocol uses an initial `goto` followed
+The `browser-reload-corpus-identities-v4` protocol uses an initial `goto` followed
 by actual browser reloads. Every recorded warm sample must include exactly one
 Navigation Timing entry with `type=reload`, including failed baseline samples.
 
@@ -28,8 +28,12 @@ nginx. Record the exact commit, clean source state, image digest and corpus in
 `identity`; a missing identity or dirty tree rejects acceptance.
 
 The config supplies explicit expected destinations, ordered entry identities,
-branch/leaf names and media availability (`available`, `pending`, `missing`).
-The observer checks the destination and corpus before accepting images. It
+branch/leaf paths with their display names and media availability (`available`, `pending`, `missing`).
+Candidate acceptance requires unique `branchPaths` and `leafPaths` for every expected
+row. DOM destinations must match these identities, so repeated labels cannot hide
+an unrestored row. Old-image baselines explicitly retain label matching because
+they predate the identity attributes. The observer checks folder and Model
+identities together before accepting images, including mixed folder views. It
 calls `decode()` and observes painted frames independently of application marks.
 Application marks are also mandatory in the after run. New browser contexts
 restore a session obtained through a real API login while starting with empty
@@ -70,6 +74,13 @@ labels their identity and never declares acceptance. Optional `PERF_SCENARIO`,
 still fails the cohort check.
 
 ## Measurement limitations discovered during the audit
+
+v4 also checks Models and media when a destination contains folders. The old
+folder-only branch of the observer could complete a mixed view too early. Tree
+rows now expose stable destinations; candidate acceptance uses these instead of
+labels, which can repeat. Four browser regressions reproduced premature success
+before these corrections. Historical v3 results retain their original observer
+hash and must not be presented as v4 identity validation.
 
 The v2 protocol used same-URL navigation for its `warm` series. Navigation Timing
 records that operation as `navigate`, so those historical samples describe cached
@@ -194,6 +205,16 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 85 | measures a browser reload after the initial visit | Happy | One initial visit followed by a warm sample | Navigation Timing changes from navigate to reload; previous timing retired without losing preferences | Playwright | ✅ |
 | 86 | rejects wrong reload evidence | Error | navigate/back_forward entries, including failed baseline | Acceptance rejects the sample before computing budgets | Repo | ✅ |
 | 87 | rejects missing reload evidence | Error | No Navigation Timing entry | Acceptance fails instead of accepting an unproven reload | Repo | ✅ |
+
+| 88 | rejects missing Models in a mixed folder view | Error | Expected folder present, expected Model absent | Observer stays incomplete until the expected Model is published | Playwright | ✅ `tests/e2e/library-readiness.spec.ts::rejects missing Models in a mixed folder view` |
+| 89 | waits for decoded media in a mixed folder view | Edge | Folder and Model present, image download pending | Observer completes only after the expected image decodes | Playwright | ✅ `tests/e2e/library-readiness.spec.ts::waits for decoded media in a mixed folder view` |
+
+| 90 | rejects a same-named branch with the wrong identity | Error | Matching label, wrong collection path | Observer waits for the exact corpus branch | Playwright | ✅ `tests/e2e/library-readiness.spec.ts::rejects a same-named branch with the wrong identity` |
+| 91 | rejects a same-named leaf with the wrong identity | Error | Matching label, wrong Model path | Observer waits for the exact corpus entry | Playwright | ✅ `tests/e2e/library-readiness.spec.ts::rejects a same-named leaf with the wrong identity` |
+| 92 | exposes restored row identities | Happy | Model and Multipart leaves under a restored branch | DOM identities match API destinations | Playwright | ✅ `tests/e2e/library-readiness.spec.ts::exposes restored row identities` |
+| 93 | rejects incomplete branch identities | Error | Missing, truncated, duplicate or invalid branch paths | Acceptance rejects incomplete expectations | Repo | ✅ `tests/repo/library-performance.test.ts::rejects incomplete branch identities` |
+| 94 | rejects incomplete leaf identities | Error | Missing, truncated, duplicate or invalid leaf paths | Acceptance rejects incomplete expectations | Repo | ✅ `tests/repo/library-performance.test.ts::rejects incomplete leaf identities` |
+| 95 | accepts distinct paths with repeated labels | Happy | Different paths share display names | Valid corpus remains acceptable | Repo | ✅ `tests/repo/library-performance.test.ts::accepts distinct paths with repeated labels` |
 
 The matrix remains open until final gates and deployment acceptance finish.
 

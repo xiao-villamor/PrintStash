@@ -25,7 +25,11 @@ function target(manifest, { path = null, expanded = false, rows = [], folders, q
     branches: manifest.collections
       .filter((c) => expanded || !c.path.includes("/"))
       .map((c) => c.name),
+    branchPaths: manifest.collections
+      .filter((c) => expanded || !c.path.includes("/"))
+      .map((c) => c.path),
     leaves: expanded ? manifest.model_rows.slice(90).map((m) => m.name) : [],
+    leafPaths: expanded ? manifest.model_rows.slice(90).map((m) => `/models/${m.id}`) : [],
     entries: rows.map((m) => ({ path: `/models/${m.id}`, media: m.media })),
   };
   if (folders) result.folders = folders;

@@ -8,7 +8,7 @@ import {
   observeInteraction,
   openAvailableLibraryTree,
 } from "../../scripts/library-performance/observer.mjs";
-import { aCollectionNode, aModelListItem } from "../../src/test-support/factories";
+import { aCollectionNode, aModelListItem, aOutlinerModel } from "../../src/test-support/factories";
 
 declare global {
   interface Window {
@@ -479,6 +479,203 @@ test.describe("Library readiness", () => {
       await expect(page).toHaveURL(new RegExp("c=" + encodeURIComponent(nodes[7].path)));
     });
   }
+
+  test.describe("mixed folder view observer", () => {
+    test.beforeEach(async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await page.route("**/", (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: '<aside class="bg-sidebar" style="width:200px;height:100px">Tree</aside><main><h1>All Models</h1><input data-model-search><div data-collection-path="folder">Folder</div></main>',
+        }),
+      );
+    });
+
+    test("rejects missing Models in a mixed folder view", async ({ page }) => {
+      await page.addInitScript(installObserver, {
+        user: { id: 1 },
+        locale: "en",
+        target: {
+          expanded: [],
+          collection: null,
+          titles: { en: "All Models", es: "Todos los modelos" },
+          branches: [],
+          leaves: [],
+          folders: ["folder"],
+          entries: [{ path: "/models/1", media: "missing" }],
+        },
+      });
+      await page.goto("/");
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      expect(await page.evaluate(() => window.libraryObservation.complete)).toBeNull();
+      const published = await page.evaluate(() => {
+        document
+          .querySelector("main")!
+          .insertAdjacentHTML(
+            "beforeend",
+            '<article data-library-entry="/models/1"><div data-library-thumbnail="missing">No image</div></article>',
+          );
+        return performance.now();
+      });
+      await page.waitForFunction(() => window.libraryObservation.complete !== null);
+      expect(await page.evaluate(() => window.libraryObservation.complete)).toBeGreaterThan(
+        published,
+      );
+    });
+
+    test("waits for decoded media in a mixed folder view", async ({ page }) => {
+      await page.addInitScript(installObserver, {
+        user: { id: 1 },
+        locale: "en",
+        target: {
+          expanded: [],
+          collection: null,
+          titles: { en: "All Models", es: "Todos los modelos" },
+          branches: [],
+          leaves: [],
+          folders: ["folder"],
+          entries: [{ path: "/models/1", media: "available" }],
+        },
+      });
+      const imageGate = Promise.withResolvers<void>();
+      await page.route("**/pending-image.svg", async (route) => {
+        await imageGate.promise;
+        await route.fulfill({
+          contentType: "image/svg+xml",
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80"><rect width="80" height="80" fill="red"/></svg>',
+        });
+      });
+      await page.route("**/", (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: '<aside class="bg-sidebar" style="width:200px;height:100px">Tree</aside><main><h1>All Models</h1><input data-model-search><div data-collection-path="folder">Folder</div><article data-library-entry="/models/1"><div data-library-thumbnail="pending"><img width="80" height="80" src="/pending-image.svg"></div></article></main>',
+        }),
+      );
+      try {
+        await page.goto("/", { waitUntil: "domcontentloaded" });
+        await page.evaluate(
+          () =>
+            new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        );
+        expect(await page.evaluate(() => window.libraryObservation.complete)).toBeNull();
+        const released = await page.evaluate(() => performance.now());
+        imageGate.resolve();
+        await page.waitForFunction(() => window.libraryObservation.complete !== null);
+        expect(await page.evaluate(() => window.libraryObservation.complete)).toBeGreaterThan(
+          released,
+        );
+        await expect(page.locator("img")).toHaveJSProperty("naturalWidth", 80);
+      } finally {
+        imageGate.resolve();
+      }
+    });
+  });
+
+  for (const kind of ["branch", "leaf"] as const) {
+    test(`rejects a same-named ${kind} with the wrong identity`, async ({ page }) => {
+      const attribute = kind === "branch" ? "data-outliner-collection" : "data-outliner-entry";
+      const destination = kind === "branch" ? "expected" : "/models/1";
+      await page.route("**/", (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: `<aside class="bg-sidebar" style="width:200px;height:100px"><button role="button" title="Repeated" ${attribute}="wrong" style="width:100px">Repeated</button></aside><main><h1>All Models</h1><input data-model-search></main>`,
+        }),
+      );
+      await page.addInitScript(installObserver, {
+        user: { id: 1 },
+        locale: "en",
+        target: {
+          expanded: [],
+          collection: null,
+          titles: { en: "All Models", es: "Todos los modelos" },
+          branches: kind === "branch" ? ["Repeated"] : [],
+          leaves: kind === "leaf" ? ["Repeated"] : [],
+          entries: [],
+          branchPaths: kind === "branch" ? [destination] : [],
+          leafPaths: kind === "leaf" ? [destination] : [],
+        },
+      });
+      await page.goto("/");
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      expect(await page.evaluate(() => window.libraryObservation.complete)).toBeNull();
+      const corrected = await page.locator("aside button").evaluate(
+        (button, { attribute, destination }) => {
+          button.setAttribute(attribute, destination);
+          return performance.now();
+        },
+        { attribute, destination },
+      );
+      await page.waitForFunction(() => window.libraryObservation.complete !== null);
+      expect(await page.evaluate(() => window.libraryObservation.complete)).toBeGreaterThan(
+        corrected,
+      );
+    });
+  }
+
+  test("exposes restored row identities", async ({ page }) => {
+    const node = aCollectionNode({ id: 1, name: "Parts", path: "parts" });
+    const model = aOutlinerModel({ id: 11, name: "Repeated" });
+    const multipart = aOutlinerModel({ id: 12, name: "Repeated" });
+    await page.addInitScript(() => sessionStorage.setItem("ps-filter-expanded", '["parts"]'));
+    await page.route("**/api/v1/outliner/restore", (route) =>
+      route.fulfill({
+        json: {
+          collections: [
+            {
+              parent_id: null,
+              page: {
+                items: [
+                  {
+                    ...node,
+                    direct_entry_count: 2,
+                    subtree_entry_count: 2,
+                    visible_child_count: 0,
+                  },
+                ],
+                next_cursor: null,
+                parent_direct_entry_count: 0,
+                revealed: null,
+              },
+            },
+            {
+              parent_id: 1,
+              page: { items: [], next_cursor: null, parent_direct_entry_count: 2, revealed: null },
+            },
+          ],
+          entries: [
+            {
+              collection_id: 1,
+              page: {
+                items: [
+                  { ...model, kind: "model" },
+                  { ...multipart, kind: "multipart" },
+                ],
+                next_cursor: null,
+              },
+            },
+          ],
+        },
+      }),
+    );
+    await page.goto("/");
+    const tree = page.locator("aside");
+    await expect(tree.getByRole("button", { name: "Parts", exact: true })).toHaveAttribute(
+      "data-outliner-collection",
+      "parts",
+    );
+    await expect(tree.locator('[role="button"][title="Repeated"]')).toHaveAttribute(
+      "data-outliner-entry",
+      "/models/11",
+    );
+    await expect(tree.locator('[role="button"][title="Repeated · Multipart set"]')).toHaveAttribute(
+      "data-outliner-entry",
+      "/multipart-models/12",
+    );
+  });
 
   test("keeps the measurement clock across a document restart", async ({ page }) => {
     let documents = 0;
