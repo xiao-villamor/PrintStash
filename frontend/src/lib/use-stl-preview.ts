@@ -1,6 +1,6 @@
 "use client";
 
-/** Wait for durable STL preparation before letting the WebGL loader parse bytes. */
+/** Wait for durable STL preparation before transferring bytes to the mesh parser. */
 import { useEffect, useState } from "react";
 import { getDerivedBlob } from "@/lib/api/request";
 import { parseApiError } from "@/lib/errors";

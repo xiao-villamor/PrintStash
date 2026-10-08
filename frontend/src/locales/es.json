@@ -4299,5 +4299,13 @@
   "Retry update check": "Reintentar búsqueda de actualizaciones",
   "Retry cleanup plan": "Reintentar plan de limpieza",
   "maintenance.retryHistory": "Reintentar historial de comprobaciones",
-  "maintenance.backupLoadFailed": "No se pudieron cargar los orígenes de copias de seguridad."
+  "maintenance.backupLoadFailed": "No se pudieron cargar los orígenes de copias de seguridad.",
+  "Mesh renderer": "Renderizador de mallas",
+  "WebGL compatibility": "Compatibilidad WebGL",
+  "Automatic · experimental": "Automático · experimental",
+  "WebGPU · experimental": "WebGPU · experimental",
+  "WebGPU requires HTTPS or localhost. Unavailable devices use WebGL.": "WebGPU requiere HTTPS o localhost. Los dispositivos no disponibles usan WebGL.",
+  "settings.gpu": "GPU",
+  "3D rendering": "Renderizado 3D",
+  "Choose how 3D models are rendered in this browser.": "Elige cómo se renderizan los modelos 3D en este navegador."
 }

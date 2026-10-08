@@ -4299,5 +4299,13 @@
   "Retry update check": "Retry update check",
   "Retry cleanup plan": "Retry cleanup plan",
   "maintenance.retryHistory": "Retry check history",
-  "maintenance.backupLoadFailed": "Backup sources could not be loaded."
+  "maintenance.backupLoadFailed": "Backup sources could not be loaded.",
+  "Mesh renderer": "Mesh renderer",
+  "WebGL compatibility": "WebGL compatibility",
+  "Automatic · experimental": "Automatic · experimental",
+  "WebGPU · experimental": "WebGPU · experimental",
+  "WebGPU requires HTTPS or localhost. Unavailable devices use WebGL.": "WebGPU requires HTTPS or localhost. Unavailable devices use WebGL.",
+  "settings.gpu": "GPU",
+  "3D rendering": "3D rendering",
+  "Choose how 3D models are rendered in this browser.": "Choose how 3D models are rendered in this browser."
 }
