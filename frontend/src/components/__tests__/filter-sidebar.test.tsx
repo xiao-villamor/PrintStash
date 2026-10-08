@@ -1095,8 +1095,10 @@ describe("outliner pages", () => {
       }),
     );
     const app = renderSidebar({ collections, selectedCollection: "folder-64" });
-    await screen.findByRole("button", { name: "Folder 064" });
-    expect(screen.getAllByRole("button", { name: "Folder 064" })).toHaveLength(1);
+    const selected = await screen.findByText("Folder 064");
+    expect(selected).toBeVisible();
+    expect(selected.closest("button")).toHaveAccessibleName("Folder 064");
+    expect(screen.getAllByText("Folder 064")).toHaveLength(1);
     expect(
       app
         .requests()
@@ -1104,8 +1106,8 @@ describe("outliner pages", () => {
         .every((r) => !new URL(r.url, "http://test").searchParams.has("cursor")),
     ).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "Show more folders" }));
-    await screen.findByRole("button", { name: "Folder 063" });
-    expect(screen.getAllByRole("button", { name: "Folder 064" })).toHaveLength(1);
+    expect(await screen.findByText("Folder 063")).toBeVisible();
+    expect(screen.getAllByText("Folder 064")).toHaveLength(1);
   });
 
   it("restores the expanded tree after Escape from global search", async () => {

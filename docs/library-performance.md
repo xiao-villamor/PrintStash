@@ -176,6 +176,8 @@ automation actionability waits or reused prior marks are not acceptance evidence
 
 | 83 | prioritizes an explicitly focused filter while the mobile tree is pending | Edge | Pending roots, keyboard focus on a filter | Catalog requests start without waiting for tree or media completion | Playwright | ✅ |
 
+| 84 | reveals a selected location beyond the first sibling page without walking previous pages | Edge | 65 siblings, last selected | Visible accessible selection without earlier page walks; continuation has no duplicate selection | Frontend integration | ✅ |
+
 The matrix remains open until final gates and deployment acceptance finish.
 
 The application publishes the currently committed navigation separately from its
