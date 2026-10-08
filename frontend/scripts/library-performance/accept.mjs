@@ -184,7 +184,9 @@ async function observed(c, kind) {
 }
 
 async function reload(c, scenario, kind) {
-  await loadLibraryDocument(c.page, c.base + scenario.target.url);
+  await loadLibraryDocument(c.page, c.base + scenario.target.url, {
+    reload: kind === "warm" && c.page.url().startsWith(c.base),
+  });
   return observed(c, kind);
 }
 

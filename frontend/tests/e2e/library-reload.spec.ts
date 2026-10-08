@@ -5,7 +5,7 @@ import { loadLibraryDocument } from "../../scripts/library-performance/navigatio
 test("measures a browser reload after the initial visit", async ({ page, baseURL }) => {
   if (!baseURL) throw new Error("A browser server is required");
   const url = new URL("/reload-measurement", baseURL).href;
-  await page.route(url, (route) =>
+  await page.route(`${url}*`, (route) =>
     route.fulfill({
       contentType: "text/html",
       body: "<!doctype html><title>Measurement target</title><main>Ready</main>",
@@ -20,12 +20,13 @@ test("measures a browser reload after the initial visit", async ({ page, baseURL
   await loadLibraryDocument(page, url);
   expect(await navigationType()).toBe("navigate");
   await page.evaluate(() => {
+    history.replaceState(null, "", `${location.pathname}?type=all&sort=date-desc`);
     sessionStorage.setItem("printstash:performance-navigation-start", "old");
     sessionStorage.setItem("remembered-library-view", "keep");
   });
-  await loadLibraryDocument(page, url);
+  await loadLibraryDocument(page, url, { reload: true });
   expect(await navigationType()).toBe("reload");
-  expect(page.url()).toBe(url);
+  expect(page.url()).toBe(`${url}?type=all&sort=date-desc`);
   expect(
     await page.evaluate(() => ({
       previousTiming: sessionStorage.getItem("printstash:performance-navigation-start"),
