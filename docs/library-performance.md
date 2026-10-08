@@ -283,6 +283,7 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 155 | translates an already mounted Multipart Model leaf | Edge | EN to ES while the optimized tree remains mounted | Existing leaf receives the Spanish accessible title | Frontend unit | ✅ `filter-sidebar.test.tsx::translates an already mounted Multipart Model leaf` |
 | 156 | exposes navigation reads through the library contract | Edge | Grid imports the destination reader | Production dependency graph accepts the explicit public entry point | Frontend unit | ✅ `dependency-boundaries.test.ts::enforces the production repository graph` |
 | 157 | completes two concurrent emulator prints | Edge | Two printer hubs write while the contract polls completion | Both queued Jobs reach completed using independent SQLite connections | Contract | ✅ `test_fleet.py::TestPrinter::test_dispatch_to_two_emulated_printers_both_complete` |
+| 158 | reports a drained lane after engine completion | Edge | Application Jobs finish before workflow bookkeeping | Engine evidence succeeds, then queue depth is zero | Contract | ✅ `test_contracts.py::TestScheduling::test_reports_each_lanes_depth` |
 
 
 
@@ -452,3 +453,8 @@ the default single-connection SQLite fixture and produced DBAPI misuse errors.
 The contract now opts into the existing concurrent hub fixture. Both fleet cases
 pass locally; the complete contract lane is being revalidated without changing
 production printing behavior or weakening completion assertions.
+
+The full contract rerun exposed a second synchronization race: terminal application
+Jobs precede DBOS workflow completion. The lane-depth contract now waits for both
+engine executions to succeed before asserting an empty lane. Both engine variants
+pass the focused case; the full contract rerun retains all original assertions.
