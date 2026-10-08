@@ -8,7 +8,7 @@ const { descriptor } = vi.hoisted(() => {
   return { descriptor };
 });
 
-import { TabBar } from "../tabs";
+import { TabBar } from "../../tabs";
 
 const tabs = [
   { key: "overview", label: "Overview" },
