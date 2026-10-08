@@ -142,7 +142,7 @@ describe("bootstrap service worker", () => {
     await done();
   });
   it("reuses HTTP-cached immutable assets during reload", async () => {
-    const network = vi.fn(
+    const network = vi.fn<(request: Request, init?: RequestInit) => Promise<Response>>(
       async (_request: Request, init?: RequestInit) =>
         new Response(init?.cache === "force-cache" ? "HTTP cached bytes" : "revalidated bytes"),
     );
@@ -157,7 +157,7 @@ describe("bootstrap service worker", () => {
   it.each(["/theme-bootstrap.js", "/locale-shell.js"])(
     "preserves revalidation for mutable bootstrap: %s",
     async (path) => {
-      const network = vi.fn(
+      const network = vi.fn<(request: Request, init?: RequestInit) => Promise<Response>>(
         async (_request: Request, init?: RequestInit) =>
           new Response(init?.cache === "force-cache" ? "stale bootstrap" : "current bootstrap"),
       );
