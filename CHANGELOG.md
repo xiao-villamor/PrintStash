@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep scheduled upload recovery outside an active verification or Job handoff,
+  avoiding spurious upload conflicts while retaining recovery after interruption.
+- Reuse the current locale's card-date formatters without caching timestamps.
+
 - Preserve visible nesting at every collection-tree depth and align Model leaves
   beneath their parent, keeping deep rows selectable on narrow screens.
 - Ignore system-only maintenance notices in Task Center instead of repeatedly

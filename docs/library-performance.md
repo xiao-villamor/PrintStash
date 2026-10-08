@@ -245,6 +245,15 @@ automation actionability waits or reused prior marks are not acceptance evidence
 
 | 123 | preserves deep tree indentation | Edge | Eight expanded levels at desktop/mobile widths | Every child is visibly indented; deepest folder remains clickable | Playwright | ✅ `library-readiness.spec.ts::keeps a deeply nested collection selectable` |
 
+| 124 | follows locale changes for relative labels | Edge | EN → ES → EN | Current locale used on every call | Domain unit | ✅ `domain/format.test.ts::follows locale changes for relative labels` |
+| 125 | updates labels as time advances | Edge | Same date before/after a day passes | Relative label updates | Domain unit | ✅ `domain/format.test.ts::updates labels as time advances` |
+| 126 | follows locale changes for absolute labels | Edge | Old date EN → ES → EN | Localized calendar date | Domain unit | ✅ `domain/format.test.ts::follows locale changes for absolute labels` |
+| 127 | retains invalid date display | Error | Invalid date input | Existing Invalid Date text preserved | Domain unit | ✅ `domain/format.test.ts::retains invalid date display` |
+
+| 128 | preserves active upload verification during recovery | Error | Recovery runs while finalize verifies bytes | HTTP 200 with one ingestion Job | Integration | ✅ `test_preserves_active_upload_verification_during_recovery` |
+
+| 129 | preserves live upload operations | Edge | Verifying, handoff or expired verifying operation owns staging | Recovery leaves state unchanged | Integration | ✅ `test_preserves_live_upload_operations` |
+| 130 | recovers verification after operation exits | Error | Failed request releases its staging lock | Recovery makes abandoned verification retryable | Integration | ✅ `test_recovers_verification_after_operation_exits` |
 
 The matrix remains open until final gates and deployment acceptance finish.
 
@@ -333,3 +342,17 @@ compact indentation; row actions appear beside the count on hover or keyboard
 focus so hidden controls do not consume label width. Deep rows retain a usable
 minimum width with horizontal scrolling. The real 27-branch/91-Model tree was
 also inspected at desktop and mobile widths against the real API.
+
+An upload-finalization regression reproduces HTTP 409 when scheduled recovery
+marks a live verification interrupted. Finalization now owns a nonblocking lock
+on its private staging-directory inode through the durable Job handoff. Recovery
+skips a live owner and rechecks the row after acquiring ownership; exceptions or
+process exit release ownership without holding SQL locks during file I/O. Existing
+abandoned verification recovery and terminal cleanup remain covered. Focused
+upload API/manager/recovery/adapter checks passed 123 cases.
+
+Browser CPU profiles identified repeated date-formatter construction on cards.
+Immutable formatters are now reused for the current locale; timestamps and elapsed
+time are never cached. The isolated 1,000-label diagnostic dropped from roughly
+100 ms to 3 ms after initialization. Locale switches, advancing clocks and invalid
+inputs remain covered; all 89 domain cases passed. Browser acceptance is separate.
