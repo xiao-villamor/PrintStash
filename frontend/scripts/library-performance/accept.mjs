@@ -9,6 +9,7 @@ import {
   openAvailableLibraryTree,
 } from "./observer.mjs";
 import { budgets, summarize, assertAcceptance } from "./budgets.mjs";
+import { loadLibraryDocument } from "./navigation.mjs";
 
 const [configPath, outputPath] = process.argv.slice(2);
 if (!configPath || !outputPath)
@@ -35,12 +36,12 @@ const browser = await chromium.launch({ headless: true });
 const sessions = new Map();
 const cohorts = [];
 const measurement = {
-  protocol: "immediate-mobile-tree-v2",
+  protocol: "browser-reload-immediate-mobile-tree-v3",
   authentication: "real-login-session-restored",
   node: process.version,
   files: Object.fromEntries(
     await Promise.all(
-      ["accept.mjs", "observer.mjs", "budgets.mjs"].map(async (name) => [
+      ["accept.mjs", "observer.mjs", "budgets.mjs", "navigation.mjs"].map(async (name) => [
         name,
         createHash("sha256")
           .update(await readFile(new URL(name, import.meta.url)))
@@ -183,13 +184,10 @@ async function observed(c, kind) {
 }
 
 async function reload(c, scenario, kind) {
-  if (c.page.url().startsWith(c.base))
-    await c.page.evaluate(() =>
-      sessionStorage.removeItem("printstash:performance-navigation-start"),
-    );
-  await c.page.goto(c.base + scenario.target.url, { waitUntil: "domcontentloaded" });
+  await loadLibraryDocument(c.page, c.base + scenario.target.url);
   return observed(c, kind);
 }
+
 async function begin(c, target) {
   await c.page.evaluate((target) => window.observeLibrary(target), target);
 }
@@ -201,7 +199,7 @@ async function closeTree(c) {
 }
 async function journey(c, scenario, kind) {
   const plan = scenario.journeys[kind];
-  // A real reload prepares the starting view; collection transitions deliberately
+  // An initial document visit prepares the source; collection transitions deliberately
   // start on published cards without waiting for the previous media downloads.
   await c.page.goto(c.base + plan.from.url, { waitUntil: "domcontentloaded" });
   await begin(c, plan.from);

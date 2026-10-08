@@ -13,6 +13,7 @@ function sample(complete = 400) {
     media: 300,
     complete,
     errors: [],
+    document: [{ type: "reload" }],
     phases: {
       start: 0,
       "session-validated": 50,
@@ -48,6 +49,28 @@ function cohorts() {
   );
 }
 describe("reference host acceptance", () => {
+  it.each(["navigate", "back_forward"])("rejects %s as reload evidence", (type) => {
+    const samples = Array.from({ length: 30 }, () => ({ ...sample(), document: [{ type }] }));
+    expect(() => summarize(samples, "warm")).toThrow("expected browser reload evidence");
+    expect(() => summarize(samples, "warm", { baseline: true })).toThrow(
+      "expected browser reload evidence",
+    );
+  });
+  it("rejects missing reload evidence", () => {
+    const samples = Array.from({ length: 30 }, () => ({ ...sample(), document: [] }));
+    expect(() => summarize(samples, "warm")).toThrow("expected browser reload evidence");
+  });
+  it("rejects wrong reload evidence in a failed baseline", () => {
+    const samples = Array.from({ length: 30 }, () => ({
+      ...sample(),
+      complete: null,
+      errors: ["unusable_tree_control"],
+      document: [{ type: "navigate" }],
+    }));
+    expect(() => summarize(samples, "warm", { baseline: true })).toThrow(
+      "expected browser reload evidence",
+    );
+  });
   it("accepts every complete cohort inside the default budgets", () => {
     expect(() => assertAcceptance(cohorts())).not.toThrow();
   });

@@ -13,6 +13,10 @@ Baseline: `8d70c5560958a3b1cdbd96773f8bf53a078736fe`. Work preserves the revisio
 | Additional page | 300 | 500 |
 | Local search including debounce | 650 | 1000 |
 
+The `browser-reload-immediate-mobile-tree-v3` protocol uses an initial `goto` followed
+by actual browser reloads. Every recorded warm sample must include exactly one
+Navigation Timing entry with `type=reload`, including failed baseline samples.
+
 Each of distributed root, dense collection and deep selection with 27 remembered paths runs at 1440×900 and 390×844, in EN and ES: 30 reloads and 20 new authenticated browser contexts each, 600 samples per version. Servers are warm. No simulated API, dropped outliers or mixed cohorts. Profiling and test suites run separately.
 
 ## Reproduce
@@ -66,6 +70,15 @@ labels their identity and never declares acceptance. Optional `PERF_SCENARIO`,
 still fails the cohort check.
 
 ## Measurement limitations discovered during the audit
+
+The v2 protocol used same-URL navigation for its `warm` series. Navigation Timing
+records that operation as `navigate`, so those historical samples describe cached
+document navigation, not the agreed browser reload. They remain retained with
+that limitation and cannot establish the reload budget. v3 requires fresh matched
+before/after reload cohorts; previous v2 results must not be relabeled or merged
+into them. Fresh-context and in-app journey observations retain their original
+meaning. No rejected historical run becomes accepted through this correction.
+
 
 The original deep-tree DOM observer found restored rows but did not verify that
 their buttons had usable width. Seven nested levels could consume the entire
@@ -177,6 +190,10 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 83 | prioritizes an explicitly focused filter while the mobile tree is pending | Edge | Pending roots, keyboard focus on a filter | Catalog requests start without waiting for tree or media completion | Playwright | ✅ |
 
 | 84 | reveals a selected location beyond the first sibling page without walking previous pages | Edge | 65 siblings, last selected | Visible accessible selection without earlier page walks; continuation has no duplicate selection | Frontend integration | ✅ |
+
+| 85 | measures a browser reload after the initial visit | Happy | One initial visit followed by a warm sample | Navigation Timing changes from navigate to reload; previous timing retired without losing preferences | Playwright | ✅ |
+| 86 | rejects wrong reload evidence | Error | navigate/back_forward entries, including failed baseline | Acceptance rejects the sample before computing budgets | Repo | ✅ |
+| 87 | rejects missing reload evidence | Error | No Navigation Timing entry | Acceptance fails instead of accepting an unproven reload | Repo | ✅ |
 
 The matrix remains open until final gates and deployment acceptance finish.
 

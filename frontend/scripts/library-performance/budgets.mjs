@@ -12,6 +12,10 @@ export function summarize(samples, kind, { diagnostic = false, baseline = false 
   if (!budget) throw new Error(`Unknown journey: ${kind}`);
   if (!samples.length || (!diagnostic && samples.length !== budget.samples))
     throw new Error(`${kind}: expected ${budget.samples} samples, received ${samples.length}`);
+  if (kind === "warm")
+    for (const sample of samples)
+      if (sample.document?.length !== 1 || sample.document[0]?.type !== "reload")
+        throw new Error("warm: expected browser reload evidence");
   if (baseline && samples.some((sample) => sample.errors.length || sample.complete === null))
     return {
       n: samples.length,
