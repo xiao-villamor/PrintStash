@@ -66,6 +66,7 @@ qualification is explicit. Parameterized variants share one observable behavior.
 
 | Behaviour (test name) | Category | Input | Observable outcome | Tier | Status |
 | --- | --- | --- | --- | --- | --- |
+| enforces the production repository graph | Edge | Viewer and Worker imports | No runtime or type dependency cycles | Repo | ✅ |
 | retains the renderer choice | Happy | webgl/auto/webgpu | Stored preference is read back | Unit | ✅ |
 | keeps legacy preferences on the compatibility renderer | Edge | Old settings | WebGL selected, quality retained | Unit | ✅ |
 | refuses an unsupported mesh renderer preference | Error | Invalid value | WebGL selected | Unit | ✅ |

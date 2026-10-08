@@ -1,5 +1,5 @@
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
-import type { StlParseReply } from "@/lib/stl-parser";
+import type { StlParseReply } from "@/lib/stl-parser-types";
 
 // This module is bundled as a dedicated Worker; it never runs on Window.
 self.onmessage = (event: MessageEvent<ArrayBuffer>) => {

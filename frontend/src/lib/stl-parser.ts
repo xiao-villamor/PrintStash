@@ -1,7 +1,6 @@
 /** Transfer-only boundary between the STL worker and the mesh viewer. */
-export type StlParseReply =
-  | { state: "parsed"; positions: Float32Array<ArrayBuffer>; normals: Float32Array<ArrayBuffer> }
-  | { state: "failed"; reason: string };
+import type { StlParseReply } from "./stl-parser-types";
+export type { StlParseReply } from "./stl-parser-types";
 
 export interface StlParserWorker {
   onmessage: ((event: MessageEvent<StlParseReply>) => void) | null;
