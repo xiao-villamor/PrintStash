@@ -255,6 +255,9 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 129 | preserves live upload operations | Edge | Verifying, handoff or expired verifying operation owns staging | Recovery leaves state unchanged | Integration | ✅ `test_preserves_live_upload_operations` |
 | 130 | recovers verification after operation exits | Error | Failed request releases its staging lock | Recovery makes abandoned verification retryable | Integration | ✅ `test_recovers_verification_after_operation_exits` |
 
+| 131 | reuses HTTP-cached immutable assets during reload | Happy | Content-hashed asset request | Browser may reuse exact URL without revalidation | Repo | ✅ `tests/repo/service-worker.test.ts` |
+| 132 | preserves revalidation for mutable bootstrap | Edge | Theme/locale bootstrap request | Original fetch cache policy preserved | Repo | ✅ `tests/repo/service-worker.test.ts` |
+
 The matrix remains open until final gates and deployment acceptance finish.
 
 The application publishes the currently committed navigation separately from its
@@ -356,3 +359,10 @@ Immutable formatters are now reused for the current locale; timestamps and elaps
 time are never cached. The isolated 1,000-label diagnostic dropped from roughly
 100 ms to 3 ms after initialization. Locale switches, advancing clocks and invalid
 inputs remain covered; all 89 domain cases passed. Browser acceptance is separate.
+
+The service worker now permits HTTP-cache reuse of content-hashed build assets
+even when the document is reloaded. Mutable HTML and bootstrap scripts retain
+their revalidation policy; API/authenticated requests remain excluded. Cache
+Storage never blocks successful network/HTTP-cache delivery. The cache-policy
+regression failed before the change; 22 worker tests and all nine production-PWA
+browser flows pass afterward, including updates, offline fallback and isolation.

@@ -17,7 +17,7 @@ function worker({
     put: (key: Request | string, response: Response) => Promise<void>;
     addAll: (paths: string[]) => Promise<void>;
   }>;
-  network: (request: Request) => Promise<Response>;
+  network: (request: Request, init?: RequestInit) => Promise<Response>;
 }) {
   const handlers = new Map<string, (event: WorkerEvent) => void>();
   const deletions: string[] = [];
@@ -141,6 +141,35 @@ describe("bootstrap service worker", () => {
     expect(open).toHaveBeenCalledWith("printstash-shell-v6");
     await done();
   });
+  it("reuses HTTP-cached immutable assets during reload", async () => {
+    const network = vi.fn(
+      async (_request: Request, init?: RequestInit) =>
+        new Response(init?.cache === "force-cache" ? "HTTP cached bytes" : "revalidated bytes"),
+    );
+    const { response, done } = worker({ open: async () => cache(), network }).invoke(
+      "fetch",
+      "/assets/index-hashed.js",
+    );
+    expect(await (await response!).text()).toBe("HTTP cached bytes");
+    await done();
+  });
+
+  it.each(["/theme-bootstrap.js", "/locale-shell.js"])(
+    "preserves revalidation for mutable bootstrap: %s",
+    async (path) => {
+      const network = vi.fn(
+        async (_request: Request, init?: RequestInit) =>
+          new Response(init?.cache === "force-cache" ? "stale bootstrap" : "current bootstrap"),
+      );
+      const { response, done } = worker({ open: async () => cache(), network }).invoke(
+        "fetch",
+        path,
+      );
+      expect(await (await response!).text()).toBe("current bootstrap");
+      await done();
+    },
+  );
+
   it("does not rewrite an already cached hashed build asset", async () => {
     const stored = cache();
     stored.match.mockResolvedValue(new Response("cached asset"));

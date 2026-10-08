@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reuse HTTP-cached content-hashed assets during reload without weakening HTML
+  or bootstrap revalidation, offline fallback, or private-response isolation.
+
 - Keep scheduled upload recovery outside an active verification or Job handoff,
   avoiding spurious upload conflicts while retaining recovery after interruption.
 - Reuse the current locale's card-date formatters without caching timestamps.
