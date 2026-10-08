@@ -232,6 +232,9 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 110 | embedded preview survives unsupported geometry | Error | Unsupported 3MF with usable embedded preview | Correct preview color within three levels; source download identical | E2E | ✅ `e2e/test_ingest.py::TestThreeMFCapabilities::test_required_extension_refusal_preserves_independent_artifacts` |
 | 111 | benchmark persists the renderer output once | Happy | Real full renderer with compact WebP | Persisted bytes match render phase output size | Integration | ✅ `integration/scripts/test_bench_thumbnails.py::TestMain::test_serializes_real_phase_evidence` |
 | 112 | upload publishes the embedded preview | Happy | 3MF with a colored preview | Served preview retains size, transparency and color within three levels | E2E | ✅ `e2e/test_ingest.py::TestMetadata::test_3mf_upload_persists_embedded_preview` |
+| 113 | saves search preferences beside another SQLite writer | Error | New/existing preferences; unrelated writer commits after lookup | Preferences persist without HTTP-500-causing stale snapshot | Integration | ✅ `integration/modules/search/test_preferences.py::TestUpdate::test_saves_preferences_beside_another_sqlite_writer` |
+| 114 | retains stages after thumbnail encoding failure | Error | Codec raises after rendering | Diagnostic retains stages and the original encoding error | Unit | ✅ `unit/scripts/test_bench_thumbnails.py::TestBenchmarkFile::test_retains_stages_after_encoding_failure` |
+| 115 | persists editable filters without repeated parsing | Happy | Real authenticated browser saves search consent | Successful save and editable parsed filters | Real-backend Playwright | ✅ `tests/e2e-real/ai-search/nl-filters.spec.ts::persists editable filters without repeated parsing` |
 
 The matrix remains open until final gates and deployment acceptance finish.
 
@@ -273,3 +276,10 @@ minimum. Representative detailed, largest and worst-PSNR images were inspected
 visually. These are codec diagnostics, not browser acceptance times; source
 images and item identities stay private. The final deployment must regenerate
 through normal derivative Jobs before measuring its actual served outputs.
+
+Expanded CI exposed a search-preference save returning HTTP 500. A separate real
+SQLite regression reproduces a stale read-to-write snapshot when background work
+commits between the preference lookup and its update. Preference writes now reserve
+the SQLite writer before reading, using the existing transaction helper. Both first
+save and existing preferences pass the two-connection test; the authenticated
+browser consent/filter flow also passes. PostgreSQL keeps its existing row lock.

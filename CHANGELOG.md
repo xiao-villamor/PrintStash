@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Serialize search-preference writes before reading SQLite state, avoiding failures
+  when background processing commits concurrently.
 - Reduce thumbnail transfer size with quality-90 WebP color and lossless transparency,
   preserving resolution and regenerating existing mesh/G-code previews through Jobs.
 - Restore remembered Library branches in bounded batches, prioritize visible thumbnails,

@@ -111,7 +111,7 @@ class TestBenchmarkFile:
             ThumbnailEngine, "generate", lambda self, request: rendered_result
         )
 
-        def fail(data: bytes) -> bytes:
+        def fail(data: bytes, *, renderer_encoded: bool = False) -> bytes:
             raise ValueError("encoding failed")
 
         monkeypatch.setattr(bench_thumbnails, "to_webp", fail)
