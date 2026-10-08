@@ -435,7 +435,9 @@ class TestMetadata:
         width = int(settings.model_thumbnail_width)
         assert image.size == (width, round(width * 3 / 4))
         assert tuple(pixels[0, 0]) == (0, 0, 0, 0)
-        assert tuple(pixels[image.height // 2, image.width // 2, :3]) == color
+        assert pixels[image.height // 2, image.width // 2, :3].tolist() == pytest.approx(
+            color, abs=3
+        )
         assert pixels[:, :, 3].mean() > 100
 
     @pytest.mark.asyncio
@@ -584,7 +586,7 @@ class TestThreeMFCapabilities:
                 tuple(
                     image.convert("RGB").getpixel((image.width // 2, image.height // 2))
                 )
-                == color
+                == pytest.approx(color, abs=3)
             )
         accepted = await api.get(f"/api/v1/files/{file_id}/stl", headers=headers)
         assert accepted.status_code == 202, accepted.text

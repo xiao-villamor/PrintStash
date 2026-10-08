@@ -152,7 +152,9 @@ def benchmark_file(path: Path, *, cold_runs: int, warm_runs: int) -> Measurement
                     else "renderer_no_output"
                 )
             else:
-                output = to_webp(result.image)
+                output = to_webp(
+                    result.image, renderer_encoded=strategy is ThumbnailStrategy.FULL
+                )
         except Exception as exc:
             # The benchmark's contract is to retain failed attempts and continue
             # the corpus, including unexpected engine bugs such as AttributeError.

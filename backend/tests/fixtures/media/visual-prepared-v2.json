@@ -1,0 +1,80 @@
+{
+  "provenance": {
+    "source_commit": "94bdec19d5c84f1837d6a6f5ee803b66ccc3a09d",
+    "python": "3.14.8",
+    "numpy": "2.5.3",
+    "pillow": "12.3.0",
+    "source": "Quality-90 WebP thumbnail with lossless alpha; six raw geometric views unchanged from v1"
+  },
+  "source_sha256": "cc09808d4d1cae28843d1c853c3bfe08943230160e5dfef6e13144f5da8180f6",
+  "image_size": 32,
+  "triangle_cap": 100,
+  "profile": "multiview",
+  "view_identity": "5ac550cddde28f6a2fd6e7330963971bba08dc74f98da1a6e7dc14568a92d001",
+  "thumbnail_rgb_sha256": "a3cd04d394ad8b1cec92375e3eb72d2a4e96d8e7eae06e386f297c9d3a92680f",
+  "views_rgb_sha256": [
+    "94766ed0cf54b339451706ac69f5bc57b3739eefeb0b38e9c29749a79cd75eb9",
+    "103e880c1655f9a261a275d6045a385d8dff08e83f76bd36fa889b3ea78b464c",
+    "7f53e02f6e290f1f3c0062838ad456d41db648c03c6ee851400e886bbb4c36d4",
+    "137361c10a9039ecb6b63e059da9113439f539729f006b1b6c6e63762d46e5be",
+    "b7ba33a0c15e83493724f23fdaa43cf5f25f0f155e77d744d13003946fcac21c",
+    "3ea009d644693774171acc9cf9d2b3d605647b7a91fe985f5d9d30dce7c93640"
+  ],
+  "geometry": {
+    "vertices": [
+      [
+        0,
+        0,
+        0
+      ],
+      [
+        10,
+        0,
+        0
+      ],
+      [
+        1,
+        20,
+        0
+      ],
+      [
+        2,
+        3,
+        30
+      ]
+    ],
+    "faces": [
+      [
+        0,
+        2,
+        1
+      ],
+      [
+        0,
+        1,
+        3
+      ],
+      [
+        0,
+        3,
+        2
+      ],
+      [
+        1,
+        2,
+        3
+      ]
+    ]
+  },
+  "recipe_input": {
+    "space": {
+      "model_key": "clip",
+      "model_revision": "v1",
+      "dimension": 3,
+      "modality": "text_image",
+      "render_recipe": "test"
+    },
+    "image_size": 32,
+    "profile": "multiview"
+  }
+}

@@ -308,7 +308,7 @@ class TestMeasure:
         from tests.factories.geometry import tetrahedron
 
         baseline = json.loads(
-            (FIXTURES_DIR / "media/visual-prepared-v1.json").read_text()
+            (FIXTURES_DIR / "media/visual-prepared-v2.json").read_text()
         )
         source = tmp_path / "tetra.stl"
         original = tetrahedron().export(file_type="stl")
