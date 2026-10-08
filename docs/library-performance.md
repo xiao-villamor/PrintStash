@@ -139,10 +139,10 @@ contract and must not be presented as comparable final acceptance.
 | 56 | keeps a restored branch usable while a newly opened branch is pending | Edge | One slow branch | Other restored branch stays usable | Frontend integration | ✅ |
 | 57 | loads a hovered folder description on navigation | Happy | Intent then selection | Description arrives on actual navigation | Frontend integration | ✅ |
 | 58 | limits simultaneous protected image downloads to two | Boundary | Many image consumers | At most two active transfers | Frontend unit | ✅ |
-| 59 | Library reads retain scale budgets | Scale | 25k collections / 100k Models | Bounded queries, parameters and wall time | Backend scale | ✅ local budget and growth checks, both roles; latest CI pending |
-| 60 | the independent observer waits for usable library controls | Error | Search control disabled | No successful completion until enabled | Playwright | ✅ |
+| 59 | Library reads retain scale budgets | Scale | 25k collections / 100k Models | Bounded queries, parameters and wall time | Backend scale | ✅ local and CI budget checks, both roles; growth checks local |
+| 60 | the independent observer waits for usable desktop/mobile library controls | Error | Hidden responsive duplicates, disabled search or mobile filter control | Only visible, enabled controls permit completion | Playwright | ✅ |
 | 61 | mobile vault prepares bounded tree roots before opening the drawer | Happy | Mobile library with closed drawer | Bounded root read reused on opening | Playwright | ✅ |
-| 62 | test_restores_unfiled_counts_and_entries | Edge | Library with/without a folder | Root count and unfiled identities agree | Backend integration | ✅ |
+| 62 | test_restores_unfiled_page | Edge | Library with/without a folder | Root count and unfiled identities agree | Backend integration | ✅ |
 | 63 | preserves Models plus G-code after grouping deletion | Happy | Picker with more than one page | Selected Models and revisions survive deleting the set | Real-backend Playwright | ✅ |
 | 64 | keeps a shared Model independently accessible | Edge | One Model used in two sets | Both references and independent navigation work | Real-backend Playwright | ✅ |
 | 65 | moves a model reached through keyboard pagination beyond 500 entries | Edge | Late page, concurrent edit and duplicate display names | Exact seeded Model moved after conflict review and found in its destination | Real-backend Playwright | ✅ |

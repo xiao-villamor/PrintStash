@@ -740,7 +740,7 @@ class TestRestore:
     @pytest.mark.parametrize(
         "with_folder", [False, True], ids=["unfiled-only", "with-folder"]
     )
-    def test_restores_unfiled_counts_and_entries(
+    def test_restores_unfiled_page(
         self, client, auth_headers, make_model, make_collection, with_folder
     ):
         model = make_model("Unfiled")

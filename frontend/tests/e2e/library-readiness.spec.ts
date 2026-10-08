@@ -282,37 +282,56 @@ test.describe("Library readiness", () => {
     expect(observed.errors).toEqual([]);
   });
 
-  test("the independent observer waits for usable library controls", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 });
-    await page.route("**/", (route) =>
-      route.fulfill({
-        contentType: "text/html",
-        body: '<aside class="bg-sidebar" style="width:200px;height:100px">Tree</aside><main><h1>All Models</h1><input data-model-search disabled></main>',
-      }),
-    );
-    await page.addInitScript(installObserver, {
-      user: { id: 1 },
-      locale: "en",
-      target: {
-        expanded: [],
-        collection: null,
-        titles: { en: "All Models", es: "Todos los modelos" },
-        branches: [],
-        leaves: [],
-        entries: [],
-        folders: [],
-      },
+  for (const device of ["desktop", "mobile"]) {
+    test(`the independent observer waits for usable ${device} library controls`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(
+        device === "mobile" ? { width: 390, height: 844 } : { width: 1440, height: 900 },
+      );
+      await page.route("**/", (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: '<aside class="bg-sidebar" style="width:200px;height:100px">Tree</aside><main><h1>All Models</h1><input data-model-search hidden disabled><input data-model-search disabled><button aria-label="Filters" hidden>Filters</button><button disabled>Filters</button></main>',
+        }),
+      );
+      await page.addInitScript(installObserver, {
+        user: { id: 1 },
+        locale: "en",
+        target: {
+          expanded: [],
+          collection: null,
+          titles: { en: "All Models", es: "Todos los modelos" },
+          branches: [],
+          leaves: [],
+          entries: [],
+          folders: [],
+        },
+      });
+      await page.goto("/");
+      await page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+      expect(await page.evaluate(() => window.libraryObservation.complete)).toBeNull();
+      const enabled = await page.evaluate(() => {
+        document.querySelector<HTMLInputElement>("[data-model-search]:not([hidden])")!.disabled =
+          false;
+        return performance.now();
+      });
+      if (device === "mobile") {
+        await page.evaluate(
+          () =>
+            new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        );
+        expect(await page.evaluate(() => window.libraryObservation.complete)).toBeNull();
+        await page.locator("button:not([hidden])").evaluate((button: HTMLButtonElement) => {
+          button.disabled = false;
+        });
+      }
+      await page.waitForFunction(() => window.libraryObservation.complete !== null);
+      expect(await page.evaluate(() => window.libraryObservation.complete)).toBeGreaterThan(
+        enabled,
+      );
     });
-    await page.goto("/");
-    await page.evaluate(
-      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    );
-    expect(await page.evaluate(() => window.libraryObservation.complete)).toBeNull();
-    const enabled = await page.evaluate(() => {
-      document.querySelector<HTMLInputElement>("[data-model-search]")!.disabled = false;
-      return performance.now();
-    });
-    await page.waitForFunction(() => window.libraryObservation.complete !== null);
-    expect(await page.evaluate(() => window.libraryObservation.complete)).toBeGreaterThan(enabled);
-  });
+  }
 });

@@ -102,9 +102,12 @@ export function installObserver({ user, locale, target }) {
         branchNames,
         leafNames,
       };
-      const search = document.querySelector("[data-model-search]");
-      const filters = document.querySelector(
-        `button[aria-label="${locale === "en" ? "Filters" : "Filtros"}"]`,
+      const search = [...document.querySelectorAll("[data-model-search]")].find(visible);
+      const filters = [...document.querySelectorAll("button")].find(
+        (button) =>
+          visible(button) &&
+          (button.getAttribute("aria-label") ?? button.textContent?.trim()) ===
+            (locale === "en" ? "Filters" : "Filtros"),
       );
       const controlsReady =
         visible(search) &&
