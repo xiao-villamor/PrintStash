@@ -238,6 +238,11 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 116 | backfill progresses during foreground arrivals | Edge | Real DBOS/native mesh processing under coverage | Both backfills and queued foreground work finish inside the unchanged deadline | E2E | ✅ `e2e/test_ingestion_fairness.py::TestIngestionFairness::test_backfill_progresses_during_sustained_interactive_arrivals` |
 | 117 | canonical profile uses bounded encoder effort | Happy | Shared preview profile | Quality 90 and method 4 pinned by the public profile contract | Unit | ✅ `packages/printstash-core/tests/mesh/test_preview_profile.py::TestPreviewProfile::test_canonical_thumbnail_profile_is_stable` |
 | 118 | completes full-capacity backfill | Edge | Real native processing with foreground arrivals | Full-capacity backfill finishes inside the unchanged deadline | E2E | ✅ `e2e/test_ingestion_fairness.py::TestIngestionFairness::test_full_capacity_backfill_eventually_completes` |
+| 119 | ignores maintenance outside the Task Center | Edge | Idle Tasks, burst of system-only Job notices | No redundant job-history reads | Frontend unit | ✅ `src/lib/__tests__/task-center.test.ts::ignores maintenance outside the Task Center` |
+| 120 | refreshes tasks for visible Job notices | Happy | Owned work or scheduled backup changes | Fresh authenticated snapshot requested | Frontend unit | ✅ `src/lib/__tests__/task-center.test.ts::refreshes tasks for visible Job notices` |
+| 121 | classifies notices like the Task Center listing | Edge | Owned/system derivatives, scheduled backup, owned import | Notice visibility matches real scoped list | Integration | ✅ `integration/modules/work/test_events.py::TestJobChanged::test_classifies_notices_like_the_task_center_listing` |
+| 122 | refreshes administrator maintenance independently | Happy | System-only Job notice, Background work page open | Administration overview updates | Frontend unit | ✅ `src/components/__tests__/background-work-panel.test.tsx::refreshes administrator maintenance independently` |
+
 
 The matrix remains open until final gates and deployment acceptance finish.
 
@@ -299,3 +304,22 @@ additional 2.4% byte reduction.
 The native fairness regression under backend coverage passed both cases in 73.95 s
 with method 4. The existing 110 s fixture deadline was unchanged. Focused core
 checks passed 218 cases and backend compression/fixture checks passed 28 cases.
+
+A deployment HAR exposed 57 identical `/jobs` responses over 93 seconds:
+1,432,809 decoded bytes and 1,474,418 transferred bytes. System thumbnail events
+woke Task Center even though its default list excluded those Jobs. A visibility
+hint now lets that reader ignore irrelevant maintenance while administrators
+still receive all events. The regression first reproduced 61 snapshots for an
+initial read plus 60 system notices. User-owned work, scheduled backups, older
+servers and reconnects retain their refresh behavior. Paired JavaScript entries
+in that HAR represented service-worker interception plus its network fetch;
+the intercepted entries transferred zero bytes, not a duplicate download.
+
+The Job visibility change passed 195 frontend cases and 212 backend API/event/store/
+contract cases. Frontend type checking, lint and formatting also passed.
+
+The deployed `da1ec393` image regenerated all 92 thumbnail derivatives. The 91
+Model previews served by the real API total 1,284,894 bytes (median 12,860), all
+640×480, and match the alpha/quality-validated method-4 outputs byte for byte.
+All 92 original Artifact files retain their hashes and sizes; database integrity
+and the Model/collection/file/user counts remain unchanged.

@@ -180,6 +180,12 @@ changed before the subscription took effect. Delivery is best effort: in one
 process it is in memory, across processes it is PostgreSQL `NOTIFY`, and a
 reconnect delivers `{"type": "resync"}` so clients refetch.
 
+Job notices include `task_visible`: true for user-owned Jobs and scheduled
+backups, matching the default `/jobs` list. The shared administrator socket also
+carries maintenance with this flag false. Task Center ignores those notices;
+the Background work page still refreshes. Reconnection always resynchronizes,
+and clients retain the old wake behavior when an older server omits the hint.
+
 ## Topologies
 
 | Topology | Settings | Needs |
