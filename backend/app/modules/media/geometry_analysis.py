@@ -237,7 +237,8 @@ def visual_views(
             if encoded is None:
                 raise GeometryError("embedding_view_failed")
             preview = thumbnail_input(
-                thumbnail.to_webp(encoded, width=640), recipe.image_size
+                thumbnail.to_webp(encoded, width=640, renderer_encoded=True),
+                recipe.image_size,
             )
             rendered = (
                 _render_views(visual, recipe.image_size, canonical_frames())

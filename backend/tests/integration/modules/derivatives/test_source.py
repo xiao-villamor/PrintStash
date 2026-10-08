@@ -208,6 +208,36 @@ class TestPending:
 
         assert _pending(db_session) == []
 
+    @pytest.mark.parametrize(
+        ("file_type", "filename", "job_kind", "old_recipe"),
+        [
+            pytest.param(
+                FileType.STL, "part.stl", JobKind.DERIVATIVES_MESH, 11, id="mesh"
+            ),
+            pytest.param(
+                FileType.GCODE, "part.gcode", JobKind.DERIVATIVES_GCODE, 1, id="gcode"
+            ),
+        ],
+    )
+    def test_backfills_previous_thumbnail_recipes(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_derivative,
+        file_type,
+        filename,
+        job_kind,
+        old_recipe,
+    ):
+        artifact = make_file(make_model(), filename=filename, file_type=file_type)
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL, recipe_version=old_recipe)
+
+        pending = _subjects(db_session, source=DerivativeSource(group(job_kind)))
+
+        assert pending == [subject_key(artifact.id)]
+
     def test_one_missing_kind_is_enough(
         self, db_session: Session, mesh, make_derivative
     ) -> None:

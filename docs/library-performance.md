@@ -215,6 +215,17 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 93 | rejects incomplete branch identities | Error | Missing, truncated, duplicate or invalid branch paths | Acceptance rejects incomplete expectations | Repo | ✅ `tests/repo/library-performance.test.ts::rejects incomplete branch identities` |
 | 94 | rejects incomplete leaf identities | Error | Missing, truncated, duplicate or invalid leaf paths | Acceptance rejects incomplete expectations | Repo | ✅ `tests/repo/library-performance.test.ts::rejects incomplete leaf identities` |
 | 95 | accepts distinct paths with repeated labels | Happy | Different paths share display names | Valid corpus remains acceptable | Repo | ✅ `tests/repo/library-performance.test.ts::accepts distinct paths with repeated labels` |
+| 96 | compresses detailed canonical previews | Happy | Legacy lossless WebP at 640 px | Output below 60% of input without changing dimensions | Unit | ✅ `unit/modules/media/test_thumbnail.py::TestWebpNormalization::test_compresses_detailed_canonical_previews` |
+| 97 | preserves thumbnail transparency exactly | Happy | Transparent preview with antialiased edges | Decoded alpha equals source alpha | Unit | ✅ `unit/modules/media/test_thumbnail.py::TestWebpNormalization::test_preserves_thumbnail_transparency_exactly` |
+| 98 | preserves visible thumbnail detail | Happy | Detailed color gradient preview | Visible RGB mean error below 4 levels | Unit | ✅ `unit/modules/media/test_thumbnail.py::TestWebpNormalization::test_preserves_visible_thumbnail_detail` |
+| 99 | preserves freshly rendered WebP bytes | Edge | Current renderer output explicitly identified by producer | No second lossy encode | Unit | ✅ `unit/modules/media/test_thumbnail.py::TestWebpNormalization::test_canonical_renderer_webp_is_validated_without_reencoding` |
+| 100 | normalizes mismatched renderer dimensions | Edge | Renderer image larger than configured width | Output obeys configured size despite trusted origin | Unit | ✅ `unit/modules/media/test_thumbnail.py::TestWebpNormalization::test_normalizes_mismatched_renderer_dimensions` |
+| 101 | rejects empty renderer output | Error | Transparent image marked as renderer output | Stable validation error before publication | Unit | ✅ `unit/modules/media/test_thumbnail.py::TestWebpNormalization::test_rejects_empty_renderer_output` |
+| 102 | compresses native rendered frames | Happy | Actual mesh rendered at 640 px | WebP smaller than equivalent lossless encoding | Unit | ✅ `packages/printstash-core/tests/mesh/test_rasterizer.py::TestRenderMeshThumbnail::test_compresses_native_rendered_frames` |
+| 103 | rejects invalid compression quality | Error | Out-of-range or boolean recipe quality | Profile load rejects invalid recipe | Unit | ✅ `packages/printstash-core/tests/mesh/test_preview_profile.py::TestPreviewProfile::test_profile_structure_rejects_invalid_recipe` |
+| 104 | serves compressed previews after processing resumes | Happy | Upload while disabled, then enable processing | API serves compressed WebP at configured resolution | E2E | ✅ `e2e/test_derivative_controls.py::TestDerivativeControls::test_disable_upload_enable_produces_a_preview` |
+| 105 | backfills previous thumbnail recipes | Edge | Ready metadata with previous mesh/G-code thumbnail recipe | Artifact becomes eligible for derivative Job | Integration | ✅ `integration/modules/derivatives/test_source.py::TestPending::test_backfills_previous_thumbnail_recipes` |
+| 106 | preserves decoded alpha in every output format | Edge | PNG/WebP with opaque, transparent and partial alpha pixels | Exact decoded alpha values | Unit | ✅ `packages/printstash-core/tests/mesh/test_rasterizer.py::TestEncodeRenderedPixels::test_preserves_decoded_alpha` |
 
 The matrix remains open until final gates and deployment acceptance finish.
 
@@ -246,3 +257,13 @@ or after full-view readiness. A loading placeholder cannot prematurely admit
 catalogs. Focusing or pressing a filter and the desktop filter toggle still express
 immediate intent. This preserves useful
 filter interactions without competing with restoration for offscreen data.
+
+A separate codec diagnostic on 91 authorized thumbnails compared WebP qualities
+90/85/80 at 640 px and quality 85 at 480/320 px. Quality 90 at the existing
+640×480 resolution reduced total bytes from 4,603,434 to 1,254,838 (72.7%);
+median size fell from 43,332 to 12,624 bytes. All 91 alpha planes remained
+byte-identical; alpha-weighted visible RGB PSNR was 43.41 dB median and 34.30 dB
+minimum. Representative detailed, largest and worst-PSNR images were inspected
+visually. These are codec diagnostics, not browser acceptance times; source
+images and item identities stay private. The final deployment must regenerate
+through normal derivative Jobs before measuring its actual served outputs.

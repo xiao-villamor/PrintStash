@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reduce thumbnail transfer size with quality-90 WebP color and lossless transparency,
+  preserving resolution and regenerating existing mesh/G-code previews through Jobs.
 - Restore remembered Library branches in bounded batches, prioritize visible thumbnails,
   and keep deeply nested folders selectable on narrow screens. Load the multipart
   editor separately from Library cards, reuse restoration counts and permission scopes,
