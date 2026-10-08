@@ -25,6 +25,9 @@ from scripts.gpu_render_measurement import (
     library_versions,
     measure,
 )
+from scripts.render_backend import Candidate
+from scripts.render_qualification import revision, verify, working_tree_dirty
+from scripts.render_statistics import summarize
 
 REPLY_LIMIT = 4 * 1024**2
 
@@ -74,6 +77,7 @@ def _worker(argv: list[str]) -> int:
     raw["mode"] = Mode(raw["mode"])
     raw["flow"] = Flow(raw["flow"])
     raw["output_format"] = OutputFormat(raw["output_format"])
+    raw["candidate"] = Candidate(raw["candidate"])
     spec = PilotSpec(**raw)
     reply = os.fdopen(os.dup(sys.stdout.fileno()), "wb", buffering=0)
     with open(os.devnull, "wb") as sink:
@@ -103,7 +107,19 @@ def main() -> int:
     parser.add_argument("--case", default="sharp-cube")
     parser.add_argument("--trials", type=int, default=1)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--backend", choices=("egl",), default="egl")
+    parser.add_argument(
+        "--candidate",
+        type=Candidate,
+        choices=tuple(Candidate),
+        default=Candidate.MODERNGL,
+    )
+    parser.add_argument("--backend", choices=("egl", "auto"))
+    parser.add_argument("--adapter", dest="selector")
+    parser.add_argument(
+        "--allow-software",
+        action="store_true",
+        help="Conformance only; never qualifies physical acceleration",
+    )
     parser.add_argument("--chunk-size", type=int, default=64000)
     parser.add_argument("--allocation-limit", type=int, default=512 * 1024**2)
     parser.add_argument("--frame-width", type=int, default=640)
@@ -120,7 +136,14 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=float, default=120)
     parser.add_argument("--memory-budget-mb", type=int)
     parser.add_argument("--telemetry", action="store_true")
+    parser.add_argument(
+        "--manifest", type=Path, help="Predeclared corpus/software/quality policy"
+    )
     args = parser.parse_args()
+    if args.backend is None:
+        args.backend = "auto" if args.candidate is Candidate.WGPU else "egl"
+    if args.backend != ("auto" if args.candidate is Candidate.WGPU else "egl"):
+        parser.error("wgpu uses auto; ModernGL uses egl")
     if not 1 <= args.trials <= 100 or not 1 <= args.views <= 6:
         parser.error("trials must be 1..100 and views 1..6")
     if (
@@ -150,6 +173,10 @@ def main() -> int:
         / (args.case + (".stl" if args.case == "real-benchy" else ".3mf"))
     )
     args.output_dir = args.output_dir.absolute()
+    if args.manifest is not None:
+        if args.source is None:
+            parser.error("--manifest requires an existing --source")
+        verify(json.loads(args.manifest.read_text()), source, args.flow)
     with tempfile.TemporaryDirectory(prefix="gpu-pilot-vault-") as temporary:
         from scripts.bench_mesh_pipeline import (
             configure_private_vault,
@@ -226,7 +253,10 @@ def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
     if args.memory_budget_mb is not None:
         amount = Resources(1, args.memory_budget_mb * 1024**2)
     report: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "candidate": args.candidate,
+        "tested_commit": revision(),
+        "working_tree_dirty": working_tree_dirty(),
         "scope": "private_gpu_pilot_no_production_adoption",
         "quality_policy": POLICY,
         "flow": args.flow,
@@ -263,6 +293,9 @@ def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
                     args.flow,
                     args.embedding_size,
                     args.output_format,
+                    args.candidate,
+                    args.selector,
+                    args.allow_software,
                 )
                 with admission(amount, capacity, checkpoint=checkpoint) as permit:
                     result = supervise_result(
@@ -333,17 +366,19 @@ def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
             for item in samples
             if item["method"] == "gpu" and item["status"] == "completed"
         ]
-        renderers = [
-            item["device"]["GL_RENDERER"]
+        devices = [
+            item["device"]
             for item in samples
             if item["method"] == "gpu" and "device" in item
         ]
-        hardware = bool(renderers) and all(
-            not any(
-                token in name.lower()
+        hardware = bool(devices) and all(
+            device["physical_acceleration"]
+            if args.candidate is Candidate.WGPU
+            else not any(
+                token in device["GL_RENDERER"].lower()
                 for token in ("llvmpipe", "softpipe", "swiftshader", "software")
             )
-            for name in renderers
+            for device in devices
         )
         speedup = (
             median(cpu) / median(gpu) if len(cpu) == len(gpu) == args.trials else None
@@ -351,12 +386,17 @@ def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
         gates.append(
             {
                 "mode": cell["mode"],
+                "cpu_statistics": summarize(cpu),
+                "gpu_statistics": summarize(gpu),
+                "minimum_observations_met": len(cpu) >= 30 and len(gpu) >= 30,
                 "hardware_renderer": hardware,
                 "full_cold_source_median_speedup": speedup,
                 "accepted": cell["status"] == "completed"
                 and hardware
                 and speedup is not None
-                and speedup >= 1.5,
+                and speedup >= 1.5
+                and len(cpu) >= 30
+                and len(gpu) >= 30,
             }
         )
     report["cost_quality_hardware_gates"] = gates
@@ -368,6 +408,9 @@ def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
         else "qualification_pending"
     )
     report["remaining_qualification"] = [
+        "30 fresh supervised processes per declared workload family on both verification devices",
+        "Linux/Docker physical-device evidence tied to the tested commit",
+        "upload acceptance through retrievable thumbnail (production Jobs remain CPU)",
         "protected analytic components",
         "driver/context-loss/OOM/cancellation recovery",
     ]

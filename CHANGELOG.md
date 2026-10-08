@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add an optional Python 3.14 WebGPU raster qualification adapter, adapter diagnostics,
+  frozen benchmark manifests and statistical reports. Production rendering remains CPU.
+
 - Keep the collection tree visible when selecting folders, preserving open branches
   and downloaded sibling pages without reloading them on every click.
 

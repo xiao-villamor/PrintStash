@@ -17,6 +17,7 @@ import pytest
 from PIL import Image
 
 from scripts.mesh_benchmark_corpus import build_contract_corpus
+from scripts.render_backend import Candidate
 from tests.paths import BACKEND_DIR
 
 
@@ -65,7 +66,10 @@ class TestMain:
         assert completed.stdout == ""
         assert not output.exists()
 
-    def test_retains_real_cpu_report_when_optional_gpu_is_unavailable(self, tmp_path):
+    @pytest.mark.parametrize("candidate", list(Candidate))
+    def test_retains_real_cpu_report_when_optional_gpu_is_unavailable(
+        self, tmp_path, candidate
+    ):
         corpus = tmp_path / "corpus"
         corpus.mkdir()
         build_contract_corpus(corpus)
@@ -74,8 +78,8 @@ class TestMain:
         output = tmp_path / "pilot"
         boundary = tmp_path / "external-library-boundary"
         boundary.mkdir()
-        (boundary / "moderngl.py").write_text(
-            "raise ImportError('pilot_external_moderngl_refusal')\n"
+        (boundary / f"{candidate.value}.py").write_text(
+            "raise ImportError('pilot_external_gpu_refusal')\n"
         )
         user_vault = tmp_path / "user-vault"
         user_vault.mkdir()
@@ -93,6 +97,8 @@ class TestMain:
                 sys.executable,
                 "-m",
                 "scripts.gpu_render_pilot",
+                "--candidate",
+                candidate.value,
                 "--source",
                 str(source),
                 "--output-dir",
@@ -163,7 +169,7 @@ class TestMain:
             "dependency_unavailable"
         ] * 2
         assert all(
-            "pilot_external_moderngl_refusal" in str(item["native_causes"])
+            "pilot_external_gpu_refusal" in str(item["native_causes"])
             for item in gpu_observations
         )
         assert source.read_bytes() == original
@@ -187,6 +193,9 @@ class TestRun:
         output = tmp_path / "report"
         output.mkdir()
         arguments = argparse.Namespace(
+            candidate=Candidate.MODERNGL,
+            selector=None,
+            allow_software=False,
             source=source,
             case="sharp-cube",
             output_dir=output,

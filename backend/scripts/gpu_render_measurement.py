@@ -16,6 +16,8 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scripts.render_backend import Candidate, GpuError
+
 if TYPE_CHECKING:
     from printstash_core.mesh.rasterizer import RenderedPixels
 
@@ -61,11 +63,20 @@ class PilotSpec:
     flow: Flow = Flow.PREVIEW
     embedding_size: int = 224
     output_format: OutputFormat = OutputFormat.WEBP
+    candidate: Candidate = Candidate.MODERNGL
+    selector: str | None = None
+    allow_software: bool = False
 
     def __post_init__(self) -> None:
         if (
             not isinstance(self.mode, Mode)
-            or self.backend != "egl"
+            or not isinstance(self.candidate, Candidate)
+            or self.backend != ("auto" if self.candidate is Candidate.WGPU else "egl")
+            or type(self.allow_software) is not bool
+            or (
+                self.selector is not None
+                and (type(self.selector) is not str or not self.selector)
+            )
             or not isinstance(self.flow, Flow)
             or not isinstance(self.output_format, OutputFormat)
         ):
@@ -149,7 +160,16 @@ def _digest(path: Path) -> str:
 
 def library_versions() -> dict[str, str | None]:
     result = {}
-    for name in ("numpy", "trimesh", "scipy", "Pillow", "moderngl", "glcontext"):
+    for name in (
+        "numpy",
+        "trimesh",
+        "scipy",
+        "Pillow",
+        "moderngl",
+        "glcontext",
+        "wgpu",
+        "rendercanvas",
+    ):
         try:
             result[name] = version(name)
         except PackageNotFoundError:
@@ -256,7 +276,10 @@ def measure(spec: PilotSpec) -> dict[str, object]:
     if spec.mode != "cpu":
         before = time.perf_counter()
         try:
-            from scripts import gpu_render_backend as gpu_api
+            if spec.candidate is Candidate.WGPU:
+                from scripts import wgpu_render_backend as gpu_api
+            else:
+                from scripts import gpu_render_backend as gpu_api
         except ImportError as exc:
             gpu_import_error = {
                 "reason": "optional_library_unavailable",
@@ -293,7 +316,15 @@ def measure(spec: PilotSpec) -> dict[str, object]:
                             raise ImportError(str(gpu_import_error))
                         if context is None:
                             before = time.perf_counter()
-                            context = gpu_api.GpuContext.create(backend=spec.backend)
+                            context = (
+                                gpu_api.GpuContext.create(
+                                    backend=spec.backend,
+                                    selector=spec.selector,
+                                    allow_software=spec.allow_software,
+                                )
+                                if spec.candidate is Candidate.WGPU
+                                else gpu_api.GpuContext.create(backend=spec.backend)
+                            )
                             context_ms = (time.perf_counter() - before) * 1000
                         row["device"] = context.info
                         if spec.mode == "cold":
@@ -415,7 +446,7 @@ def measure(spec: PilotSpec) -> dict[str, object]:
                 except Exception as exc:
                     reason = (
                         exc.reason.value
-                        if gpu_api is not None and isinstance(exc, gpu_api.GpuError)
+                        if isinstance(exc, GpuError)
                         else "optional_library_unavailable"
                         if isinstance(exc, ImportError)
                         else "render_failed"
@@ -427,6 +458,7 @@ def measure(spec: PilotSpec) -> dict[str, object]:
                     )
                     if method == "gpu":
                         if frame is not None:
+                            row["failed_frame_stats"] = asdict(frame.stats)
                             frame.close()
                             frame = None
                         if context is not None:
