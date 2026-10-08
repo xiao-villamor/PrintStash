@@ -2173,10 +2173,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => {
-                      startup.request("filters");
-                      openDrawer();
-                    }}
+                    onClick={openDrawer}
                     className="w-full min-w-0 px-2"
                   >
                     <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
@@ -2350,10 +2347,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     type="button"
                     variant="outline"
                     size="xs"
-                    onClick={() => {
-                      startup.request("filters");
-                      openDrawer();
-                    }}
+                    onClick={openDrawer}
                     className="h-10 md:hidden sm:h-8"
                   >
                     <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />

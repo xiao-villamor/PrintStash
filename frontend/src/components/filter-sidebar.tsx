@@ -12,6 +12,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import type { StartupOutcome } from "@/lib/library-startup-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
+import { useViewportAdmission } from "@/lib/use-viewport-admission";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/navigation";
@@ -714,6 +715,13 @@ export function FilterSidebarContent({
   const { t } = useI18n();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
+  const requestSecondary = startup.request;
+  const { ref: filtersRef, admitted: filtersVisible } = useViewportAdmission();
+  useEffect(() => {
+    // Opening the mobile tree does not imply intent for offscreen catalogs.
+    // Visible filter controls get their data immediately, even during restore.
+    if (readinessEnabled && filtersOpen && filtersVisible) requestSecondary("filters");
+  }, [readinessEnabled, filtersOpen, filtersVisible, requestSecondary]);
   const contentRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!readinessEnabled) return;
@@ -1044,7 +1052,12 @@ export function FilterSidebarContent({
           </section>
 
           {filtersOpen && (
-            <div className="space-y-6" aria-label={uiText("Filters")} role="region">
+            <div
+              ref={filtersRef}
+              className="space-y-6"
+              aria-label={uiText("Filters")}
+              role="region"
+            >
               {/* Printer */}
               {canViewPrinters && (
                 <section>

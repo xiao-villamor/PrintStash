@@ -172,6 +172,7 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 79 | preserves already downloaded child pages when looking up a leaf | Edge | Child pages and cursors already cached | Existing pages remain intact | Frontend integration | ✅ |
 | 80 | does not seed a leaf response that completes after cancellation | Error | Cancelled lookup resolves late | No cache data published | Frontend integration | ✅ |
 | 81 | still reads children when the selected collection is not a leaf | Happy | Lookup reports children | Normal bounded child read publishes results | Frontend integration | ✅ |
+| 82 | prioritizes the mobile tree until the filter section enters the viewport | Edge | Open drawer, offscreen catalogs, pending decoded media | No catalog reads until their controls enter the viewport, then immediate requests | Playwright | ✅ |
 
 The matrix remains open until final gates and deployment acceptance finish.
 
@@ -196,3 +197,8 @@ cancelled response; normal invalidation still refetches that entry. This removes
 one serial round trip when opening a leaf collection. The first event connection
 waits for secondary reads to be admitted, while authority checks remain immediate;
 once connected, it remains open across pending destinations.
+
+Opening the mobile drawer admits the tree first. Catalogs below the viewport are
+requested when their filter region becomes visible, or after full-view readiness.
+The desktop filter toggle still expresses immediate intent. This preserves useful
+filter interactions without competing with restoration for offscreen data.

@@ -8,7 +8,8 @@
   and avoid repeated thumbnail access lookups and image decoding. Reuse immutable
   similarity SQL construction while checking current permissions on every read.
   Reuse authorized empty child levels and defer the initial event connection until
-  critical content is ready, retaining immediate permission checks.
+  critical content is ready, retaining immediate permission checks. Opening the mobile
+  tree no longer competes with filter catalogs below the visible area.
 - Keep the first visit intact when the service worker installs, while still refreshing
   an existing installation after a worker update.
 - Measure each Library destination through restored tree rows and decoded viewport
