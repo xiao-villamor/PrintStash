@@ -292,6 +292,8 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 164 | waits for native layout before positioning the first indicator | Edge | Tab bar mounts before the browser lays out the page | Initial measurement follows ResizeObserver delivery, avoiding synchronous page layout | UI unit | ✅ 200 UI cases passed |
 | 165 | composes independent library search scopes | Edge | Two ranked reads in one SQL statement, SQLite and PostgreSQL | Each local rank CTE preserves its allowed Model identities | Integration | ✅ SQLite/PostgreSQL passed |
 | 166 | reads a new recipe after reusing the canonical predicate | Edge | Recipe 2 replaces recipe 1 after an initial read | The reused SQL predicate selects the new live row | Integration | ✅ Passed |
+| 167 | positions the initial indicator using available layout | Edge | ResizeObserver absent | Tab indicator has the active tab's measured position | UI unit | ✅ Passed |
+| 168 | follows the newly selected tab | Edge | Active tab changes without ResizeObserver | Indicator moves to the newly selected tab | UI unit | ✅ Passed |
 
 
 
@@ -503,3 +505,8 @@ The lexical increment passed 33 search cases and 111 PostgreSQL/pagination/expan
 cases, plus 23 browser readiness cases. Frontend format/lint/typecheck and backend
 Ruff/Pyright passed. CI caught the new canonical-predicate test outside the required
 TestCanonicalPassage group; it was grouped without changing its assertions.
+
+The coverage audit found the environment-without-ResizeObserver fallback missing
+from the tab matrix. Two explicit initial/selection cases close it: 202 UI cases
+pass, with 99.18% statements, 98.2% branches and 100% lines. No coverage floor was
+lowered. Frontend lint and typechecks pass.
