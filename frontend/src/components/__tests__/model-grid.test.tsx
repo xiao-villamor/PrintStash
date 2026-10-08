@@ -708,6 +708,28 @@ describe("ModelBrowser", () => {
   });
 
   describe("collection navigation", () => {
+    it("clears Model selection when entering another collection", async () => {
+      const user = userEvent.setup();
+      renderVault({
+        models: [aModelListItem({ name: "Benchy" })],
+        collections: [aCollection()],
+      });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: "Select" }));
+      await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
+      expect(screen.getAllByText("1 selected").length).toBeGreaterThan(0);
+
+      await user.click(
+        within(screen.getByRole("complementary")).getByRole("button", {
+          name: "Parts",
+        }),
+      );
+
+      await waitFor(() => expect(screen.queryAllByText("1 selected")).toHaveLength(0));
+      expect(screen.getByRole("checkbox", { name: "Select Benchy" })).not.toBeChecked();
+    });
+
     it("keeps existing root collections visible beside an imported root", async () => {
       renderVault({
         collections: [

@@ -246,6 +246,33 @@ class TestListCollectionChildren:
 
         assert response.json()["items"][0]["display_path"] == "Brackets"
 
+    def test_rechecks_labels_after_a_previous_reader(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+        make_user: MakeUser,
+        grant_role: GrantRole,
+        headers_for: HeadersFor,
+    ) -> None:
+        parts = make_collection("Parts")
+        brackets = make_collection("Brackets", parent=parts)
+        viewer = make_user("changing-label-viewer")
+        grant_role(viewer, brackets, CollectionRole.VIEW)
+        params = {"path": brackets.path}
+
+        administrator = client.get(LOOKUP, params=params, headers=auth_headers)
+        assert administrator.status_code == 200
+        assert administrator.json()["collection"]["display_path"] == "Parts/Brackets"
+        restricted = client.get(LOOKUP, params=params, headers=headers_for(viewer))
+        assert restricted.status_code == 200
+        assert restricted.json()["collection"]["display_path"] == "Brackets"
+
+        grant_role(viewer, parts, CollectionRole.VIEW)
+        expanded = client.get(LOOKUP, params=params, headers=headers_for(viewer))
+        assert expanded.status_code == 200
+        assert expanded.json()["collection"]["display_path"] == "Parts/Brackets"
+
     def test_hides_a_parent_the_viewer_cannot_see(
         self,
         client: TestClient,

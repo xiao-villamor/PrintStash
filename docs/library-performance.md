@@ -259,6 +259,18 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 132 | preserves revalidation for mutable bootstrap | Edge | Theme/locale bootstrap request | Original fetch cache policy preserved | Repo | ✅ `tests/repo/service-worker.test.ts` |
 
 | 133 | reuses an HTTP-cached bundle without Cache Storage | Edge | Offline, Cache Storage rejects, asset fetched with reload semantics | Previously loaded content-hashed bundle remains available | Production Playwright | ✅ `pwa-production.spec.ts::reuses an HTTP-cached bundle without Cache Storage` |
+| 134 | create and delete an empty collection | Happy | Real persisted empty folder; hover its row action | Folder disappears after confirmed delete and reload | Playwright | ✅ `tests/e2e-real/collections.spec.ts::create and delete an empty collection` |
+| 135 | nest a subcollection and delete the child | Happy | Persisted parent and child | Each confirmed removal leaves the expected remaining tree | Playwright | ✅ `tests/e2e-real/collections.spec.ts::nest a subcollection and delete the child` |
+| 136 | parent count includes Models stored in a child collection | Happy | Model in nested folder | Both visible counters include it; recursive deletion reaches trash | Playwright | ✅ `tests/e2e-real/collections.spec.ts::parent count includes Models stored in a child collection` |
+| 137 | recursive-delete a non-empty collection from the sidebar | Happy | Folder contains uploaded Model | Confirmed deletion removes folder and its contents | Playwright | ✅ `tests/e2e-real/collections.spec.ts::recursive-delete a non-empty collection from the sidebar` |
+| 138 | builds multiple parts while browsing collections | Happy | Collection destination chosen by search | Real upload and multipart construction complete before cleanup | Playwright | ✅ `tests/e2e-real/multipart-models.spec.ts::builds multiple parts while browsing collections` |
+| 139 | collection role gates whether a user can edit or delete a model | Error | Upload destination selected from bounded picker | Granted role controls Model editing and deletion | Playwright | ✅ `tests/e2e-real/rbac.spec.ts::collection role gates whether a user can edit or delete a model` |
+| 140 | rechecks labels after a previous reader | Error | An administrator and a restricted reader request the same path before a grant expands | Each label includes only that reader's currently visible ancestry | Integration | ✅ `test_rechecks_labels_after_a_previous_reader` |
+| 141 | rechecks candidate visibility after lifecycle changes | Error | Candidate endpoint is trashed after its badge was read | The next badge read excludes the now hidden pair | Integration | ✅ `test_rechecks_candidate_visibility_after_lifecycle_changes` |
+| 142 | clears Model selection when entering another collection | Edge | Selected Model, sidebar navigation to a different collection | No hidden Model selection remains after navigation | Frontend unit | ✅ `model-grid.test.tsx::clears Model selection when entering another collection` |
+
+
+
 
 The matrix remains open until final gates and deployment acceptance finish.
 
@@ -373,3 +385,20 @@ A production-browser regression also verifies the actual HTTP-cache path with
 Cache Storage unavailable and the network offline. After warming the exact
 request through the active worker, a reload-mode fetch still returns the cached
 bundle. This fails with the previous worker and passes with the new cache policy.
+
+The complete real-host run at `9b4d5f15938bf0c889d931d845abfbe3fd8a53cd`
+retains all 920 samples and fails the agreed budgets. All root cohorts pass;
+dense reloads, collection changes and desktop pagination need further work.
+Deep-tree reload medians range from 644 to 1,229 ms, and the slow search tail is
+retained. The matched 600-sample baseline and exact image comparison are recorded
+in the PR; neither thresholds nor completion semantics changed.
+
+A separate profile on the authorized database copy showed avoidable ORM alias
+and recursive-ancestry construction. Reusing only immutable statement structure
+reduced ten browse calls from 468 to 396 ms and ten restores from 587 to 464 ms.
+Paths remain execution parameters and current authorization is composed per read.
+176 focused SQLite cases and 12 PostgreSQL cases pass, including sequential readers
+and lifecycle changes; the final isolation reset was verified by three focused cases.
+The tree action browser selectors now target the row's accessible action rather
+than its former direct-sibling position; destination selection searches the bounded
+picker. All six affected real-browser flows pass. Host acceptance is still pending.

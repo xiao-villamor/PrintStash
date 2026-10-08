@@ -235,7 +235,10 @@ test.describe("multipart models", () => {
     const sidebar = page.locator("aside");
     const label = sidebar.getByRole("button", { name: folder, exact: true });
     await label.hover();
-    await label.locator("xpath=following-sibling::button[@title='Delete collection']").click();
+    await label
+      .locator("..")
+      .getByRole("button", { name: "Delete collection", exact: true })
+      .click();
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(label).toHaveCount(0);
   });

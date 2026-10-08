@@ -96,27 +96,38 @@ def _evidence_predicate(candidate, algorithm_version: str):
     )
 
 
-def visible_query(session: Session, actor: User):
-    # Candidate endpoints are known identities. Correlated point lookups prevent
-    # stale small-catalog statistics from starting with a full Model scan.
-    # A primary-key scalar is at most one row. Keeping it scalar preserves
-    # keyed plans where flattening EXISTS reintroduced catalog scans.
+@lru_cache(maxsize=1)
+def _endpoint_queries():
+    # Cache aliases and invariant lifecycle predicates, never permissions or rows.
+    # SQLAlchemy's generative where() leaves these templates unchanged.
     a, b = aliased(Model), aliased(Model)
-    visible_endpoints = [
-        select(model.id)
-        .where(
-            model.id == endpoint,
-            live(model),
-            col(model.purge_token).is_(None),
-            editable_models(session, actor, model),
+    return tuple(
+        (
+            model,
+            select(model.id)
+            .where(
+                model.id == endpoint,
+                live(model),
+                col(model.purge_token).is_(None),
+            )
+            .correlate(SimilarityCandidate),
         )
-        .correlate(SimilarityCandidate)
-        .scalar_subquery()
-        .is_not(None)
         for model, endpoint in (
             (a, col(SimilarityCandidate.model_a_id)),
             (b, col(SimilarityCandidate.model_b_id)),
         )
+    )
+
+
+def visible_query(session: Session, actor: User):
+    # Candidate endpoints are known identities. Correlated point lookups prevent
+    # stale small-catalog statistics from starting with a full Model scan.
+    # Every execution composes the caller's current authorization predicate.
+    visible_endpoints = [
+        statement.where(editable_models(session, actor, model))
+        .scalar_subquery()
+        .is_not(None)
+        for model, statement in _endpoint_queries()
     ]
     return select(SimilarityCandidate).where(
         SimilarityCandidate.confidence > 0, *visible_endpoints

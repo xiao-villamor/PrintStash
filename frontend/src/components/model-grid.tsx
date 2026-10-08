@@ -779,7 +779,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   function handleCollectionChange(path: string | null) {
     if (path === selectedCollection) return;
-    setSelectedIds(new Set());
+    // An already empty selection must not render the departing grid urgently
+    // before Router can commit the destination and start its critical reads.
+    setSelectedIds((current) => (current.size === 0 ? current : new Set()));
     const params = new URLSearchParams(searchParams.toString());
     if (path) params.set("c", path);
     else params.delete("c");

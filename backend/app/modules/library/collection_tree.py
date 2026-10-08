@@ -18,9 +18,10 @@ import base64
 import binascii
 import json
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Iterable, Sequence
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, bindparam, func, or_
 from sqlalchemy import select as sa_select
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
@@ -207,6 +208,35 @@ def collection_tags(
     return result
 
 
+@lru_cache(maxsize=1)
+def _label_ancestry():
+    # This is immutable SQL structure only. Paths are bound at execution and
+    # the caller appends its current authorization scope on every read.
+    lineage = (
+        sa_select(
+            Collection.path.label("target_path"),
+            Collection.id.label("ancestor_id"),
+            Collection.parent_id.label("parent_id"),
+        )
+        .where(Collection.path.in_(bindparam("label_paths", expanding=True)))  # type: ignore[union-attr]
+        .cte("lineage", recursive=True)
+    )
+    parent = aliased(Collection)
+    lineage = lineage.union_all(
+        sa_select(lineage.c.target_path, parent.id, parent.parent_id).join(
+            parent, parent.id == lineage.c.parent_id
+        )
+    )
+    ancestor = aliased(Collection)
+    return (
+        sa_select(lineage.c.target_path, ancestor.path, ancestor.name)
+        .select_from(lineage)
+        .join(ancestor, ancestor.id == lineage.c.ancestor_id)
+        .where(live(ancestor)),
+        ancestor.id,
+    )
+
+
 def _labels(
     session: Session, paths: Iterable[str], visible: SelectOfScalar[int]
 ) -> dict[str, str]:
@@ -219,31 +249,10 @@ def _labels(
     wanted = sorted(set(paths))
     if not wanted:
         return {}
-    lineage = (
-        sa_select(
-            Collection.path.label("target_path"),
-            Collection.id.label("ancestor_id"),
-            Collection.parent_id.label("parent_id"),
-        )
-        .where(Collection.path.in_(wanted))  # type: ignore[union-attr]
-        .cte("lineage", recursive=True)
-    )
-    parent = aliased(Collection)
-    lineage = lineage.union_all(
-        sa_select(lineage.c.target_path, parent.id, parent.parent_id).join(
-            parent, parent.id == lineage.c.parent_id
-        )
-    )
-    ancestor = aliased(Collection)
+    statement, ancestor_id = _label_ancestry()
     chains: dict[str, list[tuple[str, str]]] = {}
     for path, ancestor_path, name in session.execute(
-        sa_select(lineage.c.target_path, ancestor.path, ancestor.name)
-        .select_from(lineage)
-        .join(ancestor, ancestor.id == lineage.c.ancestor_id)
-        .where(
-            live(ancestor),
-            ancestor.id.in_(visible),
-        )
+        statement.where(ancestor_id.in_(visible)), {"label_paths": wanted}
     ).all():
         chains.setdefault(path, []).append((ancestor_path, name))
     return {

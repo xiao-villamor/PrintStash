@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Reuse immutable ancestry and similarity query structure while reading current
+  permissions on every request. Avoid rerendering an unselected departing grid
+  before starting a collection navigation.
+
 - Reuse HTTP-cached content-hashed assets during reload without weakening HTML
   or bootstrap revalidation, offline fallback, or private-response isolation.
 
