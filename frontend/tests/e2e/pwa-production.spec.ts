@@ -186,6 +186,34 @@ test.describe("production PWA cache contracts", () => {
     });
   }
 
+  test("reuses an HTTP-cached bundle without Cache Storage", async ({ page, context }) => {
+    await openControlledApplication(page);
+    await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
+    const asset = await page.locator('script[type="module"][src^="/assets/"]').getAttribute("src");
+    if (!asset) throw new Error("Missing production bundle");
+    // Warm this exact request through the active worker before testing reuse.
+    await page.evaluate(async (url) => {
+      const response = await fetch(url);
+      await response.arrayBuffer();
+    }, asset);
+    await context.serviceWorkers()[0].evaluate(() => {
+      caches.open = async () => {
+        throw new DOMException("Storage unavailable", "SecurityError");
+      };
+    });
+    await context.setOffline(true);
+    try {
+      const result = await page.evaluate(async (url) => {
+        const response = await fetch(url, { cache: "reload" });
+        return { status: response.status, bytes: (await response.arrayBuffer()).byteLength };
+      }, asset);
+      expect(result.status).toBe(200);
+      expect(result.bytes).toBeGreaterThan(0);
+    } finally {
+      await context.setOffline(false);
+    }
+  });
+
   test("delivers bootstrap when cache storage rejects", async ({ page, context }) => {
     await openControlledApplication(page);
     const worker = context.serviceWorkers()[0];
