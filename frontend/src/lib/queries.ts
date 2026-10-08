@@ -5,8 +5,13 @@ import { filamentProfilesOptions, printerProfilesOptions } from "@/lib/queries/p
 import { printStatisticsOptions } from "@/lib/queries/statistics";
 import { markStartup } from "@/lib/startup-timing";
 
-import { listOutlinerCollections, listOutlinerEntries, searchOutliner } from "@/lib/api/outliner";
-import type { OutlinerParams } from "@/types/outliner";
+import {
+  listOutlinerCollections,
+  listOutlinerEntries,
+  searchOutliner,
+  restoreOutliner,
+} from "@/lib/api/outliner";
+import type { OutlinerParams, OutlinerRestoreParams, OutlinerRestoreRead } from "@/types/outliner";
 import { createContext, useContext, useMemo } from "react";
 import {
   infiniteQueryOptions,
@@ -88,6 +93,7 @@ export const defaultQueryApi = {
   listOutlinerCollections,
   listOutlinerEntries,
   searchOutliner,
+  restoreOutliner,
   getCollectionReadme,
   getDashboard,
   getFleetSummary,
@@ -514,7 +520,7 @@ export function useOutlinerModels(
 export function useOutlinerCollections(params: OutlinerParams, enabled = true) {
   const api = useQueryApi();
   return useInfiniteQuery({
-    queryKey: [...queryKeys.outliner, "collections", params],
+    queryKey: queryKeys.outlinerCollections(params),
     queryFn: ({ pageParam, signal }: { pageParam: string | null; signal: AbortSignal }) =>
       api.listOutlinerCollections({ ...params, cursor: pageParam ?? undefined }, signal),
     initialPageParam: null,
@@ -525,7 +531,7 @@ export function useOutlinerCollections(params: OutlinerParams, enabled = true) {
 export function useOutlinerEntries(params: OutlinerParams, enabled = true) {
   const api = useQueryApi();
   return useInfiniteQuery({
-    queryKey: [...queryKeys.outliner, "entries", params],
+    queryKey: queryKeys.outlinerEntries(params),
     queryFn: ({ pageParam, signal }: { pageParam: string | null; signal: AbortSignal }) =>
       api.listOutlinerEntries({ ...params, cursor: pageParam ?? undefined }, signal),
     initialPageParam: null,
@@ -542,5 +548,63 @@ export function useOutlinerSearch(params: OutlinerParams, enabled = true) {
     initialPageParam: null,
     getNextPageParam: (page) => page.next_cursor,
     enabled,
+  });
+}
+
+const RESTORE_BRANCH_LIMIT = 16;
+export function useOutlinerRestore(params: OutlinerRestoreParams, enabled = true) {
+  const api = useQueryApi();
+  const client = useQueryClient();
+  const { expanded_paths, selected_path, ...scope } = params;
+  return useQuery({
+    // Selection only supplies an initial reveal. Sibling pages retain their
+    // identity when returning from a Model; off-page selections use the
+    // ordinary collection hook's separate reveal query.
+    queryKey: [...queryKeys.outlinerRestore, scope, expanded_paths],
+    queryFn: async ({ signal }) => {
+      const result: OutlinerRestoreRead = { collections: [], entries: [] };
+      // Every path is restored; the request bound is not a library-size cap.
+      const batches = Math.max(1, Math.ceil(expanded_paths.length / RESTORE_BRANCH_LIMIT));
+      for (let batch = 0; batch < batches; batch++) {
+        const restored = await api.restoreOutliner(
+          {
+            ...scope,
+            selected_path,
+            expanded_paths: expanded_paths.slice(
+              batch * RESTORE_BRANCH_LIMIT,
+              (batch + 1) * RESTORE_BRANCH_LIMIT,
+            ),
+          },
+          signal,
+        );
+        // An injected transport can finish after cancellation. Never seed such
+        // a response, including after logout has cleared this user's cache.
+        signal.throwIfAborted();
+        result.collections.push(...restored.collections);
+        result.entries.push(...restored.entries);
+      }
+      for (const { parent_id, page } of result.collections) {
+        const key = queryKeys.outlinerCollections({ ...scope, parent_id: parent_id ?? undefined });
+        client.setQueryData<InfiniteData<typeof page, string | null>>(
+          key,
+          (existing) => existing ?? { pages: [page], pageParams: [null] },
+        );
+      }
+      for (const { collection_id, page } of result.entries) {
+        const key = queryKeys.outlinerEntries({
+          ...scope,
+          collection_id: collection_id ?? undefined,
+        });
+        client.setQueryData<InfiniteData<typeof page, string | null>>(
+          key,
+          (existing) => existing ?? { pages: [page], pageParams: [null] },
+        );
+      }
+      return result;
+    },
+    enabled,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    retry: false,
   });
 }

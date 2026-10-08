@@ -15,6 +15,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.time import utcnow
+from app.db.models import CollectionRole
 from app.modules.storage.storage_backend.runtime import get_backend
 
 
@@ -30,6 +32,65 @@ class TestFileThumbnail:
 
         assert response.status_code == 200, response.text
         assert response.content == b"first-thumbnail"
+
+    def test_allows_a_reader_of_the_parent_collection(
+        self,
+        client,
+        make_collection,
+        make_model,
+        make_file,
+        make_user,
+        headers_for,
+        grant_role,
+    ):
+        collection = make_collection("Shared thumbnails")
+        row = make_file(make_model("Visible", collection=collection))
+        reader = make_user("thumbnail-reader")
+        grant_role(reader, collection, CollectionRole.VIEW)
+        backend = get_backend()
+        backend.write_bytes(b"visible-thumbnail", backend.thumbnail_key(row.id))
+
+        response = client.get(
+            f"/api/v1/files/{row.id}/thumbnail", headers=headers_for(reader)
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.content == b"visible-thumbnail"
+
+    def test_denies_an_ungranted_thumbnail(
+        self, client, make_collection, make_model, make_file, make_user, headers_for
+    ):
+        row = make_file(
+            make_model("Private", collection=make_collection("Private thumbnails"))
+        )
+        reader = make_user("thumbnail-outsider")
+        backend = get_backend()
+        backend.write_bytes(b"private-thumbnail", backend.thumbnail_key(row.id))
+
+        response = client.get(
+            f"/api/v1/files/{row.id}/thumbnail", headers=headers_for(reader)
+        )
+
+        assert response.status_code == 403, response.text
+        assert response.content != b"private-thumbnail"
+
+    @pytest.mark.parametrize(
+        "owner", ["file", "model"], ids=["trashed-artifact", "trashed-model"]
+    )
+    def test_hides_trashed_thumbnail_owners(
+        self, client, auth_headers, db_session, make_model, make_file, owner
+    ):
+        model = make_model("Trashed thumbnail")
+        row = make_file(model)
+        target = {"file": row, "model": model}[owner]
+        target.deleted_at = utcnow()
+        db_session.add(target)
+        db_session.commit()
+
+        response = client.get(f"/api/v1/files/{row.id}/thumbnail", headers=auth_headers)
+
+        assert response.status_code == 404, response.text
+        assert response.json()["detail"] == "file_not_found"
 
     def test_answers_a_matching_etag_without_a_body(
         self, client: TestClient, auth_headers, make_model, make_file

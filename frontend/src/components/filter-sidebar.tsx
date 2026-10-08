@@ -1,12 +1,19 @@
 "use client";
 
+import {
+  EXPANDED_KEY,
+  readExpandedPaths,
+  useOutlinerRestoration,
+} from "@/lib/use-outliner-restoration";
+
 import { captureModelDrag, type ModelDrag } from "@/lib/model-dnd";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
+import type { StartupOutcome } from "@/lib/library-startup-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/navigation";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { CollectionNodeRead, OutlinerModelRead, PrinterRead, TagRead } from "@/types";
@@ -84,20 +91,7 @@ function collectionDropTarget(event: DragEndEvent): CollectionDropData | null {
   return data as CollectionDropData;
 }
 
-const EXPANDED_KEY = "ps-filter-expanded";
 const ALL_EXPANDED_KEY = "ps-filter-all-expanded";
-
-/** The expanded collection paths persisted this session, or null if none are. */
-function readExpandedPaths(): Set<string> | null {
-  try {
-    const saved = sessionStorage.getItem(EXPANDED_KEY);
-    if (!saved) return null;
-    const parsed: unknown = JSON.parse(saved);
-    return Array.isArray(parsed) ? new Set(parsed.map(String)) : null;
-  } catch {
-    return null;
-  }
-}
 
 /** Is the "All Models" group expanded? Open unless this session closed it. */
 function readAllModelsExpanded(): boolean {
@@ -193,10 +187,12 @@ function OutlinerLeaves({
 interface TreeContext {
   selected: string | null;
   onSelect: (path: string | null) => void;
-  onIntent?: (path: string) => void;
+  onIntent?: (path: string | null) => void;
   expanded: Set<string>;
   toggle: (path: string) => void;
   params: OutlinerParams;
+  restoring: boolean;
+  report: (key: string, status: StartupOutcome | null) => void;
   revealNodes: CollectionNodeRead[];
   dragging: DragPayload | null;
   onDelete?: (id: number, recursive: boolean) => void;
@@ -261,9 +257,25 @@ function PageControls({
   );
 }
 
+function useTreeReadiness(ctx: TreeContext, key: string, status: StartupOutcome) {
+  const report = ctx.report;
+  useEffect(() => {
+    report(key, status);
+    return () => report(key, null);
+  }, [report, key, status]);
+}
+
 function EntryLevel({ collectionId, ctx }: { collectionId: number | null; ctx: TreeContext }) {
   useUiLocale();
-  const query = useOutlinerEntries({ ...ctx.params, collection_id: collectionId ?? undefined });
+  const query = useOutlinerEntries(
+    { ...ctx.params, collection_id: collectionId ?? undefined },
+    !ctx.restoring,
+  );
+  useTreeReadiness(
+    ctx,
+    `entries:${collectionId}`,
+    query.isError ? "failed" : query.isPending ? "pending" : "ready",
+  );
   const entries = query.data?.pages.flatMap((page) => page.items) ?? [];
   return (
     <>
@@ -277,12 +289,23 @@ function EntryLevel({ collectionId, ctx }: { collectionId: number | null; ctx: T
   );
 }
 
-function CollectionLevel({ parentId, ctx }: { parentId: number | null; ctx: TreeContext }) {
+function CollectionLevel({
+  parentId,
+  ctx,
+  depth = 0,
+}: {
+  parentId: number | null;
+  ctx: TreeContext;
+  depth?: number;
+}) {
   useUiLocale();
-  const query = useOutlinerCollections({
-    ...ctx.params,
-    parent_id: parentId ?? undefined,
-  });
+  const query = useOutlinerCollections(
+    {
+      ...ctx.params,
+      parent_id: parentId ?? undefined,
+    },
+    !ctx.restoring,
+  );
   const nodes = new Map<number, OutlinerCollection>();
   for (const page of query.data?.pages ?? []) {
     for (const node of page.items) nodes.set(node.id, node);
@@ -296,6 +319,15 @@ function CollectionLevel({ parentId, ctx }: { parentId: number | null; ctx: Tree
     { ...ctx.params, parent_id: parentId ?? undefined, reveal_id: selectedId },
     query.isSuccess && needsReveal,
   );
+  useTreeReadiness(
+    ctx,
+    `collections:${parentId}`,
+    query.isError || (needsReveal && reveal.isError)
+      ? "failed"
+      : query.isPending || (needsReveal && reveal.isPending)
+        ? "pending"
+        : "ready",
+  );
   if (needsReveal) {
     for (const page of reveal.data?.pages ?? []) {
       if (page.revealed) nodes.set(page.revealed.id, page.revealed);
@@ -306,7 +338,7 @@ function CollectionLevel({ parentId, ctx }: { parentId: number | null; ctx: Tree
       {[...nodes.values()]
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((node) => (
-          <CollectionTreeRow key={node.id} node={node} ctx={ctx} />
+          <CollectionTreeRow key={node.id} node={node} ctx={ctx} depth={depth} />
         ))}
       <PageControls
         query={query}
@@ -336,6 +368,7 @@ function SearchResults({
   useUiLocale();
   const router = useRouter();
   const query = useOutlinerSearch({ ...ctx.params, q: text });
+  useTreeReadiness(ctx, "search", query.isError ? "failed" : query.isPending ? "pending" : "ready");
   const matches = query.data?.pages.flatMap((page) => page.items) ?? [];
   function locate(path: string | null) {
     ctx.onSelect(path);
@@ -389,7 +422,15 @@ function SearchResults({
   );
 }
 
-function CollectionTreeRow({ node, ctx }: { node: OutlinerCollection; ctx: TreeContext }) {
+function CollectionTreeRow({
+  node,
+  ctx,
+  depth,
+}: {
+  node: OutlinerCollection;
+  ctx: TreeContext;
+  depth: number;
+}) {
   useUiLocale();
   const [confirming, setConfirming] = useState(false);
   const { selected, onSelect, onIntent, expanded, toggle, dragging, onDelete } = ctx;
@@ -524,6 +565,8 @@ function CollectionTreeRow({ node, ctx }: { node: OutlinerCollection; ctx: TreeC
               onPointerDown={(e) => e.stopPropagation()}
               onPointerEnter={() => onIntent?.(node.path)}
               onFocus={() => onIntent?.(node.path)}
+              onPointerLeave={() => onIntent?.(null)}
+              onBlur={() => onIntent?.(null)}
               onClick={() => onSelect(node.path)}
               className="flex flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate"
               title={node.name}
@@ -571,8 +614,16 @@ function CollectionTreeRow({ node, ctx }: { node: OutlinerCollection; ctx: TreeC
           </div>
         )}
         {isOpen && hasNestedItems && !confirming && (
-          <div className="ml-4 border-l border-border pl-3 min-w-0">
-            {node.visible_child_count > 0 && <CollectionLevel parentId={node.id} ctx={ctx} />}
+          <div
+            className={
+              depth < 2
+                ? "ml-2 border-l border-border pl-1 min-w-0"
+                : "border-l border-border min-w-0"
+            }
+          >
+            {node.visible_child_count > 0 && (
+              <CollectionLevel parentId={node.id} ctx={ctx} depth={depth + 1} />
+            )}
             {node.direct_entry_count > 0 && <EntryLevel collectionId={node.id} ctx={ctx} />}
           </div>
         )}
@@ -655,6 +706,7 @@ export function FilterSidebarContent({
   canViewPrinters = true,
   structuredFilters,
   filtersOpen = true,
+  readinessEnabled = true,
   libraryView,
   onLibraryViewChange,
 }: FilterSidebarProps) {
@@ -662,6 +714,12 @@ export function FilterSidebarContent({
   const { t } = useI18n();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!readinessEnabled) return;
+    settleStartup("tree", "pending");
+    return () => settleStartup("tree", "idle");
+  }, [settleStartup, readinessEnabled]);
   const outlinerQ = (outlinerFilter ?? "").trim();
   const [searchText, setSearchText] = useState(outlinerQ);
   useEffect(() => {
@@ -674,7 +732,6 @@ export function FilterSidebarContent({
       ? [...lookup.data.ancestors, lookup.data.collection]
       : [];
   const params: OutlinerParams = { ...outlinerFilters, view: libraryView };
-  const roots = useOutlinerCollections(params, outlinerQ === "");
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     // A first visit starts at the top level: the tree loads a level only when
     // it is opened, and opening a large library whole is what #295 was.
@@ -685,10 +742,61 @@ export function FilterSidebarContent({
     return initial;
   });
   const [allModelsExpanded, setAllModelsExpanded] = useState(readAllModelsExpanded);
+  const {
+    restore,
+    enabled: restoreEnabled,
+    restoring,
+  } = useOutlinerRestoration(params, selectedCollection, outlinerQ === "", expanded);
+  const roots = useOutlinerCollections(params, outlinerQ === "" && !restoring);
+  const [levels, setLevels] = useState<ReadonlyMap<string, StartupOutcome>>(() => new Map());
+  const report = useCallback((key: string, status: StartupOutcome | null) => {
+    setLevels((current) => {
+      if (status === null ? !current.has(key) : current.get(key) === status) return current;
+      const next = new Map(current);
+      if (status === null) next.delete(key);
+      else next.set(key, status);
+      return next;
+    });
+  }, []);
   useEffect(() => {
-    if (roots.data !== undefined) settleStartup("tree", "ready");
-    else if (roots.isError) settleStartup("tree", "failed");
-  }, [roots.data, roots.isError, settleStartup]);
+    if (!readinessEnabled) return;
+    const states = [...levels.values()];
+    if (roots.isError || (restoreEnabled && restore.isError) || states.includes("failed"))
+      settleStartup("tree", "failed");
+    else if (
+      roots.data !== undefined &&
+      !restoring &&
+      states.length > 0 &&
+      states.every((state) => state === "ready")
+    ) {
+      let frame = 0;
+      const painted = () => {
+        const drawer = contentRef.current?.closest('[role="dialog"]');
+        // Restored rows in a sliding drawer are not yet usable. Observe the
+        // primitive's real transition rather than duplicating its duration.
+        if (
+          drawer?.getAnimations &&
+          (drawer.getAttribute("data-state") !== "open" ||
+            drawer.getAnimations().some((animation) => animation.playState === "running"))
+        ) {
+          frame = requestAnimationFrame(painted);
+          return;
+        }
+        settleStartup("tree", "ready");
+      };
+      frame = requestAnimationFrame(painted);
+      return () => cancelAnimationFrame(frame);
+    } else settleStartup("tree", "pending");
+  }, [
+    readinessEnabled,
+    roots.data,
+    roots.isError,
+    restoreEnabled,
+    restore.isError,
+    restoring,
+    levels,
+    settleStartup,
+  ]);
   const [tagFilter, setTagFilter] = useState("");
   const [showAllTags, setShowAllTags] = useState(false);
   const [printerExpanded, setPrinterExpanded] = useState(false);
@@ -791,6 +899,8 @@ export function FilterSidebarContent({
     expanded,
     toggle: toggleExpanded,
     params,
+    restoring,
+    report,
     revealNodes,
     dragging,
     onDelete: onDeleteCollection,
@@ -844,7 +954,7 @@ export function FilterSidebarContent({
           setDragging(null);
         }}
       >
-        <div className="flex-1 overflow-auto py-4 px-3 space-y-6">
+        <div ref={contentRef} className="flex-1 overflow-auto py-4 px-3 space-y-6">
           <section>
             <h3 className="mb-2 pl-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
               {t("libraryView.title")}
@@ -903,6 +1013,19 @@ export function FilterSidebarContent({
                   )
                 ) : (
                   <>
+                    {restoreEnabled && restore.isError && (
+                      <div role="status" className="py-1 text-xs text-muted-foreground">
+                        {uiText("Could not load this list.")}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={restore.isFetching}
+                          onClick={() => void restore.refetch()}
+                        >
+                          {uiText("Retry")}
+                        </Button>
+                      </div>
+                    )}
                     <DroppableAllModels
                       selected={selectedCollection === null}
                       onClick={() => onCollectionChange(null)}
@@ -911,7 +1034,7 @@ export function FilterSidebarContent({
                       count={roots.data?.pages[0]?.parent_direct_entry_count ?? 0}
                       ctx={treeContext}
                     />
-                    <div className="ml-5 border-l border-border pl-4 min-w-0">
+                    <div className="ml-2 border-l border-border pl-1 min-w-0">
                       <CollectionLevel parentId={null} ctx={treeContext} />
                     </div>
                   </>
@@ -1133,7 +1256,7 @@ export interface FilterSidebarProps {
   selectedPrinterPresence: "any" | "none" | null;
   onCollectionChange: (path: string | null) => void;
   /** Hover/focus on a folder: the parent may warm that folder's data. */
-  onCollectionIntent?: (path: string) => void;
+  onCollectionIntent?: (path: string | null) => void;
   onTagsChange: (tags: string[]) => void;
   onPrinterChange: (printerId: number | null) => void;
   onPrinterPresenceChange: (presence: "any" | "none" | null) => void;
@@ -1146,6 +1269,7 @@ export interface FilterSidebarProps {
   outlinerFilter?: string;
   structuredFilters?: React.ReactNode;
   filtersOpen?: boolean;
+  readinessEnabled?: boolean;
   libraryView: LibraryViewMode;
   onLibraryViewChange: (view: LibraryViewMode) => void;
 }

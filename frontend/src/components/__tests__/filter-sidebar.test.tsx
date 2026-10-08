@@ -656,7 +656,7 @@ describe("FilterSidebar", () => {
   });
 
   describe("remembering the open folders", () => {
-    it("publishes a restored branch while another remains pending", async () => {
+    it("keeps a restored branch usable while a newly opened branch is pending", async () => {
       const user = userEvent.setup();
       const slow = Promise.withResolvers<Response>();
       const started = Promise.withResolvers<void>();
@@ -672,7 +672,7 @@ describe("FilterSidebar", () => {
         collection: "toys",
         collection_id: 3,
       });
-      sessionStorage.setItem("ps-filter-expanded", JSON.stringify(["parts", "toys"]));
+      sessionStorage.setItem("ps-filter-expanded", JSON.stringify(["parts"]));
       renderSidebar({
         models: [fastModel, slowModel],
         routes: {
@@ -690,6 +690,8 @@ describe("FilterSidebar", () => {
         },
       });
       try {
+        await screen.findByRole("button", { name: "Restored bracket" });
+        await openFolder(user, "Toys");
         await started.promise;
         expect(await screen.findByRole("button", { name: "Restored bracket" })).toBeVisible();
         expect(screen.queryByRole("button", { name: "Pending toy" })).not.toBeInTheDocument();

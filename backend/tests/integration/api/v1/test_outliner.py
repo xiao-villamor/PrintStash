@@ -12,6 +12,7 @@ ENTRIES = "/api/v1/outliner/entries"
 
 COLLECTIONS = "/api/v1/outliner/collections"
 SEARCH = "/api/v1/outliner/search"
+RESTORE = "/api/v1/outliner/restore"
 
 
 def _read(client, headers, path=ENTRIES, **params):
@@ -733,3 +734,388 @@ class TestOutlinerEditingBase:
             assert "edit_version" in schemas[name]["required"]
             assert schemas[name]["properties"]["edit_version"]["exclusiveMinimum"] == 0
         assert "edit_version" not in schemas["OutlinerCollectionMatch"]["properties"]
+
+
+class TestRestore:
+    def test_restores_deep_expanded_branches_in_one_bounded_response(
+        self, client, auth_headers, make_collection, make_model
+    ):
+        root = make_collection("Root")
+        child = make_collection("Child", parent=root)
+        grandchild = make_collection("Grandchild", parent=child)
+        model = make_model("Leaf", collection=grandchild)
+
+        response = client.post(
+            RESTORE,
+            headers=auth_headers,
+            json={
+                "expanded_paths": [root.path, child.path, grandchild.path],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        pages = {
+            row["parent_id"]: row["page"] for row in response.json()["collections"]
+        }
+        assert [row["id"] for row in pages[None]["items"]] == [root.id]
+        assert [row["id"] for row in pages[root.id]["items"]] == [child.id]
+        assert [row["id"] for row in pages[child.id]["items"]] == [grandchild.id]
+        assert pages[None]["items"][0]["subtree_entry_count"] == 1
+        leaves = {
+            row["collection_id"]: row["page"] for row in response.json()["entries"]
+        }
+        assert [row["id"] for row in leaves[grandchild.id]["items"]] == [model.id]
+        assert pages[grandchild.id]["parent_direct_entry_count"] == 1
+
+    def test_returns_the_restored_parent_label_for_entries(
+        self, client, auth_headers, make_collection, make_model
+    ):
+        root = make_collection("Parts")
+        child = make_collection("Brackets", parent=root)
+        make_model("Bracket", collection=child)
+
+        response = client.post(
+            RESTORE,
+            headers=auth_headers,
+            json={"expanded_paths": [root.path, child.path]},
+        )
+
+        assert response.status_code == 200, response.text
+        entries = next(
+            level["page"]["items"]
+            for level in response.json()["entries"]
+            if level["collection_id"] == child.id
+        )
+        assert entries[0]["collection_label"] == "Parts/Brackets"
+
+    def test_continues_restored_folder_pages_with_their_original_cursor(
+        self, client, auth_headers, make_collection
+    ):
+        parent = make_collection("Parent")
+        first = make_collection("A", parent=parent)
+        second = make_collection("B", parent=parent)
+
+        restored = client.post(
+            RESTORE,
+            headers=auth_headers,
+            json={
+                "expanded_paths": [parent.path],
+                "limit": 1,
+            },
+        ).json()
+        page = next(
+            row["page"]
+            for row in restored["collections"]
+            if row["parent_id"] == parent.id
+        )
+        continuation = _read(
+            client,
+            auth_headers,
+            COLLECTIONS,
+            parent_id=parent.id,
+            cursor=page["next_cursor"],
+            limit=1,
+        )
+
+        assert [row["id"] for row in page["items"] + continuation["items"]] == [
+            first.id,
+            second.id,
+        ]
+        assert continuation["next_cursor"] is None
+
+    def test_continues_restored_entry_pages_with_their_original_cursor(
+        self, client, auth_headers, make_collection, make_model
+    ):
+        parent = make_collection("Parent")
+        first = make_model("A", collection=parent)
+        second = make_model("B", collection=parent)
+
+        restored = client.post(
+            RESTORE,
+            headers=auth_headers,
+            json={
+                "expanded_paths": [parent.path],
+                "limit": 1,
+            },
+        ).json()
+        page = next(
+            row["page"]
+            for row in restored["entries"]
+            if row["collection_id"] == parent.id
+        )
+        continuation = _read(
+            client,
+            auth_headers,
+            collection_id=parent.id,
+            cursor=page["next_cursor"],
+            limit=1,
+        )
+
+        assert [row["id"] for row in page["items"] + continuation["items"]] == [
+            first.id,
+            second.id,
+        ]
+        assert continuation["next_cursor"] is None
+
+    def test_preserves_granted_roots_during_restoration(
+        self, client, make_collection, make_model, make_user, headers_for, grant_role
+    ):
+        parent = make_collection("Private")
+        granted = make_collection("Granted", parent=parent)
+        model = make_model("Visible", collection=granted)
+        viewer = make_user("restore-viewer")
+        grant_role(viewer, granted, CollectionRole.VIEW)
+
+        response = client.post(
+            RESTORE,
+            headers=headers_for(viewer),
+            json={
+                "expanded_paths": [granted.path],
+                "selected_path": granted.path,
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        root = response.json()["collections"][0]["page"]
+        assert [(row["id"], row["display_path"]) for row in root["items"]] == [
+            (granted.id, "Granted")
+        ]
+        assert root["revealed"]["id"] == granted.id
+        assert response.json()["entries"][1]["page"]["items"][0]["id"] == model.id
+        assert "Private" not in response.text
+
+    def test_ignores_inaccessible_persisted_paths(
+        self, client, make_collection, make_model, make_user, headers_for
+    ):
+        private = make_collection("Secret")
+        make_model("Secret model", collection=private)
+        viewer = make_user("outsider")
+
+        response = client.post(
+            RESTORE,
+            headers=headers_for(viewer),
+            json={
+                "expanded_paths": [private.path],
+                "selected_path": private.path,
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["collections"] == [
+            {
+                "parent_id": None,
+                "page": {
+                    "items": [],
+                    "next_cursor": None,
+                    "parent_direct_entry_count": 0,
+                    "revealed": None,
+                },
+            }
+        ]
+        assert response.json()["entries"] == [
+            {
+                "collection_id": None,
+                "page": {
+                    "items": [],
+                    "next_cursor": None,
+                },
+            }
+        ]
+        assert "Secret" not in response.text
+
+    def test_ignores_trashed_persisted_paths(
+        self, client, auth_headers, make_collection, make_model
+    ):
+        trashed = make_collection("Gone", deleted_at=utcnow())
+        make_model("Gone model", collection=trashed)
+
+        response = client.post(
+            RESTORE, headers=auth_headers, json={"expanded_paths": [trashed.path]}
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["collections"][0]["page"]["items"] == []
+        assert response.json()["entries"][0]["page"]["items"] == []
+        assert len(response.json()["collections"]) == 1
+
+    def test_ignores_removed_persisted_paths(
+        self, client, auth_headers, make_collection
+    ):
+        root = make_collection("Existing")
+
+        response = client.post(
+            RESTORE, headers=auth_headers, json={"expanded_paths": ["removed"]}
+        )
+
+        assert response.status_code == 200, response.text
+        assert [
+            row["id"] for row in response.json()["collections"][0]["page"]["items"]
+        ] == [root.id]
+        assert len(response.json()["collections"]) == 1
+
+    def test_filters_restored_branches_before_paging(
+        self, client, auth_headers, make_collection, make_model, make_tag, tag_model
+    ):
+        root = make_collection("Root")
+        child = make_collection("Child", parent=root)
+        chosen = make_model("Chosen", collection=child)
+        tag_model(chosen, make_tag("chosen"))
+        make_model("Other", collection=child)
+        make_collection("Empty", parent=root)
+
+        response = client.post(
+            RESTORE,
+            headers=auth_headers,
+            json={
+                "expanded_paths": [root.path, child.path],
+                "tag": ["chosen"],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        pages = {
+            row["parent_id"]: row["page"] for row in response.json()["collections"]
+        }
+        assert [
+            (row["id"], row["subtree_entry_count"]) for row in pages[root.id]["items"]
+        ] == [(child.id, 1)]
+        assert [
+            row["id"] for row in response.json()["entries"][2]["page"]["items"]
+        ] == [chosen.id]
+
+    @pytest.mark.parametrize(
+        "view,expected",
+        [
+            ("all", ["model", "multipart"]),
+            ("organized", ["multipart"]),
+            ("components", ["model"]),
+            ("multipart", ["multipart"]),
+        ],
+        ids=["all", "organized", "components", "multipart"],
+    )
+    def test_applies_the_library_view_to_restored_entries(
+        self,
+        client,
+        auth_headers,
+        make_collection,
+        make_model,
+        make_multipart_model,
+        view,
+        expected,
+    ):
+        root = make_collection("Root")
+        model = make_model("A member", collection=root)
+        group = make_multipart_model("Z group", collection=root)
+        assigned = client.put(
+            f"/api/v1/multipart-models/{group.id}",
+            headers=auth_headers,
+            json={"parts": [{"name": "Body", "choices": [{"model_id": model.id}]}]},
+        )
+        assert assigned.status_code == 200, assigned.text
+
+        response = client.post(
+            RESTORE,
+            headers=auth_headers,
+            json={
+                "expanded_paths": [root.path],
+                "view": view,
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        assert [
+            row["kind"] for row in response.json()["entries"][1]["page"]["items"]
+        ] == expected
+
+    def test_reveals_the_selected_folder_outside_a_restored_page(
+        self, client, auth_headers, make_collection
+    ):
+        first = make_collection("A")
+        selected = make_collection("Z")
+
+        response = client.post(
+            RESTORE,
+            headers=auth_headers,
+            json={
+                "expanded_paths": [],
+                "selected_path": selected.path,
+                "limit": 1,
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        page = response.json()["collections"][0]["page"]
+        assert [row["id"] for row in page["items"]] == [first.id]
+        assert page["revealed"]["id"] == selected.id
+        assert (
+            _read(
+                client, auth_headers, COLLECTIONS, cursor=page["next_cursor"], limit=1
+            )["items"][0]["id"]
+            == selected.id
+        )
+
+    def test_requires_authentication_for_restoration(self, client):
+        response = client.post(RESTORE, json={"expanded_paths": []})
+
+        assert response.status_code == 401, response.text
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"expanded_paths": ["path"] * 17},
+            {"expanded_paths": [""]},
+            {"expanded_paths": ["p" * 513]},
+            {"limit": 0},
+            {"limit": 101},
+            {"selected_path": ""},
+        ],
+        ids=[
+            "too-many-paths",
+            "empty-path",
+            "long-path",
+            "zero-limit",
+            "large-limit",
+            "empty-selection",
+        ],
+    )
+    def test_validates_restoration_bounds(self, client, auth_headers, body):
+        response = client.post(RESTORE, headers=auth_headers, json=body)
+
+        assert response.status_code == 422, response.text
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"cursor": "cursor"},
+            {"parent_id": 1},
+            {"collection_id": 1},
+            {"reveal_id": 1},
+            {"direct": True},
+            {"q": "search"},
+            {"collection": "folder"},
+        ],
+        ids=[
+            "cursor",
+            "parent",
+            "collection-id",
+            "reveal",
+            "direct",
+            "search",
+            "collection-path",
+        ],
+    )
+    def test_rejects_incompatible_restoration_scope(self, client, auth_headers, body):
+        response = client.post(RESTORE, headers=auth_headers, json=body)
+
+        assert response.status_code == 422, response.text
+
+    def test_restricts_printer_filters_during_restoration(
+        self, client, make_user, headers_for
+    ):
+        viewer = make_user("restore-printer-viewer")
+
+        response = client.post(
+            RESTORE, headers=headers_for(viewer), json={"printer_presence": "any"}
+        )
+
+        assert response.status_code == 403, response.text

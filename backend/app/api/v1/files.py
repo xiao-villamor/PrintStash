@@ -15,7 +15,7 @@ from fastapi import (
 from fastapi.responses import (
     PlainTextResponse,
 )
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.api.artifact_responses import delivery_request, render_delivery
 from app.core.config import settings
@@ -23,6 +23,7 @@ from app.core.http import get_or_404
 from app.core.logging import get_logger
 from app.core.security import get_current_user, require_auth, require_user
 from app.db.models import CollectionRole, DerivativeKind, File, FileType, Model, User
+from app.db.scopes import live
 from app.db.session import get_session
 from app.modules.identity import auth, rbac
 from app.modules.media.three_mf_preview import (
@@ -63,17 +64,20 @@ def _live_file(session: Session, file_id: int) -> File:
 
 
 def _accessible_file(session: Session, file_id: int, user: User) -> File:
-    f = _live_file(session, file_id)
-    model = session.get(Model, f.model_id)
-    if model is None:
+    # Authorization needs the live owner's collection, not its tags, collection
+    # relationship or rich Model projection. Read it with the Artifact once.
+    row = session.exec(
+        select(File, Model.collection_id)
+        .join(Model, Model.id == File.model_id)
+        .where(File.id == file_id, live(File), live(Model))
+    ).one_or_none()
+    if row is None:
         raise HTTPException(status_code=404, detail="file_not_found")
+    artifact, collection_id = row
     rbac.require_model_collection_role(
-        session,
-        user,
-        model.collection_id,
-        CollectionRole.VIEW,
+        session, user, collection_id, CollectionRole.VIEW
     )
-    return f
+    return artifact
 
 
 def serve_artifact(

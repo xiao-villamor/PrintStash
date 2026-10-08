@@ -10,7 +10,7 @@ from enum import Enum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import Select, func, literal, or_, select, tuple_, union_all
+from sqlalchemy import Select, case, func, literal, or_, select, tuple_, union_all
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, col
 
@@ -33,10 +33,14 @@ from app.modules.library.model_views.outliner import entry_response
 from app.schemas.models import ModelFilters
 from app.schemas.outliner import (
     OutlinerCollection,
+    OutlinerCollectionLevel,
     OutlinerCollectionPage,
+    OutlinerEntryLevel,
     OutlinerEntryPage,
     OutlinerKind,
     OutlinerQuery,
+    OutlinerRestoreQuery,
+    OutlinerRestoreRead,
     OutlinerSearchPage,
     OutlinerView,
 )
@@ -89,9 +93,14 @@ def _page(session: Session, statement: Select, source, query: OutlinerQuery, key
             )
         ).all()
     )
+    return _page_result(rows, query.limit, key)
+
+
+def _page_result(rows, limit: int, key: str):
+    """Both ordinary reads and restoration issue interchangeable cursors."""
     next_cursor = None
-    if len(rows) > query.limit:
-        rows = rows[: query.limit]
+    if len(rows) > limit:
+        rows = rows[:limit]
         last = rows[-1]
         token = Cursor(
             key=key, name=last.sort_name, kind=OutlinerKind(last.kind), id=last.id
@@ -448,3 +457,194 @@ def entries(session: Session, user: User, query: OutlinerQuery) -> OutlinerEntry
 def search(session: Session, user: User, query: OutlinerQuery) -> OutlinerSearchPage:
     rows, cursor = _entry_rows(session, user, query, searching=True)
     return OutlinerSearchPage(items=rows, next_cursor=cursor)
+
+
+def restore(
+    session: Session, user: User, request: OutlinerRestoreQuery
+) -> OutlinerRestoreRead:
+    """First pages for known open branches, with shared predicates and projection.
+
+    Window limits apply per parent before any nodes are projected. Missing or
+    newly inaccessible paths from session storage are ignored, never revealed.
+    No cache of user-dependent server data survives the request.
+    """
+    query = OutlinerQuery.model_validate(
+        request.model_dump(exclude={"expanded_paths", "selected_path"})
+    )
+    visible = _visible(session, user)
+    wanted = set(request.expanded_paths)
+    lineage = (
+        set(ancestor for ancestor in collection_tree._prefixes(request.selected_path))
+        if request.selected_path
+        else set()
+    )
+    paths = wanted | lineage
+    known = list(
+        session.execute(
+            select(col(Collection.id), col(Collection.path), col(Collection.parent_id))
+            .where(col(Collection.path).in_(paths), col(Collection.id).in_(visible))
+            .order_by(col(Collection.path))
+        ).all()
+    )
+    parents: list[int | None] = [None, *(row.id for row in known if row.path in wanted)]
+    parent_ids = [id for id in parents if id is not None]
+    reveals = {
+        row.parent_id if row.parent_id in {node.id for node in known} else None: row.id
+        for row in known
+        if row.path in lineage
+    }
+    entries = _entries(session, user, query)
+    _, subtree = _counts(entries)
+    eligible = _folders(session, user, query, subtree)
+    parent_scope = case(
+        (col(Collection.parent_id).in_(visible), col(Collection.parent_id)), else_=None
+    )
+    source = (
+        select(
+            col(Collection.id),
+            col(Collection.name),
+            func.lower(col(Collection.name)).label("sort_name"),
+            literal(OutlinerKind.COLLECTION.value).label("kind"),
+            parent_scope.label("scope"),
+        )
+        .where(
+            col(Collection.id).in_(eligible),
+            or_(parent_scope.is_(None), parent_scope.in_(parent_ids)),
+        )
+        .subquery()
+    )
+    ranked = select(
+        source,
+        func.row_number()
+        .over(
+            partition_by=source.c.scope,
+            order_by=(source.c.sort_name, source.c.kind, source.c.id),
+        )
+        .label("position"),
+    ).subquery()
+    rows = list(
+        session.execute(
+            select(ranked)
+            .where(
+                or_(
+                    ranked.c.position <= query.limit + 1,
+                    ranked.c.id.in_(reveals.values()),
+                )
+            )
+            .order_by(ranked.c.scope, ranked.c.position)
+        ).all()
+    )
+    siblings = {parent: [] for parent in parents}
+    revealed = {}
+    for row in rows:
+        if row.id == reveals.get(row.scope):
+            revealed[row.scope] = row
+        if row.position <= query.limit + 1:
+            siblings[row.scope].append(row)
+    pages = {
+        parent: _page_result(
+            siblings[parent],
+            query.limit,
+            _key(
+                user, query.model_copy(update={"parent_id": parent}), Scope.COLLECTIONS
+            ),
+        )
+        for parent in parents
+    }
+    node_ids = sorted(
+        {row.id for rows, _ in pages.values() for row in rows}
+        | {row.id for row in revealed.values()}
+        | set(parent_ids)
+    )
+    counts = _page_counts(session, entries, eligible, visible, node_ids, None)
+    nodes = collection_tree.nodes_for_ids(
+        session,
+        user,
+        node_ids,
+        {
+            id: collection_tree.SubtreeCounts(
+                models=int(row.models), collections=int(row.folders)
+            )
+            for id, row in counts.items()
+        },
+    )
+    projected = {
+        node.id: OutlinerCollection(
+            **node.model_dump(),
+            direct_entry_count=counts[node.id].direct,
+            subtree_entry_count=counts[node.id].total,
+            visible_child_count=counts[node.id].children,
+        )
+        for node in nodes
+    }
+    # The root count must also be available when the library has no folders.
+    root_count = session.execute(
+        select(func.count())
+        .select_from(entries)
+        .where(entries.c.collection_id.is_(None))
+    ).scalar_one()
+    collection_levels = [
+        OutlinerCollectionLevel(
+            parent_id=parent,
+            page=OutlinerCollectionPage(
+                items=[projected[row.id] for row in pages[parent][0]],
+                next_cursor=pages[parent][1],
+                parent_direct_entry_count=root_count
+                if parent is None
+                else counts[parent].direct,
+                revealed=projected[revealed[parent].id] if parent in revealed else None,
+            ),
+        )
+        for parent in parents
+    ]
+    entry_source = (
+        select(
+            entries,
+            func.row_number()
+            .over(
+                partition_by=entries.c.collection_id,
+                order_by=(entries.c.sort_name, entries.c.kind, entries.c.id),
+            )
+            .label("position"),
+        )
+        .where(
+            or_(
+                entries.c.collection_id.is_(None),
+                entries.c.collection_id.in_(parent_ids),
+            )
+        )
+        .subquery()
+    )
+    entry_rows = list(
+        session.execute(
+            select(entry_source, col(Collection.path).label("collection"))
+            .outerjoin(Collection, col(Collection.id) == entry_source.c.collection_id)
+            .where(entry_source.c.position <= query.limit + 1)
+            .order_by(entry_source.c.collection_id, entry_source.c.position)
+        ).all()
+    )
+    # Every entry belongs to one of the authorized, already projected parents.
+    # Reuse that request-local ancestry instead of traversing the tree again.
+    labels = {node.path: node.display_path for node in nodes}
+    leaves = {parent: [] for parent in parents}
+    for row in entry_rows:
+        leaves[row.collection_id].append(row)
+    entry_levels = []
+    for parent in parents:
+        items, cursor = _page_result(
+            leaves[parent],
+            query.limit,
+            _key(
+                user, query.model_copy(update={"collection_id": parent}), Scope.ENTRIES
+            ),
+        )
+        entry_levels.append(
+            OutlinerEntryLevel(
+                collection_id=parent,
+                page=OutlinerEntryPage(
+                    items=[entry_response(row, labels) for row in items],
+                    next_cursor=cursor,
+                ),
+            )
+        )
+    return OutlinerRestoreRead(collections=collection_levels, entries=entry_levels)

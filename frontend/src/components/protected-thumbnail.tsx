@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
+import { useAuthenticatedAsset } from "@/lib/use-authenticated-asset-url";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
 import { cn } from "@/lib/utils";
 
@@ -23,10 +23,12 @@ export function ProtectedThumbnail({
 }) {
   const { ref, admitted } = useViewportAdmission();
   const external = path?.startsWith("https://") || path?.startsWith("http://") ? path : null;
-  const protectedUrl = useAuthenticatedAssetUrl(external ? null : path, admitted);
-  const url = admitted ? (external ?? protectedUrl) : null;
+  const asset = useAuthenticatedAsset(external ? null : path, admitted);
+  const url = admitted ? (external ?? asset.url) : null;
   const [decoded, setDecoded] = useState<string | null>(null);
   const ready = url !== null && decoded === url;
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const failed = asset.status === "failed" || (url !== null && failedSource === url);
 
   async function decode(image: HTMLImageElement) {
     const source = image.getAttribute("src");
@@ -36,7 +38,7 @@ export function ProtectedThumbnail({
       await image.decode?.();
       if (image.isConnected && image.getAttribute("src") === source) setDecoded(source);
     } catch {
-      // A failed decode must not claim startup's decoded-image milestone.
+      if (image.isConnected && image.getAttribute("src") === source) setFailedSource(source);
     }
   }
 
@@ -44,7 +46,7 @@ export function ProtectedThumbnail({
     <div
       ref={ref}
       className={className}
-      data-library-thumbnail={!path ? "missing" : ready ? "ready" : "pending"}
+      data-library-thumbnail={!path ? "missing" : failed ? "failed" : ready ? "ready" : "pending"}
     >
       {url ? (
         <img
@@ -58,6 +60,7 @@ export function ProtectedThumbnail({
             fade && "transition-opacity duration-slow ease-out",
             fade && (ready ? "opacity-90 group-hover:opacity-100" : "opacity-0"),
           )}
+          onError={(event) => setFailedSource(event.currentTarget.getAttribute("src"))}
           onLoad={(event) => {
             void decode(event.currentTarget);
           }}

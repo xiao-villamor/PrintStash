@@ -7,17 +7,10 @@ import { resetMockApiState, startMockApi } from "./mock-api";
 const apiPort = Number(process.env.PLAYWRIGHT_API_PORT ?? 4210);
 let api: Server;
 
-// Production registration claims the first page and the app reloads it once.
-// Await that navigation rather than registering or reloading from the test.
+// First installation claims the page without discarding the user's current view.
 async function openControlledApplication(page: Page): Promise<void> {
   await page.goto("/");
-  await page.waitForFunction(
-    () =>
-      Boolean(navigator.serviceWorker.controller) &&
-      performance
-        .getEntriesByType("navigation")
-        .some((entry) => entry instanceof PerformanceNavigationTiming && entry.type === "reload"),
-  );
+  await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller));
   await page.waitForLoadState("load");
 }
 
@@ -63,7 +56,20 @@ test.beforeEach(async ({ page, context, request, baseURL }) => {
 
 test.describe("production PWA cache contracts", () => {
   test("automatically controls the production application", async ({ page, baseURL }) => {
+    const documents: string[] = [];
+    page.on("request", (request) => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame())
+        documents.push(request.url());
+    });
     await openControlledApplication(page);
+    expect(documents).toHaveLength(1);
+    expect(
+      await page.evaluate(() =>
+        performance
+          .getEntriesByType("navigation")
+          .map((entry) => (entry instanceof PerformanceNavigationTiming ? entry.type : null)),
+      ),
+    ).toEqual(["navigate"]);
 
     await expect(page.locator('script[type="module"][src^="/assets/"]')).toHaveAttribute(
       "src",
@@ -83,6 +89,31 @@ test.describe("production PWA cache contracts", () => {
       scope: new URL("/", baseURL).href,
     });
     await expectNoPrivateCacheEntries(page);
+  });
+
+  test("reloads once when replacing an installed worker", async ({ page }) => {
+    await page.goto("/offline.html");
+    await page.evaluate(async () => {
+      await navigator.serviceWorker.register("/api/v1/pwa-old-worker.js", { scope: "/" });
+      await navigator.serviceWorker.ready;
+    });
+    await page.waitForFunction(() =>
+      navigator.serviceWorker.controller?.scriptURL.endsWith("/pwa-old-worker.js"),
+    );
+    let documents = 0;
+    page.on("request", (request) => {
+      if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents++;
+    });
+    await page.goto("/");
+    await page.waitForFunction(
+      () =>
+        navigator.serviceWorker.controller?.scriptURL.endsWith("/sw.js") &&
+        performance
+          .getEntriesByType("navigation")
+          .some((entry) => entry instanceof PerformanceNavigationTiming && entry.type === "reload"),
+    );
+    await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
+    expect(documents).toBe(2);
   });
 
   test("excludes private JSON responses from worker caches", async ({ page, baseURL }) => {

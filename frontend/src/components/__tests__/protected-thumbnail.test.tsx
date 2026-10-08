@@ -36,6 +36,30 @@ describe("ProtectedThumbnail", () => {
       expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("ready"),
     );
   });
+  it("reports failed protected downloads explicitly", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response("unavailable", { status: 503 }));
+    render(
+      <ProtectedThumbnail path="/failed/download" alt="Part" placeholder={<span>Missing</span>} />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText("Missing").parentElement?.getAttribute("data-library-thumbnail"),
+      ).toBe("failed"),
+    );
+    expect(screen.queryByAltText("Part")).toBeNull();
+  });
+  it("reports image element failures explicitly", async () => {
+    render(
+      <ProtectedThumbnail
+        path="https://example.test/broken.png"
+        alt="Part"
+        placeholder={<span>Missing</span>}
+      />,
+    );
+    const image = await screen.findByAltText("Part");
+    fireEvent.error(image);
+    expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("failed");
+  });
   it("keeps missing image semantics", () => {
     render(<ProtectedThumbnail path={null} alt="Part" placeholder={<span>Missing</span>} />);
     expect(screen.getByText("Missing").parentElement?.getAttribute("data-library-thumbnail")).toBe(
@@ -71,7 +95,7 @@ describe("ProtectedThumbnail", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
-  it("keeps a failed decode out of the readiness milestone", async () => {
+  it("reports failed decoding explicitly", async () => {
     render(
       <ProtectedThumbnail path="/failed/decode" alt="Failed" placeholder={<span>Missing</span>} />,
     );
@@ -82,7 +106,7 @@ describe("ProtectedThumbnail", () => {
       },
     });
     await act(async () => fireEvent.load(image));
-    expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("pending");
+    expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("failed");
   });
 
   it("ignores a previous URL decode after image reassignment", async () => {

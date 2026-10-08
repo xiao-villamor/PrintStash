@@ -13,6 +13,8 @@ from app.schemas.outliner import (
     OutlinerCollectionPage,
     OutlinerEntryPage,
     OutlinerQuery,
+    OutlinerRestoreQuery,
+    OutlinerRestoreRead,
     OutlinerSearchPage,
 )
 
@@ -75,3 +77,20 @@ def search(
 ):
     _validate(query, user, outliner.Scope.SEARCH)
     return outliner.search(session, user, query)
+
+
+@router.post("/restore", response_model=OutlinerRestoreRead)
+def restore(
+    query: OutlinerRestoreQuery,
+    user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    # A read with a body avoids unbounded URL lengths for persisted paths.
+    _validate(query, user, outliner.Scope.COLLECTIONS)
+    if (
+        query.cursor is not None
+        or query.parent_id is not None
+        or query.reveal_id is not None
+    ):
+        raise HTTPException(422, "outliner_restore_is_first_pages")
+    return outliner.restore(session, user, query)
