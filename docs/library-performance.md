@@ -281,6 +281,7 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 153 | rebinds artifact projection for each page | Edge | Different Model pages receive new Artifacts | Counts and mesh identity belong to the requested page | Integration | ✅ `test_rebinds_artifact_projection_for_each_page` |
 | 154 | restores empty expanded branches without filters | Happy | Empty parent and child are expanded | Both levels remain navigable with zero content counts | Integration | ✅ `test_restores_empty_expanded_branches_without_filters` |
 | 155 | translates an already mounted Multipart Model leaf | Edge | EN to ES while the optimized tree remains mounted | Existing leaf receives the Spanish accessible title | Frontend unit | ✅ `filter-sidebar.test.tsx::translates an already mounted Multipart Model leaf` |
+| 156 | exposes navigation reads through the library contract | Edge | Grid imports the destination reader | Production dependency graph accepts the explicit public entry point | Frontend unit | ✅ `dependency-boundaries.test.ts::enforces the production repository graph` |
 
 
 
@@ -440,3 +441,7 @@ production build passed. Diagnostic comparisons use a separate nginx frontend on
 the same real API; they are not final acceptance. The tree comparison reduced the
 mobile deep reload median from 533 to 493 ms; desktop remains about 530 ms before
 the new backend changes. Full exact-image acceptance remains pending.
+
+The navigation-read hook is an explicit public library entry point in the dependency
+graph. The complete frontend run caught its missing registration (4,536 other
+cases passed); the focused dependency/navigation regression suite passes 100 cases.
