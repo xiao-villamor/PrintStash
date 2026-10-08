@@ -116,6 +116,14 @@ deployment. Device access is granted to that command, not to the API. An absent
 device, missing driver or denied render-node permission must fail explicitly.
 Do not treat --allow-software as a workaround for physical qualification.
 
+## Candidate decision
+
+[Sixty physical Windows observations](benchmarks/pri16/README.md) reject production
+adoption of candidate 969b2966: the curved control exceeds the unchanged RGBA gate,
+and six context initializations fail. Raw failures and the reproduction probe are
+retained. This is not a Linux/Docker or complete-flow performance qualification.
+The optional tools remain available for investigating a revised candidate.
+
 ## Adoption prerequisites
 
 Require >=1.5x median complete-flow improvement per declared target family on
