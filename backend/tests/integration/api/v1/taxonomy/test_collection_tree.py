@@ -313,6 +313,76 @@ class TestListCollectionChildren:
 
 
 class TestLookupCollection:
+    def test_rebinds_count_roots_for_the_next_lookup(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+        make_model: MakeModel,
+    ) -> None:
+        first = make_collection("First")
+        second = make_collection("Second")
+        make_model("One", collection=first)
+        make_model("Two", collection=second)
+        make_model("Three", collection=second)
+
+        counts = []
+        for collection in (first, second, first):
+            response = client.get(
+                LOOKUP, params={"id": collection.id}, headers=auth_headers
+            )
+            assert response.status_code == 200, response.text
+            counts.append(response.json()["collection"]["model_count"])
+
+        assert counts == [1, 2, 1]
+
+    def test_recounts_a_subtree_after_a_model_is_added(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+        make_model: MakeModel,
+    ) -> None:
+        root = make_collection("Root")
+        child = make_collection("Child", parent=root)
+        make_model("One", collection=root)
+        before = client.get(LOOKUP, params={"id": root.id}, headers=auth_headers)
+        assert before.status_code == 200, before.text
+        assert before.json()["collection"]["model_count"] == 1
+
+        make_model("Two", collection=child)
+        after = client.get(LOOKUP, params={"id": root.id}, headers=auth_headers)
+
+        assert after.status_code == 200, after.text
+        assert after.json()["collection"]["model_count"] == 2
+
+    def test_scopes_counts_for_the_next_reader(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+        make_model: MakeModel,
+        make_user: MakeUser,
+        grant_role: GrantRole,
+        headers_for: HeadersFor,
+    ) -> None:
+        public = make_collection("Public")
+        private = make_collection("Private")
+        make_model("Shared", collection=public)
+        make_model("Secret", collection=private)
+        viewer = make_user("subtree-count-viewer")
+        grant_role(viewer, public, CollectionRole.VIEW)
+        before = client.get(CHILDREN, headers=auth_headers)
+        assert before.status_code == 200, before.text
+        assert len(before.json()["items"]) == 2
+
+        restricted = client.get(CHILDREN, headers=headers_for(viewer))
+
+        assert restricted.status_code == 200, restricted.text
+        assert [
+            (row["id"], row["model_count"]) for row in restricted.json()["items"]
+        ] == [(public.id, 1)]
+
     def test_returns_a_saved_collection_by_id(
         self,
         client: TestClient,

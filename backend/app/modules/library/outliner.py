@@ -7,10 +7,21 @@ import binascii
 import hashlib
 import json
 from enum import Enum
+from functools import lru_cache
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import Select, case, func, literal, or_, select, tuple_, union_all
+from sqlalchemy import (
+    Select,
+    bindparam,
+    case,
+    func,
+    literal,
+    or_,
+    select,
+    tuple_,
+    union_all,
+)
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, col
 
@@ -264,13 +275,13 @@ def _folders(
     return folders
 
 
-def _all_direct_counts(visible, user: User):
+def _all_direct_counts(visible, *, include_unfiled: bool):
     """Aggregate unfiltered rows before composing Models and Multipart Models."""
 
     def allowed(column):
         return or_(
             column.in_(visible),
-            column.is_(None) if user.is_superuser else literal(False),
+            column.is_(None) if include_unfiled else literal(False),
         )
 
     models = (
@@ -305,22 +316,12 @@ def _all_direct_counts(visible, user: User):
     )
 
 
-def _page_counts(
-    session: Session,
-    entries,
-    eligible,
-    visible,
-    ids: list[int],
-    parent_id: int | None,
-    *,
-    unfiltered_counts=None,
-):
-    """Walk only the returned branches; never aggregate every ancestor first."""
-    if not ids:
-        return {}
+@lru_cache(maxsize=1)
+def _page_descendants():
+    """Reuse only the traversal shape, with bounded page roots bound at execution."""
     descendants = (
         select(col(Collection.id).label("root"), col(Collection.id).label("id"))
-        .where(col(Collection.id).in_(ids))
+        .where(col(Collection.id).in_(bindparam("page_count_root_ids", expanding=True)))
         .cte("page_descendants", recursive=True)
     )
     child = aliased(Collection)
@@ -329,6 +330,13 @@ def _page_counts(
             child, col(child.parent_id) == descendants.c.id
         )
     )
+    return descendants
+
+
+def _page_count_query(
+    entries, eligible, visible, ids, parent_id, *, unfiltered_counts=None
+):
+    descendants = _page_descendants()
     direct = (
         unfiltered_counts
         if unfiltered_counts is not None
@@ -369,28 +377,60 @@ def _page_counts(
         .group_by(col(Collection.parent_id))
         .subquery()
     )
-    return {
-        row.id: row
-        for row in session.execute(
-            select(
-                col(Collection.id),
-                func.coalesce(direct.c.count, 0).label("direct"),
-                func.coalesce(totals.c.count, 0).label("total"),
-                func.coalesce(children.c.count, 0).label("children"),
-                totals.c.models,
-                totals.c.folders,
-                func.coalesce(
-                    select(direct.c.count)
-                    .where(direct.c.id == parent_id)
-                    .scalar_subquery(),
-                    0,
-                ).label("parent_direct"),
-            )
-            .outerjoin(direct, direct.c.id == col(Collection.id))
-            .outerjoin(totals, totals.c.root == col(Collection.id))
-            .outerjoin(children, children.c.id == col(Collection.id))
-            .where(col(Collection.id).in_(ids))
+    return (
+        select(
+            col(Collection.id),
+            func.coalesce(direct.c.count, 0).label("direct"),
+            func.coalesce(totals.c.count, 0).label("total"),
+            func.coalesce(children.c.count, 0).label("children"),
+            totals.c.models,
+            totals.c.folders,
+            func.coalesce(
+                select(direct.c.count)
+                .where(direct.c.id == parent_id)
+                .scalar_subquery(),
+                0,
+            ).label("parent_direct"),
         )
+        .outerjoin(direct, direct.c.id == col(Collection.id))
+        .outerjoin(totals, totals.c.root == col(Collection.id))
+        .outerjoin(children, children.c.id == col(Collection.id))
+        .where(col(Collection.id).in_(ids))
+    )
+
+
+@lru_cache(maxsize=1)
+def _administrator_restore_counts():
+    """Unfiltered administrator query structure, never rows or permission decisions."""
+    visible = select(col(Collection.id)).where(live(Collection))
+    return _page_count_query(
+        None,
+        visible,
+        visible,
+        bindparam("page_count_root_ids", expanding=True),
+        None,
+        unfiltered_counts=_all_direct_counts(visible, include_unfiled=True),
+    )
+
+
+def _page_counts(
+    session: Session,
+    entries,
+    eligible,
+    visible,
+    ids: list[int],
+    parent_id: int | None,
+    *,
+    unfiltered_counts=None,
+):
+    """Walk only returned branches and apply the current request's scope."""
+    if not ids:
+        return {}
+    statement = _page_count_query(
+        entries, eligible, visible, ids, parent_id, unfiltered_counts=unfiltered_counts
+    )
+    return {
+        row.id: row for row in session.execute(statement, {"page_count_root_ids": ids})
     }
 
 
@@ -633,17 +673,31 @@ def restore(
         | {row.id for row in revealed.values()}
         | set(parent_ids)
     )
-    counts = _page_counts(
-        session,
-        entries,
-        eligible,
-        visible,
-        node_ids,
-        None,
-        unfiltered_counts=_all_direct_counts(visible, user)
-        if query.view == OutlinerView.ALL and not _filtered(query)
-        else None,
-    )
+    if user.is_superuser and query.view == OutlinerView.ALL and not _filtered(query):
+        counts = (
+            {
+                row.id: row
+                for row in session.execute(
+                    _administrator_restore_counts(), {"page_count_root_ids": node_ids}
+                )
+            }
+            if node_ids
+            else {}
+        )
+    else:
+        counts = _page_counts(
+            session,
+            entries,
+            eligible,
+            visible,
+            node_ids,
+            None,
+            unfiltered_counts=_all_direct_counts(
+                visible, include_unfiled=user.is_superuser
+            )
+            if query.view == OutlinerView.ALL and not _filtered(query)
+            else None,
+        )
     nodes = collection_tree.nodes_for_ids(
         session,
         user,

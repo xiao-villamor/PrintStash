@@ -284,6 +284,11 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 156 | exposes navigation reads through the library contract | Edge | Grid imports the destination reader | Production dependency graph accepts the explicit public entry point | Frontend unit | ✅ `dependency-boundaries.test.ts::enforces the production repository graph` |
 | 157 | completes two concurrent emulator prints | Edge | Two printer hubs write while the contract polls completion | Both queued Jobs reach completed using independent SQLite connections | Contract | ✅ `test_fleet.py::TestPrinter::test_dispatch_to_two_emulated_printers_both_complete` |
 | 158 | reports a drained lane after engine completion | Edge | Application Jobs finish before workflow bookkeeping | Engine evidence succeeds, then queue depth is zero | Contract | ✅ `test_contracts.py::TestScheduling::test_reports_each_lanes_depth` |
+| 159 | rebinds count roots for the next lookup | Edge | Sequential lookups of different branches | Counts belong to each requested branch | Integration | ✅ `test_rebinds_count_roots_for_the_next_lookup` |
+| 160 | recounts a subtree after a Model is added | Edge | Add a Model between lookups | Next count includes the new Model | Integration | ✅ `test_recounts_a_subtree_after_a_model_is_added` |
+| 161 | scopes counts for the next reader | Error | Administrator followed by a restricted viewer | Only the viewer's authorized branch is counted and returned | Integration | ✅ `test_scopes_counts_for_the_next_reader` |
+| 162 | preserves granted roots after administrator restoration | Error | Cached all-view statement was used by an administrator | Restricted reader sees only granted root and no private unfiled count | Integration | ✅ `test_preserves_granted_roots_during_restoration` |
+| 163 | starts an admitted image without another visibility gate | Edge | Application viewport scheduler has admitted the image | Native loading starts eagerly while application transfer bounds remain active | Frontend unit | ✅ `protected-thumbnail.test.tsx::starts an admitted image without another visibility gate` |
 
 
 
@@ -458,3 +463,19 @@ The full contract rerun exposed a second synchronization race: terminal applicat
 Jobs precede DBOS workflow completion. The lane-depth contract now waits for both
 engine executions to succeed before asserting an empty lane. Both engine variants
 pass the focused case; the full contract rerun retains all original assertions.
+
+The 35a75d8f production diagnostic retained deep reload medians of 505–544 ms,
+so it did not meet acceptance. Delaying thumbnails behind restore and adding
+sidebar layout containment did not improve the complete journey; neither ships.
+A separate query profile reduced ten restores from 395 to 293 ms by reusing an
+immutable unfiltered administrator count statement. The current administrator
+check selects that path on every request; restricted/filtered reads still compose
+the current scope. Subtree lookups reuse only traversal structure with fresh root
+parameters and current visibility. No result or permission decision is cached.
+
+Viewport admission already bounds thumbnail requests; native lazy loading added a
+second gate after admission. Admitted images now load eagerly. The isolated mobile
+diagnostic improved deep reload from 514 to 488 ms; desktop remained over budget
+and must be reassessed with the backend change. This is not final acceptance.
+256 SQLite/PostgreSQL/read-growth cases, 47 thumbnail/cache/admission cases and
+23 browser readiness cases passed. Backend/frontend lint and typechecks passed.

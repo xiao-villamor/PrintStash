@@ -3,7 +3,7 @@ import { useAuthenticatedAsset } from "@/lib/use-authenticated-asset-url";
 import { useViewportAdmission } from "@/lib/use-viewport-admission";
 import { cn } from "@/lib/utils";
 
-/** A persistent viewport target, protected URL lease and decoded-image readiness. */
+/** Viewport admission owns laziness; an admitted image decodes without another visibility gate. */
 export function ProtectedThumbnail({
   path,
   alt,
@@ -42,7 +42,7 @@ export function ProtectedThumbnail({
         setFailedSource((failed) => (failed === source ? null : failed));
       }
     } catch {
-      // A newly assigned lazy image can reject decode before its load starts.
+      // A newly assigned image can reject decode before its load starts.
       // Its load/error event owns the final outcome; a valid retry clears failure.
       if (finalAttempt && image.isConnected && image.getAttribute("src") === source)
         setFailedSource(source);
@@ -70,7 +70,7 @@ export function ProtectedThumbnail({
           src={url}
           alt={alt}
           draggable={false}
-          loading="lazy"
+          loading="eager"
           decoding="async"
           className={cn(
             imageClassName,

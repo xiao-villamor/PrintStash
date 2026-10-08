@@ -897,7 +897,14 @@ class TestRestore:
         assert continuation["next_cursor"] is None
 
     def test_preserves_granted_roots_during_restoration(
-        self, client, make_collection, make_model, make_user, headers_for, grant_role
+        self,
+        client,
+        auth_headers,
+        make_collection,
+        make_model,
+        make_user,
+        headers_for,
+        grant_role,
     ):
         parent = make_collection("Private")
         granted = make_collection("Granted", parent=parent)
@@ -906,10 +913,22 @@ class TestRestore:
         viewer = make_user("restore-viewer")
         grant_role(viewer, granted, CollectionRole.VIEW)
 
+        administrator = client.post(
+            RESTORE,
+            headers=auth_headers,
+            json={"view": "all", "expanded_paths": [parent.path, granted.path]},
+        )
+        assert administrator.status_code == 200, administrator.text
+        assert (
+            administrator.json()["collections"][0]["page"]["parent_direct_entry_count"]
+            == 1
+        )
+
         response = client.post(
             RESTORE,
             headers=headers_for(viewer),
             json={
+                "view": "all",
                 "expanded_paths": [granted.path],
                 "selected_path": granted.path,
             },

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reuse bounded subtree count query structure with current roots and permissions.
+  Decode admitted thumbnails without a second native visibility wait.
+
 - Start selected collection reads before rendering their destination, cancel abandoned
   reads, and keep pointer prefetch scheduling outside the grid's rendering path.
 - Optimize the restored tree's rendering with explicit locale dependencies, preserving

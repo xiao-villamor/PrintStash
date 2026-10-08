@@ -23,6 +23,20 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("ProtectedThumbnail", () => {
+  it("starts an admitted image without another visibility gate", async () => {
+    render(
+      <ProtectedThumbnail
+        path="/admitted/thumbnail"
+        alt="Admitted"
+        placeholder={<span>Missing</span>}
+      />,
+    );
+
+    const image = await screen.findByAltText("Admitted");
+
+    expect(image).toHaveAttribute("loading", "eager");
+  });
+
   it("waits for load when early decoding cannot start yet", async () => {
     const decoder = vi
       .fn<() => Promise<void>>()
