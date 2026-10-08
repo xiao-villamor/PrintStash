@@ -258,7 +258,7 @@ describe("taxonomy hooks", () => {
     expect(stubs.lookupCollection).not.toHaveBeenCalled();
   });
 
-  it("reuses an authorized empty child level and refetches it after invalidation", async () => {
+  it("refetches an authorized empty child level after invalidation", async () => {
     stubs.lookupCollection.mockResolvedValue({
       collection: aCollectionNode({ id: 41, child_count: 0 }),
       ancestors: [],

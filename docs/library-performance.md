@@ -168,7 +168,7 @@ automation actionability waits or reused prior marks are not acceptance evidence
 | 75 | opens only an immediately usable mobile tree control | Edge | Hidden, disabled or covered filter button | No click until visible enabled control passes hit testing | Playwright | ✅ |
 | 76 | refreshes a changed library deliberately | Happy | Foreground event after library revision changes | Old page stays until explicit refresh; no stale continuation | Playwright | ✅ |
 | 77 | checks permissions immediately while deferring the first events connection | Edge | Initial viewport unfinished | Authority checked immediately; one connection after readiness retained through later navigation | Frontend unit | ✅ |
-| 78 | reuses an authorized empty child level and refetches it after invalidation | Happy | Lookup confirms zero children, then collection changes | No serial empty read; invalidation retrieves new children | Frontend integration | ✅ |
+| 78 | refetches an authorized empty child level after invalidation | Happy | Lookup confirms zero children, then collection changes | No serial empty read; invalidation retrieves new children | Frontend integration | ✅ |
 | 79 | preserves already downloaded child pages when looking up a leaf | Edge | Child pages and cursors already cached | Existing pages remain intact | Frontend integration | ✅ |
 | 80 | does not seed a leaf response that completes after cancellation | Error | Cancelled lookup resolves late | No cache data published | Frontend integration | ✅ |
 | 81 | still reads children when the selected collection is not a leaf | Happy | Lookup reports children | Normal bounded child read publishes results | Frontend integration | ✅ |

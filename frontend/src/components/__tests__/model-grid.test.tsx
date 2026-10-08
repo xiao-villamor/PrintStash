@@ -476,7 +476,9 @@ describe("ModelBrowser", () => {
         startup: true,
         routes: { "GET /api/v1/models/browse": () => new Promise(() => {}) },
       });
-      await userEvent.click(screen.getAllByRole("button", { name: "Filters" })[0]);
+      // jsdom does not apply responsive CSS; target the desktop disclosure,
+      // not an earlier hidden mobile trigger whose catalogs are viewport-gated.
+      await userEvent.click(screen.getByRole("button", { name: "Filters", expanded: false }));
       await waitFor(() =>
         expect(requests().some((request) => request.url.startsWith("/api/v1/models/facets"))).toBe(
           true,
