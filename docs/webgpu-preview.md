@@ -137,3 +137,23 @@ overlapping earlier cases). Latest CI must run the complete combined selection.
 The development comparison and its raw samples are documented in
 [the browser evidence record](benchmarks/pri16/browser-readme.md).
 It does not qualify the default for promotion.
+
+## Viewer lifecycle and first rendered frame
+
+Public readiness now waits for the primary mesh render callback after geometry
+preparation. A deliberately delayed native WebGPU draw keeps readiness false;
+releasing it enables readiness. This is draw readiness, not a GPU timestamp or
+browser compositor presentation measurement.
+
+The native conformance selection now contains 42 cases. New focused cases pass:
+
+| Behaviour | Category | Input | Observable outcome | Tier | Status |
+| --- | --- | --- | --- | --- | --- |
+| waits for a rendered mesh before announcing readiness | Edge | GPU draw delayed | Ready remains false until mesh renders | Playwright | ✅ |
+| aligns the scaled overlay | Happy | Half-size overlay compensated by 2x, both backends | Independently expected world bounds match primary | Playwright | ✅ |
+| releases resources across repeated viewer lifecycles | Edge | Five open/close cycles with changing sources, both backends | Workers, devices, geometries, materials and object URLs return to zero each cycle | Playwright | ✅ |
+| renders translucent x-ray pixels | Happy | X-ray versus solid image, both backends | Foreground contrast energy is reduced while image stays visible | Playwright | ✅ |
+| renders sparse wireframe pixels | Happy | Wireframe versus solid image, both backends | Nonempty edge coverage occupies less than one quarter of solid coverage | Playwright | ✅ |
+
+These analytic controls verify display-mode behavior and resource ownership.
+They do not claim exhaustive corpus visual parity or physical GPU memory telemetry.

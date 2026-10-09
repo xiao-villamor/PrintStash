@@ -71,6 +71,7 @@ function Mesh({
   geometry,
   displayMode,
   onSized,
+  onRendered,
   onGeometrySize,
   comparison,
   overlay = false,
@@ -78,6 +79,7 @@ function Mesh({
   geometry: THREE.BufferGeometry;
   displayMode: ViewerDisplayMode;
   onSized: (size: THREE.Vector3) => void;
+  onRendered?: () => void;
   onGeometrySize?: (size: number) => void;
   comparison?: MeshComparison;
   overlay?: boolean;
@@ -125,7 +127,7 @@ function Mesh({
   }, [geometry, onSized, comparison]);
 
   return (
-    <mesh ref={meshRef} geometry={geometry}>
+    <mesh ref={meshRef} geometry={geometry} onAfterRender={onRendered}>
       <meshStandardMaterial
         color={overlay ? "#497bbd" : "#8a93a6"}
         roughness={0.45}
@@ -205,6 +207,7 @@ function Scene({
     [comparisonCamera, invalidate],
   );
 
+  const visible = useRef(false);
   const loadedChangeRef = useRef(onLoadedChange);
   useEffect(() => {
     loadedChangeRef.current = onLoadedChange;
@@ -219,11 +222,17 @@ function Scene({
     (nextSize: THREE.Vector3) => {
       setModelSize((current) => (current.equals(nextSize) ? current : nextSize));
       setLoaded(true);
-      loadedChangeRef.current?.(true);
       invalidate();
     },
     [invalidate, setLoaded],
   );
+
+  const handleRendered = useCallback(() => {
+    if (loaded && !visible.current) {
+      visible.current = true;
+      loadedChangeRef.current?.(true);
+    }
+  }, [loaded]);
 
   const gridSize = Math.max(modelSize.x, modelSize.z) * 2.6 || NORMALIZED_SIZE * 2.6;
   const floorY = -modelSize.y / 2;
@@ -306,6 +315,7 @@ function Scene({
   ]);
 
   useLayoutEffect(() => {
+    visible.current = false;
     loadedChangeRef.current?.(false);
   }, [url]);
 
@@ -339,6 +349,7 @@ function Scene({
           geometry={geometry}
           displayMode={displayMode}
           onSized={handleSized}
+          onRendered={handleRendered}
           onGeometrySize={onGeometrySize}
           comparison={comparison}
         />

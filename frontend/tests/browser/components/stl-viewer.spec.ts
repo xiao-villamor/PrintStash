@@ -1,7 +1,8 @@
 /** Native viewer lifecycle contracts under StrictMode, without application persistence. */
 import { readFile } from "node:fs/promises";
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import type {} from "../../browser-fixtures/stl-viewer";
+import type {} from "../../browser-fixtures/stl-viewer-lifecycle";
 test.use({
   launchOptions: {
     args: [
@@ -15,7 +16,116 @@ test.use({
   },
 });
 
+async function appearance(page: Page, backend: string, mode: string) {
+  await page.goto(
+    "/tests/browser-fixtures/stl-viewer-lifecycle.html?hold=1&backend=" + backend + "&mode=" + mode,
+  );
+  await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+  const pending = page.evaluate(() => window.meshLifecycleCheck.runCycles(1));
+  await expect(page.locator("body")).toHaveAttribute("data-viewer-ready", "true");
+  const png = await page.locator("canvas").screenshot();
+  const pixels = await page.evaluate(async (bytes) => {
+    const bitmap = await createImageBitmap(
+      new Blob([new Uint8Array(bytes)], { type: "image/png" }),
+    );
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const context = canvas.getContext("2d");
+    if (context === null) throw new Error("pixel_control_canvas_unavailable");
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const rgba = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let foreground = 0;
+    let energy = 0;
+    for (let offset = 0; offset < rgba.length; offset += 4) {
+      const red = Math.abs(rgba[offset]! - rgba[0]!);
+      const green = Math.abs(rgba[offset + 1]! - rgba[1]!);
+      const blue = Math.abs(rgba[offset + 2]! - rgba[2]!);
+      if (Math.max(red, green, blue) > 6) foreground += 1;
+      energy += red + green + blue;
+    }
+    return { foreground, energy };
+  }, Array.from(png));
+  await page.evaluate(() => window.meshLifecycleCheck.releaseViewer());
+  await pending;
+  return pixels;
+}
+
 test.describe("STLViewer", () => {
+  test("waits for a rendered mesh before announcing readiness", async ({ page }) => {
+    await page.goto(
+      "/tests/browser-fixtures/stl-viewer-lifecycle.html?backend=webgpu&pauseFrame=1",
+    );
+    await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+    const pending = page.evaluate(() => window.meshLifecycleCheck.runCycles(1));
+    await expect(page.locator("body")).toHaveAttribute("data-draw-requested", "true");
+
+    await expect(page.locator("body")).toHaveAttribute("data-viewer-ready", "false");
+    await page.evaluate(() => window.meshLifecycleCheck.releaseFrame());
+
+    await expect(page.locator("body")).toHaveAttribute("data-viewer-ready", "true");
+    await pending;
+  });
+
+  for (const backend of ["webgl", "webgpu"]) {
+    test("renders translucent " + backend + " x-ray pixels", async ({ page }) => {
+      const solid = await appearance(page, backend, "solid");
+
+      const xray = await appearance(page, backend, "xray");
+
+      expect(xray.energy).toBeGreaterThan(solid.energy * 0.1);
+      expect(xray.energy).toBeLessThan(solid.energy * 0.9);
+    });
+
+    test("renders sparse " + backend + " wireframe pixels", async ({ page }) => {
+      const solid = await appearance(page, backend, "solid");
+
+      const wireframe = await appearance(page, backend, "wireframe");
+
+      expect(wireframe.foreground).toBeGreaterThan(0);
+      expect(wireframe.foreground).toBeLessThan(solid.foreground * 0.25);
+    });
+
+    test("aligns the scaled " + backend + " overlay", async ({ page }) => {
+      await page.goto(
+        "/tests/browser-fixtures/stl-viewer-lifecycle.html?overlay=1&backend=" + backend,
+      );
+      await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+
+      await page.evaluate(() => window.meshLifecycleCheck.runCycles(1));
+
+      expect(await page.evaluate(() => window.meshLifecycleCheck.alignmentBounds())).toEqual(
+        Array.from({ length: 2 }, () => [
+          expect.closeTo(-10 / 3, 5),
+          expect.closeTo(-5, 5),
+          expect.closeTo(-5 / 3, 5),
+          expect.closeTo(10 / 3, 5),
+          expect.closeTo(5, 5),
+          expect.closeTo(5 / 3, 5),
+        ]),
+      );
+    });
+
+    test(
+      "releases " + backend + " resources across repeated viewer lifecycles",
+      async ({ page }) => {
+        await page.goto("/tests/browser-fixtures/stl-viewer-lifecycle.html?backend=" + backend);
+        await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+
+        const resources = await page.evaluate(() => window.meshLifecycleCheck.runCycles(5));
+
+        expect(resources).toEqual(
+          Array.from({ length: 5 }, () => ({
+            workers: 0,
+            devices: 0,
+            geometries: 0,
+            materials: 0,
+            objectUrls: 0,
+          })),
+        );
+      },
+    );
+  }
+
   test("retires controls while changing renderer preference", async ({ page }) => {
     await page.goto("/tests/browser-fixtures/stl-viewer.html?delayDevice=1");
     await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
