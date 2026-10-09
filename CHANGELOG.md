@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Release the mesh preview GPU device when renderer construction or initialization cleanup fails.
+
 - Parse mesh previews in a cancellable worker and add an experimental WebGPU
   preference with camera-preserving WebGL recovery and asynchronous screenshots.
   WebGL remains the default; GPU performance qualification is still pending.

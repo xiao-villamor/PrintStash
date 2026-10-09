@@ -1,6 +1,6 @@
 /** Backend eligibility and readback layout preserve the browser compatibility path. */
-import { describe, expect, it } from "vitest";
-import { normalizeCaptureRows, selectMeshBackend } from "../mesh-renderer";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createMeshRenderer, normalizeCaptureRows, selectMeshBackend } from "../mesh-renderer";
 
 describe("selectMeshBackend", () => {
   it("retains explicit WebGL preference on capable devices", () => {
@@ -58,5 +58,60 @@ describe("normalizeCaptureRows", () => {
     expect(() => normalizeCaptureRows(new Uint8Array(7), 1, 2, "webgpu")).toThrow(
       "screenshot_readback_incomplete",
     );
+  });
+});
+
+const initialization = vi.hoisted(() => ({
+  constructionFails: false,
+  disposalFails: false,
+}));
+vi.mock("three/webgpu", () => ({
+  WebGPURenderer: class {
+    constructor() {
+      if (initialization.constructionFails) throw new Error("construction_failed");
+    }
+    async init() {
+      throw new Error("initialization_failed");
+    }
+    async dispose() {
+      if (initialization.disposalFails) throw new Error("cleanup_failed");
+    }
+  },
+  WebGPUBackend: class {},
+}));
+
+describe("createMeshRenderer", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    { name: "constructor refusal", constructionFails: true, disposalFails: false },
+    { name: "initialization refusal", constructionFails: false, disposalFails: false },
+    { name: "cleanup refusal", constructionFails: false, disposalFails: true },
+  ])("releases the acquired device after $name", async (failure) => {
+    initialization.constructionFails = failure.constructionFails;
+    initialization.disposalFails = failure.disposalFails;
+    let destroyed = false;
+    const device = {
+      destroy: () => {
+        destroyed = true;
+      },
+    };
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("navigator", {
+      gpu: { requestAdapter: async () => ({ requestDevice: async () => device }) },
+    });
+
+    await expect(
+      createMeshRenderer(
+        document.createElement("canvas"),
+        "webgpu",
+        new AbortController().signal,
+        () => undefined,
+      ),
+    ).rejects.toThrow();
+
+    expect(destroyed).toBe(true);
   });
 });

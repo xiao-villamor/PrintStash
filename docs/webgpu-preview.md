@@ -110,3 +110,9 @@ Primary references: [Three.js WebGPURenderer](https://threejs.org/manual/pages/w
 [Fiber asynchronous renderer factory](https://r3f.docs.pmnd.rs/api/canvas),
 [WebGPU secure contexts](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/gpu),
 [Chromium SwiftShader](https://chromium.googlesource.com/chromium/src/+/main/docs/gpu/swiftshader.md).
+
+Additional initialization cleanup coverage:
+
+| Behaviour | Input | Outcome | Tier | Status |
+| --- | --- | --- | --- | --- |
+| releases the acquired device after failure | Constructor, initialization, or disposal refusal | Acquired device is destroyed | Frontend unit | ✅ |

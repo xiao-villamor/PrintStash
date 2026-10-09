@@ -95,12 +95,20 @@ export async function createMeshRenderer(
       device.destroy();
       throw new DOMException("Renderer initialization cancelled", "AbortError");
     }
-    renderer = new WebGPURenderer({ canvas, device, antialias: true, alpha: true });
+    try {
+      renderer = new WebGPURenderer({ canvas, device, antialias: true, alpha: true });
+    } catch (error) {
+      device.destroy();
+      throw error;
+    }
     try {
       await renderer.init();
     } catch (error) {
-      await renderer.dispose();
-      device.destroy();
+      try {
+        await renderer.dispose();
+      } finally {
+        device.destroy();
+      }
       throw error;
     }
     if (renderer.backend instanceof WebGPUBackend) {
@@ -109,8 +117,11 @@ export async function createMeshRenderer(
       selection = { backend: "webgl", fallback: "initialization_failed" };
       const context = canvas.getContext("webgl2");
       if (!context) {
-        await renderer.dispose();
-        device.destroy();
+        try {
+          await renderer.dispose();
+        } finally {
+          device.destroy();
+        }
         throw new Error("webgl_fallback_unavailable");
       }
       maxTextureSize = Number(context.getParameter(context.MAX_TEXTURE_SIZE));
