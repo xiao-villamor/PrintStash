@@ -97,9 +97,9 @@ production adoption.
 
 `cold` creates a new context per observation; `reused` shares a context and
 prepared geometry within one worker invocation. Both compare against retained CPU
-preparation. These are **not** thirty fresh worker processes. Run at least thirty
-independent command invocations into separate output directories to record fresh
-process costs; preserve every result, including failures. The supervised cost
+preparation. With the default --processes 1 these are **not** thirty fresh worker processes.
+Use --processes 30 for independent supervised workers, retaining every result,
+including failures. Each worker still uses the declared --trials count. The supervised cost
 includes the paired CPU reference and must not be represented as GPU-only Job
 latency. `full_cold_source_visual_ms` is explicitly an estimate adding shared
 imports/load/preparation, not upload-to-publication latency.
@@ -227,3 +227,32 @@ below are under the mirrored `backend/tests/{unit,integration,e2e,repo}` tiers.
 | test_releases_partial_native_allocations | Error | Failure at each attachment/buffer allocation | All earlier native resources destroyed | Integration | ✅ |
 | test_releases_native_device_wrappers_after_close | Error | Closed owner remains referenced | Native device wrapper becomes collectible | Integration | ✅ |
 | test_reports_distinct_resolution_phases | Happy | Independently controlled native readback and CPU shading costs | Reported phase excludes the other cost | Integration | ✅ |
+
+## Fresh-process sampling and encoding controls
+
+Use --processes 30 --trials 1 with a frozen manifest to run thirty fresh
+supervised workers per mode. Each attempt has its own directory and raw report;
+the aggregate retains failed attempts and summarizes all-attempt and successful
+startup-through-cleanup costs separately. A cancelled attempt ends the campaign.
+Worker PIDs identify independent child invocations. The pilot refuses existing
+output directories instead of overwriting evidence.
+
+Cold/reused workers include their paired CPU reference. Their supervised costs
+are not GPU-only execution or upload-to-thumbnail latency. A single observation
+per worker does not establish reused-context performance; use --trials 30 when
+measuring that separately. This command never grants production qualification.
+
+The shared generated corpus now includes ASCII and binary STL versions of the
+same cube, exact duplicate faces and intersecting solids. Source extensions match
+their encodings. These join the existing thin, hole, disconnected, curved,
+reflected, sheared, translated and retained-instance controls.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | preserves geometry across STL encodings | Happy | ASCII/binary cube | Twelve facets and 20 mm bounds | Integration | ✅ integration/scripts/test_viewer_representation_corpus.py::TestSources::test_preserves_geometry_across_stl_encodings |
+| 2 | preserves overlapping faces | Edge | Duplicated 3MF cube | Twenty-four facets, original bounds | Integration | ✅ integration/scripts/test_viewer_representation_corpus.py::TestSources::test_preserves_overlapping_faces |
+| 3 | preserves intersecting placements | Edge | Offset solids | Twenty-four facets, 30 mm bounds | Integration | ✅ integration/scripts/test_viewer_representation_corpus.py::TestSources::test_preserves_intersecting_placements |
+| 4 | produces deterministic control bytes | Happy | Repeated generation | Identical bytes | Integration | ✅ integration/scripts/test_viewer_representation_corpus.py::TestSources::test_produces_deterministic_control_bytes |
+| 5 | refuses existing evidence directories | Error | Prior campaign output | Nonzero exit, original evidence unchanged | Integration | ✅ integration/scripts/test_gpu_render_pilot.py::TestCampaign::test_refuses_existing_evidence_directories |
+| 6 | retains independent worker failures | Error | Two processes, absent GPU dependency | Distinct child PIDs, raw failures, CPU results, separate statistics | Integration | ✅ integration/scripts/test_gpu_render_pilot.py::TestCampaign::test_retains_independent_worker_failures |
+| 7 | stops a cancelled campaign | Error | Native supervision interrupted | One attempt retained, no next worker | Integration | ✅ integration/scripts/test_gpu_render_pilot.py::TestRun::test_persists_cancelled_decline |

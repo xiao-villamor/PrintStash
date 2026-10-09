@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Automate fresh-worker GPU benchmark campaigns with retained failures and immutable output directories; add ASCII/binary STL and overlapping geometry controls.
+
 - Report native GPU readback separately from CPU face resolution and canonical shading in qualification measurements.
 
 - Record revised RTX 5060 control evidence: exact CPU/GPU images across 60 observations after precision and native cleanup fixes; production qualification remains gated.

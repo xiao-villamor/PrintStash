@@ -26,6 +26,8 @@ class TestMain:
         "arguments",
         [
             pytest.param(["--trials", "0"], id="zero-trials"),
+            pytest.param(["--processes", "0"], id="zero-processes"),
+            pytest.param(["--processes", "101"], id="excess-processes"),
             pytest.param(["--chunk-size", "0"], id="zero-chunk"),
             pytest.param(["--frame-width", "0"], id="zero-width"),
             pytest.param(["--embedding-size", "31"], id="small-embedding"),
@@ -180,11 +182,12 @@ class TestMain:
 
 
 class TestRun:
-    def test_persists_cancelled_decline(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("processes", [1, 3])
+    def test_persists_cancelled_decline(self, tmp_path, monkeypatch, processes):
         from app.modules.media import mesh_isolation
         from app.runtime.native_runtime import current_permit
         from scripts.gpu_render_measurement import Flow, OutputFormat
-        from scripts.gpu_render_pilot import _run
+        from scripts.gpu_render_pilot import _campaign, _run
 
         corpus = tmp_path / "source"
         corpus.mkdir()
@@ -194,6 +197,8 @@ class TestRun:
         output.mkdir()
         arguments = argparse.Namespace(
             candidate=Candidate.MODERNGL,
+            processes=processes,
+            manifest=None,
             selector=None,
             allow_software=False,
             source=source,
@@ -220,7 +225,7 @@ class TestRun:
 
         monkeypatch.setattr(mesh_isolation, "supervise_result", interrupt_supervision)
 
-        report = _run(arguments, source)
+        report = (_campaign if processes > 1 else _run)(arguments, source)
 
         persisted = json.loads((output / "report.json").read_text())
         assert report["cancelled"] is True
@@ -230,3 +235,112 @@ class TestRun:
         assert persisted == report
         assert not (output / "report.pending").exists()
         assert current_permit() is None
+        if processes > 1:
+            assert len(report["attempts"]) == 1
+            assert not (output / "process-001").exists()
+
+
+class TestCampaign:
+    def test_retains_independent_worker_failures(self, tmp_path):
+        from scripts.viewer_representation_corpus import write_sources
+
+        source = write_sources(tmp_path / "sources", ("binary-cube",))["binary-cube"]
+        boundary = tmp_path / "optional-dependency"
+        boundary.mkdir()
+        (boundary / "wgpu.py").write_text("raise ImportError('campaign_gpu_absent')\n")
+        output = tmp_path / "campaign"
+        reply = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "scripts.gpu_render_pilot",
+                "--candidate",
+                "wgpu",
+                "--source",
+                str(source),
+                "--output-dir",
+                str(output),
+                "--processes",
+                "2",
+                "--frame-width",
+                "64",
+                "--frame-height",
+                "48",
+                "--memory-budget-mb",
+                "1024",
+                "--timeout-seconds",
+                "15",
+            ],
+            cwd=tmp_path,
+            env={
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join((str(boundary), str(BACKEND_DIR))),
+                "OPENBLAS_NUM_THREADS": "1",
+                "OMP_NUM_THREADS": "1",
+            },
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+        assert reply.returncode == 1, reply.stderr
+        report = json.loads((output / "report.json").read_text())
+        assert report["decision"] == "declined"
+        assert len(report["attempts"]) == 2
+        cells = [
+            cell
+            for attempt in report["attempts"]
+            for cell in attempt["report"]["cells"]
+        ]
+        assert len({cell["result"]["worker_pid"] for cell in cells}) == 6
+        for index, attempt in enumerate(report["attempts"]):
+            assert (
+                json.loads(
+                    (output / f"process-{index:03d}" / "report.json").read_text()
+                )
+                == attempt["report"]
+            )
+        assert all(
+            cell["result"]["source_unchanged"]
+            for cell in cells
+            if cell["mode"] == "cpu"
+        )
+        for mode, statistics in report["supervised_statistics"].items():
+            assert statistics["all_attempts_ms"]["count"] == 2
+            assert statistics["completed_attempts_ms"]["count"] == (
+                2 if mode == "cpu" else 0
+            )
+            assert statistics["failed_attempts"] == (0 if mode == "cpu" else 2)
+        assert all(
+            observation["reason"] == "dependency_unavailable"
+            for cell in cells
+            if cell["mode"] != "cpu"
+            for observation in cell["result"]["observations"]
+            if observation["method"] == "gpu"
+        )
+
+    def test_refuses_existing_evidence_directories(self, tmp_path):
+        output = tmp_path / "previous"
+        output.mkdir()
+        report = output / "report.json"
+        original = b'{"immutable": true}'
+        report.write_bytes(original)
+        reply = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "scripts.gpu_render_pilot",
+                "--output-dir",
+                str(output),
+                "--processes",
+                "2",
+            ],
+            cwd=BACKEND_DIR,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        assert reply.returncode != 0
+        assert report.read_bytes() == original
+        assert list(output.iterdir()) == [report]
