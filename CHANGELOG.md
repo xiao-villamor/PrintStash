@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Retain expanded NVIDIA quality rejection and fresh-worker failure evidence; document an isolated experimental WSL/Docker diagnostic without changing production eligibility.
+
 - Automate fresh-worker GPU benchmark campaigns with retained failures and immutable output directories; add ASCII/binary STL and overlapping geometry controls.
 
 - Report native GPU readback separately from CPU face resolution and canonical shading in qualification measurements.

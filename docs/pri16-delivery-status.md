@@ -16,10 +16,9 @@ difference. The historical candidate failed quality. The revised candidate
 also retires cyclic native wrappers at session cleanup, addressing the
 repeated-context memory exhaustion observed in the intermediate candidate.
 
-These results are not Linux/Docker evidence, full STL/3MF quality, complete-flow
+Expanded d1679b86 controls complete 120 observations: ASCII/binary cube and\nduplicate-face controls pass exactly; all 30 intersecting-solid observations\nfail the unchanged gate (two mask pixels, maximum channel difference 148).\nThis workload is rejected pending a coverage/depth-selection correction.\n\nThese results are not Linux/Docker evidence, full STL/3MF quality, complete-flow
 speedup, or physical Job failure containment. Intel hardware is not available
-in this environment. WSL exposes software Vulkan; the available Docker daemon
-has no configured GPU runtime. The native Windows NVIDIA device is usable.
+in this environment. Default WSL exposes software rendering. A separate Mesa Dozen probe now renders\non the NVIDIA GPU in WSL and a disposable container, but requires an explicit\nnon-conformant-driver override and is not production evidence. The Docker daemon\nstill has no configured NVIDIA GPU runtime. The native Windows NVIDIA device is usable.
 
 The browser comparison on 42bb9668 retains 120 attempts (119 completed).
 Neither control demonstrates interaction-frame improvement. The readiness proxy
@@ -64,7 +63,7 @@ first-draw readiness, mode pixels, overlay bounds and repeated resource retireme
 | 30 | releases viewer resources | ✅ | Five changing-source open/close cycles per backend return tracked workers, devices, geometry, materials and object URLs to zero. |
 | 31 | preserves G-code preview behavior | ✅ | Existing real BGCODE preview flow passed; G-code renderer implementation remains unchanged. |
 | 32 | starts without container GPU access | ❌ | Research image refuses absent hardware correctly; GPU-enabled application CPU recovery is pending. |
-| 33 | reports complete benchmark costs | ❌ | Raw samples/failures/phases are retained; upload-to-thumbnail and full browser phase instrumentation remain incomplete. |
+| 33 | reports complete benchmark costs | ❌ | Thirty fresh-worker attempts per mode now retain startup-through-cleanup costs and all failures; upload-to-thumbnail and full browser phase instrumentation remain incomplete. |
 
 ## Remaining implementation gates
 

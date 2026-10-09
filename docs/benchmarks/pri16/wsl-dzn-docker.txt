@@ -1,0 +1,13 @@
+WARNING: dzn is not a conformant Vulkan implementation, testing use only.
+MESA: error: ID3D12DeviceFactory::CreateDevice failed
+enumerate_adapters: Initialization of an object has failed
+WARNING: dzn is not a conformant Vulkan implementation, testing use only.
+MESA: error: ID3D12DeviceFactory::CreateDevice failed
+enumerate_adapters: Initialization of an object has failed
+WARNING: dzn is not a conformant Vulkan implementation, testing use only.
+MESA: error: ID3D12DeviceFactory::CreateDevice failed
+enumerate_adapters: Initialization of an object has failed
+WARNING: dzn is not a conformant Vulkan implementation, testing use only.
+MESA: error: ID3D12DeviceFactory::CreateDevice failed
+enumerate_adapters: Initialization of an object has failed
+{"status": "failed", "reason": "capability_unavailable", "qualification": false}

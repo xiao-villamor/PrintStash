@@ -75,3 +75,45 @@ corpus, Job latency, browser performance, Linux/Docker verification or physical
 failure containment. Render/encode timings exclude cleanup and were collected
 during other development work; they cannot qualify speedup. The historical
 969b2966 rejection remains valid for that historical candidate.
+
+## Expanded controls and fresh workers (d1679b86)
+
+The immutable candidate d1679b86b08514e4bb74ec39652ff1d42efc9cb1 was tested on
+Windows RTX 5060/Vulkan with 30 observations for each of four additional controls.
+The [raw report](windows-corpus-d1679b86.json) retains all 120 completed observations.
+ASCII cube, binary cube and duplicate-face controls are exact (90/90). Intersecting
+solids fail all 30 observations: two foreground-mask differences and maximum RGBA
+difference 148. Output is stable. This is a **quality rejection** for that workload;
+the original tolerances remain unchanged.
+
+A supersampled diagnostic finds five differing raw pixels, including two coverage
+differences, before image resizing. Thus canonical CPU shading alone cannot
+correct GPU coverage/depth selection. This failure is distinct from the previously
+fixed interpolation precision problem.
+
+Reproduce with [the Windows probe](windows-corpus-controls.py). The archived replay\nadds a nonzero exit for a failed quality report; measured pixels are unchanged.\nGenerate its four
+sources with scripts.viewer_representation_corpus.write_sources into the probe's
+campaign-controls-d1679b86 directory, using names ascii-cube, binary-cube,
+overlapping-faces and intersecting-solids. The manifest records original file
+hashes. The isolated environment additionally has networkx 3.6.1 and lxml 6.1.3
+from the repository lock for 3MF loading. An initial setup attempt lacked networkx
+and failed before measurement; installing these dependencies preceded the frozen run.
+The 3MF probe expands scenes through trimesh, so it does not qualify production
+retained-instance loading.
+
+The [WSL fresh-process report](wsl-fresh-process-d1679b86.json) retains 30 attempts
+per mode: 30 successful CPU workers, 31 GPU worker resource-limit failures and
+29 GPU worker failures without a completed reply. Every supervised execution has
+its own execution identifier; successful replies also record the child PID.
+No failure is counted as acceleration. Use the committed pilot with --processes 30
+--trials 1, candidate wgpu, 64x48 preview, 1024 MiB admission and 15-second deadline.
+The binary cube source hash is frozen. Reports intentionally retain failures even
+when no native phase measurements could be returned.
+
+Both probes ran alongside other development validation. Windows timing excludes
+process supervision and cleanup; WSL cold/reused supervisor time includes the
+paired CPU reference. Neither report demonstrates the complete-flow speed gate.
+Production integration remains gated; these reports are not Linux/Docker or Intel
+hardware qualification.
+
+[Additional WSL/Docker NVIDIA diagnostic](wsl-dzn.md): an isolated non-conformant\nDozen build works only with an explicit experimental override. Default refusal\nand the missing-driver-store failure are retained. This is not deployment qualification.\n
