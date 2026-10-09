@@ -20,7 +20,9 @@ eligible production-driver qualification.
 Each admitted case has 30 CPU/GPU comparisons using cold GPU contexts and
 retained preparation for both methods. The 3MF preview path retains instances.
 All 150 comparisons completed; outputs were stable. Raw phases, failures and
-quality values are in [the anonymized records](deployed-models-aad74576.jsonl).\n[Statistics](deployed-statistics-aad74576.json) include median, p95, dispersion\nand reproducible bootstrap confidence intervals for each admitted comparison.
+quality values are in [the anonymized records](deployed-models-aad74576.jsonl).
+[Statistics](deployed-statistics-aad74576.json) include median, p95, dispersion
+and reproducible bootstrap confidence intervals for each admitted comparison.
 
 | Case | Bytes | Triangles | Comparisons passing quality | Maximum RGBA difference | Foreground-mask differences | Estimated CPU/GPU median ratio |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -62,9 +64,71 @@ assertion; then sending the largest source through DevTools exceeded Chrome's
 100 MiB protocol buffer. A token-protected loopback stream supplied the large
 file without exposing it on the LAN. Those attempts are not viewer failures.
 
-These are correctness checks, not thirty-sample browser performance or reference
-visual-parity qualification. WebGL remains the default.
+## Browser performance development comparison
 
+The same six cases completed 360 measured observations (30 per case and viewer),
+plus twelve retained warmups, with no failed attempts. Each observation verifies
+the intended source hash, renderer and 1280x960 screenshot. The baseline is the
+original application at 8d70c556; the candidate is 72c66550.
+
+[Frozen protocol and runtime metadata](deployed-browser-manifest-72c66550.json)
+identify the corpus, application commits, browser and adapter.
+[Raw observations](deployed-browser-performance-72c66550.jsonl) retain every frame
+interval and attempt. [Statistics](deployed-browser-statistics-72c66550.json)
+include medians, p95, dispersion and seeded bootstrap confidence intervals.
+Frame columns below are the median of each observation's p95, in milliseconds.
+Readiness columns are a proxy, not first-visible-frame latency.
+
+| Case | Baseline/candidate observations | Original frame p95 | WebGPU frame p95 | Original readiness proxy | WebGPU readiness proxy |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| real-3mf-large | 30/30 | 7.10 | 7.10 | 549.2 | 1046.8 |
+| real-3mf-medium | 30/30 | 7.10 | 7.10 | 495.7 | 860.4 |
+| real-3mf-small | 30/30 | 7.10 | 7.10 | 473.0 | 825.7 |
+| real-stl-large | 30/30 | 7.20 | 7.10 | 912.8 | 1867.7 |
+| real-stl-medium | 30/30 | 7.10 | 7.10 | 477.9 | 853.4 |
+| real-stl-small | 30/30 | 7.10 | 7.10 | 477.4 | 854.1 |
+
+Neither declared large case demonstrates the required 20% interaction improvement.
+Readiness callbacks have different semantics: the candidate waits for its first
+mesh draw, while the original can signal earlier. Their proxy ratio cannot
+establish the required first-visible-frame gate. Headless RAF intervals also
+include refresh scheduling. No visual-parity or performance qualification is
+claimed; WebGL remains the default.
+
+### Reproduction and boundaries
+
+Browser comparison protocol:
+
+- Candidate 72c66550602fc36ef2fa206bf1bfca8b30f9ca1b; original application 8d70c556.
+- Backported candidate benchmark fixture only; original application source unchanged.
+- Native Chrome 154.0.8037.98, Windows RTX 5060, NVIDIA driver 610.88.
+- Fixed 900x700 viewport, 640x480 canvas, DPR 1, 1280x960 PNG.
+- Six anonymized real-source cases; source hashes verified for every context.
+- Thirty observations per variant/case plus one retained warmup.
+- Alternating variant order; fresh browser contexts, reused browser process, warm dedicated Vite servers.
+- 120 RAF intervals per observation while alternating fit and zoom.
+- Readiness-plus-two-RAF is a proxy after source hashing, not actual first-visible paint.
+- Readiness semantics differ: the candidate waits for its first mesh draw; the original callback can fire earlier. Do not interpret proxy ratios as first-visible-frame regression or improvement.
+- Source download recorded separately; it uses token-protected private loopback file streaming.
+- Scene preparation is offline application viewer-STL conversion, not deployed HTTP preparation.
+- Headless RAF intervals include refresh scheduling; GPU execution durations are not measured.
+- These development measurements do not qualify production browser performance or visual parity.
+
+The fixture SHA-256 is
+f44a886e5386a2ca02413e37d3e1bf5704c033e48153f39b1cda93b3bf7fc65b
+for both checkouts. The candidate fixture was copied to the baseline without
+changing its application source. Dedicated Vite servers use ports 3291 (baseline)
+and 3292 (candidate), leaving the deployment untouched.
+
+[Replay script](browser-deployed-controls.mjs) preserves the measured protocol.
+Install Playwright Core 1.60.0, set PLAYWRIGHT_MODULE to its importable module
+specifier and CHROME_PATH to the Chrome executable. Provide the six matching
+private-deployed-corpus/real-{stl,3mf}-{small,medium,large}.stl files locally and
+start from a directory without private-browser-performance-72c66550. Three 3MF
+inputs must be converted with the application's viewer-STL converter first.
+The archived script only makes the dependency/executable paths configurable;
+the measured script used those exact Windows paths. Private file bytes and
+screenshots are not part of this repository.
 
 ## Coverage assessment
 
@@ -75,4 +139,4 @@ visual-parity qualification. WebGL remains the default.
 | 3 | preserves the source-loader refusal | Error | Largest STL exceeds prepared-source policy | resource_limit, no comparison falsely reported | Native integration | ✅ recorded refusal |
 | 4 | preserves real-model image quality | Edge | Thirty observations per admitted case | Fixed foreground/RGBA gates | Physical development probe | ❌ medium STL and large 3MF fail |
 | 5 | qualifies server complete-flow performance | Happy | Conformant Linux/Docker NVIDIA and Intel | At least 1.5x median improvement | Hardware qualification | ❌ no qualification |
-| 6 | qualifies browser performance on real Models | Happy | Frozen baseline/candidate browser corpus | Required interaction and first-visible-frame thresholds | Hardware qualification | ❌ not established by correctness checks |
+| 6 | qualifies browser performance on real Models | Happy | Frozen baseline/candidate browser corpus | Required interaction and first-visible-frame thresholds | Hardware qualification | ❌ interaction target not demonstrated; actual first-visible-frame and visual parity remain unqualified |

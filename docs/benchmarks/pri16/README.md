@@ -91,7 +91,9 @@ differences, before image resizing. Thus canonical CPU shading alone cannot
 correct GPU coverage/depth selection. This failure is distinct from the previously
 fixed interpolation precision problem.
 
-Reproduce with [the Windows probe](windows-corpus-controls.py). The archived replay\nadds a nonzero exit for a failed quality report; measured pixels are unchanged.\nGenerate its four
+Reproduce with [the Windows probe](windows-corpus-controls.py). The archived replay
+adds a nonzero exit for a failed quality report; measured pixels are unchanged.
+Generate its four
 sources with scripts.viewer_representation_corpus.write_sources into the probe's
 campaign-controls-d1679b86 directory, using names ascii-cube, binary-cube,
 overlapping-faces and intersecting-solids. The manifest records original file
@@ -116,5 +118,12 @@ paired CPU reference. Neither report demonstrates the complete-flow speed gate.
 Production integration remains gated; these reports are not Linux/Docker or Intel
 hardware qualification.
 
-[Additional WSL/Docker NVIDIA diagnostic](wsl-dzn.md): an isolated non-conformant\nDozen build works only with an explicit experimental override. Default refusal\nand the missing-driver-store failure are retained. This is not deployment qualification.\n
-[Real deployed Model measurements](deployed-models.md) add 150 CPU/GPU comparisons\nand twelve native-browser correctness checks using private copies from port 3000.\nTwo real cases fail image tolerance and no measured case demonstrates speedup.\n
+[Additional WSL/Docker NVIDIA diagnostic](wsl-dzn.md): an isolated non-conformant
+Dozen build works only with an explicit experimental override. Default refusal
+and the missing-driver-store failure are retained. This is not deployment qualification.
+
+[Real deployed Model measurements](deployed-models.md) add 150 CPU/GPU comparisons
+and twelve native-browser correctness checks using private copies from port 3000.
+A further 360 measured browser observations retain all samples and do not
+demonstrate the required large-case interaction improvement.
+Two real cases fail image tolerance and no measured case demonstrates speedup.

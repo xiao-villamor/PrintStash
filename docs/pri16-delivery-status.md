@@ -16,9 +16,23 @@ difference. The historical candidate failed quality. The revised candidate
 also retires cyclic native wrappers at session cleanup, addressing the
 repeated-context memory exhaustion observed in the intermediate candidate.
 
-Expanded d1679b86 controls complete 120 observations: ASCII/binary cube and\nduplicate-face controls pass exactly; all 30 intersecting-solid observations\nfail the unchanged gate (two mask pixels, maximum channel difference 148).\nThis workload is rejected pending a coverage/depth-selection correction.\nPrivate copies of the deployment corpus add 150 real-source comparisons: three\ncases pass quality, two fail, and none demonstrates estimated speedup. Twelve\nnative-browser checks on the six selected real Models pass. See\n[the deployed Model evidence](benchmarks/pri16/deployed-models.md).\n\nThese results are not Linux/Docker evidence, full STL/3MF quality, complete-flow
+Expanded d1679b86 controls complete 120 observations: ASCII/binary cube and
+duplicate-face controls pass exactly; all 30 intersecting-solid observations
+fail the unchanged gate (two mask pixels, maximum channel difference 148).
+This workload is rejected pending a coverage/depth-selection correction.
+Private copies of the deployment corpus add 150 real-source comparisons: three
+cases pass quality, two fail, and none demonstrates estimated speedup. Twelve
+native-browser checks on the six selected real Models pass. An additional 360
+measured browser observations complete with no failures, but neither large case
+demonstrates the required interaction improvement. See
+[the deployed Model evidence](benchmarks/pri16/deployed-models.md).
+
+These results are not Linux/Docker evidence, full STL/3MF quality, complete-flow
 speedup, or physical Job failure containment. Intel hardware is not available
-in this environment. Default WSL exposes software rendering. A separate Mesa Dozen probe now renders\non the NVIDIA GPU in WSL and a disposable container, but requires an explicit\nnon-conformant-driver override and is not production evidence. The Docker daemon\nstill has no configured NVIDIA GPU runtime. The native Windows NVIDIA device is usable.
+in this environment. Default WSL exposes software rendering. A separate Mesa Dozen probe now renders
+on the NVIDIA GPU in WSL and a disposable container, but requires an explicit
+non-conformant-driver override and is not production evidence. The Docker daemon
+still has no configured NVIDIA GPU runtime. The native Windows NVIDIA device is usable.
 
 The browser comparison on 42bb9668 retains 120 attempts (119 completed).
 Neither control demonstrates interaction-frame improvement. The readiness proxy
@@ -34,7 +48,7 @@ first-draw readiness, mode pixels, overlay bounds and repeated resource retireme
 | 1 | preserves CPU-only operation | ✅ | Existing CPU-only application suites pass; optional GPU package stays outside default installation. |
 | 2 | renders through the GPU adapter | ❌ | Physical prepared cube/torus controls pass; full admitted STL/retained-3MF integration is pending. |
 | 3 | produces canonical visual views | ❌ | Pilot supports multiview; full frozen-corpus physical framing qualification is pending. |
-| 4 | preserves reference image quality | ❌ | 60 revised physical control comparisons are exact; full corpus/protected-part qualification is pending. |
+| 4 | preserves reference image quality | ❌ | Expanded controls and real Models fail the fixed quality gate; the current candidate is rejected for those workloads. |
 | 5 | selects adapters by capabilities | ✅ | Vendor-neutral adapter-type/limit selection is implemented; eligibility contract tests pass. |
 | 6 | rejects software acceleration claims | ✅ | CPU/unknown adapter tests and no-device diagnostic refuse physical qualification. |
 | 7 | recovers from GPU setup failure | ❌ | Typed research adapter refusals exist; production Job CPU retry is not integrated. |
