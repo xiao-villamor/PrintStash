@@ -51,6 +51,7 @@ class GpuStats:
     upload_ms: float = 0.0
     draw_ms: float = 0.0
     readback_ms: float = 0.0
+    cpu_resolve_ms: float = 0.0
 
 
 class RenderFrame(Protocol):

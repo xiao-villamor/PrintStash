@@ -42,7 +42,10 @@ does not trigger Python garbage collection. Include that cleanup cost in timing.
 peak RSS or interpolation/readback temporaries. Whole-worker RSS, requested storage and optional device-wide
 telemetry are separate measurements; shared Intel memory contributes to host RSS.
 Each submission drains through mapping a four-byte copy into the owned staging
-buffer before reusing the vertex buffer. Final image readback happens once.
+buffer before reusing the vertex buffer. Final image readback happens once. readback_ms measures only native readback;
+cpu_resolve_ms separately measures face-ID validation, original-precision
+interpolation, canonical shading and publication into CPU pixels. Historical
+reports before this split include CPU resolution in readback_ms.
 This public mapping API avoids an ABI mismatch in 0.32.0's queue-completion
 callback. No private wgpu APIs or package patches are used.
 
@@ -223,3 +226,4 @@ below are under the mirrored `backend/tests/{unit,integration,e2e,repo}` tiers.
 | --- | --- | --- | --- | --- | --- |
 | test_releases_partial_native_allocations | Error | Failure at each attachment/buffer allocation | All earlier native resources destroyed | Integration | ✅ |
 | test_releases_native_device_wrappers_after_close | Error | Closed owner remains referenced | Native device wrapper becomes collectible | Integration | ✅ |
+| test_reports_distinct_resolution_phases | Happy | Independently controlled native readback and CPU shading costs | Reported phase excludes the other cost | Integration | ✅ |

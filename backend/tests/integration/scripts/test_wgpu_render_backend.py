@@ -325,6 +325,37 @@ class TestGpuFrame:
         assert not inputs[0].any()
         assert np.isinf(inputs[1]).all()
 
+    @pytest.mark.parametrize(
+        "field, expected", [("readback_ms", 3), ("cpu_resolve_ms", 7)]
+    )
+    def test_reports_distinct_resolution_phases(
+        self, session, inputs, monkeypatch, field, expected
+    ):
+        _, context = session
+        frame = GpuFrame(context, 2, 2, 1, 2)
+        elapsed = [0]
+        read = frame.native.read
+
+        def native_read():
+            elapsed[0] += 3_000_000
+            return read()
+
+        def shade(normals):
+            elapsed[0] += 7_000_000
+            return normals
+
+        monkeypatch.setattr(frame.native, "read", native_read)
+        monkeypatch.setattr(
+            "scripts.wgpu_render_backend.time.perf_counter_ns", lambda: elapsed[0]
+        )
+        values = list(inputs)
+        values[4] = shade
+        frame(*values)
+
+        frame.finish(*values[:2])
+
+        assert getattr(frame.stats, field) == expected
+
 
 class TestNativeFrame:
     @pytest.mark.parametrize("fail_at", [1, 2, 3, 4, 5])

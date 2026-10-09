@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Report native GPU readback separately from CPU face resolution and canonical shading in qualification measurements.
+
 - Record revised RTX 5060 control evidence: exact CPU/GPU images across 60 observations after precision and native cleanup fixes; production qualification remains gated.
 
 - PRI-16: preserve canonical interpolation precision in the optional WebGPU

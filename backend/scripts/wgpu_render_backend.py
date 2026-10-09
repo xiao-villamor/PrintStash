@@ -508,9 +508,14 @@ class GpuFrame:
             self.failure = GpuError(GpuFailure.INVALID_REQUEST)
             raise self.failure
         started = time.perf_counter_ns()
+        resolve_started: int | None = None
         try:
-            payload = self.native.read()
+            try:
+                payload = self.native.read()
+            finally:
+                self.stats.readback_ms += (time.perf_counter_ns() - started) / 1e6
             self.stats.readback_count += 1
+            resolve_started = time.perf_counter_ns()
             if len(payload) != self.width * self.height * 16:
                 raise ValueError("incomplete face readback")
             rgba = np.frombuffer(payload, dtype=np.float32).reshape(
@@ -583,7 +588,10 @@ class GpuFrame:
             )
             raise self.failure from exc
         finally:
-            self.stats.readback_ms += (time.perf_counter_ns() - started) / 1e6
+            if resolve_started is not None:
+                self.stats.cpu_resolve_ms += (
+                    time.perf_counter_ns() - resolve_started
+                ) / 1e6
 
     def close(self) -> None:
         if self._closed:

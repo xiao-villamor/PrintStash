@@ -25,7 +25,8 @@ The browser comparison on 42bb9668 retains 120 attempts (119 completed).
 Neither control demonstrates interaction-frame improvement. The readiness proxy
 is slower with WebGPU; it is not an actual first-visible-frame measurement.
 WebGPU remains experimental. Individual native browser conformance covers 33
-cases, including camera operations and capture recovery on both backends.
+cases initially. The complete expanded selection now passes 42 cases, including
+first-draw readiness, mode pixels, overlay bounds and repeated resource retirement.
 
 ## Original acceptance matrix
 
@@ -54,13 +55,13 @@ cases, including camera operations and capture recovery on both backends.
 | 21 | initializes the selected browser renderer | ✅ | Native browser WebGPU initialization, usable controls and captures pass. |
 | 22 | retains preview on unsupported contexts | ✅ | Unavailable-adapter recovery and physical localhost/HTTPS/LAN compatibility checks pass. |
 | 23 | recovers the browser renderer | ✅ | Device destruction recovers a fresh WebGL canvas with the camera preserved. |
-| 24 | preserves display modes | ❌ | Solid/x-ray/wireframe export passes; complete baseline visual-parity corpus is pending. |
+| 24 | preserves display modes | ✅ | Native image checks verify translucent x-ray contrast and sparse wireframe edges relative to solid, on both backends. Full corpus parity remains a separate rollout gate. |
 | 25 | preserves camera controls | ✅ | Native fit/reset/zoom/pan/orbit checks pass for WebGL and WebGPU. |
-| 26 | preserves comparison alignment | ❌ | Synchronized comparison cameras pass; full overlay visual-parity qualification is pending. |
+| 26 | preserves comparison alignment | ✅ | Synchronized cameras and independently expected compensated-overlay world bounds pass on both backends. |
 | 27 | exports screenshots correctly | ✅ | Native PNG dimensions and independent pixel orientation checks pass at scales 1–3 for both renderers. |
 | 28 | restores rendering after capture failure | ✅ | Injected native readback refusal restores state and permits the next capture on both renderers. |
 | 29 | discards stale loading results | ✅ | Worker cancellation, stale source handling and late renderer initialization cleanup are covered. |
-| 30 | releases viewer resources | ❌ | Individual worker/geometry/device disposal is covered; repeated-cycle steady-state accounting is pending. |
+| 30 | releases viewer resources | ✅ | Five changing-source open/close cycles per backend return tracked workers, devices, geometry, materials and object URLs to zero. |
 | 31 | preserves G-code preview behavior | ✅ | Existing real BGCODE preview flow passed; G-code renderer implementation remains unchanged. |
 | 32 | starts without container GPU access | ❌ | Research image refuses absent hardware correctly; GPU-enabled application CPU recovery is pending. |
 | 33 | reports complete benchmark costs | ❌ | Raw samples/failures/phases are retained; upload-to-thumbnail and full browser phase instrumentation remain incomplete. |
