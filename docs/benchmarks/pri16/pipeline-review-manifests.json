@@ -1,0 +1,133 @@
+{
+  "production_qualified": false,
+  "notes": {
+    "unbounded-native-threads": "Initial diagnostic omitted the worker native-thread environment; retained, not representative of production.",
+    "production-native-thread-limits": "Matches four worker thread limits; no-fence variant is diagnostic only because unbounded queued uploads need separate admission.",
+    "first-compatible-selection": "Intermediate selector fix; no substantial performance gain.",
+    "preferred-selection": "Final committed selector; retained preparation and cold devices within one process, not fresh-process Jobs; large 3MF uses application-derived STL.",
+    "adapter-discovery": "Isolated discovery retains adapter references across observations, so it is a different lifecycle from render/close/recreate.",
+    "integrated-traces": "Three diagnostic cycles each; these trace phases rather than qualifying performance."
+  },
+  "unbounded-native-threads": {
+    "commit": "db41b45d61662ee22441de267da123d12f3b040e",
+    "observations": 30,
+    "dimensions": [
+      640,
+      480
+    ],
+    "python": "3.14.8",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "versions": {
+      "wgpu": "0.32.0",
+      "numpy": "2.5.3",
+      "trimesh": "5.1.1",
+      "pillow": "12.3.0"
+    },
+    "sources": {
+      "real-stl-medium": "9ee60e3375c0211bd7b3fa6b7d9dd629157b5dd637067177aa59ee54f493e03a",
+      "real-3mf-large": "0ebb10a97f1a1c7fbf21b326c5fc719b5c3955dfe412745a818ed8eb7062fda5"
+    },
+    "variant": "queued draw removes intermediate copy/map/unmap fences only; final readback still waits",
+    "scope": "Native Windows diagnostic, retained preparation, cold GPU devices, all render/encode/cleanup costs; no production Job or upload qualification",
+    "probe_sha256": "295482d261f95c767515787b57ea4f8b2bac62827764dd4b6a92ab2cf3e5f258"
+  },
+  "production-native-thread-limits": {
+    "commit": "db41b45d61662ee22441de267da123d12f3b040e",
+    "observations": 30,
+    "native_threads": {
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "NUMEXPR_NUM_THREADS": "1"
+    },
+    "dimensions": [
+      640,
+      480
+    ],
+    "python": "3.14.8",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "versions": {
+      "wgpu": "0.32.0",
+      "numpy": "2.5.3",
+      "trimesh": "5.1.1",
+      "pillow": "12.3.0"
+    },
+    "sources": {
+      "real-stl-medium": "9ee60e3375c0211bd7b3fa6b7d9dd629157b5dd637067177aa59ee54f493e03a",
+      "real-3mf-large": "0ebb10a97f1a1c7fbf21b326c5fc719b5c3955dfe412745a818ed8eb7062fda5"
+    },
+    "variant": "queued draw removes intermediate copy/map/unmap fences only; final readback still waits",
+    "scope": "Native Windows diagnostic, retained preparation, cold GPU devices, all render/encode/cleanup costs; no production Job or upload qualification",
+    "probe_sha256": "7376f307447832bb0b90ec42293f32b72e26329a10cd909b530bb7c7933b751c"
+  },
+  "first-compatible-selection": {
+    "commit": "d9511ac900f45a7574fa05e4cc8641b83895450e",
+    "baseline_commit": "db41b45d61662ee22441de267da123d12f3b040e",
+    "observations": 30,
+    "native_threads": {
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "NUMEXPR_NUM_THREADS": "1"
+    },
+    "dimensions": [
+      640,
+      480
+    ],
+    "python": "3.14.8",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "versions": {
+      "wgpu": "0.32.0",
+      "numpy": "2.5.3",
+      "trimesh": "5.1.1",
+      "pillow": "12.3.0"
+    },
+    "sources": {
+      "real-stl-medium": "9ee60e3375c0211bd7b3fa6b7d9dd629157b5dd637067177aa59ee54f493e03a",
+      "real-3mf-large": "0ebb10a97f1a1c7fbf21b326c5fc719b5c3955dfe412745a818ed8eb7062fda5"
+    },
+    "variant": "first-compatible adapter selection; original draw synchronization unchanged",
+    "scope": "Native Windows diagnostic, retained preparation, cold GPU devices, all render/encode/cleanup costs; no production Job or upload qualification",
+    "probe_sha256": "a7da4fe793b99099c6b0dc5695093163312818c63f0f8d9a16e0a124419722b6"
+  },
+  "preferred-selection": {
+    "commit": "02811d35a116eff159bca79c12aac1e200c2413a",
+    "baseline_commit": "db41b45d61662ee22441de267da123d12f3b040e",
+    "observations": 30,
+    "native_threads": {
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "NUMEXPR_NUM_THREADS": "1"
+    },
+    "dimensions": [
+      640,
+      480
+    ],
+    "python": "3.14.8",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "versions": {
+      "wgpu": "0.32.0",
+      "numpy": "2.5.3",
+      "trimesh": "5.1.1",
+      "pillow": "12.3.0"
+    },
+    "sources": {
+      "real-stl-medium": "9ee60e3375c0211bd7b3fa6b7d9dd629157b5dd637067177aa59ee54f493e03a",
+      "real-3mf-large": "0ebb10a97f1a1c7fbf21b326c5fc719b5c3955dfe412745a818ed8eb7062fda5"
+    },
+    "variant": "platform-preferred adapter request with capability fallback; original draw synchronization unchanged",
+    "scope": "Native Windows diagnostic, retained preparation, cold GPU devices, all render/encode/cleanup costs; no production Job or upload qualification",
+    "probe_sha256": "d8be4d224318df95b485dca2688b88a6ec7520020ad03e07a731da672ca34f02"
+  },
+  "archive_script_normalization": "Archived replay scripts normalize BOM/line endings and terminal blank lines only. Per-experiment probe_sha256 identifies the original executed Windows file.",
+  "archive_script_sha256": {
+    "pipeline-review-server-selector-review.py": "395f2e5ce20d036130f764d1cf7ead87baa903c31c024c7b91d34bcd85871b76",
+    "pipeline-review-server-request-phases.py": "f9ca22c2b724d873f82e1e18bbd6a0c396d21bb41c87510774ec8b8669a8a527",
+    "pipeline-review-server-device-phases.py": "09d86d13096c233261b4141d864491d62f6f67250f7ca3279840776cb1bbc22b",
+    "pipeline-review-server-pipeline-review-bounded.py": "66616fcbf7d5e761527d002fbede2c85269bc0db483c5ca84931543fe2241403",
+    "pipeline-review-server-pipeline-review.py": "f6e6331680a7f7df7b7b89ebb6bec563a62131aa02619faa60406ac8f5405229",
+    "pipeline-review-server-integrated-phases.py": "561b331cfa4e76035fb601d6db1212d9dc069b6ffff009f5f82a4dceb79750c0",
+    "pipeline-review-server-preferred-review.py": "1012b4f22f94059cb8c7cf72321da24242bee174085e05096f8f8b13958c350e"
+  }
+}

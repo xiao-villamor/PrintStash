@@ -10,6 +10,14 @@ with bounded STL streaming recovery. The wgpu adapter is currently a research
 script; there is no production GPU admission, GPU worker selection or GPU retry.
 The browser GPU preference does not configure server thumbnail rendering.
 
+The application's validated embedded-preview extractor finds a usable PNG in
+both real-3mf-medium (42,029 bytes) and real-3mf-large (34,270 bytes); the small
+3MF has none. Production prefers those previews. Therefore the earlier forced
+CPU/GPU raster comparisons on the medium/large archives are not thumbnail-only
+pipeline measurements. They remain useful renderer controls, and canonical
+multiview generation is a separate workload.
+[Extraction evidence](benchmarks/pri16/pipeline-review-embedded.json).
+
 The earlier whole-flow estimate must not be summarized as slower GPU rasterization.
 On the recorded real medium STL, median render plus postprocessing was 717 ms
 on CPU and 223 ms through the hybrid GPU adapter. Cold GPU setup added about
@@ -44,15 +52,68 @@ refuses ambiguity. Failed preference diagnostics are retained if fallback also
 finds no eligible adapter. This changes default selection to the platform
 preference; there is no vendor whitelist.
 
-The focused adapter/diagnostic selection passes 104 tests; Ruff and explicit
-adapter Pyright checks pass. Native performance evidence identifies the exact
-tested commit separately.
+Validation: 103 focused adapter/diagnostic tests passed together, followed by
+the additional fallback-selection case passing individually (104 total).
+Ruff and explicit adapter Pyright checks pass.
+
+## Native before/after measurements
+
+Code commit 02811d35a116eff159bca79c12aac1e200c2413a versus db41b45d,
+native Windows RTX 5060/Vulkan, driver 610.88, Python 3.14.8 and wgpu 0.32.0.
+All four production native-thread environment limits are one. Each case has
+30 CPU, 30 original-GPU and 30 revised-GPU observations, alternating method
+order: 180 successful observations total. All sixty before/after GPU images
+are byte-identical and use the same physical adapter/backend.
+
+| Real case | CPU total median | Original GPU total median | Revised GPU total median | Original/revised GPU setup |
+| --- | ---: | ---: | ---: | ---: |
+| Medium STL | 1,169 ms | 1,430 ms | 1,113 ms | 741 / 379 ms |
+| Large 3MF-derived STL | 999 ms | 1,522 ms | 1,229 ms | 729 / 388 ms |
+
+The setup change reduces measured GPU totals by 22.2% and 19.3%, respectively.
+GPU render plus postprocessing itself is about 246 ms versus CPU 818 ms on the
+medium STL, and 671 ms versus CPU 974 ms on the large case. The large case
+remains slower overall. GPU setup, CPU geometry/shading, encoding and cleanup
+must be considered together.
+
+These totals include device/frame/render/readback/postprocessing/encoding and
+cleanup, but reuse prepared geometry inside one process. First-process imports,
+source preparation, Job supervision and publication are not included. A new
+device is not a fresh process: these results do not qualify the production
+complete-flow target. The large archive is converted through the application's
+viewer-STL path before this native control; it is not the retained-scene loader.
+The existing CPU quality failures remain: medium STL max RGBA difference 11;
+large case max 247 with one mask pixel differing. No tolerance was relaxed.
+
+[Raw samples](benchmarks/pri16/pipeline-review-samples.jsonl),
+[frozen manifests and experiment boundaries](benchmarks/pri16/pipeline-review-manifests.json),
+and [statistics with dispersion and bootstrap intervals](benchmarks/pri16/pipeline-review-statistics.json)
+retain the intermediate and final investigations. The initial native probe
+omitted thread limits and is labeled separately. Removing all intermediate
+GPU fences was diagnostic only and gave no material medium-case improvement;
+it was not adopted. The intermediate first-compatible selector fixed error
+containment without a substantial speed gain.
+
+The archived pipeline-review-server-*.py scripts in the evidence directory
+replay these diagnostics with the exact identified adapter revisions, core
+sources and optional dependencies. Archived script line endings/BOM are normalized;
+the manifest retains original executed-file hashes and separate archive hashes. They expect the anonymized private STL
+inputs locally; no private geometry or model names are committed. The final
+probe imports the original adapter as scripts.wgpu_render_backend_baseline
+and the revised adapter as scripts.wgpu_render_backend. The separate three-cycle
+traces locate phases, not statistically qualify performance.
 
 ## Other costs and integration constraints
 
 - The candidate is hybrid: GPU coverage/depth selects face identifiers, then
   CPU code sorts identifiers, interpolates original-precision normals and shades
   pixels. Canonical postprocessing and WebP encoding remain on the CPU.
+- The DeferredRasteriser hook receives already-projected triangle chunks.
+  It accelerates the inner raster stage, not source parsing, scene preparation,
+  vertex transformation or all material processing. A fuller renderer port
+  should consume prepared geometry plus camera/material parameters, allowing
+  one geometry upload per session and reuse across views without moving policy
+  ownership into vendor-specific code.
 - Face identifiers currently occupy an RGBA32Float attachment. At 1280x960,
   final raw readback transfers 19,660,800 bytes although one integer per pixel
   would need 4,915,200. A scalar integer attachment is a separate worthwhile

@@ -127,3 +127,9 @@ and twelve native-browser correctness checks using private copies from port 3000
 A further 360 measured browser observations retain all samples and do not
 demonstrate the required large-case interaction improvement.
 Two real cases fail image tolerance and no measured case demonstrates speedup.
+
+[GPU thumbnail pipeline review](../../gpu-thumbnail-pipeline-review.md) separates
+actual embedded-preview routing from forced raster controls, profiles native
+startup costs and records the preferred-adapter setup improvement. Its raw
+experiments preserve unchanged pixels, remaining quality failures and lifecycle
+limitations; they do not enable production GPU rendering.

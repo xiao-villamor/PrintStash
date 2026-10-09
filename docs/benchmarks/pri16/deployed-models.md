@@ -44,6 +44,12 @@ upload-to-thumbnail latency or GPU-only supervised Job cost. Other development
 validation overlapped. These results reject adoption of the current candidate
 for this sample; they do not characterize conformant native Linux or Intel.
 
+A subsequent [pipeline review](../../gpu-thumbnail-pipeline-review.md) confirms
+that the medium and large 3MF sources contain validated embedded thumbnails.
+Production prefers those images, so their forced-raster measurements are renderer
+controls rather than thumbnail-only pipeline costs. The review also measures a
+revised adapter-selection path; the archived observations here remain unchanged.
+
 ## Browser correctness on the same Models
 
 [Native Chrome results](deployed-browser-72c66550.json) cover all six selected
