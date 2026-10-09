@@ -11,6 +11,7 @@ this is allocation accounting, not a measurement of physical VRAM.
 
 from __future__ import annotations
 
+import gc
 import threading
 import time
 from collections.abc import Buffer, Callable, Mapping
@@ -153,7 +154,17 @@ class _Device:
         return _Frame(self, width, height, chunk, radius)
 
     def close(self) -> None:
-        self.device.destroy()
+        try:
+            self.device.destroy()
+        finally:
+            # destroy() invalidates GPU work; dropping wrappers also releases
+            # their native references while the closed session remains reachable.
+            del self.pipeline
+            del self.device
+            # The Python device/queue wrappers can form cycles. Native memory
+            # pressure does not advance Python's GC thresholds; reclaim those
+            # cycles at the disposable session boundary, not between chunks.
+            gc.collect()
 
 
 class _Frame:
@@ -273,7 +284,15 @@ class _Frame:
             self.staging.unmap()
 
     def close(self) -> None:
-        self.resources.close()
+        try:
+            self.resources.close()
+        finally:
+            del self.binding
+            del self.color
+            del self.depth
+            del self.vertices
+            del self.uniform
+            del self.staging
 
 
 class GpuContext:

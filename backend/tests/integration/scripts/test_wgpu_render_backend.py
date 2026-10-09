@@ -1,12 +1,20 @@
 """Native-boundary conformance, without claiming physical GPU qualification."""
 
+import sys
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from scripts.render_backend import GpuError, GpuFailure
-from scripts.wgpu_render_backend import GpuContext, GpuFrame, is_hardware
+from scripts.wgpu_render_backend import (
+    GpuContext,
+    GpuFrame,
+    _Device,
+    _Frame,
+    is_hardware,
+)
 
 
 class NativeFrame:
@@ -316,3 +324,72 @@ class TestGpuFrame:
         assert failure.value.reason is GpuFailure.READBACK_FAILED
         assert not inputs[0].any()
         assert np.isinf(inputs[1]).all()
+
+
+class TestNativeFrame:
+    @pytest.mark.parametrize("fail_at", [1, 2, 3, 4, 5])
+    def test_releases_partial_native_allocations(self, monkeypatch, fail_at):
+        resources = []
+        attempts = 0
+
+        def allocate(**kwargs):
+            nonlocal attempts
+            attempts += 1
+            if attempts == fail_at:
+                raise MemoryError("native_allocation_failed")
+            state = SimpleNamespace(destroyed=False)
+
+            def destroy():
+                state.destroyed = True
+
+            state.destroy = destroy
+            resources.append(state)
+            return state
+
+        monkeypatch.setitem(
+            sys.modules,
+            "wgpu",
+            SimpleNamespace(
+                TextureUsage=SimpleNamespace(RENDER_ATTACHMENT=1, COPY_SRC=2),
+                BufferUsage=SimpleNamespace(
+                    VERTEX=1, COPY_DST=2, UNIFORM=4, COPY_SRC=8, MAP_READ=16
+                ),
+            ),
+        )
+        owner = SimpleNamespace(
+            device=SimpleNamespace(create_texture=allocate, create_buffer=allocate)
+        )
+
+        with pytest.raises(MemoryError, match="native_allocation_failed"):
+            _Frame(owner, 2, 2, 1, 2)
+
+        assert [resource.destroyed for resource in resources] == [True] * (fail_at - 1)
+
+
+class TestNativeDevice:
+    def test_releases_native_device_wrappers_after_close(self):
+        import weakref
+
+        class Device:
+            limits = {}
+
+            def __init__(self):
+                self.queue = self
+
+            def create_shader_module(self, **kwargs):
+                return object()
+
+            def create_render_pipeline(self, **kwargs):
+                return SimpleNamespace()
+
+            def destroy(self):
+                return None
+
+        device = Device()
+        reference = weakref.ref(device)
+        owner = _Device(device, {"adapter_type": "IntegratedGPU"})
+        del device
+
+        owner.close()
+
+        assert reference() is None

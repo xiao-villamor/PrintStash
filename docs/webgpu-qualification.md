@@ -36,7 +36,9 @@ storage and one aligned readback buffer. Context/driver overhead is not physical
 VRAM accounting. Retained host geometry has a separate 128 MiB default ceiling
 and is reported as retained_geometry_bytes; exceeding it refuses the frame
 before its next upload. Pixel interpolation uses bounded 65,536-pixel batches.
-Geometry is released on frame close. This field measures retained arrays, not
+Geometry is released on frame close. Session cleanup drops native wrappers and
+collects device/queue reference cycles after destruction: native memory pressure
+does not trigger Python garbage collection. Include that cleanup cost in timing. This field measures retained arrays, not
 peak RSS or interpolation/readback temporaries. Whole-worker RSS, requested storage and optional device-wide
 telemetry are separate measurements; shared Intel memory contributes to host RSS.
 Each submission drains through mapping a four-byte copy into the owned staging
@@ -212,3 +214,8 @@ below are under the mirrored `backend/tests/{unit,integration,e2e,repo}` tiers.
 | 37 | Physical quality/performance/recovery gates | Edge | NVIDIA and Intel Linux/Docker | Predeclared complete-flow and recovery gates | Hardware | ❌ awaiting physical access |
 | 38 | Production backend selection/publication/admission | Happy | Qualified adapter | Existing Job contracts preserved | Integration/E2E | ⏭️ Stage B prohibited until hardware gates pass |
 | 39 | Browser modernization | Happy | Browser renderer preference | Worker loading and compatible recovery | Playwright | ⏭️ separate PR |
+
+| Behaviour | Category | Input | Outcome | Tier | Status |
+| --- | --- | --- | --- | --- | --- |
+| test_releases_partial_native_allocations | Error | Failure at each attachment/buffer allocation | All earlier native resources destroyed | Integration | ✅ |
+| test_releases_native_device_wrappers_after_close | Error | Closed owner remains referenced | Native device wrapper becomes collectible | Integration | ✅ |
