@@ -5,8 +5,6 @@ import gc
 import time
 from pathlib import Path
 
-from printstash_core.inference import EmbeddingError
-
 from .budget import Residency
 from .contracts import (
     Capability,
@@ -62,7 +60,7 @@ class Dispatcher:
                 except ComputeUnavailable as exc:
                     self.inference_reason = exc.reason
                     self.factory = None
-                except ImportError, RuntimeError, OSError:
+                except Exception:
                     self.inference_reason = Reason.DEVICE_FAILED
                     self.factory = None
             except ComputeUnavailable as exc:
@@ -280,10 +278,18 @@ class Dispatcher:
                 self.workers[key] = native_worker(
                     directory, request.model_key, request.threads, self.factory
                 )
-            except EmbeddingError, ComputeUnavailable, RuntimeError, MemoryError:
+            except Exception:
                 self.memory.remove(key)
                 raise
         else:
+            # A larger qualified batch can require more workspace than the one
+            # that loaded these weights. Admit the additional peak without
+            # discarding the warm session; failure leaves it available for
+            # smaller work and sends this request back to CPU.
+            host_size = max(self.host_sizes[key], receipt.peak_host_bytes)
+            self.make_host_room(key, host_size)
+            self.memory.grow(key, receipt.peak_device_bytes)
+            self.host_sizes[key] = host_size
             self.residency_hits += 1
         self.memory.pin(key, time.monotonic())
         try:

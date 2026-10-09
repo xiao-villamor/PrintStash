@@ -2,8 +2,6 @@
 
 ## Unreleased
 
-### Added
-
 - Optional portable compute broker for qualified WebGPU rendering and ONNX inference, resident geometry/model reuse, bounded tensor batching and administrator diagnostics. CPU-only installations retain normal ingestion. Physical GPU combinations remain unqualified pending quality, end-to-end performance and recovery gates.
 
 - Keep the collection tree visible when selecting folders, preserving open branches

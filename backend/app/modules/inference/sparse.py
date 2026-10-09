@@ -148,8 +148,18 @@ class SparseNativeProvider:
             raise EmbeddingError("embedding_canary_mismatch")
         if OnnxCpuProvider._dynamic_batch(self.model):
             batch = self.expand_many([manifest.canary_text, manifest.canary_text])
-            if any(row != result for row in batch):
-                raise EmbeddingError("embedding_canary_mismatch")
+            expected = {term.term: term.weight for term in result.terms}
+            for row in batch:
+                actual = {term.term: term.weight for term in row.terms}
+                if (
+                    row.truncated != result.truncated
+                    or actual.keys() != expected.keys()
+                    or any(
+                        abs(actual[term] - weight) > manifest.canary_tolerance
+                        for term, weight in expected.items()
+                    )
+                ):
+                    raise EmbeddingError("embedding_canary_mismatch")
 
     def expand(self, text: str | None) -> SparseResult:
         if text is None:

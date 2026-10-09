@@ -1,6 +1,6 @@
 """Storage contracts against an already built, unmodified runtime image.
 
-Run through ``scripts/test.sh image --image TAG --variant full|lite``. This is
+Run through ``scripts/test.sh image --image TAG --variant full|lite|gpu``. This is
 the image-build lane: unlike ASGI tests, every application dependency comes
 from the final image. The host only supplies HTTP and container test clients.
 """
@@ -526,14 +526,14 @@ def main() -> int:
     global IMAGE, VARIANT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", required=True)
-    parser.add_argument("--variant", required=True, choices=("full", "lite"))
+    parser.add_argument("--variant", required=True, choices=("full", "lite", "gpu"))
     arguments = parser.parse_args()
     IMAGE, VARIANT = arguments.image, arguments.variant
     classes = (
         TestRuntimeImageEntrypoint,
         *(
             (TestFullImageTransports, TestRuntimeImageBackup)
-            if VARIANT == "full"
+            if VARIANT in {"full", "gpu"}
             else (TestLiteImageTransports,)
         ),
     )

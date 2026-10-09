@@ -34,6 +34,18 @@ class Residency:
         self.make_room(size)
         self.entries[key] = Entry(size, release, now)
 
+    def grow(self, key: str, size: int) -> None:
+        entry = self.entries[key]
+        if size <= entry.size:
+            return
+        # Protect the resident allocation while admitting only its extra peak.
+        entry.pins += 1
+        try:
+            self.make_room(size - entry.size)
+            entry.size = size
+        finally:
+            entry.pins -= 1
+
     def make_room(self, size: int) -> None:
         if size < 0 or size > self.capacity:
             raise ComputeUnavailable(Reason.CAPACITY)

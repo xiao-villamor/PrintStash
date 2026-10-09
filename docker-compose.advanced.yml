@@ -178,6 +178,11 @@ services:
       # uploads committed at once. Settings → Background work overrides every
       # lane's concurrency at runtime for all processes.
       VAULT_MAX_RENDER_JOBS: ${VAULT_MAX_RENDER_JOBS:-1}
+      # Qualified portable compute (optional gpu image): docs/compute.md
+      VAULT_COMPUTE_MODE: ${VAULT_COMPUTE_MODE:-auto}
+      VAULT_COMPUTE_MEMORY_MB: ${VAULT_COMPUTE_MEMORY_MB:-1024}
+      VAULT_COMPUTE_BATCH_WAIT_MS: ${VAULT_COMPUTE_BATCH_WAIT_MS:-10}
+      # VAULT_COMPUTE_ADAPTER: exact physical adapter name or identity
       # Derivative defaults; persisted Background work controls win on every process.
       VAULT_DERIVATIVES_MESH_ENABLED: ${VAULT_DERIVATIVES_MESH_ENABLED:-true}
       VAULT_DERIVATIVES_GCODE_ENABLED: ${VAULT_DERIVATIVES_GCODE_ENABLED:-true}

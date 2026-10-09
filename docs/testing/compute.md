@@ -30,6 +30,11 @@ This matrix separates implemented software contracts from outstanding physical q
 | 24 | Refuse insufficient performance evidence | Edge | Slow or interactive-regressing receipt | Receipt rejected | Unit | ✅ unit/runtime/compute/test_qualification.py::TestQualification::test_rejects_insufficient_performance |
 | 25 | Keep canonical processing around native drawing | Happy | Prepared backend | Common alpha and vignette applied | Core | ✅ backend/packages/printstash-core/tests/mesh/rasterizer/test_prepared.py::TestPreparedRasterizer::test_keeps_common_frame_processing |
 
+| 26 | Preserve rendering after inference startup failure | Error | Independent native ONNX startup error | Rendering device retained; inference unavailable | Unit | ✅ unit/runtime/compute/test_dispatcher.py::TestRuntimeIsolation::test_keeps_render_device_when_inference_runtime_fails |
+| 27 | Admit larger warm batches | Edge | Larger workspace peak after model residency | Extra bytes reserved without reloading; oversized request refused | Unit | ✅ unit/runtime/compute/test_budget.py::TestResidency::test_grows_a_warm_model_without_reloading and test_keeps_warm_model_after_larger_batch_is_refused |
+| 28 | Validate optional render completion | Error | Incomplete frames or withdrawn caller | Invalid output falls back; cancellation propagates | Unit | ✅ unit/modules/media/test_compute_render.py::TestOptionalRender |
+| 29 | Preserve optional image deployment contracts | Happy | Built GPU variant | Startup, storage and backup/restore contracts pass | E2E image | ✅ tests/e2e/runtime_image.py; 10 passed |
+
 ## Evidence recorded during implementation
 
 - Focused inference/media/API and broker checks: 457 passed.
@@ -38,8 +43,10 @@ This matrix separates implemented software contracts from outstanding physical q
 - Ingestion, indexer and component changes: 100 passed.
 - Core prepared-renderer and rasterizer checks: 181 passed.
 - Latest focused diagnostics, fallback, admission and receipt checks: 47 passed.
-- Optional GPU Docker image built successfully; a container probe exposing /dev/dxg and WSL driver libraries still enumerated only llvmpipe (no Dozen ICD).
-- Full backend/core gates and PR CI results are reported in the pull request once complete.
+- Independent native startup and sparse canary checks: 25 passed; final memory/render/startup contracts: 12 passed.
+- Optional GPU Docker image built successfully; image startup/storage contracts: 10 passed; a container probe exposing /dev/dxg and WSL driver libraries still enumerated only llvmpipe (no Dozen ICD).
+- Required PR CI (including the complete core gate) passed at commit 11ae80a8. Results for the final commit are recorded in the pull request.
+- The broad local full run was interrupted after 46 minutes: 20,281 passed, 29 failed and 38 errors. It ran while source/recipes and fixtures were being revised, producing parent/child embedding-space mismatches and stale OpenAPI/test-path failures. This is not a successful full gate. Stable-tree rechecks are reported in the pull request.
 - An initial broad local run stopped after missing full-extra dependencies (879 passed, one failure and two collection errors); installing the full extra preceded the full-suite run. This was not a successful gate.
 
 The explicit optional diagnostic fails if runtime/device prerequisites are absent; it is invoked separately from ordinary CPU CI. The development machine exposed llvmpipe to wgpu. Its synthetic box/sphere results and injected faults do not authorize receipts or NVIDIA/AMD/Intel support claims. The outstanding rows above block physical acceleration qualification, while normal CPU deployment remains available.

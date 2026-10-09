@@ -48,6 +48,32 @@ class TestResidency:
 
         assert ledger.used == 60
 
+    def test_grows_a_warm_model_without_reloading(self):
+        released = []
+        ledger = Residency(100)
+        ledger.reserve("model", 40, lambda: released.append("model"), 0)
+        ledger.reserve("geometry:old", 40, lambda: released.append("geometry"), 0)
+
+        ledger.grow("model", 80)
+
+        assert ledger.used == 80
+        assert ledger.entries["model"].size == 80
+        assert released == ["geometry"]
+        assert ledger.entries["model"].pins == 0
+
+    def test_keeps_warm_model_after_larger_batch_is_refused(self):
+        ledger = Residency(100)
+        ledger.reserve("model", 40, lambda: None, 0)
+        ledger.reserve("runtime", 40, lambda: None, 0)
+        ledger.pin("runtime", 0)
+
+        with pytest.raises(ComputeUnavailable):
+            ledger.grow("model", 80)
+
+        assert ledger.entries["model"].size == 40
+        assert ledger.entries["model"].pins == 0
+        assert ledger.used == 80
+
     def test_rejects_unbalanced_release(self):
         ledger = Residency(100)
         ledger.reserve("model", 60, lambda: None, 0)
