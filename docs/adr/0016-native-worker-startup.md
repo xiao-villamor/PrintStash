@@ -42,3 +42,15 @@ The existing collector runs as `python -m scripts.bench_mesh_pipeline --mode wor
 The [portable compute broker](../compute.md) extends lifetime only for validated array execution and verified model sessions. Disposable source parsers, hard limits, source permits and retained RAM reservations remain unchanged. A private descriptor-owned broker amortizes graphics context, shader and model startup across sequential Artifacts without retaining untrusted parser state.
 
 Inference coalesces already-ready inputs. Visual thumbnail gathering reads existing derivatives; bounded similarity component groups share one source parse. No extra large source is parsed merely to fill a batch. Jobs, generation leases and run writers retain scheduling and publication authority. Broker queues remain transient and are discarded on restart.
+
+
+## Render owner follow-up (2026-10-10)
+
+GPU context ownership is persistent and separate from disposable parsers. The
+supervisor warms the descriptor-elected owner before launching native parsing,
+so the broker does not inherit a parser's address-space ceiling. Subsequent
+Artifacts reuse the context, shaders, geometry and framebuffer pools. Render
+startup does not initialize ONNX. WSL uses the maintained Mesa GL/D3D12 route,
+with independent DXCore hardware evidence; see [compute deployment](../compute.md)
+and [render evaluation](../testing/compute-render-wsl.md). Cold-start cost and
+warm work remain separate observations; operator visual acceptance is pending.

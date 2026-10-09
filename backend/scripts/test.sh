@@ -21,7 +21,7 @@ Lanes
              container-backed provider contracts run in `full`.
   e2e        tests/e2e — the whole app over ASGITransport plus the fakes.
   image      final-image transport and HTTP backup/restore contracts.
-             --image TAG --variant full|lite|gpu; requires an already built image.
+             --image TAG --variant full|lite|gpu|gpu-render; requires an already built image.
   critical   release-blocking workflows across integration, contract and E2E.
              Includes real remote providers and therefore needs Docker.
   full       everything, including `slow`, minus the coverage gate and `scale`.

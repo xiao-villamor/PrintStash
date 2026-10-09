@@ -574,3 +574,16 @@ it preserves retry budgets and deliberate cancellations. Similar Models has its
 own settings. ASCII toolpaths continue to use the Artifact's text directly.
 
 Optional qualified GPU execution, settings and device exposure are described in [compute deployment](compute.md).
+
+
+### Optional GPU thumbnail evaluation
+
+Build the backend with `PRINTSTASH_VARIANT=gpu-render` for wgpu rendering without
+the ONNX WebGPU plugin. `VAULT_COMPUTE_BACKEND=auto|vulkan|opengl` selects the native
+graphics backend; auto uses Mesa OpenGL/D3D12 on WSL. The default
+`VAULT_COMPUTE_RENDER_POLICY=qualified` requires measured operation receipts.
+`preview` enables bounded hardware evaluation for the administrator's visual
+review, without asserting quality or speed. `VAULT_COMPUTE_MODE=cpu` overrides it.
+Follow [compute deployment](compute.md) for Docker device/library mounts and
+private evaluation volumes. The minimal CPU image and public ingestion response
+shapes are unchanged.

@@ -61,6 +61,14 @@ class TestQualification:
         with pytest.raises(ValidationError):
             Qualification.model_validate({**receipt.model_dump(), field: value})
 
+    def test_refuses_batching_with_singleton_evidence(self, device, receipt):
+        assert not receipt.accepts(device, "runtime", Operation.RENDER, "v1", 100, 2)
+
+    def test_accepts_only_the_qualified_batch_size(self, device, receipt):
+        batch = receipt.model_copy(update={"maximum_batch_items": 4})
+        assert batch.accepts(device, "runtime", Operation.RENDER, "v1", 100, 4)
+        assert not batch.accepts(device, "runtime", Operation.RENDER, "v1", 100, 5)
+
 
 class TestReadReceipts:
     def test_refuses_missing_evidence(self, tmp_path):

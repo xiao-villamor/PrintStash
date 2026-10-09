@@ -365,9 +365,8 @@ def render_prepared_pixels(
     try:
         import numpy as np
 
-        # Pillow 10 does not ship the ``py.typed`` marker that later supported
-        # versions provide. Runtime imports are still valid across the matrix.
-        from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
+        # Preserve the early optional-dependency failure before geometry work.
+        from PIL import Image  # noqa: F401 # pyright: ignore[reportMissingTypeStubs]
     except ImportError:
         if logger is not None:
             logger.error(
@@ -639,22 +638,7 @@ def render_prepared_pixels(
         # ------------------------------------------------------------------
         # 7. Post-process: Lanczos downsample (anti-aliasing) + subtle vignette.
         # ------------------------------------------------------------------
-        pil = Image.frombytes("RGBA", (ss_width, ss_height), rgba.tobytes())
-        # ``Resampling`` is present in both supported Pillow lines (10 and 12),
-        # while Pillow 12's typing no longer exposes the legacy Image.LANCZOS.
-        if supersample > 1:
-            pil = pil.resize((width, height), Image.Resampling.LANCZOS)
-
-        # Vignette: darken the corners slightly so the model "pops"
-        vx = np.linspace(-1, 1, width, dtype=np.float32)
-        vy = np.linspace(-1, 1, height, dtype=np.float32)
-        gx, gy = np.meshgrid(vx, vy)
-        vignette = 1.0 - 0.18 * np.clip(gx**2 + gy**2, 0, 1)
-        vig_arr = np.array(pil, dtype=np.float32)
-        vig_arr[:, :, :3] *= vignette[:, :, None]  # vignette RGB only, keep alpha
-        pil = Image.fromarray(np.clip(vig_arr, 0, 255).astype(np.uint8), mode="RGBA")
-
-        return RenderedPixels(width, height, pil.tobytes())
+        return postprocess_rgba(rgba.tobytes(), width, height)
 
     except Exception:
         if logger is not None:
@@ -662,6 +646,31 @@ def render_prepared_pixels(
                 "mesh_render: render_thumbnail failed for %s", name, exc_info=True
             )
         return None
+
+
+def postprocess_rgba(rgba: bytes, width: int, height: int) -> RenderedPixels:
+    """Apply the same canonical downsample/vignette to CPU or GPU raster pixels."""
+    import numpy as np
+    from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
+
+    supersample = PREVIEW_PROFILE.supersample_for(width)
+    ss_width, ss_height = width * supersample, height * supersample
+    pil = Image.frombytes("RGBA", (ss_width, ss_height), rgba)
+    # ``Resampling`` is present in both supported Pillow lines (10 and 12),
+    # while Pillow 12's typing no longer exposes the legacy Image.LANCZOS.
+    if supersample > 1:
+        pil = pil.resize((width, height), Image.Resampling.LANCZOS)
+
+    # Vignette: darken the corners slightly so the model "pops"
+    vx = np.linspace(-1, 1, width, dtype=np.float32)
+    vy = np.linspace(-1, 1, height, dtype=np.float32)
+    gx, gy = np.meshgrid(vx, vy)
+    vignette = 1.0 - 0.18 * np.clip(gx**2 + gy**2, 0, 1)
+    vig_arr = np.array(pil, dtype=np.float32)
+    vig_arr[:, :, :3] *= vignette[:, :, None]  # vignette RGB only, keep alpha
+    pil = Image.fromarray(np.clip(vig_arr, 0, 255).astype(np.uint8), mode="RGBA")
+
+    return RenderedPixels(width, height, pil.tobytes())
 
 
 # ---------------------------------------------------------------------------

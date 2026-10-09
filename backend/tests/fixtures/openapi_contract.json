@@ -4270,6 +4270,12 @@
             "title": "Fallbacks",
             "type": "integer"
           },
+          "geometry_upload_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Geometry Upload Bytes",
+            "type": "integer"
+          },
           "host_reserved_bytes": {
             "minimum": 0.0,
             "title": "Host Reserved Bytes",
@@ -4306,6 +4312,24 @@
           "queued_bytes": {
             "minimum": 0.0,
             "title": "Queued Bytes",
+            "type": "integer"
+          },
+          "render_batches": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Render Batches",
+            "type": "integer"
+          },
+          "render_cache_hits": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Render Cache Hits",
+            "type": "integer"
+          },
+          "render_frames": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Render Frames",
             "type": "integer"
           },
           "rendering_transfer_seconds": {
@@ -16578,6 +16602,7 @@
       "Reason": {
         "enum": [
           "ready",
+          "preview",
           "disabled",
           "runtime_missing",
           "adapter_missing",

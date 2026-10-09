@@ -293,6 +293,8 @@ class Settings(BaseSettings):
     # Portable device selection is independent of durable recipe/model identity.
     compute_mode: Literal["auto", "cpu"] = "auto"
     compute_adapter: str | None = None
+    compute_backend: Literal["auto", "vulkan", "opengl"] = "auto"
+    compute_render_policy: Literal["qualified", "preview"] = "qualified"
     compute_memory_mb: int = Field(default=1024, ge=256, le=65536)
     compute_batch_wait_ms: int = Field(default=10, ge=0, le=10)
 

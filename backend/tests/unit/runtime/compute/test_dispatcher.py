@@ -41,6 +41,7 @@ class TestRuntimeIsolation:
             tmp_path, mode=ComputeMode.AUTO, selector=None, budget_bytes=1024**3
         )
         try:
+            owner.start_inference()
             status = owner.status()
             reasons = {
                 capability.operation: capability.reason
@@ -53,3 +54,38 @@ class TestRuntimeIsolation:
         finally:
             owner.close()
         assert device.destroyed
+
+
+class TestRenderStartup:
+    def test_preview_does_not_start_inference(self, tmp_path, monkeypatch):
+        from app.core.config import _overlay
+
+        _overlay["compute_render_policy"] = "preview"
+        device = Device()
+        info = DeviceInfo(
+            identity="physical",
+            name="hardware",
+            vendor_id=1,
+            device_id=2,
+            driver="test",
+            backend="OpenGL",
+        )
+        monkeypatch.setattr(dispatcher, "discover", lambda selector: (info, device))
+
+        def forbidden(info):
+            pytest.fail("render startup initialized inference")
+
+        import pytest
+
+        monkeypatch.setattr(webgpu, "SessionFactory", forbidden)
+        owner = dispatcher.Dispatcher(
+            tmp_path, mode=ComputeMode.AUTO, selector=None, budget_bytes=1024**3
+        )
+        try:
+            caps = {c.operation: c for c in owner.status().capabilities}
+            assert caps[Operation.RENDER].available
+            assert caps[Operation.RENDER].reason is Reason.PREVIEW
+            assert not caps[Operation.DENSE].available
+            assert owner.factory is None
+        finally:
+            owner.close()

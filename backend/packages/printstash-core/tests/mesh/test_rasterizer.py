@@ -1587,3 +1587,17 @@ class TestFrozenPreparedRender:
         actual = render_prepared_thumbnail(prepared, case["name"], **options)
         assert actual is not None
         assert hashlib.sha256(actual).hexdigest() == view["png_sha256"]
+
+
+class TestPostprocessRgba:
+    def test_preserves_transparency_in_gpu_readback(self):
+        from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+        from printstash_core.mesh.rasterizer import postprocess_rgba
+
+        size = 32
+        factor = PREVIEW_PROFILE.supersample_for(size)
+        rgba = bytes([100, 150, 200, 0]) * (size * factor) ** 2
+        result = postprocess_rgba(rgba, size, size)
+        assert (result.width, result.height) == (size, size)
+        assert len(result.rgba) == size * size * 4
+        assert set(result.rgba[3::4]) == {0}

@@ -106,6 +106,9 @@ ai = [
     "onnxruntime>=1.30,<2",
     "tokenizers>=0.23,<0.24",
 ]
+gpu-render = [
+    "wgpu>=0.32,<0.33",
+]
 gpu = [
     "onnx>=1.22,<2",
     "tokenizers>=0.23,<0.24",

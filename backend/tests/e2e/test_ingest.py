@@ -1026,11 +1026,16 @@ class TestStagedMeshOutputs:
 
 class TestComputePlacement:
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("mode", ["cpu", "auto"])
+    @pytest.mark.parametrize(
+        "mode,policy",
+        [("cpu", "qualified"), ("auto", "qualified"), ("auto", "preview")],
+        ids=["cpu", "automatic", "preview-without-runtime"],
+    )
     async def test_publishes_mesh_outputs_without_gpu_qualification(
-        self, api, tmp_path, monkeypatch, mode
+        self, api, tmp_path, monkeypatch, mode, policy
     ):
         monkeypatch.setitem(_overlay, "compute_mode", mode)
+        monkeypatch.setitem(_overlay, "compute_render_policy", policy)
         headers = await _setup_and_login(api, tmp_path)
         payload = trimesh.creation.box(extents=(10, 20, 30)).export(file_type="stl")
 

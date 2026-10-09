@@ -5,6 +5,8 @@ import gc
 import time
 from pathlib import Path
 
+from app.core.config import settings
+
 from .budget import Residency
 from .contracts import (
     Capability,
@@ -51,21 +53,26 @@ class Dispatcher:
                     "runtime", 128 * 1024**2, self._release_device, started
                 )
                 self.memory.pin("runtime", started)
-                from app.modules.inference.webgpu import SessionFactory
-
-                try:
-                    self.factory = SessionFactory(self.device_info)
-                    self.factory.probe()
-                    self.inference_reason = Reason.UNQUALIFIED
-                except ComputeUnavailable as exc:
-                    self.inference_reason = exc.reason
-                    self.factory = None
-                except Exception:
-                    self.inference_reason = Reason.DEVICE_FAILED
-                    self.factory = None
             except ComputeUnavailable as exc:
                 self.reason = exc.reason
             self.cold_start = time.monotonic() - started
+
+    def start_inference(self) -> None:
+        """Rendering never initializes or probes the separate ONNX runtime."""
+        if self.factory is not None or self.device_info is None:
+            return
+        from app.modules.inference.webgpu import SessionFactory
+
+        try:
+            factory = SessionFactory(self.device_info)
+            factory.probe()
+            self.factory = factory
+            self.inference_reason = Reason.UNQUALIFIED
+        except ComputeUnavailable as exc:
+            self.inference_reason = exc.reason
+        except Exception:
+            # Native plugins use their own exception classes; isolate that runtime.
+            self.inference_reason = Reason.DEVICE_FAILED
 
     def _release_device(self) -> None:
         if self.device is not None:
@@ -85,6 +92,11 @@ class Dispatcher:
             and receipt.quality_passed
             and (receipt.operation is Operation.RENDER or self.factory is not None)
         }
+        preview = (
+            self.device is not None and settings.compute_render_policy == "preview"
+        )
+        if preview:
+            ready.add(Operation.RENDER)
         return ComputeStatus(
             mode=self.mode,
             device=self.device_info,
@@ -93,7 +105,9 @@ class Dispatcher:
                 Capability(
                     operation=op,
                     available=op in ready,
-                    reason=Reason.READY
+                    reason=Reason.PREVIEW
+                    if preview and op is Operation.RENDER
+                    else Reason.READY
                     if op in ready
                     else (
                         self.inference_reason
@@ -121,14 +135,30 @@ class Dispatcher:
             input_bytes=self.input_bytes,
             output_bytes=self.output_bytes,
             batch_inputs=self.batch_inputs,
-            residency_hits=self.residency_hits,
-            residency_misses=self.residency_misses,
+            residency_hits=self.residency_hits
+            + (
+                self.renderer.cache_hits + self.renderer.output_hits
+                if self.renderer is not None
+                else 0
+            ),
+            residency_misses=self.residency_misses
+            + (self.renderer.uploads if self.renderer is not None else 0),
             host_reserved_bytes=self.host_capacity,
             queued_bytes=queued_bytes,
             rendering_transfer_seconds=self.renderer.transfer_seconds
             if self.renderer is not None
             else 0,
             inference_batches=self.inference_batches,
+            render_batches=self.renderer.readback_batches
+            if self.renderer is not None
+            else 0,
+            render_frames=self.renderer.submissions if self.renderer is not None else 0,
+            render_cache_hits=self.renderer.output_hits
+            if self.renderer is not None
+            else 0,
+            geometry_upload_bytes=self.renderer.transfers
+            if self.renderer is not None
+            else 0,
         )
 
     def admit_host(self, deadline: float) -> None:
@@ -176,13 +206,15 @@ class Dispatcher:
             checkpoint=lambda: None
         )
 
-    def qualification(self, operation: Operation, recipe: str, units: int):
+    def qualification(
+        self, operation: Operation, recipe: str, units: int, batch_items: int = 1
+    ):
         if self.device_info is None or self.device is None:
             raise ComputeUnavailable(self.reason)
         receipts = read_receipts(self.root / "qualification.json")
         for receipt in receipts:
             if receipt.accepts(
-                self.device_info, self.runtime, operation, recipe, units
+                self.device_info, self.runtime, operation, recipe, units, batch_items
             ):
                 return receipt
         raise ComputeUnavailable(Reason.UNQUALIFIED)
@@ -218,6 +250,8 @@ class Dispatcher:
         from app.modules.inference.webgpu import SessionFactory, native_worker
         from app.modules.inference.worker_protocol import MAX_INPUT_BYTES, WorkerRequest
 
+        if self.factory is None:
+            self.start_inference()
         if self.factory is None:
             raise ComputeUnavailable(
                 self.inference_reason if self.device is not None else self.reason
@@ -304,20 +338,71 @@ class Dispatcher:
         finally:
             self.memory.unpin(key)
 
+    def execute_render_batch(self, requests: list[RenderRequest]) -> list[bytes]:
+        deadline = min(request.deadline for request in requests)
+        if time.monotonic() >= deadline:
+            raise ComputeUnavailable(Reason.DEADLINE)
+        self.active_deadline = deadline
+        started = time.monotonic()
+        self.input_bytes += sum(len(request.payload) for request in requests)
+        try:
+            self.memory.expire(started)
+            results = self.render_many(requests)
+            self.completed += len(results)
+            self.output_bytes += sum(map(len, results))
+            return results
+        finally:
+            self.execution_seconds += time.monotonic() - started
+            self.active_deadline = None
+
     def render(self, request: RenderRequest) -> bytes:
+        return self.render_many([request])[0]
+
+    def render_many(self, requests: list[RenderRequest]) -> list[bytes]:
         from app.modules.media.webgpu_render import Renderer
 
-        receipt = self.qualification(Operation.RENDER, request.recipe, request.units)
-        self.admit_host(request.deadline)
+        from .render_policy import admission_many
+
+        if self.device is None:
+            raise ComputeUnavailable(self.reason)
+        payloads = [
+            base64.b64decode(request.payload, validate=True) for request in requests
+        ]
+        requirement = admission_many(
+            payloads, [r.recipe for r in requests], [r.units for r in requests]
+        )
+        device_bytes, host_bytes = requirement.device_bytes, requirement.host_bytes
+        if self.renderer is not None:
+            host_bytes += max(
+                0, self.renderer.readback_size - requirement.readback_bytes
+            )
+            # Reused pools retain their individual high-water marks. A large
+            # singleton followed by small multi-view work needs both the old
+            # projected buffer and the new readback slots admitted together.
+            device_bytes = (
+                max(requirement.projected_bytes, self.renderer.projected_size)
+                + requirement.attachment_bytes
+                + max(requirement.readback_bytes, self.renderer.readback_size)
+                + 116
+            )
+        if settings.compute_render_policy == "qualified":
+            # Every member needs evidence for this batch size. Old receipts
+            # default to singleton; they never certify cross-Artifact batching.
+            for request in requests:
+                receipt = self.qualification(
+                    Operation.RENDER, request.recipe, request.units, len(requests)
+                )
+                device_bytes = max(device_bytes, receipt.peak_device_bytes)
+                host_bytes = max(host_bytes, receipt.peak_host_bytes)
+        deadline = min(request.deadline for request in requests)
+        self.admit_host(deadline)
         key = "renderer"
-        if (
-            key in self.memory.entries
-            and self.memory.entries[key].size < receipt.peak_device_bytes
-        ):
-            self.memory.remove(key)
+        if key in self.memory.entries and self.memory.entries[key].size < device_bytes:
+            self.make_host_room(key, max(self.host_sizes[key], host_bytes))
+            self.memory.grow(key, device_bytes)
         if key not in self.memory.entries:
-            self.make_host_room(key, receipt.peak_host_bytes)
-            self.memory.make_room(receipt.peak_device_bytes)
+            self.make_host_room(key, host_bytes)
+            self.memory.make_room(device_bytes)
             if self.renderer is None:
                 self.renderer = Renderer(self.device, self.memory)
 
@@ -326,29 +411,29 @@ class Dispatcher:
                 self.renderer.close()
                 self.host_sizes.pop(key, None)
 
-            self.memory.reserve(
-                key, receipt.peak_device_bytes, release, time.monotonic()
-            )
-            self.host_sizes[key] = receipt.peak_host_bytes
+            self.memory.reserve(key, device_bytes, release, time.monotonic())
+            self.host_sizes[key] = host_bytes
+        # A resident framebuffer does not waive a larger input's host peak.
+        self.make_host_room(key, max(self.host_sizes[key], host_bytes))
+        self.host_sizes[key] = max(self.host_sizes[key], host_bytes)
         self.memory.pin(key, time.monotonic())
         try:
             assert self.renderer is not None
             self.renderer.workspace_limit = self.memory.entries[key].size
             from .recovery import allocation_failure
 
-            payload = base64.b64decode(request.payload, validate=True)
             try:
-                return self.renderer.execute(payload)
+                return self.renderer.execute_many(payloads)
             except Exception as exc:
                 if not allocation_failure(exc):
                     raise
             for idle in list(self.memory.entries):
                 if not self.memory.entries[idle].pins:
                     self.memory.remove(idle)
-            if time.monotonic() >= request.deadline:
+            if time.monotonic() >= deadline:
                 raise ComputeUnavailable(Reason.DEADLINE)
             try:
-                return self.renderer.execute(payload)
+                return self.renderer.execute_many(payloads)
             except Exception as exc:
                 if allocation_failure(exc):
                     raise ComputeUnavailable(Reason.CAPACITY) from exc

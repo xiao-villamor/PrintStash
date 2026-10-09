@@ -89,6 +89,40 @@ def send(connection: socket.socket, payload: bytes) -> None:
     connection.sendall(struct.pack("!I", len(payload)) + payload)
 
 
+def send_admitted(
+    connection: socket.socket,
+    payload: bytes,
+    deadline: float,
+    *,
+    checkpoint=lambda: None,
+) -> None:
+    """Reserve broker staging before uploading a large request body.
+
+    Capacity refusal is a normal CPU-routing outcome, not a broken GPU owner.
+    Short writes retain cancellation/deadline checks under socket backpressure.
+    """
+    if len(payload) > MAX_FRAME:
+        raise ComputeUnavailable(Reason.INVALID_INPUT)
+    connection.sendall(struct.pack("!I", len(payload)))
+    acknowledgement = json.loads(receive(connection, deadline, checkpoint=checkpoint))
+    if "error" in acknowledgement:
+        raise ComputeUnavailable(Reason(acknowledgement["error"]))
+    if acknowledgement != {"ready": True}:
+        raise ComputeUnavailable(Reason.INVALID_INPUT)
+    remaining = memoryview(payload)
+    while remaining:
+        checkpoint()
+        if time.monotonic() >= deadline:
+            raise ComputeUnavailable(Reason.DEADLINE)
+        try:
+            written = connection.send(remaining[:65536])
+        except socket.timeout:
+            continue
+        if written == 0:
+            raise ComputeUnavailable(Reason.CANCELLED)
+        remaining = remaining[written:]
+
+
 def encode(value) -> bytes:
     return json.dumps(value, allow_nan=False, separators=(",", ":")).encode()
 

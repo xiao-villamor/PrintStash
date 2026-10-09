@@ -44,15 +44,44 @@ def physical_adapter(info: dict) -> bool:
     return info.get("adapter_type") in ("DiscreteGPU", "IntegratedGPU")
 
 
+def adapter_evidence(info: dict) -> dict:
+    if (
+        info.get("adapter_type") == "Unknown"
+        and info.get("backend_type") == "OpenGL"
+        and Path("/dev/dxg").exists()
+    ):
+        from .dxcore import hardware, identify
+
+        return identify(info, hardware())
+    return info
+
+
+def configure_backend() -> None:
+    from app.core.config import settings
+
+    backend = settings.compute_backend
+    if backend == "auto" and not Path("/dev/dxg").exists():
+        return
+    from wgpu.backends.wgpu_native.extras import set_instance_extras
+
+    # WSL's maintained Mesa D3D12 GL driver avoids Vulkan/Dozen restrictions.
+    # No vendor selection, patched driver or relaxed WebGPU validation.
+    set_instance_extras(backends=["Vulkan" if backend == "vulkan" else "GL"])
+
+
 def discover(selector: str | None = None):
     try:
         import wgpu
     except ImportError:
         raise ComputeUnavailable(Reason.RUNTIME_MISSING) from None
     try:
+        configure_backend()
         adapters = wgpu.gpu.enumerate_adapters_sync()
+        candidates = [
+            (adapter, adapter_evidence(dict(adapter.info))) for adapter in adapters
+        ]
         hardware = [
-            adapter for adapter in adapters if physical_adapter(dict(adapter.info))
+            (adapter, info) for adapter, info in candidates if physical_adapter(info)
         ]
         if not hardware:
             raise ComputeUnavailable(
@@ -60,28 +89,26 @@ def discover(selector: str | None = None):
             )
         if selector is not None:
             hardware = [
-                adapter
-                for adapter in hardware
-                if selector
-                in (str(adapter.info["device"]), identity(dict(adapter.info)).identity)
+                (adapter, info)
+                for adapter, info in hardware
+                if selector in (str(info["device"]), identity(info).identity)
             ]
         if not hardware:
             raise ComputeUnavailable(Reason.ADAPTER_MISSING)
-        # Stable preference without vendor-specific implementations.
         hardware.sort(
-            key=lambda a: (
-                a.info["adapter_type"] != "DiscreteGPU",
-                identity(dict(a.info)).identity,
+            key=lambda item: (
+                item[1]["adapter_type"] != "DiscreteGPU",
+                identity(item[1]).identity,
             )
         )
-        adapter = hardware[0]
+        adapter, info = hardware[0]
         device = adapter.request_device_sync()
         try:
             canary(device)
         except RuntimeError, ValueError:
             device.destroy()
             raise ComputeUnavailable(Reason.DEVICE_FAILED) from None
-        return identity(dict(adapter.info)), device
+        return identity(info), device
     except ComputeUnavailable:
         raise
     except RuntimeError, OSError:

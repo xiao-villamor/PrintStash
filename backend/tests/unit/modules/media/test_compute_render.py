@@ -25,7 +25,7 @@ def prepared():
 
 class TestOptionalRender:
     def test_returns_complete_associated_frames(self, prepared, monkeypatch):
-        monkeypatch.setattr(compute_render.client, "available", lambda: True)
+        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
         red = bytes([255, 0, 0, 255]) * 4
         blue = bytes([0, 0, 255, 255]) * 4
         payload = struct.pack("!III", 2, 2, 2) + red + blue
@@ -42,7 +42,7 @@ class TestOptionalRender:
         assert tuple(frame.rgba for frame in frames) == (red, blue)
 
     def test_refuses_incomplete_native_output(self, prepared, monkeypatch):
-        monkeypatch.setattr(compute_render.client, "available", lambda: True)
+        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
         payload = struct.pack("!III", 2, 2, 1) + b"short"
         monkeypatch.setattr(
             compute_render.client,
@@ -55,8 +55,8 @@ class TestOptionalRender:
         assert compute_render.render(prepared, 2, 2, [None], False) is None
 
     def test_withdrawal_does_not_become_cpu_fallback(self, prepared, monkeypatch):
-        monkeypatch.setattr(compute_render.client, "available", lambda: True)
+        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
 
-        with cancellation_scope(lambda: True):
+        with cancellation_scope(lambda **kwargs: True):
             with pytest.raises(OperationCancelled):
                 compute_render.render(prepared, 2, 2, [None], False)

@@ -25,7 +25,7 @@ from .contracts import (
 from .discovery import runtime_identity
 from .health import cooling
 from .profile import identity as profile_identity
-from .protocol import InferenceRequest, Priority, StatusRequest, receive, send
+from .protocol import InferenceRequest, Priority, StatusRequest, receive, send_admitted
 
 ROOT_ENV = "PRINTSTASH_COMPUTE_ROOT"
 _disabled_until = 0.0
@@ -75,16 +75,32 @@ def cpu_status(reason: Reason) -> ComputeStatus:
     )
 
 
-def available() -> bool:
+def available(*, render: bool = False) -> bool:
     root = directory()
     return (
         settings.compute_mode == "auto"
         and time.monotonic() >= _disabled_until
         and root is not None
         and not cooling(root)
-        and (root / "qualification.json").is_file()
+        and (
+            (root / "qualification.json").is_file()
+            or (render and settings.compute_render_policy == "preview")
+        )
         and importlib.util.find_spec("wgpu") is not None
     )
+
+
+def warm_render() -> None:
+    """Start ownership in the supervisor, outside disposable parser limits.
+
+    Status is a bounded private IPC request; the API/worker never imports a GPU
+    driver. Reuse the elected owner across the whole import, including after an
+    idle owner has exited. Failed startup leaves the normal CPU path available.
+    """
+    if available(render=True):
+        state = status()
+        if state.device is None:
+            cooldown()
 
 
 def _connect(root: Path, deadline: float, *, start: bool = True) -> socket.socket:
@@ -139,6 +155,8 @@ def _connect(root: Path, deadline: float, *, start: bool = True) -> socket.socke
                 env = os.environ.copy()
                 env.update(
                     VAULT_COMPUTE_MODE=settings.compute_mode,
+                    VAULT_COMPUTE_BACKEND=settings.compute_backend,
+                    VAULT_COMPUTE_RENDER_POLICY=settings.compute_render_policy,
                     VAULT_COMPUTE_MEMORY_MB=str(settings.compute_memory_mb),
                     VAULT_COMPUTE_BATCH_WAIT_MS=str(settings.compute_batch_wait_ms),
                     VAULT_EMBEDDING_WORKER_MEMORY_MB=str(
@@ -196,8 +214,13 @@ def exchange(request, *, checkpoint=lambda: None) -> bytes:
         ) as connection:
             checkpoint()
             connection.settimeout(max(0.001, min(1, deadline - time.monotonic())))
-            send(connection, request.model_dump_json().encode())
             connection.settimeout(0.05)
+            send_admitted(
+                connection,
+                request.model_dump_json().encode(),
+                deadline,
+                checkpoint=checkpoint,
+            )
             # Poll readiness so cancellation is checked while the device executes.
             import select
 

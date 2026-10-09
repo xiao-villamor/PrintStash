@@ -155,6 +155,47 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                             waiting.remove(candidate)
                             batch = combined
 
+                # Only independently admitted, already-prepared render tickets
+                # may coalesce. Interactive work never waits for a batch.
+                render_group = False
+                if (
+                    isinstance(ticket.request, RenderRequest)
+                    and ticket.request.priority == Priority.BACKGROUND
+                    and not ticket.cancelled.is_set()
+                ):
+                    flush_at = min(
+                        ticket.received + settings.compute_batch_wait_ms / 1000,
+                        ticket.request.deadline,
+                    )
+                    while time.monotonic() < flush_at:
+                        try:
+                            arrival = pending.get(
+                                timeout=max(0.001, flush_at - time.monotonic())
+                            )
+                            waiting.append(arrival)
+                            if arrival.request.priority == Priority.INTERACTIVE:
+                                break
+                        except queue.Empty:
+                            break
+                    if time.monotonic() - ticket.received < 30 and any(
+                        t.request.priority == Priority.INTERACTIVE for t in waiting
+                    ):
+                        waiting.append(ticket)
+                        continue
+                    for candidate in list(waiting):
+                        if len(group) >= 8:
+                            break
+                        if (
+                            isinstance(candidate.request, RenderRequest)
+                            and candidate.request.priority == Priority.BACKGROUND
+                            and candidate.request.recipe == ticket.request.recipe
+                            and not candidate.cancelled.is_set()
+                            and candidate.request.deadline > time.monotonic()
+                        ):
+                            group.append(candidate)
+                            waiting.remove(candidate)
+                    render_group = len(group) > 1
+
                 waiting_count = len(waiting)
 
                 def execute_one(member):
@@ -176,9 +217,25 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                                 ).decode()
                             }
                         )
+                    except ValueError, ValidationError:
+                        return error(Reason.INVALID_INPUT)
 
                 try:
-                    if batch is None:
+                    if render_group:
+                        try:
+                            outputs = dispatcher.execute_render_batch(
+                                [member.request for member in group]
+                            )
+                            for member, output in zip(group, outputs, strict=True):
+                                member.result = encode(
+                                    {"result": base64.b64encode(output).decode()}
+                                )
+                        except ValueError, ComputeUnavailable:
+                            # Re-admit each member independently after a batch budget
+                            # refusal/invalid member; preserve each original deadline.
+                            for member in group:
+                                member.result = execute_one(member)
+                    elif batch is None:
                         ticket.result = execute_one(ticket)
                     else:
                         try:
@@ -241,8 +298,13 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
             def admit(length):
                 nonlocal reserved
                 amount = 3 * length
-                queue_budget.reserve(amount)
+                try:
+                    queue_budget.reserve(amount)
+                except ComputeUnavailable as exc:
+                    send(connection, error(exc.reason))
+                    raise
                 reserved = amount
+                send(connection, encode({"ready": True}))
 
             try:
                 with connection:

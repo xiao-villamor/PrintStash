@@ -18,6 +18,7 @@ class Operation(StrEnum):
 
 class Reason(StrEnum):
     READY = "ready"
+    PREVIEW = "preview"
     DISABLED = "disabled"
     RUNTIME_MISSING = "runtime_missing"
     ADAPTER_MISSING = "adapter_missing"
@@ -73,6 +74,10 @@ class ComputeStatus(BaseModel):
     queued_bytes: int = Field(ge=0)
     rendering_transfer_seconds: float = Field(ge=0)
     inference_batches: int = Field(ge=0)
+    render_batches: int = Field(default=0, ge=0)
+    render_frames: int = Field(default=0, ge=0)
+    render_cache_hits: int = Field(default=0, ge=0)
+    geometry_upload_bytes: int = Field(default=0, ge=0)
 
 
 class ComputeUnavailable(Exception):

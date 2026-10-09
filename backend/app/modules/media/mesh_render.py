@@ -66,7 +66,7 @@ def render_mesh_thumbnail(
     """Render through core with application settings and logging injected."""
     from app.runtime.compute.client import available
 
-    if available():
+    if available(render=True):
         prepared = prepare_mesh_render(mesh)
         if prepared is not None:
             return render_prepared_thumbnail(
@@ -178,7 +178,7 @@ def render_scene_thumbnail(
     """Render retained placements through the bounded core scene entry point."""
     from app.runtime.compute.client import available
 
-    if available():
+    if available(render=True):
         return render_prepared_thumbnail(
             prepare_scene_render(scene),
             name,

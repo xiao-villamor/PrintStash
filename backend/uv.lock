@@ -1689,6 +1689,9 @@ gpu-pilot = [
     { name = "glcontext" },
     { name = "moderngl" },
 ]
+gpu-render = [
+    { name = "wgpu" },
+]
 step = [
     { name = "cadquery-ocp-novtk" },
     { name = "cascadio" },
@@ -1775,10 +1778,11 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52,<1" },
     { name = "watchfiles", specifier = ">=1.2,<2" },
     { name = "wgpu", marker = "extra == 'gpu'", specifier = ">=0.32,<0.33" },
+    { name = "wgpu", marker = "extra == 'gpu-render'", specifier = ">=0.32,<0.33" },
     { name = "wsgidav", marker = "extra == 'dev'", specifier = ">=4.3,<5" },
     { name = "wsproto", marker = "extra == 'dev'", specifier = ">=1.3,<2" },
 ]
-provides-extras = ["async-db", "step", "full", "storage-opendal", "dev", "ai", "gpu", "gpu-pilot"]
+provides-extras = ["async-db", "step", "full", "storage-opendal", "dev", "ai", "gpu-render", "gpu", "gpu-pilot"]
 
 [[package]]
 name = "printstash-core"

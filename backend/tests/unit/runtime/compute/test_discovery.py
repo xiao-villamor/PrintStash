@@ -40,9 +40,11 @@ class TestDiscovery:
         import sys
         from types import SimpleNamespace
 
+        from app.runtime.compute import discovery
         from app.runtime.compute.contracts import ComputeUnavailable, Reason
         from app.runtime.compute.discovery import discover
 
+        monkeypatch.setattr(discovery, "configure_backend", lambda: None)
         adapter = SimpleNamespace(info={"adapter_type": "CPU"})
         monkeypatch.setitem(
             sys.modules,
@@ -56,3 +58,33 @@ class TestDiscovery:
             discover()
 
         assert exc.value.reason == Reason.SOFTWARE_ADAPTER
+
+
+class TestBackendSelection:
+    @pytest.mark.parametrize(
+        "backend,wsl,expected",
+        [
+            ("auto", False, None),
+            ("auto", True, "GL"),
+            ("vulkan", True, "Vulkan"),
+            ("opengl", False, "GL"),
+        ],
+        ids=["native-auto", "wsl-auto", "explicit-vulkan", "explicit-gl"],
+    )
+    def test_selects_the_deployment_backend(self, monkeypatch, backend, wsl, expected):
+        import sys
+        from types import SimpleNamespace
+
+        from app.core.config import _overlay
+        from app.runtime.compute import discovery
+
+        _overlay["compute_backend"] = backend
+        monkeypatch.setattr(discovery.Path, "exists", lambda path: wsl)
+        selected = []
+        monkeypatch.setitem(
+            sys.modules,
+            "wgpu.backends.wgpu_native.extras",
+            SimpleNamespace(set_instance_extras=lambda **kw: selected.append(kw)),
+        )
+        discovery.configure_backend()
+        assert selected == ([] if expected is None else [{"backends": [expected]}])

@@ -7,8 +7,8 @@ recipe and physical adapter before the broker can select it.
 
 import hashlib
 import struct
-import sys
 import time
+from collections import OrderedDict
 
 import numpy as np
 from printstash_core.mesh import rasterizer as core
@@ -17,6 +17,8 @@ from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_REC
 from app.runtime.compute.budget import Residency
 
 from .compute_geometry import decode
+
+OUTPUT_CACHE_BYTES = 32 * 1024**2
 
 SHADER = """
 struct Triangle { a: vec4<f32>, b: vec4<f32>, c: vec4<f32>,
@@ -118,41 +120,17 @@ struct Fragment { @location(0) color: vec4<f32>, @builtin(frag_depth) depth: f32
 """
 
 
-class RenderErrors:
-    def __init__(self):
-        self.failure = None
-
-    def error(self, msg, *args):
-        self.failure = sys.exception()
-
-    def warning(self, msg, *args, exc_info=False):
-        if exc_info:
-            self.failure = sys.exception()
-
-
-class FrameRaster:
-    def __init__(self, owner, key):
-        self.owner, self.key = owner, key
-
-    def __call__(self, img, zbuf, tri, vert_nrm, shade, base_color, width, height):
-        raise RuntimeError("compute_prepared_dispatch_required")
-
-    def draw_prepared(self, geometry, rotation, screen, width, height, matte):
-        self.owner.draw(geometry, self.key, rotation, screen, width, height, matte)
-
-    def finish(self, img, zbuf):
-        pixels = self.owner.read_pixels()
-        mask = pixels[:, :, 3] > 0
-        img[mask] = pixels[:, :, :3][mask]
-        zbuf[mask] = 0
-
-
 class Renderer:
     def __init__(self, device, memory: Residency | None = None):
         self.device = device
         self.memory = memory if memory is not None else Residency(1024**3)
         self.geometry = {}
-        self.transfers = self.cache_hits = 0
+        self.transfers = self.cache_hits = self.uploads = 0
+        self.output_hits = self.submissions = self.readback_batches = 0
+        self.outputs = OrderedDict()
+        self.output_bytes = 0
+        self.readback_frames = 1
+        self.frame_offset = 0
         self.transfer_seconds = 0.0
         compute_source, vertex_source = SHADER.split("struct Vertex", 1)
         compute_shader = device.create_shader_module(code=compute_source)
@@ -239,6 +217,7 @@ class Renderer:
                 self.transfer_seconds += time.monotonic() - started
                 offset += values.nbytes
             self.transfers += size
+            self.uploads += 1
             return buffer
         except Exception:
             if key in self.geometry:
@@ -253,7 +232,10 @@ class Renderer:
         if (
             max(size, self.projected_size)
             + width * height * 8
-            + max(self.readback_size, ((width * 4 + 255) // 256) * 256 * height)
+            + max(
+                self.readback_size,
+                ((width * 4 + 255) // 256) * 256 * height * self.readback_frames,
+            )
             + 116
             > self.workspace_limit
         ):
@@ -282,7 +264,7 @@ class Renderer:
                 size=size, usage=wgpu.BufferUsage.STORAGE
             )
             self.projected_size = size
-        readback_size = ((width * 4 + 255) // 256) * 256 * height
+        readback_size = ((width * 4 + 255) // 256) * 256 * height * self.readback_frames
         if readback_size > self.readback_size:
             if self.readback is not None:
                 self.readback.destroy()
@@ -299,7 +281,7 @@ class Renderer:
                 size=4, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST
             )
 
-    def draw(self, prepared, key, rotation, screen, width, height, matte):
+    def draw(self, prepared, key, rotation, width, height, matte):
         objects = self.geometry[key]
         size = prepared.face_count * 96
         self.attachments(width, height, size)
@@ -370,38 +352,18 @@ class Renderer:
             {"texture": self.color},
             {
                 "buffer": self.readback,
-                "offset": 0,
+                "offset": self.frame_offset,
                 "bytes_per_row": ((width * 4 + 255) // 256) * 256,
                 "rows_per_image": height,
             },
             (width, height, 1),
         )
         self.device.queue.submit([encoder.finish()])
+        self.submissions += 1
 
-    def read_pixels(self):
-        assert self.size is not None
-        width, height = self.size
-        pitch = ((width * 4 + 255) // 256) * 256
-        import wgpu
-
-        assert self.readback is not None
-        started = time.monotonic()
-        self.readback.map_sync(wgpu.MapMode.READ)
-        try:
-            payload = bytes(self.readback.read_mapped())
-        finally:
-            self.readback.unmap()
-        self.transfer_seconds += time.monotonic() - started
-        return (
-            np.frombuffer(payload, dtype=np.uint8, count=height * pitch)
-            .reshape(height, pitch)[:, : width * 4]
-            .reshape(height, width, 4)
-        )
-
-    def execute(self, payload: bytes) -> bytes:
-        prepared, width, height, views, matte = decode(payload)
+    def geometry_key(self, payload, prepared):
         header_size = struct.unpack("!I", payload[:4])[0]
-        key = (
+        return (
             "geometry:"
             + hashlib.sha256(
                 RASTERIZER_RECIPE.encode()
@@ -414,32 +376,127 @@ class Renderer:
                 + payload[4 + header_size :]
             ).hexdigest()
         )
-        self.upload(prepared, key)
-        self.memory.pin(key, time.monotonic())
-        results = []
+
+    def execute(self, payload: bytes) -> bytes:
+        return self.execute_many([payload])[0]
+
+    def execute_many(self, payloads: list[bytes]) -> list[bytes]:
+        """Upload admitted models once; submit all cameras before one map fence.
+
+        All frames in a submission group share dimensions. Sequential queue
+        writes/submissions retain each camera's uniforms while pooled textures
+        and projected geometry are reused. Readbacks occupy disjoint slots.
+        """
+        import wgpu
+
+        decoded = [decode(payload) for payload in payloads]
+        dimensions = {(width, height) for _, width, height, _, _ in decoded}
+        if len(dimensions) != 1:
+            raise ValueError("compute_batch_dimensions")
+        width, height = next(iter(dimensions))
+        keys = [
+            hashlib.sha256(RASTERIZER_RECIPE.encode() + p).hexdigest() for p in payloads
+        ]
+        missing = [i for i, key in enumerate(keys) if key not in self.outputs]
+        frame_count = sum(len(decoded[i][3]) for i in missing)
+        if frame_count > 8:
+            from app.runtime.compute.contracts import ComputeUnavailable, Reason
+
+            raise ComputeUnavailable(Reason.CAPACITY)
+        factor = PREVIEW_PROFILE.supersample_for(width)
+        w, h = width * factor, height * factor
+        pitch = ((w * 4 + 255) // 256) * 256
+        frame_bytes = pitch * h
+        pinned = []
+        new_outputs = {}
         try:
-            for view in views:
-                errors = RenderErrors()
-                result = core.render_prepared_pixels(
-                    prepared,
-                    "",
-                    width,
-                    height,
-                    rasterise_triangles=FrameRaster(self, key),
-                    logger=errors,
-                    view_rotation=view,
-                    matte=matte,
+            self.readback_frames = max(1, frame_count)
+            # Allocate the largest workspace first so later models cannot replace
+            # the shared buffers while earlier commands are still pending.
+            if missing:
+                self.attachments(
+                    w, h, max(decoded[i][0].face_count for i in missing) * 96
                 )
-                if result is None:
-                    if errors.failure is not None:
-                        raise errors.failure
-                    raise RuntimeError("compute_render_failed")
-                results.append(result.rgba)
-            return struct.pack("!III", width, height, len(results)) + b"".join(results)
+            for i in missing:
+                prepared = decoded[i][0]
+                key = self.geometry_key(payloads[i], prepared)
+                self.upload(prepared, key)
+                self.memory.pin(key, time.monotonic())
+                pinned.append(key)
+            frame_index = 0
+            spans = {}
+            for i, key in zip(missing, pinned, strict=True):
+                prepared, _, _, views, matte = decoded[i]
+                spans[i] = (frame_index, len(views))
+                for view in views:
+                    rotation = (
+                        core._select_view_rotation(prepared.vertices)
+                        if view is None
+                        else view
+                    )
+                    self.frame_offset = frame_index * frame_bytes
+                    self.draw(prepared, key, rotation, w, h, matte)
+                    frame_index += 1
+            if missing:
+                started = time.monotonic()
+                self.readback.map_sync(wgpu.MapMode.READ)
+                try:
+                    pixels = bytes(self.readback.read_mapped())
+                finally:
+                    self.readback.unmap()
+                self.transfer_seconds += time.monotonic() - started
+                self.readback_batches += 1
+                for i in missing:
+                    first, count = spans[i]
+                    frames = []
+                    for index in range(first, first + count):
+                        rgba = (
+                            np.frombuffer(
+                                pixels,
+                                dtype=np.uint8,
+                                count=frame_bytes,
+                                offset=index * frame_bytes,
+                            )
+                            .reshape(h, pitch)[:, : w * 4]
+                            .copy()
+                        )
+                        frames.append(
+                            core.postprocess_rgba(rgba.tobytes(), width, height).rgba
+                        )
+                    new_outputs[i] = struct.pack(
+                        "!III", width, height, count
+                    ) + b"".join(frames)
+            results = []
+            for i, key in enumerate(keys):
+                if i in new_outputs:
+                    result = new_outputs[i]
+                else:
+                    result = self.outputs[key]
+                    self.outputs.move_to_end(key)
+                    self.output_hits += 1
+                results.append(result)
+            # Bounded host RGBA cache avoids reshading repeated views. Its 32 MiB
+            # ceiling is included in render_policy's host reservation.
+            for i, result in new_outputs.items():
+                if len(result) <= OUTPUT_CACHE_BYTES:
+                    while (
+                        self.outputs
+                        and self.output_bytes + len(result) > OUTPUT_CACHE_BYTES
+                    ):
+                        _, retired = self.outputs.popitem(last=False)
+                        self.output_bytes -= len(retired)
+                    if keys[i] not in self.outputs:
+                        self.outputs[keys[i]] = result
+                        self.output_bytes += len(result)
+            return results
         finally:
-            self.memory.unpin(key)
+            self.readback_frames, self.frame_offset = 1, 0
+            for key in pinned:
+                self.memory.unpin(key)
 
     def close(self):
+        self.outputs.clear()
+        self.output_bytes = 0
         for resource in (
             self.color,
             self.depth,

@@ -17,6 +17,7 @@ class Qualification(BaseModel):
     recipe: str
     minimum_units: int = Field(ge=1)
     maximum_units: int = Field(ge=1)
+    maximum_batch_items: int = Field(default=1, ge=1, le=8)
     quality_passed: bool
     source_to_publication_speedup: float = Field(ge=1.5, allow_inf_nan=False)
     interactive_p95_ratio: float = Field(gt=0, le=1.1, allow_inf_nan=False)
@@ -30,6 +31,7 @@ class Qualification(BaseModel):
         operation: Operation,
         recipe: str,
         units: int,
+        batch_items: int = 1,
     ) -> bool:
         return (
             self.quality_passed
@@ -38,6 +40,7 @@ class Qualification(BaseModel):
             and self.operation == operation
             and self.recipe == recipe
             and self.minimum_units <= units <= self.maximum_units
+            and 1 <= batch_items <= self.maximum_batch_items
         )
 
 

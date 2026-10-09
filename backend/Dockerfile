@@ -90,10 +90,21 @@ RUN uv sync --frozen --no-dev --no-editable --extra full \
  && uv cache clean \
  && rm -rf "$UV_CACHE_DIR"
 
+FROM dependencies-full AS dependencies-gpu-render
+COPY --from=opendal-builder /wheels /tmp/opendal-wheels
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libegl1 libgl1-mesa-dri libglx-mesa0 \
+ && rm -rf /var/lib/apt/lists/* \
+ && uv sync --frozen --no-dev --no-editable --extra full --extra gpu-render --no-install-package opendal \
+ && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
+ && rm -rf /tmp/opendal-wheels \
+ && uv cache clean \
+ && rm -rf "$UV_CACHE_DIR"
+
 FROM dependencies-full AS dependencies-gpu
 COPY --from=opendal-builder /wheels /tmp/opendal-wheels
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers \
+ && apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libegl1 libgl1-mesa-dri libglx-mesa0 \
  && rm -rf /var/lib/apt/lists/* \
  && uv sync --frozen --no-dev --no-editable --extra full --extra gpu --no-install-package opendal \
  && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \

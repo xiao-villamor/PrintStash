@@ -20,7 +20,7 @@ RECIPE = "webgpu-canonical-raster-v2"
 
 
 def render(prepared, width, height, views, matte):
-    if not client.available():
+    if not client.available(render=True):
         return None
     from .compute_geometry import encode
 
