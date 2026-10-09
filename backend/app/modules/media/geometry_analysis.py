@@ -139,20 +139,48 @@ def embedding_views(
     triangle_cap: int,
 ):
     """Six opaque RGB views, sharing the mesh loader and interactive render cap."""
-    import trimesh
-
     if not 32 <= image_size <= 512:
         raise GeometryError("invalid_view_budget")
     with mesh_policy.render_admission():
         prepared = _load(path, file_type, triangle_cap=triangle_cap)
         if not isinstance(prepared.geometry, CompleteGeometry):
             raise GeometryError("embedding_requires_complete_geometry")
-        vertices, faces = _component(prepared, component_index)
-        mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
-        visual = mesh_render.prepare_mesh_render(mesh)
-        if visual is None:
-            raise GeometryError("embedding_view_failed")
-        return _render_views(visual, image_size, canonical_frames())
+        return _component_embedding_views(prepared, component_index, image_size)
+
+
+def _component_embedding_views(prepared, component_index, image_size):
+    import trimesh
+
+    vertices, faces = _component(prepared, component_index)
+    mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
+    visual = mesh_render.prepare_mesh_render(mesh)
+    if visual is None:
+        raise GeometryError("embedding_view_failed")
+    return _render_views(visual, image_size, canonical_frames())
+
+
+def embedding_components(
+    path, *, file_type, component_indices, image_size, triangle_cap
+):
+    """At most two components of the same parsed source, with separate outcomes."""
+    if (
+        not 1 <= len(component_indices) <= 2
+        or len(set(component_indices)) != len(component_indices)
+        or any(type(index) is not int or index < 0 for index in component_indices)
+        or not 32 <= image_size <= 512
+    ):
+        raise GeometryError("invalid_view_budget")
+    with mesh_policy.render_admission():
+        prepared = _load(path, file_type, triangle_cap=triangle_cap)
+        if not isinstance(prepared.geometry, CompleteGeometry):
+            raise GeometryError("embedding_requires_complete_geometry")
+        results = []
+        for index in component_indices:
+            try:
+                results.append(_component_embedding_views(prepared, index, image_size))
+            except GeometryError as exc:
+                results.append(exc)
+        return tuple(results)
 
 
 def canonical_frames():
@@ -169,6 +197,19 @@ def canonical_frames():
 def _render_views(prepared: PreparedRender, image_size: int, frames):
     import numpy as np
 
+    from .compute_render import render
+
+    accelerated = render(prepared, image_size, image_size, frames, True)
+    if accelerated is not None:
+        return tuple(
+            EmbeddingInput(
+                "image",
+                rgb=frame.rgb(mesh_render.RGBBackground.WHITE),
+                width=image_size,
+                height=image_size,
+            )
+            for frame in accelerated
+        )
     views = []
     for frame in frames:
         rendered = mesh_render.render_prepared_pixels(
@@ -180,6 +221,7 @@ def _render_views(prepared: PreparedRender, image_size: int, frames):
             if frame is not None
             else None,
             matte=True,
+            compute=False,
         )
         if rendered is None:
             raise GeometryError("embedding_view_failed")

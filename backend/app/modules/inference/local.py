@@ -122,7 +122,11 @@ class LocalEmbeddingProvider:
 
     @property
     def is_warm(self) -> bool:
-        return pool.is_warm(self._worker_key())
+        from app.runtime.compute.client import is_warm
+
+        return pool.is_warm(self._worker_key()) or is_warm(
+            manifest_identity(self.manifest)
+        )
 
     def prepare_query(self) -> None:
         if not self.is_warm:
@@ -225,6 +229,13 @@ class LocalEmbeddingProvider:
             admission_context = context or InferenceContext.bounded(
                 120, priority="background"
             )
+            from app.runtime.compute.client import infer
+
+            accelerated = infer(
+                self.directory, self.model_key, self.threads, payload, admission_context
+            )
+            if accelerated is not None:
+                return accelerated
             acquire_slot(admission_context)
             cleanup.callback(release_slot)
             if len(payload) > MAX_INPUT_BYTES:

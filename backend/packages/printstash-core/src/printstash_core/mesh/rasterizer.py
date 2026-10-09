@@ -123,6 +123,25 @@ class DeferredRasteriser(Rasteriser, Protocol):
     def finish(self, img: UInt8Array, zbuf: FloatArray) -> None: ...
 
 
+@runtime_checkable
+class PreparedRasteriser(DeferredRasteriser, Protocol):
+    """Optional persistent backend accepting one camera-independent geometry set.
+
+    Framing and final encoding stay canonical. Native allocation, ownership and
+    qualification belong to the caller; core never imports a device runtime.
+    """
+
+    def draw_prepared(
+        self,
+        geometry: PreparedRender,
+        rotation: FloatArray,
+        screen: FloatArray,
+        width: int,
+        height: int,
+        matte: bool,
+    ) -> None: ...
+
+
 class RGBBackground(str, Enum):
     IGNORE_ALPHA = "ignore_alpha"
     WHITE = "white"
@@ -512,91 +531,103 @@ def render_prepared_pixels(
         img = np.zeros((ss_height, ss_width, 3), dtype=np.uint8)
         zbuf = np.full((ss_height, ss_width), np.inf, dtype=np.float64)
 
-        visible_total = 0
-        for fc in geometry.face_chunks(chunk):
-            tri = screen[fc]  # (c, 3, 3) screen-space
-            view_tri = view[fc]  # (c, 3, 3) view-space
-
-            edge1 = view_tri[:, 1] - view_tri[:, 0]
-            edge2 = view_tri[:, 2] - view_tri[:, 0]
-            # Back-face cull: in right-handed view-space visible faces have raw
-            # z<0; a negative-determinant (front-on flat) view flips that sign.
-            raw_normals = np.cross(edge1, edge2)  # (c, 3)
-            norm_len = np.linalg.norm(raw_normals, axis=1)  # (c,)
-
-            # Object-space face normals for the crease test (the view normals are
-            # flipped toward the camera, which would corrupt smoothing across
-            # silhouettes).
-            f_obj = verts[fc]  # (c, 3, 3)
-            fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
-            fn = fn / np.where(
-                np.linalg.norm(fn, axis=1, keepdims=True) == 0,
-                1.0,
-                np.linalg.norm(fn, axis=1, keepdims=True),
+        if isinstance(rasterise, PreparedRasteriser):
+            rasterise.draw_prepared(
+                geometry, rotation, screen, ss_width, ss_height, matte
             )
-
-            corner_smooth = vsm[pos_id[fc]]  # (c, 3, 3) object-space
-            # Blend each corner between its smoothed normal and the flat face
-            # normal by how far the two diverge (a crease measure). A *smooth*
-            # blend (smoothstep), not a hard threshold, is essential: a binary
-            # flip snaps neighbouring corners between smooth and flat, which on
-            # coarse fillets paints a comb of sharp light/dark streaks. The window
-            # cos(41°)=0.75 → cos(23°)=0.92 keeps a 90° edge's 45° half-angle
-            # (cos 0.707, below the window) fully flat so box/mechanical edges stay
-            # crisp, while curved fillets blend gradually and read smooth.
-            cos_crease = np.sum(corner_smooth * fn[:, None, :], axis=2)  # (c, 3)
-            t = np.clip((cos_crease - 0.75) / (0.92 - 0.75), 0.0, 1.0)
-            t = (t * t * (3.0 - 2.0 * t))[..., None]  # smoothstep, (c, 3, 1)
-            corner_n = t * corner_smooth + (1.0 - t) * fn[:, None, :]
-            corner_n = corner_n / np.where(
-                np.linalg.norm(corner_n, axis=2, keepdims=True) == 0,
-                1.0,
-                np.linalg.norm(corner_n, axis=2, keepdims=True),
-            )
-            # Into view-space and flip toward the camera (+Z). These per-corner
-            # normals are interpolated per pixel in the rasteriser (Phong); the
-            # Fresnel rim, diffuse and specular are all evaluated there from the
-            # interpolated normal, so there is no separate per-vertex colour pass.
-            cvn = corner_n @ rot_T  # (c, 3, 3)
-            cvn = np.where(cvn[..., 2:3] >= 0, cvn, -cvn)
-
-            front = (raw_normals[:, 2] * view_handedness) < 0.0
-            valid = front & (norm_len > 1e-8)
-            tri = tri[valid]
-            cvn = cvn[valid]
-            visible_total += int(tri.shape[0])
-
-            rasterise(img, zbuf, tri, cvn, _shade, base_color, ss_width, ss_height)
-            # Free this chunk's temporaries before the next one so only one
-            # chunk's worth of per-face arrays is ever live. No gc.collect() here:
-            # there are no reference cycles in the hot loop, and the per-file
-            # The application mesh policy returns retired arenas to the OS.
-            del view_tri, edge1, edge2, raw_normals, norm_len, f_obj, fn
-            del corner_smooth, cos_crease, corner_n, cvn, tri, valid
-
-        if visible_total == 0:
-            # Degenerate / fully back-facing mesh: paint every face flat so the
-            # silhouette still reads, matching the single-pass fallback.
-            if logger is not None:
-                logger.warning(
-                    "mesh_render: no visible triangles for %s — using silhouette",
-                    name,
-                )
-            flat_color = albedo * 0.6
-
-            def _flat_shade(
-                n: FloatArray,
-                _c: FloatArray = flat_color,
-            ) -> FloatArray:
-                return np.broadcast_to(_c, n.shape)
-
+        else:
+            visible_total = 0
             for fc in geometry.face_chunks(chunk):
-                tri = screen[fc]
-                nrm = np.zeros((tri.shape[0], 3, 3), dtype=np.float32)
-                rasterise(
-                    img, zbuf, tri, nrm, _flat_shade, base_color, ss_width, ss_height
+                tri = screen[fc]  # (c, 3, 3) screen-space
+                view_tri = view[fc]  # (c, 3, 3) view-space
+
+                edge1 = view_tri[:, 1] - view_tri[:, 0]
+                edge2 = view_tri[:, 2] - view_tri[:, 0]
+                # Back-face cull: in right-handed view-space visible faces have raw
+                # z<0; a negative-determinant (front-on flat) view flips that sign.
+                raw_normals = np.cross(edge1, edge2)  # (c, 3)
+                norm_len = np.linalg.norm(raw_normals, axis=1)  # (c,)
+
+                # Object-space face normals for the crease test (the view normals are
+                # flipped toward the camera, which would corrupt smoothing across
+                # silhouettes).
+                f_obj = verts[fc]  # (c, 3, 3)
+                fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
+                fn = fn / np.where(
+                    np.linalg.norm(fn, axis=1, keepdims=True) == 0,
+                    1.0,
+                    np.linalg.norm(fn, axis=1, keepdims=True),
                 )
-                del tri, nrm
+
+                corner_smooth = vsm[pos_id[fc]]  # (c, 3, 3) object-space
+                # Blend each corner between its smoothed normal and the flat face
+                # normal by how far the two diverge (a crease measure). A *smooth*
+                # blend (smoothstep), not a hard threshold, is essential: a binary
+                # flip snaps neighbouring corners between smooth and flat, which on
+                # coarse fillets paints a comb of sharp light/dark streaks. The window
+                # cos(41°)=0.75 → cos(23°)=0.92 keeps a 90° edge's 45° half-angle
+                # (cos 0.707, below the window) fully flat so box/mechanical edges stay
+                # crisp, while curved fillets blend gradually and read smooth.
+                cos_crease = np.sum(corner_smooth * fn[:, None, :], axis=2)  # (c, 3)
+                t = np.clip((cos_crease - 0.75) / (0.92 - 0.75), 0.0, 1.0)
+                t = (t * t * (3.0 - 2.0 * t))[..., None]  # smoothstep, (c, 3, 1)
+                corner_n = t * corner_smooth + (1.0 - t) * fn[:, None, :]
+                corner_n = corner_n / np.where(
+                    np.linalg.norm(corner_n, axis=2, keepdims=True) == 0,
+                    1.0,
+                    np.linalg.norm(corner_n, axis=2, keepdims=True),
+                )
+                # Into view-space and flip toward the camera (+Z). These per-corner
+                # normals are interpolated per pixel in the rasteriser (Phong); the
+                # Fresnel rim, diffuse and specular are all evaluated there from the
+                # interpolated normal, so there is no separate per-vertex colour pass.
+                cvn = corner_n @ rot_T  # (c, 3, 3)
+                cvn = np.where(cvn[..., 2:3] >= 0, cvn, -cvn)
+
+                front = (raw_normals[:, 2] * view_handedness) < 0.0
+                valid = front & (norm_len > 1e-8)
+                tri = tri[valid]
+                cvn = cvn[valid]
+                visible_total += int(tri.shape[0])
+
+                rasterise(img, zbuf, tri, cvn, _shade, base_color, ss_width, ss_height)
+                # Free this chunk's temporaries before the next one so only one
+                # chunk's worth of per-face arrays is ever live. No gc.collect() here:
+                # there are no reference cycles in the hot loop, and the per-file
+                # The application mesh policy returns retired arenas to the OS.
+                del view_tri, edge1, edge2, raw_normals, norm_len, f_obj, fn
+                del corner_smooth, cos_crease, corner_n, cvn, tri, valid
+
+            if visible_total == 0:
+                # Degenerate / fully back-facing mesh: paint every face flat so the
+                # silhouette still reads, matching the single-pass fallback.
+                if logger is not None:
+                    logger.warning(
+                        "mesh_render: no visible triangles for %s — using silhouette",
+                        name,
+                    )
+                flat_color = albedo * 0.6
+
+                def _flat_shade(
+                    n: FloatArray,
+                    _c: FloatArray = flat_color,
+                ) -> FloatArray:
+                    return np.broadcast_to(_c, n.shape)
+
+                for fc in geometry.face_chunks(chunk):
+                    tri = screen[fc]
+                    nrm = np.zeros((tri.shape[0], 3, 3), dtype=np.float32)
+                    rasterise(
+                        img,
+                        zbuf,
+                        tri,
+                        nrm,
+                        _flat_shade,
+                        base_color,
+                        ss_width,
+                        ss_height,
+                    )
+                    del tri, nrm
 
         if isinstance(rasterise, DeferredRasteriser):
             rasterise.finish(img, zbuf)

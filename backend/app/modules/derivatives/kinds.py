@@ -32,7 +32,7 @@ from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, Jo
 
 # Recipe versions. Bump rule: see the module docstring.
 MESH_GEOMETRY_RECIPE = 12
-MESH_THUMBNAIL_RECIPE = 11
+MESH_THUMBNAIL_RECIPE = 12
 GCODE_METADATA_RECIPE = 2
 GCODE_THUMBNAIL_RECIPE = 1
 TOOLPATH_RECIPE = 1

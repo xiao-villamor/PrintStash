@@ -572,3 +572,5 @@ blocks subsequent attempts, retries, regeneration and audit repairs for that
 group. Re-enabling discovers eligible missing work through the bounded source;
 it preserves retry budgets and deliberate cancellations. Similar Models has its
 own settings. ASCII toolpaths continue to use the Artifact's text directly.
+
+Optional qualified GPU execution, settings and device exposure are described in [compute deployment](compute.md).

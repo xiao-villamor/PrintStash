@@ -290,6 +290,12 @@ class Settings(BaseSettings):
     # the mesh is not loaded; the file is still indexed, and 3MF still gets its
     # embedded slicer preview. This is the hard ceiling; the RAM-aware cap below
     # tightens it further on small hosts.
+    # Portable device selection is independent of durable recipe/model identity.
+    compute_mode: Literal["auto", "cpu"] = "auto"
+    compute_adapter: str | None = None
+    compute_memory_mb: int = Field(default=1024, ge=256, le=65536)
+    compute_batch_wait_ms: int = Field(default=10, ge=0, le=10)
+
     mesh_max_render_triangles: int = Field(default=2_000_000, gt=0)
 
     # Fraction of host/cgroup RAM shared by native mesh work. Admission reserves

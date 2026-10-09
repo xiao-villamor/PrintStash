@@ -64,6 +64,14 @@ def render_mesh_thumbnail(
     output_format: Literal["PNG", "WEBP"] = "PNG",
 ) -> Optional[bytes]:
     """Render through core with application settings and logging injected."""
+    from app.runtime.compute.client import available
+
+    if available():
+        prepared = prepare_mesh_render(mesh)
+        if prepared is not None:
+            return render_prepared_thumbnail(
+                prepared, name, width, height, output_format=output_format
+            )
     return _core.render_mesh_thumbnail(
         mesh,
         name,
@@ -101,6 +109,19 @@ def render_prepared_thumbnail(
     matte: bool = False,
 ) -> bytes | None:
     """Render encoded output from shared preparation with application policy."""
+    from .compute_render import render
+
+    accelerated = render(prepared, width, height, (view_rotation,), matte)
+    if accelerated is not None:
+        from io import BytesIO
+
+        from PIL import Image
+
+        output = BytesIO()
+        Image.frombytes("RGBA", (width, height), accelerated[0].rgba).save(
+            output, format=output_format
+        )
+        return output.getvalue()
     return _core.render_prepared_thumbnail(
         prepared,
         name,
@@ -123,8 +144,16 @@ def render_prepared_pixels(
     *,
     view_rotation: NDArray[np.float64] | None = None,
     matte: bool = False,
+    compute: bool = True,
 ) -> RenderedPixels | None:
     """Return direct RGBA pixels with the same application raster policy."""
+    from .compute_render import render
+
+    accelerated = (
+        render(prepared, width, height, (view_rotation,), matte) if compute else None
+    )
+    if accelerated is not None:
+        return accelerated[0]
     return _core.render_prepared_pixels(
         prepared,
         name,
@@ -147,6 +176,16 @@ def render_scene_thumbnail(
     output_format: Literal["PNG", "WEBP"] = "PNG",
 ) -> Optional[bytes]:
     """Render retained placements through the bounded core scene entry point."""
+    from app.runtime.compute.client import available
+
+    if available():
+        return render_prepared_thumbnail(
+            prepare_scene_render(scene),
+            name,
+            width,
+            height,
+            output_format=output_format,
+        )
     return _core.render_scene_thumbnail(
         scene,
         name,

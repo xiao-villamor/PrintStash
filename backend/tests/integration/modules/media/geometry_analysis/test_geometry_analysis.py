@@ -386,3 +386,27 @@ class TestSharedSTLSampleRefusals:
             )
 
         assert caught.value.code == cause
+
+
+class TestComponentBatch:
+    def test_keeps_valid_component_after_an_invalid_member(self, tmp_path):
+        from printstash_core.mesh.similarity import GeometryError
+
+        from app.modules.media.geometry_analysis import embedding_components
+        from tests.factories.geometry import tetrahedron
+
+        path = tmp_path / "components.stl"
+        path.write_bytes(tetrahedron().export(file_type="stl"))
+
+        results = embedding_components(
+            path,
+            file_type="stl",
+            component_indices=(0, 999),
+            image_size=32,
+            triangle_cap=1000,
+        )
+
+        assert len(results[0]) == 6
+        assert all(view.modality == "image" for view in results[0])
+        assert isinstance(results[1], GeometryError)
+        assert results[1].code == "component_unavailable"

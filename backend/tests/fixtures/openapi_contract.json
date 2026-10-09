@@ -2775,6 +2775,28 @@
         "title": "CandidateSelection",
         "type": "object"
       },
+      "Capability": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "operation": {
+            "$ref": "#/components/schemas/Operation"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/Reason"
+          }
+        },
+        "required": [
+          "operation",
+          "available",
+          "reason"
+        ],
+        "title": "Capability",
+        "type": "object"
+      },
       "CaptionPatch": {
         "additionalProperties": false,
         "properties": {
@@ -4190,6 +4212,167 @@
         "title": "CompatibilityRequest",
         "type": "object"
       },
+      "ComputeMode": {
+        "enum": [
+          "auto",
+          "cpu"
+        ],
+        "title": "ComputeMode",
+        "type": "string"
+      },
+      "ComputeStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "batch_inputs": {
+            "minimum": 0.0,
+            "title": "Batch Inputs",
+            "type": "integer"
+          },
+          "budget_bytes": {
+            "minimum": 0.0,
+            "title": "Budget Bytes",
+            "type": "integer"
+          },
+          "capabilities": {
+            "items": {
+              "$ref": "#/components/schemas/Capability"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "cold_start_seconds": {
+            "minimum": 0.0,
+            "title": "Cold Start Seconds",
+            "type": "number"
+          },
+          "completed": {
+            "minimum": 0.0,
+            "title": "Completed",
+            "type": "integer"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DeviceInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "execution_seconds": {
+            "minimum": 0.0,
+            "title": "Execution Seconds",
+            "type": "number"
+          },
+          "fallbacks": {
+            "minimum": 0.0,
+            "title": "Fallbacks",
+            "type": "integer"
+          },
+          "host_reserved_bytes": {
+            "minimum": 0.0,
+            "title": "Host Reserved Bytes",
+            "type": "integer"
+          },
+          "inference_batches": {
+            "minimum": 0.0,
+            "title": "Inference Batches",
+            "type": "integer"
+          },
+          "input_bytes": {
+            "minimum": 0.0,
+            "title": "Input Bytes",
+            "type": "integer"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/ComputeMode"
+          },
+          "output_bytes": {
+            "minimum": 0.0,
+            "title": "Output Bytes",
+            "type": "integer"
+          },
+          "queue_depth": {
+            "minimum": 0.0,
+            "title": "Queue Depth",
+            "type": "integer"
+          },
+          "queue_seconds": {
+            "minimum": 0.0,
+            "title": "Queue Seconds",
+            "type": "number"
+          },
+          "queued_bytes": {
+            "minimum": 0.0,
+            "title": "Queued Bytes",
+            "type": "integer"
+          },
+          "rendering_transfer_seconds": {
+            "minimum": 0.0,
+            "title": "Rendering Transfer Seconds",
+            "type": "number"
+          },
+          "reserved_bytes": {
+            "minimum": 0.0,
+            "title": "Reserved Bytes",
+            "type": "integer"
+          },
+          "residency_hits": {
+            "minimum": 0.0,
+            "title": "Residency Hits",
+            "type": "integer"
+          },
+          "residency_misses": {
+            "minimum": 0.0,
+            "title": "Residency Misses",
+            "type": "integer"
+          },
+          "resident_entries": {
+            "minimum": 0.0,
+            "title": "Resident Entries",
+            "type": "integer"
+          },
+          "resident_model_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Resident Model Ids",
+            "type": "array"
+          },
+          "runtime_identity": {
+            "title": "Runtime Identity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "device",
+          "runtime_identity",
+          "capabilities",
+          "budget_bytes",
+          "reserved_bytes",
+          "resident_entries",
+          "queue_depth",
+          "completed",
+          "fallbacks",
+          "cold_start_seconds",
+          "resident_model_ids",
+          "queue_seconds",
+          "execution_seconds",
+          "input_bytes",
+          "output_bytes",
+          "batch_inputs",
+          "residency_hits",
+          "residency_misses",
+          "host_reserved_bytes",
+          "queued_bytes",
+          "rendering_transfer_seconds",
+          "inference_batches"
+        ],
+        "title": "ComputeStatus",
+        "type": "object"
+      },
       "CultsConnectRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4487,6 +4670,45 @@
         ],
         "title": "DerivativeStatus",
         "type": "string"
+      },
+      "DeviceInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "backend": {
+            "title": "Backend",
+            "type": "string"
+          },
+          "device_id": {
+            "title": "Device Id",
+            "type": "integer"
+          },
+          "driver": {
+            "title": "Driver",
+            "type": "string"
+          },
+          "identity": {
+            "title": "Identity",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "vendor_id": {
+            "title": "Vendor Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "identity",
+          "name",
+          "vendor_id",
+          "device_id",
+          "driver",
+          "backend"
+        ],
+        "title": "DeviceInfo",
+        "type": "object"
       },
       "DocumentCreate": {
         "additionalProperties": false,
@@ -12177,6 +12399,15 @@
         "title": "OAuthAuthorizeRead",
         "type": "object"
       },
+      "Operation": {
+        "enum": [
+          "render",
+          "dense",
+          "sparse"
+        ],
+        "title": "Operation",
+        "type": "string"
+      },
       "OperationResult": {
         "properties": {
           "allowed": {
@@ -16343,6 +16574,24 @@
         },
         "title": "QueueJobUpdate",
         "type": "object"
+      },
+      "Reason": {
+        "enum": [
+          "ready",
+          "disabled",
+          "runtime_missing",
+          "adapter_missing",
+          "software_adapter",
+          "unqualified",
+          "device_failed",
+          "capacity",
+          "deadline",
+          "invalid_input",
+          "cancelled",
+          "broker_unavailable"
+        ],
+        "title": "Reason",
+        "type": "string"
       },
       "RefreshRequest": {
         "additionalProperties": false,
@@ -44790,6 +45039,33 @@
         "summary": "Patch Caption",
         "tags": [
           "search"
+        ]
+      }
+    },
+    "/api/v1/system/compute": {
+      "get": {
+        "description": "Expose compute capability and residency without model paths or user inputs.",
+        "operationId": "compute_status_api_v1_system_compute_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComputeStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Compute Status",
+        "tags": [
+          "system"
         ]
       }
     },

@@ -68,7 +68,7 @@ services:
     # build:
     #   context: ./backend
     #   args:
-    #     PRINTSTASH_VARIANT: full   # or: lite
+    #     PRINTSTASH_VARIANT: full   # or: lite; optional local build: gpu
     container_name: printstash-api
     restart: unless-stopped
     logging: *default-logging

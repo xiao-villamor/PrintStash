@@ -73,7 +73,14 @@ class LocalSparseProvider(LocalEmbeddingProvider):
 class SparseNativeProvider:
     """Only instantiated inside the monitored child. Never normalizes weights."""
 
-    def __init__(self, directory: Path, manifest: SparseModelManifest, threads: int):
+    def __init__(
+        self,
+        directory: Path,
+        manifest: SparseModelManifest,
+        threads: int,
+        *,
+        session_factory=None,
+    ):
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
@@ -107,8 +114,10 @@ class SparseNativeProvider:
         options.enable_cpu_mem_arena = options.enable_mem_pattern = False
         options.add_session_config_entry("session.intra_op.allow_spinning", "0")
         options.add_session_config_entry("session.inter_op.allow_spinning", "0")
-        self.model = ort.InferenceSession(
-            payload, options, providers=["CPUExecutionProvider"]
+        self.model = (
+            ort.InferenceSession(payload, options, providers=["CPUExecutionProvider"])
+            if session_factory is None
+            else session_factory(payload, options)
         )
         self.model.disable_fallback()
         expected = {
@@ -137,49 +146,75 @@ class SparseNativeProvider:
             for term in manifest.canary
         ):
             raise EmbeddingError("embedding_canary_mismatch")
+        if OnnxCpuProvider._dynamic_batch(self.model):
+            batch = self.expand_many([manifest.canary_text, manifest.canary_text])
+            if any(row != result for row in batch):
+                raise EmbeddingError("embedding_canary_mismatch")
 
     def expand(self, text: str | None) -> SparseResult:
+        if text is None:
+            return SparseResult(
+                config_hash=manifest_identity(self.manifest), terms=[], truncated=False
+            )
+        return self.expand_many([text])[0]
+
+    def expand_many(self, texts: list[str]) -> list[SparseResult]:
+        from app.modules.inference.onnx_cpu import OnnxCpuProvider
+
+        if not 1 <= len(texts) <= 8 or any(
+            not isinstance(t, str) or not 0 < len(t) <= 16384 for t in texts
+        ):
+            raise EmbeddingError("embedding_input_budget")
+        if len(texts) > 1 and not OnnxCpuProvider._dynamic_batch(self.model):
+            return [self.expand(text) for text in texts]
         import numpy as np
 
         manifest = self.manifest
-        terms, truncated = [], False
-        if text is not None:
-            if not 0 < len(text) <= 16384:
-                raise EmbeddingError("embedding_input_budget")
-            full = self.tokenizer.encode(text)
-            truncated = len(full.ids) > manifest.max_tokens
-            encoded = self.bounded_tokenizer.encode(text)
-            mask = np.asarray([encoded.attention_mask], dtype=np.int64)
-            values = self.model.run(
-                [manifest.output_name],
-                {
-                    manifest.input_name: np.asarray([encoded.ids], dtype=np.int64),
-                    manifest.attention_mask_name: mask,
-                    manifest.token_type_ids_name: np.asarray(
-                        [encoded.type_ids], dtype=np.int64
-                    ),
-                },
-            )[0]
-            if (
-                values.shape != (1, len(encoded.ids), manifest.vocabulary_size)
-                or not np.isfinite(values).all()
-            ):
-                raise EmbeddingError("embedding_output_invalid")
-            weights = np.max(
-                np.log1p(np.maximum(values, 0)) * mask[:, :, None], axis=1
-            )[0]
+        full = self.tokenizer.encode_batch(texts)
+        encoded = self.bounded_tokenizer.encode_batch(texts)
+        length = max(len(item.ids) for item in encoded)
+        # Token ID 0 is masked; special-token vocabulary identity remains unchanged.
+        values = {}
+        mask = np.zeros((len(texts), length), dtype=np.int64)
+        ids = np.zeros_like(mask)
+        types = np.zeros_like(mask)
+        for row, item in enumerate(encoded):
+            ids[row, : len(item.ids)] = item.ids
+            mask[row, : len(item.ids)] = item.attention_mask
+            types[row, : len(item.ids)] = item.type_ids
+        values = self.model.run(
+            [manifest.output_name],
+            {
+                manifest.input_name: ids,
+                manifest.attention_mask_name: mask,
+                manifest.token_type_ids_name: types,
+            },
+        )[0]
+        if (
+            not isinstance(values, np.ndarray)
+            or values.shape != (len(texts), length, manifest.vocabulary_size)
+            or not np.isfinite(values).all()
+        ):
+            raise EmbeddingError("embedding_output_invalid")
+        weights = np.max(np.log1p(np.maximum(values, 0)) * mask[:, :, None], axis=1)
+        results = []
+        for row, tokens in zip(weights, full, strict=True):
             ranked = sorted(
                 (
                     (self.words[index], min(float(weight), 10.0))
-                    for index, weight in enumerate(weights)
+                    for index, weight in enumerate(row)
                     if weight > 0 and index in self.words
                 ),
                 key=lambda item: (-item[1], item[0]),
             )
-            terms = [
-                SparseTerm(term=term, weight=weight)
-                for term, weight in ranked[: manifest.max_terms]
-            ]
-        return SparseResult(
-            config_hash=manifest_identity(manifest), terms=terms, truncated=truncated
-        )
+            results.append(
+                SparseResult(
+                    config_hash=manifest_identity(manifest),
+                    terms=[
+                        SparseTerm(term=term, weight=weight)
+                        for term, weight in ranked[: manifest.max_terms]
+                    ],
+                    truncated=len(tokens.ids) > manifest.max_tokens,
+                )
+            )
+        return results

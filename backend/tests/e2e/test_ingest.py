@@ -1022,3 +1022,32 @@ class TestStagedMeshOutputs:
             select(GeometryFingerprint).where(GeometryFingerprint.file_id == file_id)
         ).all()
         assert fingerprints and all(row.state == "ready" for row in fingerprints)
+
+
+class TestComputePlacement:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["cpu", "auto"])
+    async def test_publishes_mesh_outputs_without_gpu_qualification(
+        self, api, tmp_path, monkeypatch, mode
+    ):
+        monkeypatch.setitem(_overlay, "compute_mode", mode)
+        headers = await _setup_and_login(api, tmp_path)
+        payload = trimesh.creation.box(extents=(10, 20, 30)).export(file_type="stl")
+
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("compute-box.stl", payload, "application/sla")},
+            data={"model_name": "Compute placement"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        file_id = job["file_id"]
+        thumbnail = await _thumbnail_derivative(api, headers, file_id)
+        original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+
+        assert thumbnail["state"] == "ready"
+        assert original.content == payload
+        listed = await api.get(f"/api/v1/files/{file_id}/derivatives", headers=headers)
+        metadata = next(row for row in listed.json() if row["kind"] == "metadata")
+        assert metadata["state"] == "ready"

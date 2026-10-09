@@ -88,3 +88,26 @@ class TestReplyFrame:
 
         with pytest.raises(MeshWorkerError):
             decode_reply(b"EMB1" + json.dumps(body).encode())
+
+
+class TestComponentFrame:
+    def test_preserves_component_error_association(self):
+        from printstash_core.inference import EmbeddingInput
+        from printstash_core.mesh.similarity import GeometryError
+
+        from app.modules.media.embedding_isolation import (
+            decode_components,
+            encode_components,
+        )
+
+        views = tuple(
+            EmbeddingInput("image", width=1, height=1, rgb=b"abc") for _ in range(6)
+        )
+
+        results = decode_components(
+            encode_components((views, GeometryError("component_unavailable"))), 2
+        )
+
+        assert results[0] == views
+        assert isinstance(results[1], GeometryError)
+        assert results[1].code == "component_unavailable"
