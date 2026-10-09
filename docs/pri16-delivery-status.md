@@ -16,7 +16,7 @@ difference. The historical candidate failed quality. The revised candidate
 also retires cyclic native wrappers at session cleanup, addressing the
 repeated-context memory exhaustion observed in the intermediate candidate.
 
-Expanded d1679b86 controls complete 120 observations: ASCII/binary cube and\nduplicate-face controls pass exactly; all 30 intersecting-solid observations\nfail the unchanged gate (two mask pixels, maximum channel difference 148).\nThis workload is rejected pending a coverage/depth-selection correction.\n\nThese results are not Linux/Docker evidence, full STL/3MF quality, complete-flow
+Expanded d1679b86 controls complete 120 observations: ASCII/binary cube and\nduplicate-face controls pass exactly; all 30 intersecting-solid observations\nfail the unchanged gate (two mask pixels, maximum channel difference 148).\nThis workload is rejected pending a coverage/depth-selection correction.\nPrivate copies of the deployment corpus add 150 real-source comparisons: three\ncases pass quality, two fail, and none demonstrates estimated speedup. Twelve\nnative-browser checks on the six selected real Models pass. See\n[the deployed Model evidence](benchmarks/pri16/deployed-models.md).\n\nThese results are not Linux/Docker evidence, full STL/3MF quality, complete-flow
 speedup, or physical Job failure containment. Intel hardware is not available
 in this environment. Default WSL exposes software rendering. A separate Mesa Dozen probe now renders\non the NVIDIA GPU in WSL and a disposable container, but requires an explicit\nnon-conformant-driver override and is not production evidence. The Docker daemon\nstill has no configured NVIDIA GPU runtime. The native Windows NVIDIA device is usable.
 

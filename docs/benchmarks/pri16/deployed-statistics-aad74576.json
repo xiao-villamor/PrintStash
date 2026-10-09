@@ -1,0 +1,138 @@
+{
+  "real-3mf-medium": {
+    "cpu": {
+      "count": 30,
+      "median": 1316.8067385013273,
+      "p95": 1510.188359003223,
+      "population_stddev": 89.00311188153152,
+      "median_95_percent_bootstrap_ci": [
+        1308.8822705030907,
+        1340.9062690043356
+      ],
+      "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+    },
+    "gpu": {
+      "count": 30,
+      "median": 1700.8705750049558,
+      "p95": 2026.0375520010712,
+      "population_stddev": 264.339530211202,
+      "median_95_percent_bootstrap_ci": [
+        1691.6291695015389,
+        1732.5022445038485
+      ],
+      "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+    }
+  },
+  "real-3mf-small": {
+    "cpu": {
+      "count": 30,
+      "median": 867.9884865050553,
+      "p95": 1171.6605830006301,
+      "population_stddev": 91.60644867946583,
+      "median_95_percent_bootstrap_ci": [
+        844.8682175003341,
+        893.728031503997
+      ],
+      "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+    },
+    "gpu": {
+      "count": 30,
+      "median": 1345.6367454964493,
+      "p95": 1635.4378139949404,
+      "population_stddev": 268.5805901426065,
+      "median_95_percent_bootstrap_ci": [
+        1327.6795589990797,
+        1379.8457239972777
+      ],
+      "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+    }
+  },
+  "real-stl-small": {
+    "cpu": {
+      "count": 30,
+      "median": 1732.9235049874114,
+      "p95": 1763.3397669924307,
+      "population_stddev": 32.071364098847894,
+      "median_95_percent_bootstrap_ci": [
+        1726.3840384948708,
+        1739.312001489452
+      ],
+      "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+    },
+    "gpu": {
+      "count": 30,
+      "median": 2248.3362184902944,
+      "p95": 2450.806543994986,
+      "population_stddev": 303.93709431781167,
+      "median_95_percent_bootstrap_ci": [
+        2240.918989995407,
+        2255.214603988861
+      ],
+      "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+    }
+  },
+  "real-3mf-large": {
+    "cpu": {
+      "count": 30,
+      "median": 3792.8627600012987,
+      "p95": 3945.6575620060903,
+      "population_stddev": 48.3129594798721,
+      "median_95_percent_bootstrap_ci": [
+        3790.204757504398,
+        3797.397283502505
+      ],
+      "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+    },
+    "gpu": {
+      "count": 30,
+      "median": 4236.270909499581,
+      "p95": 4588.293453998631,
+      "population_stddev": 263.4730561896492,
+      "median_95_percent_bootstrap_ci": [
+        4230.137549500796,
+        4243.611220004823
+      ],
+      "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+    }
+  },
+  "real-stl-medium": {
+    "cpu": {
+      "count": 30,
+      "median": 2038.9829599953373,
+      "p95": 2067.6407539940556,
+      "population_stddev": 30.329613858532856,
+      "median_95_percent_bootstrap_ci": [
+        2035.4066219952074,
+        2046.405353994487
+      ],
+      "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+    },
+    "gpu": {
+      "count": 30,
+      "median": 2152.863630992215,
+      "p95": 2177.4223699976574,
+      "population_stddev": 269.00181432075965,
+      "median_95_percent_bootstrap_ci": [
+        2150.8651794938487,
+        2158.9665844949195
+      ],
+      "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+    }
+  },
+  "real-stl-large": {
+    "cpu": {
+      "count": 0,
+      "median": null,
+      "p95": null,
+      "population_stddev": null,
+      "median_95_percent_bootstrap_ci": null
+    },
+    "gpu": {
+      "count": 0,
+      "median": null,
+      "p95": null,
+      "population_stddev": null,
+      "median_95_percent_bootstrap_ci": null
+    }
+  }
+}

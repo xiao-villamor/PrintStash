@@ -117,3 +117,4 @@ Production integration remains gated; these reports are not Linux/Docker or Inte
 hardware qualification.
 
 [Additional WSL/Docker NVIDIA diagnostic](wsl-dzn.md): an isolated non-conformant\nDozen build works only with an explicit experimental override. Default refusal\nand the missing-driver-store failure are retained. This is not deployment qualification.\n
+[Real deployed Model measurements](deployed-models.md) add 150 CPU/GPU comparisons\nand twelve native-browser correctness checks using private copies from port 3000.\nTwo real cases fail image tolerance and no measured case demonstrates speedup.\n
