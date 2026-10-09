@@ -9,12 +9,11 @@ this is allocation accounting, not a measurement of physical VRAM.
 
 from __future__ import annotations
 
-import math
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Buffer, Callable, Mapping
 from contextlib import ExitStack
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -54,8 +53,11 @@ class NativeFrame(Protocol):
 
 
 class NativeDevice(Protocol):
-    info: Mapping[str, str | int | bool]
-    limits: Mapping[str, int]
+    @property
+    def info(self) -> Mapping[str, str | int | bool]: ...
+
+    @property
+    def limits(self) -> Mapping[str, int]: ...
 
     def frame(
         self, width: int, height: int, chunk: int, radius: float
@@ -258,7 +260,9 @@ class _Frame:
         device.queue.submit([encoder.finish()])
         self.staging.map_sync("READ")
         try:
-            payload = self.staging.read_mapped()
+            # wgpu types this as ArrayLike; mapped data supports the buffer
+            # protocol consumed by NumPy without an additional copy.
+            payload = cast(Buffer, self.staging.read_mapped())
             rows = np.frombuffer(payload, dtype=np.uint8).reshape(
                 self.height, self.stride
             )
@@ -346,8 +350,13 @@ class GpuFrame:
             )
             or type(matte) is not bool
             or type(depth_radius) not in (float, int)
-            or not math.isfinite(depth_radius)
-            or depth_radius <= 0
+            # GPU uniforms must remain finite and nonzero even on devices that
+            # flush float32 subnormals to zero.
+            or not (
+                float(np.finfo(np.float32).tiny)
+                <= depth_radius
+                <= float(np.finfo(np.float32).max)
+            )
         ):
             raise GpuError(GpuFailure.INVALID_REQUEST)
         stride = ((width * 16 + 255) // 256) * 256

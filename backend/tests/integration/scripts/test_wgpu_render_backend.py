@@ -122,6 +122,16 @@ class TestGpuContext:
 
 
 class TestGpuFrame:
+    @pytest.mark.parametrize(
+        "radius", [0.0, -1.0, float("nan"), float("inf"), 1e-300, 1e300, 10**400]
+    )
+    def test_refuses_depth_not_representable_by_gpu(self, session, radius):
+        device, context = session
+        with pytest.raises(GpuError) as failure:
+            GpuFrame(context, 2, 2, 1, radius)
+        assert failure.value.reason is GpuFailure.INVALID_REQUEST
+        assert not device.frames
+
     def test_shades_complete_readback_with_canonical_callback(self, session, inputs):
         _, context = session
         frame = GpuFrame(context, 2, 2, 1, 2)

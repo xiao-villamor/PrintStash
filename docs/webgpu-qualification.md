@@ -18,6 +18,8 @@ existing `DeferredRasteriser` seam. WebGPU rasterizes normals and coverage into
 offscreen attachments; the canonical CPU callback supplies material/lighting.
 Camera selection, normal preparation, matte policy, postprocessing and encoding
 remain shared. One session owns one pipeline and at most one active frame.
+Depth radii outside the normal finite float32 range are refused before native
+allocation, including values that would overflow or be flushed to zero by a GPU.
 
 Adapters are selected by capabilities and limits, independently of vendor.
 Explicit `--adapter` selection matches an exact device name and refuses ambiguity.
@@ -191,6 +193,7 @@ below are under the mirrored `backend/tests/{unit,integration,e2e,repo}` tiers.
 | 26 | `test_reports_missing_optional_dependency` | Error | Executable without wgpu | Nonzero diagnostic with no qualification claim | E2E | ✅ |
 | 27 | `test_pins_current_optional_webgpu_library` | Happy | Project/lock metadata | Stable optional version pinned | Repo | ✅ |
 | 28 | Existing CPU and ModernGL pilot regression tests | Happy | Optional library absent | CPU report retained; historical pilot compatible | Integration | ✅ |
-| 29 | Physical quality/performance/recovery gates | Edge | NVIDIA and Intel Linux/Docker | Predeclared complete-flow and recovery gates | Hardware | ❌ awaiting physical access |
-| 30 | Production backend selection/publication/admission | Happy | Qualified adapter | Existing Job contracts preserved | Integration/E2E | ⏭️ Stage B prohibited until hardware gates pass |
-| 31 | Browser modernization | Happy | Browser renderer preference | Worker loading and compatible recovery | Playwright | ⏭️ separate PR |
+| 29 | test_refuses_depth_not_representable_by_gpu | Error | Overflow, underflow, nonfinite or nonpositive radius | Typed refusal before native allocation | Integration | ✅ |
+| 30 | Physical quality/performance/recovery gates | Edge | NVIDIA and Intel Linux/Docker | Predeclared complete-flow and recovery gates | Hardware | ❌ awaiting physical access |
+| 31 | Production backend selection/publication/admission | Happy | Qualified adapter | Existing Job contracts preserved | Integration/E2E | ⏭️ Stage B prohibited until hardware gates pass |
+| 32 | Browser modernization | Happy | Browser renderer preference | Worker loading and compatible recovery | Playwright | ⏭️ separate PR |
