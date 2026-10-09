@@ -116,3 +116,4 @@ Additional initialization cleanup coverage:
 | Behaviour | Input | Outcome | Tier | Status |
 | --- | --- | --- | --- | --- |
 | releases the acquired device after failure | Constructor, initialization, or disposal refusal | Acquired device is destroyed | Frontend unit | ✅ |
+| retains the device after successful initialization | Successful initialization | Live renderer owns the device | Frontend unit | ✅ |

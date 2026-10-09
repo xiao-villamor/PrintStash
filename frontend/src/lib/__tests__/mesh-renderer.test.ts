@@ -1,6 +1,6 @@
 /** Backend eligibility and readback layout preserve the browser compatibility path. */
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMeshRenderer, normalizeCaptureRows, selectMeshBackend } from "../mesh-renderer";
+import { describe, expect, it } from "vitest";
+import { initializeGpuRenderer, normalizeCaptureRows, selectMeshBackend } from "../mesh-renderer";
 
 describe("selectMeshBackend", () => {
   it("retains explicit WebGL preference on capable devices", () => {
@@ -61,57 +61,62 @@ describe("normalizeCaptureRows", () => {
   });
 });
 
-const initialization = vi.hoisted(() => ({
-  constructionFails: false,
-  disposalFails: false,
-}));
-vi.mock("three/webgpu", () => ({
-  WebGPURenderer: class {
-    constructor() {
-      if (initialization.constructionFails) throw new Error("construction_failed");
-    }
-    async init() {
-      throw new Error("initialization_failed");
-    }
-    async dispose() {
-      if (initialization.disposalFails) throw new Error("cleanup_failed");
-    }
-  },
-  WebGPUBackend: class {},
-}));
-
-describe("createMeshRenderer", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
+describe("initializeGpuRenderer", () => {
   it.each([
-    { name: "constructor refusal", constructionFails: true, disposalFails: false },
-    { name: "initialization refusal", constructionFails: false, disposalFails: false },
-    { name: "cleanup refusal", constructionFails: false, disposalFails: true },
+    {
+      name: "constructor refusal",
+      constructionFails: true,
+      disposalFails: false,
+      error: "construction_failed",
+    },
+    {
+      name: "initialization refusal",
+      constructionFails: false,
+      disposalFails: false,
+      error: "initialization_failed",
+    },
+    {
+      name: "cleanup refusal",
+      constructionFails: false,
+      disposalFails: true,
+      error: "cleanup_failed",
+    },
   ])("releases the acquired device after $name", async (failure) => {
-    initialization.constructionFails = failure.constructionFails;
-    initialization.disposalFails = failure.disposalFails;
     let destroyed = false;
     const device = {
       destroy: () => {
         destroyed = true;
       },
     };
-    vi.stubGlobal("isSecureContext", true);
-    vi.stubGlobal("navigator", {
-      gpu: { requestAdapter: async () => ({ requestDevice: async () => device }) },
-    });
+    const create = () => {
+      if (failure.constructionFails) throw new Error("construction_failed");
+      return {
+        init: async () => {
+          throw new Error("initialization_failed");
+        },
+        dispose: async () => {
+          if (failure.disposalFails) throw new Error("cleanup_failed");
+        },
+      };
+    };
 
-    await expect(
-      createMeshRenderer(
-        document.createElement("canvas"),
-        "webgpu",
-        new AbortController().signal,
-        () => undefined,
-      ),
-    ).rejects.toThrow();
+    await expect(initializeGpuRenderer(device, create)).rejects.toThrow(failure.error);
 
     expect(destroyed).toBe(true);
+  });
+
+  it("retains the device after successful initialization", async () => {
+    let destroyed = false;
+    const device = {
+      destroy: () => {
+        destroyed = true;
+      },
+    };
+    const renderer = { init: async () => undefined, dispose: () => undefined };
+
+    const initialized = await initializeGpuRenderer(device, () => renderer);
+
+    expect(initialized).toBe(renderer);
+    expect(destroyed).toBe(false);
   });
 });

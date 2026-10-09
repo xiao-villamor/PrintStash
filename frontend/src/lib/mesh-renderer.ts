@@ -74,6 +74,30 @@ function rememberRenderTarget(renderer: WebGLRenderer | WebGPURenderer): () => v
   return () => renderer.setRenderTarget(target);
 }
 
+/** Own an acquired device until renderer initialization transfers its lifetime. */
+export async function initializeGpuRenderer<
+  T extends { init(): Promise<T | void>; dispose(): void | Promise<void> },
+>(device: Pick<GPUDevice, "destroy">, create: () => T): Promise<T> {
+  let renderer: T;
+  try {
+    renderer = create();
+  } catch (error) {
+    device.destroy();
+    throw error;
+  }
+  try {
+    await renderer.init();
+    return renderer;
+  } catch (error) {
+    try {
+      await renderer.dispose();
+    } finally {
+      device.destroy();
+    }
+    throw error;
+  }
+}
+
 export async function createMeshRenderer(
   canvas: HTMLCanvasElement,
   preference: MeshRendererPreference,
@@ -95,22 +119,11 @@ export async function createMeshRenderer(
       device.destroy();
       throw new DOMException("Renderer initialization cancelled", "AbortError");
     }
-    try {
-      renderer = new WebGPURenderer({ canvas, device, antialias: true, alpha: true });
-    } catch (error) {
-      device.destroy();
-      throw error;
-    }
-    try {
-      await renderer.init();
-    } catch (error) {
-      try {
-        await renderer.dispose();
-      } finally {
-        device.destroy();
-      }
-      throw error;
-    }
+    const acquiredDevice = device;
+    renderer = await initializeGpuRenderer(
+      acquiredDevice,
+      () => new WebGPURenderer({ canvas, device: acquiredDevice, antialias: true, alpha: true }),
+    );
     if (renderer.backend instanceof WebGPUBackend) {
       maxTextureSize = device.limits.maxTextureDimension2D;
     } else {
