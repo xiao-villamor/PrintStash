@@ -58,8 +58,11 @@ evidence. No physical device-loss or hardware-OOM claim is made.
 ## Software validation
 
 The focused compute/media/real-IPC suite passes 73 cases. Core mesh tests pass
-642 cases. Ruff, scoped formatting and pyright pass. The full backend lane and
-optional image contracts are run separately; their final status belongs to the PR
+642 cases. Ruff, scoped formatting and backend pyright pass. The `gpu-render`
+image passes all ten startup/storage/backup contracts; a fresh vault on that final
+image also publishes three corpus inputs (two GPU renders and one embedded image).
+The local gallery's 92 cards, 184 images, filters and review export passed a browser
+functional check. The full backend lane and latest CI status belong to the PR
 validation record rather than these physical measurement claims.
 
 ## Coverage matrix
@@ -103,3 +106,6 @@ Physical diagnostics are opt-in and are not silently counted as ordinary CI test
 | 32 | Operator accepts visual quality | Happy | Local CPU/GPU gallery | Human decision recorded separately | Manual E2E | ⏭️ N/A — operator review pending |
 | 33 | Automatic performance qualification | Happy | Controlled accepted-Artifact → publication and mixed search | ≥1.5× and interactive p95≤1.1 | E2E | ⏭️ N/A — no receipt issued; shared-load runs do not qualify |
 | 34 | Other hardware combinations qualified | Happy | Representative AMD/Intel/native Linux drivers | Physical deployment evidence for each combination | E2E | ⏭️ N/A — unavailable hardware; no support claim |
+| 35 | Full-image transports preserved | Happy | Built gpu-render image | S3/WebDAV/SFTP/Drive available | E2E image | ✅ `e2e/runtime_image.py::TestFullImageTransports::test_constructs_advertised_image_transports` |
+| 36 | S3 restore preserved | Happy | Backup from shipped gpu-render image | Backup restores successfully | E2E image | ✅ `e2e/runtime_image.py::TestRuntimeImageBackup::test_restores_s3_backup_from_shipped_image` |
+| 37 | SFTP restore preserved | Happy | Backup from shipped gpu-render image | Backup restores successfully | E2E image | ✅ `e2e/runtime_image.py::TestRuntimeImageBackup::test_restores_sftp_backup_from_shipped_image` |

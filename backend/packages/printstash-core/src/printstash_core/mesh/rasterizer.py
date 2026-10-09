@@ -366,7 +366,7 @@ def render_prepared_pixels(
         import numpy as np
 
         # Preserve the early optional-dependency failure before geometry work.
-        from PIL import Image  # noqa: F401 # pyright: ignore[reportMissingTypeStubs]
+        __import__("PIL", fromlist=["Image"])
     except ImportError:
         if logger is not None:
             logger.error(
