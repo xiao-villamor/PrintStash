@@ -88,15 +88,26 @@ fn shade(value: vec3<f32>) -> vec3<f32> {
     let specular = frame.style.x * pow(clamp(dot(n,half_vector),0.,1.),32.);
     return clamp(diffuse+0.22*fresnel*vec3(0.85,0.92,1.)+specular,vec3(0.),vec3(1.));
 }
+// Shared edges use one arithmetic order in both incident triangles. This
+// preserves opposite signs even when the driver contracts multiply/add.
+fn edge(start: vec2<f32>, end: vec2<f32>, p: vec2<f32>) -> f32 {
+    let reverse = start.x > end.x || (start.x == end.x && start.y > end.y);
+    let low = select(start, end, reverse);
+    let high = select(end, start, reverse);
+    let value = (high.y-low.y)*(p.x-low.x)+(low.x-high.x)*(p.y-low.y);
+    return select(value, -value, reverse);
+}
 struct Fragment { @location(0) color: vec4<f32>, @builtin(frag_depth) depth: f32 };
 @fragment fn fs(in: Vertex) -> Fragment {
     let t = projected[in.triangle];
     let p = in.pos.xy;
     let d = (t.b.y-t.c.y)*(t.a.x-t.c.x)+(t.c.x-t.b.x)*(t.a.y-t.c.y);
     if abs(d) <= 1e-9 { discard; }
-    let a = ((t.b.y-t.c.y)*(p.x-t.c.x)+(t.c.x-t.b.x)*(p.y-t.c.y))/d;
-    let b = ((t.c.y-t.a.y)*(p.x-t.c.x)+(t.a.x-t.c.x)*(p.y-t.c.y))/d;
-    let c = 1.0-a-b;
+    let a = edge(t.c.xy,t.b.xy,p)/d;
+    let b = edge(t.a.xy,t.c.xy,p)/d;
+    // Evaluate the third edge directly. Subtracting the first two weights
+    // loses opacity along shared edges through single-precision cancellation.
+    let c = edge(t.b.xy,t.a.xy,p)/d;
     if a < 0.0 || b < 0.0 || c < 0.0 { discard; }
     let z = a*t.a.z+b*t.b.z+c*t.c.z;
     var out: Fragment;

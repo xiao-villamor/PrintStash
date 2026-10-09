@@ -16,7 +16,7 @@ from app.runtime.compute import client
 from app.runtime.compute.contracts import ComputeUnavailable, Reason
 from app.runtime.compute.protocol import Priority, RenderRequest
 
-RECIPE = "webgpu-canonical-raster-v1"
+RECIPE = "webgpu-canonical-raster-v2"
 
 
 def render(prepared, width, height, views, matte):

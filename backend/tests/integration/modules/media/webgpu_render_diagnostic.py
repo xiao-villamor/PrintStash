@@ -57,6 +57,28 @@ class TestWebGpuRender:
         assert np.array_equal(actual[:, 3] >= 128, baseline[:, 3] >= 128)
         assert np.abs(actual.astype(int) - baseline.astype(int)).max() <= 8
 
+    def test_preserves_shared_edges_in_orthographic_views(self, renderer):
+        import trimesh
+
+        from app.modules.media.geometry_analysis import canonical_frames
+
+        prepared = prepare_mesh_render(trimesh.creation.box())
+        views = [np.asarray(view) for view in canonical_frames()]
+        payload = encode(prepared, 224, 224, views, True)
+        actual = renderer.execute(payload)
+        size = 224 * 224 * 4
+
+        for index, view in enumerate(views):
+            expected = render_prepared_pixels(
+                prepared, "", 224, 224, view_rotation=view, matte=True
+            )
+            candidate = np.frombuffer(
+                actual[12 + index * size : 12 + (index + 1) * size], dtype=np.uint8
+            ).reshape(-1, 4)
+            baseline = np.frombuffer(expected.rgba, dtype=np.uint8).reshape(-1, 4)
+            assert np.array_equal(candidate[:, 3] >= 128, baseline[:, 3] >= 128)
+            assert np.abs(candidate.astype(int) - baseline.astype(int)).max() <= 8
+
     def test_refuses_workspace_growth_over_budget(self, renderer):
         renderer.workspace_limit = 1
 

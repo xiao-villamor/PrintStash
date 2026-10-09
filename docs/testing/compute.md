@@ -35,6 +35,8 @@ This matrix separates implemented software contracts from outstanding physical q
 | 28 | Validate optional render completion | Error | Incomplete frames or withdrawn caller | Invalid output falls back; cancellation propagates | Unit | ✅ unit/modules/media/test_compute_render.py::TestOptionalRender |
 | 29 | Preserve optional image deployment contracts | Happy | Built GPU variant | Startup, storage and backup/restore contracts pass | E2E image | ✅ tests/e2e/runtime_image.py; 10 passed |
 
+| 30 | Preserve opacity along shared GPU edges | Error | Orthographic box at 224 pixels on physical RTX 5060 | Exact foreground mask and RGBA difference at most 8 | Integration diagnostic | ✅ integration/modules/media/webgpu_render_diagnostic.py::TestWebGpuRender::test_preserves_shared_edges_in_orthographic_views |
+
 ## Evidence recorded during implementation
 
 - Focused inference/media/API and broker checks: 457 passed.
@@ -50,5 +52,7 @@ This matrix separates implemented software contracts from outstanding physical q
 - An initial broad local run stopped after missing full-extra dependencies (879 passed, one failure and two collection errors); installing the full extra preceded the full-suite run. This was not a successful gate.
 
 The explicit optional diagnostic fails if runtime/device prerequisites are absent; it is invoked separately from ordinary CPU CI. The development machine exposed llvmpipe to wgpu. Its synthetic box/sphere results and injected faults do not authorize receipts or NVIDIA/AMD/Intel support claims. The outstanding rows above block physical acceleration qualification, while normal CPU deployment remains available.
+
+Follow-up [physical RTX 5060 investigation](compute-rtx5060-investigation.md): both native Windows canaries pass; experimental WSL rendering diagnostics pass after a shared-edge correction. Dozen still blocks ONNX WebGPU and 2/84 expanded render views fail the quality gate, so no production qualification is claimed.
 
 See [compute deployment and qualification](../compute.md) and ADRs [0015](../adr/0015-gpu-rendering.md) / [0016](../adr/0016-native-worker-startup.md).

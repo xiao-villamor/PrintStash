@@ -63,7 +63,7 @@ Linux AMD/Intel deployments need a hardware Vulkan driver and access to the appr
 
 In WSL, qualify inside the actual distribution/container. Windows drivers or working CUDA utilities do not prove a hardware Vulkan/Dozen path. CPU, llvmpipe and unknown adapters are refused as acceleration. Both runtimes must identify the same physical vendor/device and run real canaries. Native Windows/macOS broker deployments are outside this POSIX implementation.
 
-**No NVIDIA, AMD or Intel combination is qualified by this change.** The development WSL environment exposed only software wgpu adapters. Software raster diagnostics exercise commands and quality assertions, not physical GPU support or speedup.
+**No NVIDIA, AMD or Intel deployment combination is fully qualified by this change.** Follow-up testing reached the RTX 5060 with both runtimes natively on Windows and with experimental wgpu rendering through a locally built Dozen driver in WSL. ONNX WebGPU still rejects Dozen's missing fullDrawIndexUint32 feature. Some thumbnail comparisons also remain outside the unchanged visual gate. See the [physical RTX 5060 investigation](testing/compute-rtx5060-investigation.md) for measured results and deployment blockers.
 
 ## Qualification and rollout
 
