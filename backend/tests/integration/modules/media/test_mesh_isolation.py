@@ -931,3 +931,37 @@ class TestFreshWorkerDependencies:
         assert following.failure_reason is None
         assert malformed.read_bytes() == damaged
         assert startup_source.read_bytes() == original
+
+
+class TestComputeStartupPlacement:
+    @pytest.mark.parametrize(
+        "thumbnail,fingerprint,expected_starts",
+        [
+            (False, False, 0),
+            (True, False, 1),
+            (False, True, 1),
+        ],
+        ids=["metadata-only", "thumbnail", "visual-analysis"],
+    )
+    def test_warms_render_owner_only_for_visual_work(
+        self, tmp_path, monkeypatch, thumbnail, fingerprint, expected_starts
+    ):
+        from app.runtime.compute import client
+
+        path = tmp_path / "cube.stl"
+        path.write_bytes(trimesh.creation.box().export(file_type="stl"))
+        starts = []
+        monkeypatch.setattr(client, "warm_render", lambda: starts.append(True))
+        result = mesh_isolation.generate(
+            _request(
+                path,
+                include_thumbnail=thumbnail,
+                include_fingerprint=fingerprint,
+                width=64,
+                height=48,
+            )
+        )
+
+        assert len(starts) == expected_starts
+        assert result.geometry["triangle_count"] == 12
+        assert (result.image is not None) is thumbnail

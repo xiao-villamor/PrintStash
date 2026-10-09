@@ -672,8 +672,9 @@ def _run_worker(
     from app.runtime.compute.client import warm_render
 
     checkpoint()
-    warm_render()
-    checkpoint()
+    if isinstance(work, (RasterWork, AnalysisWork)):
+        warm_render()
+        checkpoint()
     existing = current_permit()
     capacity = Resources(native_process.native_capacity().slots, memory_budget_bytes())
     amount = (

@@ -57,7 +57,7 @@ evidence. No physical device-loss or hardware-OOM claim is made.
 
 ## Software validation
 
-The focused compute/media/real-IPC suite passes 73 cases. Core mesh tests pass
+The focused compute/media/real-IPC suite passes 73 cases. Three additional isolated-worker cases verify that only visual work starts the GPU owner; the metadata-only case failed before its fix. Core mesh tests pass
 642 cases. Ruff, scoped formatting and backend pyright pass. The `gpu-render`
 image passes all ten startup/storage/backup contracts; a fresh vault on that final
 image also publishes three corpus inputs (two GPU renders and one embedded image).
@@ -109,3 +109,4 @@ Physical diagnostics are opt-in and are not silently counted as ordinary CI test
 | 35 | Full-image transports preserved | Happy | Built gpu-render image | S3/WebDAV/SFTP/Drive available | E2E image | ✅ `e2e/runtime_image.py::TestFullImageTransports::test_constructs_advertised_image_transports` |
 | 36 | S3 restore preserved | Happy | Backup from shipped gpu-render image | Backup restores successfully | E2E image | ✅ `e2e/runtime_image.py::TestRuntimeImageBackup::test_restores_s3_backup_from_shipped_image` |
 | 37 | SFTP restore preserved | Happy | Backup from shipped gpu-render image | Backup restores successfully | E2E image | ✅ `e2e/runtime_image.py::TestRuntimeImageBackup::test_restores_sftp_backup_from_shipped_image` |
+| 38 | CPU-only metadata avoids GPU cold start | Edge | Metadata-only, thumbnail and visual-analysis requests | Owner starts only for visual work | Integration | ✅ `integration/modules/media/test_mesh_isolation.py::TestComputeStartupPlacement::test_warms_render_owner_only_for_visual_work` |
