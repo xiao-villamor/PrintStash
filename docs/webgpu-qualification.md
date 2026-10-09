@@ -134,7 +134,11 @@ Do not treat --allow-software as a workaround for physical qualification.
 adoption of candidate 969b2966: the curved control exceeds the unchanged RGBA gate,
 and six context initializations fail. Raw failures and the reproduction probe are
 retained. This is not a Linux/Docker or complete-flow performance qualification.
-The optional tools remain available for investigating a revised candidate.
+The revised 649cd8f2 candidate passes all sixty cube/torus control observations
+with zero RGBA difference and no failures. Its face-ID readback and session
+cleanup address the observed precision and repeated-context failures. This
+does not qualify the full corpus, complete-flow speed, recovery or Linux/Intel
+deployment. See the same evidence record for both historical and revised results.
 
 ## Adoption prerequisites
 

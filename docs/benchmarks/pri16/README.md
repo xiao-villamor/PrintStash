@@ -40,3 +40,38 @@ Additional conformance checks:
 - Explicit software conformance passes in that image and reports acceleration=false.
 - The available Docker daemon refuses --gpus all: no GPU vendor is configured.
 - WSL sees llvmpipe, while native Windows enumerates RTX 5060 Vulkan and D3D12.
+
+## Revised candidate
+
+Candidate 649cd8f27af0c523c686662db129fac520e8da1f changes GPU readback to
+winning face identifiers. Canonical interpolation uses original geometry
+precision before the existing CPU shading and quantization. A diagnostic on
+the torus located the old difference: raw supersampled channels differed by
+at most one, while alpha-aware resizing amplified edge differences to 83.
+The new approach does not change that resize policy or its tolerance.
+
+| Control | Attempts | Completed | Equal foreground masks | Maximum RGBA difference | Stable output |
+| --- | ---: | ---: | --- | ---: | --- |
+| Cube | 30 | 30 | Yes | 0 | Yes |
+| Torus with hole | 30 | 30 | Yes | 0 | Yes |
+
+All sixty observations on 649cd8f2 pass these control quality checks. The
+predeclared manifest and all samples are in windows-rtx5060-649cd8f2.json.
+windows-revised-controls.py reproduces this Windows development probe from the
+exact commit. It refuses to overwrite its output directory.
+
+The intermediate d3d649fb report is retained too: completed output matches
+exactly, but six repeated-context initializations fail. Captured native causes
+identify insufficient memory. Dropping GPU wrappers alone still failed after
+54 contexts in a follow-up diagnostic. Explicit collection at session cleanup
+completed 80 diagnostic cycles. The final 60-observation run includes that
+cleanup in the adapter. Native driver memory does not advance Python's garbage
+collection thresholds, so deferred device/queue wrapper cycles must be retired
+at the session boundary.
+
+**Decision: control quality now passes; production adoption remains unqualified.**
+These are prepared synthetic controls on Windows, not the complete STL/3MF
+corpus, Job latency, browser performance, Linux/Docker verification or physical
+failure containment. Render/encode timings exclude cleanup and were collected
+during other development work; they cannot qualify speedup. The historical
+969b2966 rejection remains valid for that historical candidate.
