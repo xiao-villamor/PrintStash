@@ -669,6 +669,12 @@ def _run_worker(
     on_chunk: Callable[[bytes], None] | None = None,
 ) -> SupervisedReply:
     """Plan a weighted native allowance, then run one supervised worker."""
+    from app.runtime.compute.client import warm_render
+
+    checkpoint()
+    if isinstance(work, (RasterWork, AnalysisWork)):
+        warm_render()
+        checkpoint()
     existing = current_permit()
     capacity = Resources(native_process.native_capacity().slots, memory_budget_bytes())
     amount = (

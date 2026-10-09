@@ -1,9 +1,10 @@
-"""CPU-only ONNX sessions; loaded exclusively in the monitored inference child."""
+"""Validated ONNX sessions and tensor batches inside a monitored compute owner."""
 
 from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 from printstash_core.inference import EmbeddingError, EmbeddingInput, EmbeddingSpace
 from printstash_core.inference.vectors import normalize
@@ -11,7 +12,6 @@ from printstash_core.inference.vectors import normalize
 from app.modules.inference.manifest import (
     LocalModelManifest,
     ModelAsset,
-    ModelManifest,
     PointModelManifest,
     TextModelManifest,
     verify_assets,
@@ -26,13 +26,27 @@ def _verified_bytes(directory: Path, asset: ModelAsset) -> bytes:
 
 
 class OnnxCpuProvider:
-    def __init__(self, directory: Path, manifest: ModelManifest, threads: int):
+    def __init__(
+        self,
+        directory: Path,
+        manifest: LocalModelManifest | PointModelManifest | TextModelManifest,
+        threads: int,
+        *,
+        session_factory=None,
+    ):
         if type(threads) is not int or not 1 <= threads <= 4:
             raise EmbeddingError("embedding_thread_budget_invalid")
         try:
             import onnxruntime as ort
         except ImportError as exc:
             raise EmbeddingError("embedding_runtime_unavailable") from exc
+
+        def cpu_factory(payload, options) -> Any:
+            return ort.InferenceSession(
+                payload, sess_options=options, providers=["CPUExecutionProvider"]
+            )
+
+        factory = cpu_factory if session_factory is None else session_factory
         verify_assets(directory, manifest)
         self.manifest = manifest
         self.space = manifest.space()
@@ -48,12 +62,11 @@ class OnnxCpuProvider:
         options.enable_mem_pattern = False
         options.add_session_config_entry("session.intra_op.allow_spinning", "0")
         options.add_session_config_entry("session.inter_op.allow_spinning", "0")
-        self.image = None
+        self.image: Any = None
         if isinstance(manifest, (LocalModelManifest, PointModelManifest)):
-            self.image = ort.InferenceSession(
+            self.image = factory(
                 _verified_bytes(directory, manifest.image.graph),
-                sess_options=options,
-                providers=["CPUExecutionProvider"],
+                options,
             )
             self.image.disable_fallback()
             image_size = manifest.image.image_size
@@ -67,7 +80,7 @@ class OnnxCpuProvider:
                 },
                 manifest.image.output_name,
             )
-        self.text = None
+        self.text: Any = None
         if manifest.text is not None:
             try:
                 from tokenizers import Tokenizer
@@ -88,10 +101,9 @@ class OnnxCpuProvider:
             graph = _verified_bytes(directory, manifest.text.graph)
             if isinstance(manifest, TextModelManifest):
                 self._verify_text_graph(graph, manifest.text.opset)
-            self.text = ort.InferenceSession(
+            self.text = factory(
                 graph,
-                sess_options=options,
-                providers=["CPUExecutionProvider"],
+                options,
             )
             self.text.disable_fallback()
             inputs = {
@@ -137,13 +149,11 @@ class OnnxCpuProvider:
                     pad_id=manifest.text.pad_id,
                     pad_token=manifest.text.pad_token,
                 )
-        self.point = None
+        self.point: Any = None
         if isinstance(manifest, PointModelManifest):
             graph = _verified_bytes(directory, manifest.point.graph)
             self._verify_text_graph(graph, manifest.point.opset)
-            self.point = ort.InferenceSession(
-                graph, sess_options=options, providers=["CPUExecutionProvider"]
-            )
+            self.point = factory(graph, options)
             self.point.disable_fallback()
             self._validate_signature(
                 self.point,
@@ -245,64 +255,92 @@ class OnnxCpuProvider:
         ):
             raise EmbeddingError("embedding_signature_mismatch")
 
-    def _one(self, item: EmbeddingInput) -> tuple[float, ...]:
+    @staticmethod
+    def _dynamic_batch(session) -> bool:
+        """Only graphs with dynamic batch inputs AND outputs admit a tensor batch."""
+        return all(
+            node.shape and not isinstance(node.shape[0], int)
+            for node in (*session.get_inputs(), *session.get_outputs())
+        )
+
+    def _batch(
+        self, items: tuple[EmbeddingInput, ...]
+    ) -> tuple[tuple[float, ...], ...]:
         import numpy as np
 
-        if item.modality == "text":
+        modality = items[0].modality
+        if any(item.modality != modality for item in items):
+            raise EmbeddingError("embedding_modality_mismatch")
+        count = len(items)
+        if modality == "text":
             if (
                 self.text is None
                 or self.tokenizer is None
+                or self.count_tokenizer is None
                 or self.manifest.text is None
             ):
                 raise EmbeddingError("embedding_text_unavailable")
             contract = self.manifest.text
-            text = item.text or ""
-            if not isinstance(self.manifest, TextModelManifest):
-                text = self.space.query_prefix + text
-            tokens = self.tokenizer.encode(text)
-            self.truncations.append(
-                len(self.count_tokenizer.encode(text).ids) > contract.max_tokens
-            )
-            values = {contract.input_name: np.asarray([tokens.ids], dtype=np.int64)}
-            if contract.attention_mask_name is not None:
-                values[contract.attention_mask_name] = np.asarray(
-                    [tokens.attention_mask], dtype=np.int64
+            texts = [
+                (
+                    self.space.query_prefix
+                    if not isinstance(self.manifest, TextModelManifest)
+                    else ""
                 )
+                + (item.text or "")
+                for item in items
+            ]
+            tokens = self.tokenizer.encode_batch(texts)
+            self.truncations.extend(
+                len(encoded.ids) > contract.max_tokens
+                for encoded in self.count_tokenizer.encode_batch(texts)
+            )
+            values = {
+                contract.input_name: np.asarray(
+                    [token.ids for token in tokens], dtype=np.int64
+                )
+            }
+            masks = np.asarray(
+                [token.attention_mask for token in tokens], dtype=np.int64
+            )
+            if contract.attention_mask_name is not None:
+                values[contract.attention_mask_name] = masks
             if (
                 isinstance(self.manifest, TextModelManifest)
                 and self.manifest.text.token_type_ids_name is not None
             ):
                 values[self.manifest.text.token_type_ids_name] = np.asarray(
-                    [tokens.type_ids], dtype=np.int64
+                    [token.type_ids for token in tokens], dtype=np.int64
                 )
             result = self.text.run([contract.output_name], values)[0]
             if isinstance(self.manifest, TextModelManifest):
-                if result.shape != (
-                    1,
-                    len(tokens.ids)
-                    if self.dynamic_text_length
-                    else self.manifest.text.max_tokens,
-                    self.space.dimension,
-                ):
+                if result.shape != (count, len(tokens[0].ids), self.space.dimension):
                     raise EmbeddingError("embedding_output_mismatch")
                 if self.manifest.text.pooling == "cls":
                     result = result[:, 0, :]
                 else:
-                    mask = np.asarray(tokens.attention_mask, dtype=np.float32)[
-                        None, :, None
-                    ]
-                    result = (result * mask).sum(axis=1) / max(float(mask.sum()), 1)
-        elif item.modality == "point_cloud":
+                    mask = masks.astype(np.float32)[:, :, None]
+                    result = (result * mask).sum(axis=1) / np.maximum(
+                        mask.sum(axis=1), 1
+                    )
+        elif modality == "point_cloud":
             from printstash_core.inference.points import grouped_points
 
             if not isinstance(self.manifest, PointModelManifest) or self.point is None:
                 raise EmbeddingError("embedding_point_unavailable")
-            centers, grouped = grouped_points(item)
+            pairs = [grouped_points(item) for item in items]
             point = self.manifest.point
-            self.truncations.append(False)
+            self.truncations.extend([False] * count)
             result = self.point.run(
                 [point.output_name],
-                {point.centers_name: centers, point.grouped_name: grouped},
+                {
+                    point.centers_name: np.concatenate(
+                        [pair[0] for pair in pairs], axis=0
+                    ),
+                    point.grouped_name: np.concatenate(
+                        [pair[1] for pair in pairs], axis=0
+                    ),
+                },
             )[0]
         else:
             from PIL import Image
@@ -312,31 +350,43 @@ class OnnxCpuProvider:
                 or self.image is None
             ):
                 raise EmbeddingError("embedding_image_unavailable")
-            self.truncations.append(False)
-            image_contract = self.manifest.image
-            image = Image.frombytes("RGB", (item.width, item.height), item.rgb or b"")
-            image = image.resize(
-                (image_contract.image_size, image_contract.image_size),
-                Image.Resampling.BICUBIC,
-            )
-            pixels = np.asarray(image, dtype=np.float32) / 255
-            pixels = (
-                pixels - np.asarray(image_contract.mean, dtype=np.float32)
-            ) / np.asarray(image_contract.std, dtype=np.float32)
-            tensor = np.ascontiguousarray(
-                pixels.transpose(2, 0, 1)[None], dtype=np.float32
-            )
+            self.truncations.extend([False] * count)
+            contract = self.manifest.image
+            tensors = []
+            for item in items:
+                image = Image.frombytes(
+                    "RGB", (item.width, item.height), item.rgb or b""
+                )
+                image = image.resize(
+                    (contract.image_size, contract.image_size), Image.Resampling.BICUBIC
+                )
+                pixels = np.asarray(image, dtype=np.float32) / 255
+                pixels = (
+                    pixels - np.asarray(contract.mean, dtype=np.float32)
+                ) / np.asarray(contract.std, dtype=np.float32)
+                tensors.append(pixels.transpose(2, 0, 1))
             result = self.image.run(
-                [image_contract.output_name], {image_contract.input_name: tensor}
+                [contract.output_name],
+                {
+                    contract.input_name: np.ascontiguousarray(
+                        np.stack(tensors), dtype=np.float32
+                    )
+                },
             )[0]
-        if result.shape != (1, self.space.dimension) or result.dtype != np.float32:
+        if result.shape != (count, self.space.dimension) or result.dtype != np.float32:
             raise EmbeddingError("embedding_output_mismatch")
         return tuple(
-            float(value)
-            for value in np.frombuffer(
-                normalize(result[0], self.space.dimension), dtype="<f4"
+            tuple(
+                float(value)
+                for value in np.frombuffer(
+                    normalize(row, self.space.dimension), dtype="<f4"
+                )
             )
+            for row in result
         )
+
+    def _one(self, item: EmbeddingInput) -> tuple[float, ...]:
+        return self._batch((item,))[0]
 
     def _check_canaries(self) -> None:
         import numpy as np
@@ -372,6 +422,20 @@ class OnnxCpuProvider:
                 actual, expected, atol=self.manifest.canary_tolerance, rtol=0
             ):
                 raise EmbeddingError("embedding_canary_mismatch")
+            session = {
+                "text": self.text,
+                "image": self.image,
+                "point_cloud": self.point,
+            }[item.modality]
+            if self._dynamic_batch(session):
+                batched = self._batch((item, item))
+                if any(
+                    not np.allclose(
+                        row, actual, atol=self.manifest.canary_tolerance, rtol=0
+                    )
+                    for row in batched
+                ):
+                    raise EmbeddingError("embedding_canary_mismatch")
 
     def embed(
         self, inputs: tuple[EmbeddingInput, ...], space: EmbeddingSpace
@@ -381,4 +445,37 @@ class OnnxCpuProvider:
         if not 1 <= len(inputs) <= 8:
             raise EmbeddingError("embedding_batch_budget")
         self.truncations = []
-        return tuple(self._one(item) for item in inputs)
+        # Bucket dynamic text lengths before padding; fixed exports keep their
+        # singleton path. Restore source order after independently shaped runs.
+        groups = {}
+        for index, item in enumerate(inputs):
+            session = {
+                "text": self.text,
+                "image": self.image,
+                "point_cloud": self.point,
+            }[item.modality]
+            bucket = 0
+            if session is None or not self._dynamic_batch(session):
+                bucket = index + 100000
+            elif item.modality == "text" and self.dynamic_text_length:
+                assert (
+                    self.count_tokenizer is not None and self.manifest.text is not None
+                )
+                length = min(
+                    len(self.count_tokenizer.encode(item.text or "").ids),
+                    self.manifest.text.max_tokens,
+                )
+                bucket = max(32, 1 << max(0, length - 1).bit_length())
+            groups.setdefault((item.modality, bucket), []).append(index)
+        results = {}
+        truncations = {}
+        for indexes in groups.values():
+            self.truncations = []
+            vectors = self._batch(tuple(inputs[index] for index in indexes))
+            for index, vector, truncated in zip(
+                indexes, vectors, self.truncations, strict=True
+            ):
+                results[index] = vector
+                truncations[index] = truncated
+        self.truncations = [truncations[index] for index in range(len(inputs))]
+        return tuple(results[index] for index in range(len(inputs)))

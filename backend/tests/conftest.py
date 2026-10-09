@@ -352,6 +352,7 @@ def _patch_engine(
     ``app.db.session.engine`` and ``app.modules.printing.printer_hub.engine``.
     See ADR-0001.
     """
+    monkeypatch.delenv("PRINTSTASH_COMPUTE_ROOT", raising=False)
     override_session_factory(_test_factory)
     _overlay.clear()
     _overlay["db_url"] = TEST_DB_URL

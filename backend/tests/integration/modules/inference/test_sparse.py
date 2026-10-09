@@ -156,3 +156,20 @@ class TestSparse:
         monkeypatch.setitem(_overlay, "embedding_worker_memory_mb", 1)
         with pytest.raises(EmbeddingError, match="embedding_worker_oom"):
             sparse_provider.validate()
+
+
+class TestSparseTensorBatch:
+    @pytest.mark.parametrize("dynamic", [False, True])
+    def test_matches_independent_documents(self, tmp_path, dynamic):
+        directory = sparse_embedding_assets(
+            tmp_path / "sparse-batch", dynamic_batch=dynamic
+        )
+        manifest = read_manifest(directory, "sparse-contract")
+        provider = SparseNativeProvider(directory, manifest, 1)
+        texts = ["bicycle", "lamp bracket", "bicycle " * 10]
+        expected = [provider.expand(text) for text in texts]
+
+        result = provider.expand_many(texts)
+
+        assert result == expected
+        assert result[-1].truncated

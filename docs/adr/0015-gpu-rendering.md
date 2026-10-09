@@ -22,4 +22,26 @@ Keep the application on the existing CPU renderer. The optional ModernGL candida
 
 Context reuse and one final readback are retained in the research tool. Adoption would require resolving the image discrepancies against independent controls, qualifying an explicit hardware/driver allocation strategy, and measuring recovery from real device reset/OOM. Current successful cancellation and deadline containment prove process and credit recovery only. The existing CPU path, derivative recipe and installation requirements remain unchanged. A later candidate can reuse the narrow deferred-frame protocol and canonical encoder without duplicating geometry preparation or application orchestration.
 
-This decision qualifies the ModernGL candidate only. A native WebGPU adapter using wgpu-py has not been qualified for rendering quality, complete-flow performance or failure recovery; its migration is deferred. API availability alone cannot supply those measurements. See the [official wgpu-py guide](https://wgpu-py.readthedocs.io/en/stable/guide.html) for the separate native API.
+This decision qualifies the ModernGL candidate only. A native WebGPU adapter using wgpu-py has not been qualified for rendering quality, complete-flow performance or failure recovery; its candidate implementation is guarded by operation-specific qualification receipts. API availability alone cannot supply those measurements. See the [official wgpu-py guide](https://wgpu-py.readthedocs.io/en/stable/guide.html) for the separate native API.
+
+
+## Portable compute lifecycle
+
+The [portable compute implementation](../compute.md) uses a host-local broker for persistent wgpu and ONNX WebGPU ownership, bounded immutable array transfers, shared device admission and separately reserved host memory. Source parsing stays disposable. Geometry uploads serve all cameras and may stay cached; canonical framing and final CPU postprocessing remain in core through PreparedRasteriser.
+
+Automatic selection requires hardware and implementation-specific evidence. Missing evidence is ordinary CPU operation. Thumbnail recipe 12 and qualified-portable-v3 version the candidate independently of hardware. Original ModernGL measurements remain unchanged and cannot qualify this backend.
+
+
+## Render-only WSL follow-up (2026-10-10)
+
+The maintained Mesa D3D12 OpenGL path works with wgpu-native in Docker/WSL.
+It does not require ONNX readiness or the experimental Vulkan/Dozen route.
+DXCore hardware evidence resolves unknown GL adapter classification without
+vendor-specific rendering. The optional render image includes EGL/GL drivers.
+
+The persistent broker supports bounded ready-frame batches, shared readback
+fences, retained geometry/shader resources and a bounded shaded-output cache.
+Preview admission is explicit and retains all resource/publication fences;
+it produces no qualification receipt. Visual acceptance belongs to the operator.
+Historical pilot numbers remain historical evidence; see
+[current render evaluation](../testing/compute-render-wsl.md).

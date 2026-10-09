@@ -1,7 +1,7 @@
 """Bounded, validated messages exchanged with the isolated native worker."""
 
 from enum import IntEnum
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -32,6 +32,9 @@ class WorkerRequest(BaseModel):
     space_json: str | None = Field(default=None, max_length=32768)
     inputs: list[WorkerInput] = Field(default_factory=list, max_length=8)
     sparse_text: str | None = Field(default=None, min_length=1, max_length=16384)
+    sparse_texts: list[Annotated[str, Field(min_length=1, max_length=16384)]] = Field(
+        default_factory=list, max_length=8
+    )
 
 
 class WorkerResult(BaseModel):

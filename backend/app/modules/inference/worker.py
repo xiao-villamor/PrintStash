@@ -53,12 +53,26 @@ class NativeWorker:
                 self._sparse_provider = SparseNativeProvider(
                     self.directory, self.manifest, self.threads
                 )
+            if request.sparse_texts:
+                if request.sparse_text is not None:
+                    raise EmbeddingError("embedding_input_invalid")
+                return json.dumps(
+                    {
+                        "sparse_results": [
+                            result.model_dump()
+                            for result in self._sparse_provider.expand_many(
+                                request.sparse_texts
+                            )
+                        ]
+                    },
+                    allow_nan=False,
+                ).encode()
             return (
                 self._sparse_provider.expand(request.sparse_text)
                 .model_dump_json()
                 .encode()
             )
-        if request.sparse_text is not None:
+        if request.sparse_text is not None or request.sparse_texts:
             raise EmbeddingError("embedding_sparse_required")
         space = (
             EmbeddingSpace(**json.loads(request.space_json))

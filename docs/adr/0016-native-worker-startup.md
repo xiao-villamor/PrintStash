@@ -35,3 +35,22 @@ A separate 30-sample admitted bootstrap/guardian/stdlib-reply control measured a
 The [test matrix](../testing/native-worker-startup.md) covers real fresh-child operation with parent dependencies refused at an external import boundary, parent telemetry and URL semantics, plus real hard-limit, parent-death, descendant, cancellation and final-exit regressions. Import traces run separately from timed samples. No GPU, runtime migration or older-Python support is involved.
 
 The existing collector runs as `python -m scripts.bench_mesh_pipeline --mode worker --runs 30 --case cube-binary.stl --case cube-mm.3mf`; its isolated vault and real supervisor include startup and cleanup. Reproduce the baseline on the recorded commit with the same dependency environment. The reverse-selector metrics-only arm and bounded alternating confirmation are identified in [summary.json](0016-startup-pilot/summary.json), with relative source identities in [code-identities.json](0016-startup-pilot/code-identities.json) and guarded-launch observations in [launch.json](0016-startup-pilot/launch.json). Installation paths and private model names or bytes are excluded.
+
+
+## Persistent compute ownership
+
+The [portable compute broker](../compute.md) extends lifetime only for validated array execution and verified model sessions. Disposable source parsers, hard limits, source permits and retained RAM reservations remain unchanged. A private descriptor-owned broker amortizes graphics context, shader and model startup across sequential Artifacts without retaining untrusted parser state.
+
+Inference coalesces already-ready inputs. Visual thumbnail gathering reads existing derivatives; bounded similarity component groups share one source parse. No extra large source is parsed merely to fill a batch. Jobs, generation leases and run writers retain scheduling and publication authority. Broker queues remain transient and are discarded on restart.
+
+
+## Render owner follow-up (2026-10-10)
+
+GPU context ownership is persistent and separate from disposable parsers. The
+supervisor warms the descriptor-elected owner before launching native parsing,
+so the broker does not inherit a parser's address-space ceiling. Subsequent
+Artifacts reuse the context, shaders, geometry and framebuffer pools. Render
+startup does not initialize ONNX. WSL uses the maintained Mesa GL/D3D12 route,
+with independent DXCore hardware evidence; see [compute deployment](../compute.md)
+and [render evaluation](../testing/compute-render-wsl.md). Cold-start cost and
+warm work remain separate observations; operator visual acceptance is pending.

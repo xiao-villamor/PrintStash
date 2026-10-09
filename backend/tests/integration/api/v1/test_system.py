@@ -53,3 +53,47 @@ class TestRestart:
         )
 
         assert response.status_code == 403, response.text
+
+
+class TestComputeStatus:
+    def test_reports_cpu_override(self, client, auth_headers, monkeypatch):
+        monkeypatch.setitem(_overlay, "compute_mode", "cpu")
+
+        response = client.get("/api/v1/system/compute", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["mode"] == "cpu"
+        assert {item["reason"] for item in response.json()["capabilities"]} == {
+            "disabled"
+        }
+
+    def test_denies_non_administrators(self, client, user_headers):
+        response = client.get(
+            "/api/v1/system/compute", headers=user_headers("operator")
+        )
+
+        assert response.status_code == 403, response.text
+
+    def test_denies_unauthenticated_diagnostics(self, client):
+        response = client.get("/api/v1/system/compute")
+
+        assert response.status_code == 401
+
+    def test_reports_missing_optional_runtime(self, client, auth_headers, monkeypatch):
+        from app.runtime.compute import client as compute
+
+        monkeypatch.setitem(_overlay, "compute_mode", "auto")
+        original = compute.importlib.util.find_spec
+        monkeypatch.setattr(
+            compute.importlib.util,
+            "find_spec",
+            lambda name: None if name == "wgpu" else original(name),
+        )
+
+        response = client.get("/api/v1/system/compute", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert {item["reason"] for item in response.json()["capabilities"]} == {
+            "runtime_missing"
+        }
+        assert response.json()["reserved_bytes"] == 0

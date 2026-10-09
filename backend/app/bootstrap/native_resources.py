@@ -10,6 +10,9 @@ from app.runtime.preparation_runtime import bind_pools, make_pools
 
 def configure(root: Path) -> None:
     """Processes sharing a local data root share descriptor-owned ledgers."""
+    from app.runtime.compute.client import bind as bind_compute
+
+    bind_compute(root)
     # Kernel locks cannot survive a reboot. Closed records are reclaimed before
     # admitting new work, so the ledger does not need Linux boot discovery.
     bind_pool(LocalResourcePool(root / "runtime" / "native"))
