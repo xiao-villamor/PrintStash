@@ -107,7 +107,7 @@ class Dispatcher:
             ],
             budget_bytes=self.memory.capacity,
             reserved_bytes=self.memory.used,
-            resident_entries=len(self.workers),
+            resident_entries=len(self.memory.entries),
             queue_depth=queue_depth,
             completed=self.completed,
             fallbacks=self.fallbacks,

@@ -65,7 +65,12 @@ def execute(worker, payload: bytes, deadline: float, evict) -> bytes:
             allow_nan=False,
         ).encode()
     pieces = [WorkerResult.model_validate_json(result) for result in results]
-    if any(piece.config_hash != message.config_hash for piece in pieces):
+    if any(
+        piece.config_hash != message.config_hash
+        or len(piece.vectors) != size
+        or len(piece.truncated) != size
+        for piece, size in zip(pieces, (midpoint, len(items) - midpoint), strict=True)
+    ):
         raise ValueError("compute_batch_identity_mismatch")
     return (
         WorkerResult(

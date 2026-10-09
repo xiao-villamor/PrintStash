@@ -28,7 +28,7 @@ This matrix separates implemented software contracts from outstanding physical q
 | 22 | Keep valid component beside invalid component | Error | Two components of one parsed source | Valid six-view result retained; independent error | Integration | ✅ integration/modules/media/geometry_analysis/test_geometry_analysis.py::TestComponentBatch::test_keeps_valid_component_after_an_invalid_member |
 | 23 | Restore units across eight-input chunks | Happy | Two six-view prepared units | Correct unit association over batches of eight and four | Unit | ✅ unit/modules/inference/test_batches.py::TestPreparedBatches::test_retains_unit_association_across_tensor_batches |
 | 24 | Refuse insufficient performance evidence | Edge | Slow or interactive-regressing receipt | Receipt rejected | Unit | ✅ unit/runtime/compute/test_qualification.py::TestQualification::test_rejects_insufficient_performance |
-| 25 | Keep canonical processing around native drawing | Happy | Prepared backend | Common alpha and vignette applied | Core | ✅ backend/packages/printstash-core/tests/mesh/test_prepared_rasterizer.py::TestPreparedRasterizer::test_keeps_common_frame_processing |
+| 25 | Keep canonical processing around native drawing | Happy | Prepared backend | Common alpha and vignette applied | Core | ✅ backend/packages/printstash-core/tests/mesh/rasterizer/test_prepared.py::TestPreparedRasterizer::test_keeps_common_frame_processing |
 
 ## Evidence recorded during implementation
 
@@ -38,6 +38,7 @@ This matrix separates implemented software contracts from outstanding physical q
 - Ingestion, indexer and component changes: 100 passed.
 - Core prepared-renderer and rasterizer checks: 181 passed.
 - Latest focused diagnostics, fallback, admission and receipt checks: 47 passed.
+- Optional GPU Docker image built successfully; a container probe exposing /dev/dxg and WSL driver libraries still enumerated only llvmpipe (no Dozen ICD).
 - Full backend/core gates and PR CI results are reported in the pull request once complete.
 - An initial broad local run stopped after missing full-extra dependencies (879 passed, one failure and two collection errors); installing the full extra preceded the full-suite run. This was not a successful gate.
 

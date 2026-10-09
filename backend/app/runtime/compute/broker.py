@@ -79,9 +79,10 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
             budget_bytes=settings.compute_memory_mb * 1024**2,
         )
         last_used = time.monotonic()
+        waiting_count = 0
 
         def scheduler() -> None:
-            nonlocal last_used
+            nonlocal last_used, waiting_count
             waiting = []
             while not stop.is_set():
                 if not waiting:
@@ -105,6 +106,7 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                         stop.set()
                     continue
                 ticket = waiting.pop(0)
+                waiting_count = len(waiting)
                 dispatcher.queue_seconds += max(0, now - ticket.received)
                 group = [ticket]
                 batch = None
@@ -133,6 +135,7 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                             except queue.Empty:
                                 break
                     if preempted:
+                        waiting_count = len(waiting)
                         continue
                     for candidate in list(waiting):
                         if candidate.cancelled.is_set() or not isinstance(
@@ -151,6 +154,8 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                             group.append(candidate)
                             waiting.remove(candidate)
                             batch = combined
+
+                waiting_count = len(waiting)
 
                 def execute_one(member):
                     if member.cancelled.is_set():
@@ -249,7 +254,9 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                     if isinstance(request, StatusRequest):
                         send(
                             connection,
-                            dispatcher.status(pending.qsize(), queue_budget.used)
+                            dispatcher.status(
+                                pending.qsize() + waiting_count, queue_budget.used
+                            )
                             .model_dump_json()
                             .encode(),
                         )
