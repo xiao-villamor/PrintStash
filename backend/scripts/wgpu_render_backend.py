@@ -1,8 +1,10 @@
 """Bounded WebGPU qualification adapter; deliberately absent from production Jobs.
 
-The GPU rasterizes canonical screen coordinates and interpolated normals. The
+The GPU rasterizes canonical screen coordinates and returns winning face IDs. The
 existing shade callback owns lighting/material policy, including matte views.
-Only one normal/coverage readback is performed per complete frame. Requested
+Only one face/coverage readback is performed per complete frame. Float64
+interpolation stays on the CPU: one-channel pre-resize errors can amplify at
+transparent edges during the canonical alpha-aware downsample. Requested
 storage includes attachments, the bounded upload and aligned staging storage;
 this is allocation accounting, not a measurement of physical VRAM.
 """
@@ -29,18 +31,18 @@ struct Dimensions { width: f32, height: f32, radius: f32, padding: f32 };
 @group(0) @binding(0) var<uniform> dimensions: Dimensions;
 struct Vertex {
     @builtin(position) position: vec4f,
-    @location(0) normal: vec3f,
+    @location(0) @interpolate(flat) face: f32,
 };
 @vertex fn vertex(@location(0) position: vec3f, @location(1) normal: vec3f) -> Vertex {
     var result: Vertex;
     result.position = vec4f(2.0 * position.x / dimensions.width - 1.0,
                            1.0 - 2.0 * position.y / dimensions.height,
                            (position.z / dimensions.radius + 1.0) * 0.5, 1.0);
-    result.normal = normal;
+    result.face = normal.x;
     return result;
 }
 @fragment fn fragment(input: Vertex) -> @location(0) vec4f {
-    return vec4f(input.normal, 1.0);
+    return vec4f(0.0, 0.0, 0.0, input.face);
 }
 """
 
@@ -337,6 +339,7 @@ class GpuFrame:
         depth_radius: float,
         matte: bool = False,
         allocation_limit_bytes: int = 512 * 1024 * 1024,
+        retained_geometry_limit_bytes: int = 128 * 1024 * 1024,
     ):
         if (
             any(
@@ -346,6 +349,7 @@ class GpuFrame:
                     height,
                     face_chunk_size,
                     allocation_limit_bytes,
+                    retained_geometry_limit_bytes,
                 )
             )
             or type(matte) is not bool
@@ -377,7 +381,9 @@ class GpuFrame:
         self.stats = GpuStats(requested)
         self.failure: GpuError | None = None
         self._closed = self._finished = False
-        self._shade: Shade | None = None
+        self._face_count = 0
+        self._geometry_limit = retained_geometry_limit_bytes
+        self._chunks: list[tuple[int, FloatArray, FloatArray, Shade]] = []
         try:
             self.native = context.native.frame(
                 width, height, face_chunk_size, depth_radius
@@ -430,10 +436,30 @@ class GpuFrame:
         if not selected.any():
             return
         tri, vert_nrm = tri[selected], vert_nrm[selected]
-        self._shade = shade
+        # Retain owned canonical precision, bounded independently of native
+        # allocations. Each face owns two (3, 3) float64 arrays. IDs are exact
+        # in float32 up to 2**24, regardless of the adapter's vendor.
+        retained = self.stats.retained_geometry_bytes + len(tri) * 144
+        if retained > self._geometry_limit or self._face_count + len(tri) > 2**24:
+            self.failure = GpuError(GpuFailure.ALLOCATION_FAILED)
+            raise self.failure
+        start_face = self._face_count
+        self._chunks.append(
+            (
+                start_face,
+                tri.copy(),
+                vert_nrm.copy(),
+                shade,
+            )
+        )
+        self._face_count += len(tri)
+        self.stats.retained_geometry_bytes = retained
         packed = np.empty((len(tri) * 3, 6), dtype=np.float32)
         packed[:, :3] = tri.reshape(-1, 3)
-        packed[:, 3:] = vert_nrm.reshape(-1, 3)
+        packed[:, 3:] = 0
+        packed[:, 3] = np.repeat(
+            np.arange(start_face + 1, self._face_count + 1, dtype=np.float32), 3
+        )
         if not np.isfinite(packed).all():
             self.failure = GpuError(GpuFailure.INVALID_REQUEST)
             raise self.failure
@@ -467,24 +493,65 @@ class GpuFrame:
             payload = self.native.read()
             self.stats.readback_count += 1
             if len(payload) != self.width * self.height * 16:
-                raise ValueError("incomplete normal readback")
+                raise ValueError("incomplete face readback")
             rgba = np.frombuffer(payload, dtype=np.float32).reshape(
                 self.height, self.width, 4
             )
-            if not np.isfinite(rgba).all() or not np.isin(rgba[:, :, 3], [0, 1]).all():
-                raise ValueError("invalid normal readback")
-            mask = rgba[:, :, 3] == 1
+            ids = rgba[:, :, 3]
+            if (
+                not np.isfinite(rgba).all()
+                or np.any(ids < 0)
+                or np.any(ids > self._face_count)
+                or np.any(ids != np.floor(ids))
+            ):
+                raise ValueError("invalid face readback")
+            mask = ids > 0
             result = np.zeros_like(img)
-            if mask.any():
-                if self._shade is None:
-                    raise ValueError("coverage without submitted geometry")
-                normals = rgba[:, :, :3][mask].astype(np.float64)
-                length = np.linalg.norm(normals, axis=1, keepdims=True)
-                normals /= np.where(length == 0, 1, length)
-                shaded = self._shade(normals)
-                if shaded.shape != normals.shape or not np.isfinite(shaded).all():
-                    raise ValueError("invalid canonical shading result")
-                result[mask] = (np.clip(shaded, 0, 1) * 255).astype(np.uint8)
+            targets = np.flatnonzero(mask)
+            face_ids = ids.reshape(-1)[targets].astype(np.int64) - 1
+            order = np.argsort(face_ids, kind="stable")
+            targets, face_ids = targets[order], face_ids[order]
+            flat_result = result.reshape(-1, 3)
+            for start_face, triangles, normals, shade in self._chunks:
+                lo, hi = np.searchsorted(
+                    face_ids, [start_face, start_face + len(triangles)]
+                )
+                # Fixed pixel batches bound interpolation temporaries, including
+                # when one triangle covers the entire image.
+                for offset in range(int(lo), int(hi), 65536):
+                    end = min(offset + 65536, int(hi))
+                    target = targets[offset:end]
+                    local = face_ids[offset:end] - start_face
+                    a, b, c = np.moveaxis(triangles[local], 1, 0)
+                    fx = target % self.width + 0.5
+                    fy = target // self.width + 0.5
+                    denominator = (b[:, 1] - c[:, 1]) * (a[:, 0] - c[:, 0]) + (
+                        c[:, 0] - b[:, 0]
+                    ) * (a[:, 1] - c[:, 1])
+                    w0 = (
+                        (b[:, 1] - c[:, 1]) * (fx - c[:, 0])
+                        + (c[:, 0] - b[:, 0]) * (fy - c[:, 1])
+                    ) / denominator
+                    w1 = (
+                        (c[:, 1] - a[:, 1]) * (fx - c[:, 0])
+                        + (a[:, 0] - c[:, 0]) * (fy - c[:, 1])
+                    ) / denominator
+                    w2 = 1.0 - w0 - w1
+                    vn = normals[local]
+                    interpolated = (
+                        w0[:, None] * vn[:, 0]
+                        + w1[:, None] * vn[:, 1]
+                        + w2[:, None] * vn[:, 2]
+                    )
+                    length = np.linalg.norm(interpolated, axis=1, keepdims=True)
+                    interpolated /= np.where(length == 0, 1.0, length)
+                    shaded = shade(interpolated)
+                    if (
+                        shaded.shape != interpolated.shape
+                        or not np.isfinite(shaded).all()
+                    ):
+                        raise ValueError("invalid canonical shading result")
+                    flat_result[target] = np.clip(255 * shaded, 0, 255).astype(np.uint8)
             # Publish only after complete readback and canonical shading succeed.
             img[:] = result
             zbuf[:] = np.where(mask, 0.0, np.inf)
@@ -507,4 +574,5 @@ class GpuFrame:
         try:
             self.native.close()
         finally:
+            self._chunks.clear()
             self.context._frame = None

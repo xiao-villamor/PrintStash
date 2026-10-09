@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- PRI-16: preserve canonical interpolation precision in the optional WebGPU
+  adapter, bound retained geometry, and reject invalid face readback before publication.
+
 - Add an optional Python 3.14 WebGPU raster qualification adapter, adapter diagnostics,
   frozen benchmark manifests and statistical reports. Production rendering remains CPU.
 

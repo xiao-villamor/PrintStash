@@ -224,3 +224,95 @@ class TestGpuFrame:
             frame.finish(*inputs[:2])
         assert failure.value.reason is GpuFailure.CLOSED
         assert frame.stats.readback_count == 1
+
+    def test_matches_cpu_quantization_from_original_precision(self, session, inputs):
+        from printstash_core.mesh.rasterizer import _rasterise_triangles
+
+        _, context = session
+        values = list(inputs)
+        values[3] = np.array(
+            [
+                [
+                    [0.234567891234, 0.2, 0.91],
+                    [0.765432109876, 0.3, 0.63],
+                    [0.456789123456, 0.7, 0.53],
+                ]
+            ]
+        )
+        expected = values[0].copy()
+        _rasterise_triangles(expected, values[1].copy(), *values[2:])
+        frame = GpuFrame(context, 2, 2, 1, 2)
+        frame(*values)
+        frame.finish(*values[:2])
+        np.testing.assert_array_equal(values[0][0, 0], expected[0, 0])
+
+    def test_keeps_submitted_geometry_owned_until_readback(self, session, inputs):
+        _, context = session
+        values = list(inputs)
+        values[3] = inputs[3].copy()
+        frame = GpuFrame(context, 2, 2, 1, 2)
+        frame(*values)
+        values[2][:] = 100
+        values[3][:] = 0
+        frame.finish(*values[:2])
+        np.testing.assert_array_equal(values[0][0, 0], [0, 0, 255])
+
+    def test_resolves_winner_from_later_chunk(self, session, inputs):
+        _, context = session
+        frame = GpuFrame(context, 2, 2, 1, 2)
+        frame(*inputs)
+        second = list(inputs)
+        second[4] = lambda n: np.broadcast_to([0.0, 1.0, 0.0], n.shape)
+        frame(*second)
+        frame.native.payload[0, 0, 3] = 2
+        frame.finish(*inputs[:2])
+        np.testing.assert_array_equal(inputs[0][0, 0], [0, 255, 0])
+
+    @pytest.mark.parametrize("face_id", [-1, 0.5, 2, float("inf")])
+    def test_rejects_invalid_winning_face_without_publication(
+        self, session, inputs, face_id
+    ):
+        _, context = session
+        frame = GpuFrame(context, 2, 2, 1, 2)
+        frame(*inputs)
+        frame.native.payload[0, 0, 3] = face_id
+        with pytest.raises(GpuError) as failure:
+            frame.finish(*inputs[:2])
+        assert failure.value.reason is GpuFailure.READBACK_FAILED
+        assert not inputs[0].any()
+
+    def test_bounds_retained_host_geometry_before_upload(self, session, inputs):
+        _, context = session
+        frame = GpuFrame(context, 2, 2, 1, 2, retained_geometry_limit_bytes=144)
+        frame(*inputs)
+        with pytest.raises(GpuError) as failure:
+            frame(*inputs)
+        assert failure.value.reason is GpuFailure.ALLOCATION_FAILED
+        assert len(frame.native.uploads) == 1
+        assert frame.stats.retained_geometry_bytes == 144
+
+    def test_releases_retained_geometry_on_close(self, session, inputs):
+        import weakref
+
+        _, context = session
+        frame = GpuFrame(context, 2, 2, 1, 2)
+        frame(*inputs)
+        owned = weakref.ref(frame._chunks[0][1])
+        frame.close()
+        assert owned() is None
+
+    def test_does_not_publish_earlier_chunks_when_later_shading_fails(
+        self, session, inputs
+    ):
+        _, context = session
+        frame = GpuFrame(context, 2, 2, 1, 2)
+        frame(*inputs)
+        second = list(inputs)
+        second[4] = lambda n: np.full_like(n, np.nan)
+        frame(*second)
+        frame.native.payload[0, 1, 3] = 2
+        with pytest.raises(GpuError) as failure:
+            frame.finish(*inputs[:2])
+        assert failure.value.reason is GpuFailure.READBACK_FAILED
+        assert not inputs[0].any()
+        assert np.isinf(inputs[1]).all()

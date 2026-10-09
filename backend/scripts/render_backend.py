@@ -44,6 +44,7 @@ class GpuError(Exception):
 @dataclass
 class GpuStats:
     requested_allocation_bytes: int
+    retained_geometry_bytes: int = 0
     upload_bytes: int = 0
     draw_calls: int = 0
     readback_count: int = 0

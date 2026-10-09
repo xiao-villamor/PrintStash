@@ -14,8 +14,12 @@ CPU/full installation excludes it. The lock contains its platform wheels.
 
 The operation-specific ports in `scripts/render_backend.py` keep native objects
 inside adapters. CPU preparation supplies bounded face chunks through the
-existing `DeferredRasteriser` seam. WebGPU rasterizes normals and coverage into
-offscreen attachments; the canonical CPU callback supplies material/lighting.
+existing `DeferredRasteriser` seam. WebGPU rasterizes face identifiers and coverage into
+offscreen attachments. Canonical interpolation uses the original submitted
+geometry precision on the CPU before shared material/lighting and quantization.
+This avoids amplification of float32 interpolation errors at translucent edges
+during alpha-aware resizing. It does not eliminate hardware coverage/depth
+differences; all quality gates still apply.
 Camera selection, normal preparation, matte policy, postprocessing and encoding
 remain shared. One session owns one pipeline and at most one active frame.
 Depth radii outside the normal finite float32 range are refused before native
@@ -29,7 +33,11 @@ No device initialization occurs in API startup or request handlers.
 
 Allocations include color/depth attachments, one bounded vertex upload, uniform
 storage and one aligned readback buffer. Context/driver overhead is not physical
-VRAM accounting. Whole-worker RSS, requested storage and optional device-wide
+VRAM accounting. Retained host geometry has a separate 128 MiB default ceiling
+and is reported as retained_geometry_bytes; exceeding it refuses the frame
+before its next upload. Pixel interpolation uses bounded 65,536-pixel batches.
+Geometry is released on frame close. This field measures retained arrays, not
+peak RSS or interpolation/readback temporaries. Whole-worker RSS, requested storage and optional device-wide
 telemetry are separate measurements; shared Intel memory contributes to host RSS.
 Each submission drains through mapping a four-byte copy into the owned staging
 buffer before reusing the vertex buffer. Final image readback happens once.
@@ -171,7 +179,7 @@ below are under the mirrored `backend/tests/{unit,integration,e2e,repo}` tiers.
 | 4 | `test_refuses_cross_thread_access` | Error | Foreign thread | Closed refusal, owner remains usable | Integration | ✅ |
 | 5 | `test_preserves_dependency_failure` | Error | Missing optional import | Typed dependency refusal | Integration | ✅ |
 | 6 | `test_preserves_capability_refusal` | Error | No eligible adapter | Capability refusal survives | Integration | ✅ |
-| 7 | `test_shades_complete_readback_with_canonical_callback` | Happy | Valid normal readback | Canonical pixels and coverage published | Integration | ✅ |
+| 7 | `test_shades_complete_readback_with_canonical_callback` | Happy | Valid face readback | Canonical pixels and coverage published | Integration | ✅ |
 | 8 | `test_defers_publication_until_finish` | Happy | Multiple submissions | CPU image untouched until final readback | Integration | ✅ |
 | 9 | `test_refuses_excess_allocation_before_native_work` | Edge | Over allowance | Allocation refused before native creation | Integration | ✅ |
 | 10 | `test_accepts_exact_allocation_limit` | Edge | Exact allowance | Requested accounting equals limit | Integration | ✅ |
@@ -194,6 +202,13 @@ below are under the mirrored `backend/tests/{unit,integration,e2e,repo}` tiers.
 | 27 | `test_pins_current_optional_webgpu_library` | Happy | Project/lock metadata | Stable optional version pinned | Repo | ✅ |
 | 28 | Existing CPU and ModernGL pilot regression tests | Happy | Optional library absent | CPU report retained; historical pilot compatible | Integration | ✅ |
 | 29 | test_refuses_depth_not_representable_by_gpu | Error | Overflow, underflow, nonfinite or nonpositive radius | Typed refusal before native allocation | Integration | ✅ |
-| 30 | Physical quality/performance/recovery gates | Edge | NVIDIA and Intel Linux/Docker | Predeclared complete-flow and recovery gates | Hardware | ❌ awaiting physical access |
-| 31 | Production backend selection/publication/admission | Happy | Qualified adapter | Existing Job contracts preserved | Integration/E2E | ⏭️ Stage B prohibited until hardware gates pass |
-| 32 | Browser modernization | Happy | Browser renderer preference | Worker loading and compatible recovery | Playwright | ⏭️ separate PR |
+| 30 | test_matches_cpu_quantization_from_original_precision | Happy | Nontrivial original normals | CPU reference quantization preserved | Integration | ✅ |
+| 31 | test_keeps_submitted_geometry_owned_until_readback | Edge | Caller replaces submitted arrays | Original frame remains unchanged | Integration | ✅ |
+| 32 | test_resolves_winner_from_later_chunk | Happy | Winner in second submission | Correct chunk supplies canonical shading | Integration | ✅ |
+| 33 | test_rejects_invalid_winning_face_without_publication | Error | Negative, fractional, absent, infinite ID | Invalid frame remains unpublished | Integration | ✅ |
+| 34 | test_bounds_retained_host_geometry_before_upload | Edge | Exact host ceiling followed by excess chunk | Further upload refused | Integration | ✅ |
+| 35 | test_releases_retained_geometry_on_close | Happy | Frame holds geometry | Owned geometry becomes collectible | Integration | ✅ |
+| 36 | test_does_not_publish_earlier_chunks_when_later_shading_fails | Error | Later callback returns invalid colors | Entire frame remains unpublished | Integration | ✅ |
+| 37 | Physical quality/performance/recovery gates | Edge | NVIDIA and Intel Linux/Docker | Predeclared complete-flow and recovery gates | Hardware | ❌ awaiting physical access |
+| 38 | Production backend selection/publication/admission | Happy | Qualified adapter | Existing Job contracts preserved | Integration/E2E | ⏭️ Stage B prohibited until hardware gates pass |
+| 39 | Browser modernization | Happy | Browser renderer preference | Worker loading and compatible recovery | Playwright | ⏭️ separate PR |
