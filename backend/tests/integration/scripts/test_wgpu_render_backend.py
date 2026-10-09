@@ -451,7 +451,12 @@ def adapters(monkeypatch):
         sys.modules,
         "wgpu",
         SimpleNamespace(
-            gpu=SimpleNamespace(enumerate_adapters_sync=lambda: candidates)
+            gpu=SimpleNamespace(
+                enumerate_adapters_sync=lambda: candidates,
+                request_adapter_sync=lambda **kwargs: (
+                    candidates[0] if candidates else None
+                ),
+            )
         ),
     )
     return candidates
@@ -521,5 +526,81 @@ class TestNativeSelection:
         owner = _native_device(None, True)
         try:
             assert owner.info["physical_acceleration"] is False
+        finally:
+            owner.close()
+
+    def test_uses_capability_fallback_after_preference_failure(
+        self, adapters, monkeypatch
+    ):
+        def unavailable(**kwargs):
+            raise RuntimeError("preferred_backend_unavailable")
+
+        adapters.append(CandidateAdapter("fallback"))
+        monkeypatch.setattr(
+            sys.modules["wgpu"].gpu, "request_adapter_sync", unavailable
+        )
+        owner = _native_device(None, False)
+        try:
+            assert owner.info["device"] == "fallback"
+        finally:
+            owner.close()
+
+    def test_retains_preference_failure_when_no_adapter_is_eligible(
+        self, adapters, monkeypatch
+    ):
+        def unavailable(**kwargs):
+            raise RuntimeError("preferred_backend_unavailable")
+
+        monkeypatch.setattr(
+            sys.modules["wgpu"].gpu, "request_adapter_sync", unavailable
+        )
+        with pytest.raises(GpuError) as failure:
+            _native_device(None, False)
+        assert str(failure.value.__cause__) == "preferred_backend_unavailable"
+
+    def test_uses_platform_preference_before_enumeration(self, adapters, monkeypatch):
+        preferred = CandidateAdapter("platform-preferred")
+        adapters.append(CandidateAdapter("enumerated-first"))
+        monkeypatch.setattr(
+            sys.modules["wgpu"].gpu, "request_adapter_sync", lambda **kwargs: preferred
+        )
+        owner = _native_device(None, False)
+        try:
+            assert owner.info["device"] == "platform-preferred"
+        finally:
+            owner.close()
+
+    def test_keeps_explicit_selection_independent_of_platform_preference(
+        self, adapters, monkeypatch
+    ):
+        def unavailable(**kwargs):
+            raise RuntimeError("preferred_backend_unavailable")
+
+        adapters.append(CandidateAdapter("selected"))
+        monkeypatch.setattr(
+            sys.modules["wgpu"].gpu, "request_adapter_sync", unavailable
+        )
+        owner = _native_device("selected", False)
+        try:
+            assert owner.info["device"] == "selected"
+        finally:
+            owner.close()
+
+    def test_stops_fallback_before_unavailable_later_backend(self, adapters):
+        class UnavailableBackend:
+            @property
+            def info(self):
+                raise RuntimeError("unavailable_later_backend")
+
+        adapters.extend(
+            [
+                CandidateAdapter("software", "CPU"),
+                CandidateAdapter("compatible"),
+                UnavailableBackend(),
+            ]
+        )
+        owner = _native_device(None, False)
+        try:
+            assert owner.info["device"] == "compatible"
         finally:
             owner.close()

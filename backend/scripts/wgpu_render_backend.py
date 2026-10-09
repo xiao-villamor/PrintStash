@@ -77,23 +77,41 @@ def _native_device(selector: str | None, allow_software: bool) -> NativeDevice:
     # Optional import: CPU installations never need to load native GPU libraries.
     import wgpu
 
-    adapters = wgpu.gpu.enumerate_adapters_sync()
-    eligible = (
-        adapter
-        for adapter in adapters
-        if (allow_software or is_hardware(adapter.info))
-        and adapter.limits["max-color-attachment-bytes-per-sample"] >= 16
-        and adapter.limits["max-vertex-attributes"] >= 2
-    )
+    def compatible(adapter: wgpu.GPUAdapter) -> bool:
+        return (
+            (allow_software or is_hardware(adapter.info))
+            and adapter.limits["max-color-attachment-bytes-per-sample"] >= 16
+            and adapter.limits["max-vertex-attributes"] >= 2
+        )
+
+    preferred_failure = None
     if selector is None:
-        # Capability queries can initialize a different native graphics backend.
-        # Once the default is eligible, later adapters cannot change the choice.
-        adapter = next(eligible, None)
+        # Ask the platform for one preferred adapter before probing every backend.
+        # A preferred adapter still has to satisfy our hardware/limit contract.
+        try:
+            preferred = wgpu.gpu.request_adapter_sync(
+                power_preference="high-performance"
+            )
+        except RuntimeError as exc:
+            preferred = None
+            preferred_failure = exc
+        adapter = (
+            preferred
+            if preferred is not None and compatible(preferred)
+            else next(
+                (a for a in wgpu.gpu.enumerate_adapters_sync() if compatible(a)),
+                None,
+            )
+        )
     else:
-        matches = [a for a in eligible if a.info["device"] == selector]
+        matches = [
+            a
+            for a in wgpu.gpu.enumerate_adapters_sync()
+            if a.info["device"] == selector and compatible(a)
+        ]
         adapter = matches[0] if len(matches) == 1 else None
     if adapter is None:
-        raise GpuError(GpuFailure.CAPABILITY_UNAVAILABLE)
+        raise GpuError(GpuFailure.CAPABILITY_UNAVAILABLE) from preferred_failure
     device = adapter.request_device_sync(
         required_limits={"max-color-attachment-bytes-per-sample": 16}
     )

@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Avoid probing unused graphics backends after the optional GPU research adapter finds compatible hardware. Preserve explicit adapter selection and capability checks.
+- Request the platform-preferred GPU before enumerating other graphics backends in the optional research adapter. Preserve capability fallback, software exclusion and explicit adapter selection.
 
 - Retain expanded NVIDIA quality rejection, real-model browser comparisons and fresh-worker failure evidence; document an isolated experimental WSL/Docker diagnostic without changing production eligibility.
 

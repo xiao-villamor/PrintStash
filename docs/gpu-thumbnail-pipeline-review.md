@@ -26,17 +26,27 @@ claim about every 3MF or a real upload Job.
 
 ## Confirmed selection defect
 
-Default selection eagerly evaluated capability properties on every enumerated
-backend before choosing the first eligible adapter. Those properties can involve
-native driver work. A later backend failure could also prevent use of an already
-eligible adapter. Default selection now stops at the first eligible adapter.
-Adapter order, vendor-neutral capability requirements, software exclusion and
-explicit-selector ambiguity refusal are preserved.
+Default selection eagerly evaluated every enumerated backend before choosing
+one. A later backend failure could prevent use of already eligible hardware.
+Stopping at the first eligible adapter fixes that error case, but measured
+real-file performance did not substantially improve.
 
-The regression test fails against the preceding implementation and passes after
-the change. The focused adapter/diagnostic selection passes 99 tests; Ruff and
-explicit adapter Pyright checks pass. Native performance evidence will identify
-the exact tested commit separately.
+A detailed three-cycle trace then placed about 500 ms inside native enumeration
+after a rendered session closes. Python capability checks took less than 0.02 ms.
+An isolated discovery probe that retained adapter references between iterations
+had much lower enumeration cost and did not represent that lifecycle.
+
+The final selection path asks WebGPU for the platform's high-performance adapter,
+checks hardware identity and required limits, and only enumerates other adapters
+when the preference fails or is incompatible. Enumeration fallback stops at the
+first compatible adapter. Explicit selection still enumerates candidates and
+refuses ambiguity. Failed preference diagnostics are retained if fallback also
+finds no eligible adapter. This changes default selection to the platform
+preference; there is no vendor whitelist.
+
+The focused adapter/diagnostic selection passes 104 tests; Ruff and explicit
+adapter Pyright checks pass. Native performance evidence identifies the exact
+tested commit separately.
 
 ## Other costs and integration constraints
 
@@ -88,6 +98,11 @@ qualify upload-to-thumbnail latency.
 | 4 | refuses nonunique explicit selection | Error | Empty, missing or duplicate eligible names | Typed capability refusal | Integration | ✅ TestNativeSelection.test_refuses_nonunique_explicit_selection |
 | 5 | refuses absent compatible hardware | Error | Only software adapter without opt-in | Typed capability refusal | Integration | ✅ TestNativeSelection.test_refuses_absent_compatible_hardware |
 | 6 | labels opted-in software execution | Edge | Software diagnostic opt-in | Physical acceleration remains false | Integration | ✅ TestNativeSelection.test_labels_opted_in_software_execution |
+| 7 | uses capability fallback after preference failure | Error | Preferred adapter request fails | Eligible enumerated adapter usable | Integration | ✅ TestNativeSelection.test_uses_capability_fallback_after_preference_failure |
+| 8 | retains preference failure when no adapter is eligible | Error | Failed preference, no fallback | Original diagnostic retained as refusal cause | Integration | ✅ TestNativeSelection.test_retains_preference_failure_when_no_adapter_is_eligible |
+| 9 | uses platform preference before enumeration | Happy | Preferred adapter differs from first enumerated | Eligible platform preference selected | Integration | ✅ TestNativeSelection.test_uses_platform_preference_before_enumeration |
+| 10 | keeps explicit selection independent of platform preference | Edge | Explicit choice, failed preference API | Explicit adapter remains usable | Integration | ✅ TestNativeSelection.test_keeps_explicit_selection_independent_of_platform_preference |
+| 11 | stops fallback before unavailable later backend | Error | Incompatible preference, eligible fallback, later failing driver | Eligible fallback remains usable | Integration | ✅ TestNativeSelection.test_stops_fallback_before_unavailable_later_backend |
 
 Tests live in backend/tests/integration/scripts/test_wgpu_render_backend.py.
 This focused change does not complete the original production delivery matrix.
