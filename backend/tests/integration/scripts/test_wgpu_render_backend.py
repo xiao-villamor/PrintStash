@@ -13,6 +13,7 @@ from scripts.wgpu_render_backend import (
     GpuFrame,
     _Device,
     _Frame,
+    _native_device,
     is_hardware,
 )
 
@@ -424,3 +425,101 @@ class TestNativeDevice:
         owner.close()
 
         assert reference() is None
+
+
+class CandidateAdapter:
+    def __init__(self, name, kind="DiscreteGPU", color_bytes=16, attributes=2):
+        self.info = {"adapter_type": kind, "device": name}
+        self.limits = {
+            "max-color-attachment-bytes-per-sample": color_bytes,
+            "max-vertex-attributes": attributes,
+        }
+
+    def request_device_sync(self, **kwargs):
+        return SimpleNamespace(
+            limits=self.limits,
+            create_shader_module=lambda **kwargs: object(),
+            create_render_pipeline=lambda **kwargs: object(),
+            destroy=lambda: None,
+        )
+
+
+@pytest.fixture
+def adapters(monkeypatch):
+    candidates = []
+    monkeypatch.setitem(
+        sys.modules,
+        "wgpu",
+        SimpleNamespace(
+            gpu=SimpleNamespace(enumerate_adapters_sync=lambda: candidates)
+        ),
+    )
+    return candidates
+
+
+class TestNativeSelection:
+    def test_uses_eligible_device_before_unavailable_later_backend(self, adapters):
+        class UnavailableBackend:
+            @property
+            def info(self):
+                raise RuntimeError("unavailable_later_backend")
+
+        adapters.extend([CandidateAdapter("ready"), UnavailableBackend()])
+        owner = _native_device(None, False)
+        try:
+            assert owner.info["device"] == "ready"
+        finally:
+            owner.close()
+
+    @pytest.mark.parametrize(
+        ("kind", "color_bytes", "attributes"),
+        [("CPU", 16, 2), ("DiscreteGPU", 8, 2), ("IntegratedGPU", 16, 1)],
+        ids=["software", "attachment-limit", "vertex-limit"],
+    )
+    def test_selects_first_compatible_hardware(
+        self, adapters, kind, color_bytes, attributes
+    ):
+        adapters.extend(
+            [
+                CandidateAdapter("ineligible", kind, color_bytes, attributes),
+                CandidateAdapter("compatible"),
+            ]
+        )
+        owner = _native_device(None, False)
+        try:
+            assert owner.info["device"] == "compatible"
+        finally:
+            owner.close()
+
+    def test_preserves_explicit_selection(self, adapters):
+        adapters.extend([CandidateAdapter("first"), CandidateAdapter("selected")])
+        owner = _native_device("selected", False)
+        try:
+            assert owner.info["device"] == "selected"
+        finally:
+            owner.close()
+
+    @pytest.mark.parametrize(
+        "names",
+        [[], ["other"], ["selected", "selected"]],
+        ids=["empty", "missing", "ambiguous"],
+    )
+    def test_refuses_nonunique_explicit_selection(self, adapters, names):
+        adapters.extend(CandidateAdapter(name) for name in names)
+        with pytest.raises(GpuError) as failure:
+            _native_device("selected", False)
+        assert failure.value.reason is GpuFailure.CAPABILITY_UNAVAILABLE
+
+    def test_refuses_absent_compatible_hardware(self, adapters):
+        adapters.append(CandidateAdapter("software", "CPU"))
+        with pytest.raises(GpuError) as failure:
+            _native_device(None, False)
+        assert failure.value.reason is GpuFailure.CAPABILITY_UNAVAILABLE
+
+    def test_labels_opted_in_software_execution(self, adapters):
+        adapters.append(CandidateAdapter("software", "CPU"))
+        owner = _native_device(None, True)
+        try:
+            assert owner.info["physical_acceleration"] is False
+        finally:
+            owner.close()
