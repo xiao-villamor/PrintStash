@@ -1,12 +1,5 @@
 /** Real native renderer checks, isolated from application data and service mocks. */
-import {
-  BoxGeometry,
-  Mesh,
-  MeshBasicMaterial,
-  OrthographicCamera,
-  Scene,
-  WebGLRenderer,
-} from "three";
+import { BoxGeometry, Mesh, MeshBasicMaterial, OrthographicCamera, Scene } from "three";
 import { createMeshRenderer, type CapturedMesh } from "../../src/lib/mesh-renderer";
 
 interface CaptureCheck {
@@ -73,7 +66,6 @@ window.meshCheck = {
   },
   recoverCapture: async () => {
     const renderer = adapter.renderer;
-    if (!(renderer instanceof WebGLRenderer)) throw new Error("WebGL failure boundary required");
     const read = renderer.readRenderTargetPixelsAsync;
     const target = renderer.getRenderTarget();
     const background = scene.background;

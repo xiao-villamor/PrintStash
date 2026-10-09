@@ -30,6 +30,7 @@ const query = new URLSearchParams(location.search);
 writePreviewPreferences({
   ...DEFAULT_PREVIEW_PREFERENCES,
   meshRenderer: query.get("backend") === "webgpu" ? "webgpu" : "webgl",
+  screenshotScale: query.get("scale") === "1" ? 1 : query.get("scale") === "3" ? 3 : 2,
 });
 let device: GPUDevice | null = null;
 let releaseDevice: (() => void) | null = null;
@@ -106,7 +107,7 @@ root.render(
 );
 window.meshViewerCheck = {
   zoom: () => controls?.zoomIn(),
-  fit: () => controls?.fit(),
+  fit: () => (query.has("reset") ? controls?.resetView() : controls?.fit()),
   pose: () => pose,
   loseDevice: () => {
     if (device === null) throw new Error("no device to lose");

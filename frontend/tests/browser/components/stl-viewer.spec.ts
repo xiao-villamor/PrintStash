@@ -56,9 +56,23 @@ test.describe("STLViewer", () => {
     await page.evaluate(() => window.meshViewerCheck.close());
   });
 
-  for (const mode of ["solid", "xray", "wireframe"]) {
-    test("exports the " + mode + " display mode", async ({ page }) => {
-      await page.goto("/tests/browser-fixtures/stl-viewer.html?backend=webgpu&mode=" + mode);
+  const captures = [
+    ...["webgl", "webgpu"].flatMap((backend) =>
+      [1, 2, 3].map((scale) => ({ backend, scale, mode: "solid" })),
+    ),
+    { backend: "webgpu", scale: 2, mode: "xray" },
+    { backend: "webgpu", scale: 2, mode: "wireframe" },
+  ];
+  for (const { backend, scale, mode } of captures) {
+    test("exports " + mode + " PNG using " + backend + " at scale " + scale, async ({ page }) => {
+      await page.goto(
+        "/tests/browser-fixtures/stl-viewer.html?backend=" +
+          backend +
+          "&mode=" +
+          mode +
+          "&scale=" +
+          scale,
+      );
       await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
       const download = page.waitForEvent("download");
 
@@ -68,28 +82,70 @@ test.describe("STLViewer", () => {
       expect(file).not.toBeNull();
       const png = await readFile(file!);
       expect(png.subarray(1, 4).toString()).toBe("PNG");
-      expect(png.readUInt32BE(16)).toBe(1280);
-      expect(png.readUInt32BE(20)).toBe(960);
+      expect(png.readUInt32BE(16)).toBe(640 * scale);
+      expect(png.readUInt32BE(20)).toBe(480 * scale);
       await page.evaluate(() => window.meshViewerCheck.close());
     });
   }
 
-  test("fits the camera after zooming", async ({ page }) => {
-    await page.goto("/tests/browser-fixtures/stl-viewer.html");
-    await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
-    const initial = await page.evaluate(() => window.meshViewerCheck.pose());
-    await page.evaluate(() => window.meshViewerCheck.zoom());
-    expect(await page.evaluate(() => window.meshViewerCheck.pose())).not.toEqual(initial);
+  for (const backend of ["webgl", "webgpu"]) {
+    test("orbits the " + backend + " camera", async ({ page }) => {
+      await page.goto("/tests/browser-fixtures/stl-viewer.html?backend=" + backend);
+      await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+      const initial = await page.evaluate(() => window.meshViewerCheck.pose());
 
-    await page.evaluate(() => window.meshViewerCheck.fit());
+      await page.mouse.move(320, 240);
+      await page.mouse.down();
+      await page.mouse.move(420, 290, { steps: 12 });
+      await page.mouse.up();
 
-    const fitted = await page.evaluate(() => window.meshViewerCheck.pose());
-    expect(fitted).toEqual({
-      position: initial!.position.map((value) => expect.closeTo(value, 10)),
-      target: initial!.target.map((value) => expect.closeTo(value, 10)),
+      await expect
+        .poll(async () => (await page.evaluate(() => window.meshViewerCheck.pose()))?.position)
+        .not.toEqual(initial!.position);
+      await page.evaluate(() => window.meshViewerCheck.close());
     });
-    await page.evaluate(() => window.meshViewerCheck.close());
-  });
+
+    test("pans the " + backend + " camera", async ({ page }) => {
+      await page.goto("/tests/browser-fixtures/stl-viewer.html?backend=" + backend);
+      await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+      const initial = await page.evaluate(() => window.meshViewerCheck.pose());
+
+      await page.mouse.move(320, 240);
+      await page.mouse.down({ button: "right" });
+      await page.mouse.move(420, 290, { steps: 12 });
+      await page.mouse.up({ button: "right" });
+
+      await expect
+        .poll(async () => (await page.evaluate(() => window.meshViewerCheck.pose()))?.target)
+        .not.toEqual(initial!.target);
+      await page.evaluate(() => window.meshViewerCheck.close());
+    });
+  }
+
+  for (const backend of ["webgl", "webgpu"]) {
+    for (const operation of ["fit", "reset"]) {
+      test(operation + " restores the " + backend + " camera framing", async ({ page }) => {
+        await page.goto(
+          "/tests/browser-fixtures/stl-viewer.html?backend=" +
+            backend +
+            (operation === "reset" ? "&reset=1" : ""),
+        );
+        await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+        const initial = await page.evaluate(() => window.meshViewerCheck.pose());
+        await page.evaluate(() => window.meshViewerCheck.zoom());
+        expect(await page.evaluate(() => window.meshViewerCheck.pose())).not.toEqual(initial);
+
+        await page.evaluate(() => window.meshViewerCheck.fit());
+
+        const fitted = await page.evaluate(() => window.meshViewerCheck.pose());
+        expect(fitted).toEqual({
+          position: initial!.position.map((value) => expect.closeTo(value, 10)),
+          target: initial!.target.map((value) => expect.closeTo(value, 10)),
+        });
+        await page.evaluate(() => window.meshViewerCheck.close());
+      });
+    }
+  }
 
   test("recovers the current camera after device loss", async ({ page }) => {
     await page.goto("/tests/browser-fixtures/stl-viewer.html?backend=webgpu");

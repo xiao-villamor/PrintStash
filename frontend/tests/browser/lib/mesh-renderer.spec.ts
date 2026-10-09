@@ -30,31 +30,37 @@ test.describe("createMeshRenderer", () => {
     });
   }
 
-  test("contains a capture during disposal", async ({ page }) => {
-    await page.goto("/tests/browser-fixtures/mesh-renderer.html");
-    await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
-
-    expect(await page.evaluate(() => window.meshCheck.closeDuringCapture())).toBe(true);
-    await page.evaluate(() => window.meshCheck.close());
-  });
-
-  test("restores rendering after asynchronous capture failure", async ({ page }) => {
-    await page.goto("/tests/browser-fixtures/mesh-renderer.html");
-    await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
-    expect(await page.evaluate(() => window.meshCheck.recoverCapture())).toBe(true);
-    await page.evaluate(() => window.meshCheck.close());
-  });
-
-  test.describe("WebGPU conformance", () => {
-    test("exports a correctly oriented WebGPU screenshot", async ({ page }) => {
-      await page.goto("/tests/browser-fixtures/mesh-renderer.html?backend=webgpu");
+  for (const backend of ["webgl", "webgpu"]) {
+    test("contains a " + backend + " capture during disposal", async ({ page }) => {
+      await page.goto("/tests/browser-fixtures/mesh-renderer.html?backend=" + backend);
       await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
-      await expect(page.locator("body")).toHaveAttribute("data-backend", "webgpu");
-      const capture = await page.evaluate(() => window.meshCheck.capture(2));
-      expect(capture.width).toBe(256);
-      expect(capture.top).toEqual([255, 0, 0, 255]);
-      expect(capture.bottom).toEqual([0, 0, 255, 255]);
+
+      expect(await page.evaluate(() => window.meshCheck.closeDuringCapture())).toBe(true);
       await page.evaluate(() => window.meshCheck.close());
     });
+
+    test("restores " + backend + " rendering after capture failure", async ({ page }) => {
+      await page.goto("/tests/browser-fixtures/mesh-renderer.html?backend=" + backend);
+      await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+
+      expect(await page.evaluate(() => window.meshCheck.recoverCapture())).toBe(true);
+      await page.evaluate(() => window.meshCheck.close());
+    });
+  }
+
+  test.describe("WebGPU conformance", () => {
+    for (const scale of [1, 2, 3] as const) {
+      test("exports a correctly oriented WebGPU screenshot at scale " + scale, async ({ page }) => {
+        await page.goto("/tests/browser-fixtures/mesh-renderer.html?backend=webgpu");
+        await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+        await expect(page.locator("body")).toHaveAttribute("data-backend", "webgpu");
+        const capture = await page.evaluate((value) => window.meshCheck.capture(value), scale);
+        expect(capture.width).toBe(128 * scale);
+        expect(capture.height).toBe(128 * scale);
+        expect(capture.top).toEqual([255, 0, 0, 255]);
+        expect(capture.bottom).toEqual([0, 0, 255, 255]);
+        await page.evaluate(() => window.meshCheck.close());
+      });
+    }
   });
 });

@@ -117,3 +117,23 @@ Additional initialization cleanup coverage:
 | --- | --- | --- | --- | --- |
 | releases the acquired device after failure | Constructor, initialization, or disposal refusal | Acquired device is destroyed | Frontend unit | ✅ |
 | retains the device after successful initialization | Successful initialization | Live renderer owns the device | Frontend unit | ✅ |
+
+## Expanded native conformance
+
+The expanded native browser selection passes 33 cases in total: the earlier
+25-case selection plus the replacement PNG/control selection (12 cases, four
+overlapping earlier cases). Latest CI must run the complete combined selection.
+
+| Behaviour | Category | Input | Outcome | Tier | Status |
+| --- | --- | --- | --- | --- | --- |
+| orbits the selected camera | Happy | WebGL/WebGPU left drag | Camera position changes | Playwright | ✅ |
+| pans the selected camera | Happy | WebGL/WebGPU right drag | Camera target changes | Playwright | ✅ |
+| restores camera framing | Happy | Fit/reset after zoom, both backends | Initial framing restored | Playwright | ✅ |
+| exports selected PNG scale | Happy | Scales 1–3, both backends | PNG dimensions match viewport times scale | Playwright | ✅ |
+| exports oriented GPU pixels | Happy | Scales 1–3, WebGPU | Independent red-top/blue-bottom control matches | Playwright | ✅ |
+| restores rendering after GPU readback refusal | Error | Native asynchronous readback rejects | Target/background restored; next capture succeeds | Playwright | ✅ |
+| contains GPU capture during disposal | Error | Pending capture plus repeated dispose | Capture rejects; cleanup completes | Playwright | ✅ |
+
+The development comparison and its raw samples are documented in
+[the browser evidence record](benchmarks/pri16/browser-readme.md).
+It does not qualify the default for promotion.

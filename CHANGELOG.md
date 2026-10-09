@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Extend native mesh preview checks for camera movement, screenshot scales, capture failures, and disposal; retain WebGPU as experimental after baseline comparison.
+
 - Release the mesh preview GPU device when renderer construction or initialization cleanup fails.
 
 - Parse mesh previews in a cancellable worker and add an experimental WebGPU
