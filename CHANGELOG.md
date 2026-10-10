@@ -298,6 +298,8 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 ### Fixed
 
+- Continue manual remote-library scans across bounded pages and time slices using durable requests committed with the saved cursor. Cancellation and provider backoff remain distinct from normal continuation.
+
 - Normalize S3 library listing timestamps to HTTP HEAD precision so unchanged Cloudflare R2 models can be indexed; retain size, ETag, version and post-download change checks.
 
 - Keep admitted editor state while setup navigation is checked, retire it on rejection, and show legacy local/S3 storage details.

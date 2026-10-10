@@ -927,6 +927,11 @@ def scan_remote_library(
                     "bytes_read": checkpoint.bytes_read,
                 }
                 library.last_scan_summary = json.dumps(result)
+                if not checkpoint.complete:
+                    # A manual scan covers the whole epoch, not just this page.
+                    # Commit its continuation beside the checkpoint so a restart
+                    # cannot strand a bounded slice between Jobs.
+                    library.scan_requested_at = library.scan_requested_at or utcnow()
                 library.updated_at = utcnow()
                 session.add(library)
                 session.commit()
@@ -975,12 +980,22 @@ def scan_remote_library(
                 )
                 summary.error = failure_of(exc)
                 summary.aborted = True
+                if deadline_reached:
+                    library.scan_requested_at = library.scan_requested_at or utcnow()
                 library.last_scan_summary = json.dumps(summary.as_dict())
                 session.add(checkpoint)
                 session.add(library)
                 session.commit()
                 if job_context is not None:
-                    job_context.finish(JobOutcome.FAILED, error=summary.error)
+                    if deadline_reached:
+                        # Exhausting the slice is a successful handoff. Marking
+                        # the Job failed would clear its continuation intent in
+                        # the failure callback and overwrite PARTIAL with ERROR.
+                        job_context.finish(
+                            JobOutcome.COMPLETED, result=summary.as_dict()
+                        )
+                    else:
+                        job_context.finish(JobOutcome.FAILED, error=summary.error)
                 return summary.as_dict()
     finally:
         budget.__exit__(None, None, None)
