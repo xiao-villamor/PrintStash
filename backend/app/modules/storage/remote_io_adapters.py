@@ -446,11 +446,17 @@ class _RemoteAdapter:
                     if not path or path == directory:
                         continue
                     metadata = entry.metadata
+                    modified_at = getattr(metadata, "last_modified", None)
+                    if self._spec.kind is TransportKind.S3 and modified_at is not None:
+                        # S3 list XML can include fractions, but HEAD's HTTP date
+                        # has whole-second precision. Keep both observations in
+                        # that common precision; ETag/version still fence reads.
+                        modified_at = modified_at.replace(microsecond=0)
                     yield RemoteEntry(
                         key=path,
                         size=int(getattr(metadata, "content_length", 0) or 0),
                         is_dir=bool(getattr(metadata, "is_dir", False)),
-                        modified_at=getattr(metadata, "last_modified", None),
+                        modified_at=modified_at,
                         etag=getattr(metadata, "etag", None) or None,
                         version_id=getattr(metadata, "version", None) or None,
                     )

@@ -298,6 +298,8 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 ### Fixed
 
+- Normalize S3 library listing timestamps to HTTP HEAD precision so unchanged Cloudflare R2 models can be indexed; retain size, ETag, version and post-download change checks.
+
 - Keep admitted editor state while setup navigation is checked, retire it on rejection, and show legacy local/S3 storage details.
 
 - Preserve confirmed Model batch results when a later request loses its response, with explicit review and conditional undo of acknowledged changes.
