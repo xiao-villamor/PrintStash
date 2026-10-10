@@ -32,7 +32,7 @@ def main() -> None:
             raise ValueError("seeded_collection_missing")
         target = build_model(
             session,
-            "Zebra paginated target",
+            f"Zebra paginated target {root.id}",
             collection=folder,
             hash=hashlib.sha256(root.name.encode()).hexdigest(),
             slug=f"outliner-target-{root.id}",

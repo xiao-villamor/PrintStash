@@ -161,7 +161,7 @@ class RenderedPixels:
 def encode_rendered_pixels(
     pixels: RenderedPixels, *, output_format: Literal["PNG", "WEBP"] = "PNG"
 ) -> bytes:
-    """Encode a completed frame with the canonical lossless thumbnail policy."""
+    """Encode a frame with compact color and lossless thumbnail transparency."""
     if output_format not in ("PNG", "WEBP"):
         raise ValueError("invalid_thumbnail_format")
     from PIL import Image
@@ -172,7 +172,9 @@ def encode_rendered_pixels(
         image.save(
             buffer,
             format="WEBP",
-            lossless=True,
+            lossless=False,
+            quality=PREVIEW_PROFILE.encoding_quality,
+            alpha_quality=100,
             exact=True,
             method=PREVIEW_PROFILE.encoding_method,
         )

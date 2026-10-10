@@ -12,6 +12,53 @@
   preference with camera-preserving WebGL recovery and asynchronous screenshots.
   WebGL remains the default; GPU performance qualification is still pending.
 
+- Avoid deep-cloning lexical search queries for each page; keep rank materialization
+  local to each query and reuse immutable current-recipe predicates. Measure tab
+  indicators after native layout instead of forcing layout during React commit.
+
+- Reuse bounded subtree count query structure with current roots and permissions.
+  Decode admitted thumbnails without a second native visibility wait.
+
+- Start selected collection reads before rendering their destination, cancel abandoned
+  reads, and keep pointer prefetch scheduling outside the grid's rendering path.
+- Optimize the restored tree's rendering with explicit locale dependencies, preserving
+  live language changes, drag-and-drop and pagination. Reuse immutable card projection
+  statements with fresh page/user parameters; avoid constructing unused tree ancestry.
+
+- Reuse immutable ancestry and similarity query structure while reading current
+  permissions on every request. Avoid rerendering an unselected departing grid
+  before starting a collection navigation.
+
+- Reuse HTTP-cached content-hashed assets during reload without weakening HTML
+  or bootstrap revalidation, offline fallback, or private-response isolation.
+
+- Keep scheduled upload recovery outside an active verification or Job handoff,
+  avoiding spurious upload conflicts while retaining recovery after interruption.
+- Reuse the current locale's card-date formatters without caching timestamps.
+
+- Preserve visible nesting at every collection-tree depth and align Model leaves
+  beneath their parent, keeping deep rows selectable on narrow screens.
+- Ignore system-only maintenance notices in Task Center instead of repeatedly
+  downloading an unchanged Jobs list.
+
+- Serialize search-preference writes before reading SQLite state, avoiding failures
+  when background processing commits concurrently.
+- Reduce thumbnail transfer size with quality-90 WebP color and lossless transparency,
+  preserving resolution and regenerating existing mesh/G-code previews through Jobs.
+- Restore remembered Library branches in bounded batches, prioritize visible thumbnails,
+  and keep deeply nested folders selectable on narrow screens. Load the multipart
+  editor separately from Library cards, reuse restoration counts and permission scopes,
+  and avoid repeated thumbnail access lookups and image decoding. Reuse immutable
+  similarity SQL construction while checking current permissions on every read.
+  Reuse authorized empty child levels and defer the initial event connection until
+  critical content is ready, retaining immediate permission checks. Opening the mobile
+  tree no longer competes with filter catalogs below the visible area.
+- Keep the first visit intact when the service worker installs, while still refreshing
+  an existing installation after a worker update.
+- Measure each Library destination through restored tree rows and decoded viewport
+  images, with a reproducible reference-host acceptance command and explicit failures.
+  Tie timings to committed history entries and actual input events.
+
 - Keep the collection tree visible when selecting folders, preserving open branches
   and downloaded sibling pages without reloading them on every click.
 
@@ -635,6 +682,10 @@ image. See UPGRADE.md before pulling.**
   and customization examples in a separate deployment guide.
 
 ### Changed
+
+- The library filter panel names its file-format group **File type**, matching the
+  active-filter chip ("file type: STL") and the Spanish panel ("Tipo de archivo"),
+  instead of "Artifact".
 
 - Background work settings now lead with running, waiting, and failed work and
   show each active Job's state, progress and cancel action. They also show where

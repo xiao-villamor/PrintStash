@@ -83,7 +83,10 @@ self.addEventListener("fetch", (event) => {
   )
     return;
   const key = navigation ? "/" : request;
-  const network = fetch(request);
+  // Reload requests normally bypass HTTP cache. Content-hashed assets are
+  // immutable, so reuse that exact URL without retransferring the JS graph.
+  // Keep mutable documents/bootstrap on their original revalidation policy.
+  const network = fetch(request, immutable ? { cache: "force-cache" } : undefined);
   event.waitUntil(
     network.then((response) => remember(key, response, immutable)).catch(() => undefined),
   );

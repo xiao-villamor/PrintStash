@@ -25,7 +25,14 @@ export type EventNotice =
   | { type: "resync" }
   | { type: "derivative_policy" }
   | { type: "subscribed"; channel: string }
-  | { type: "job"; job_id: string; kind: string; state: JobState; progress: number | null }
+  | {
+      type: "job";
+      job_id: string;
+      kind: string;
+      state: JobState;
+      progress: number | null;
+      task_visible: boolean;
+    }
   | {
       type: "derivative";
       model_id: number;

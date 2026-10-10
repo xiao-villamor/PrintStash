@@ -215,10 +215,11 @@ You can use the library without connecting a printer.
 - Run **Quick or Full Vault audits** to find missing files, integrity problems,
   and metadata issues. Review findings and use supported repairs for thumbnails,
   parsed metadata, and recommended Revisions.
-- Create, verify, and restore backups of the SQLite database, managed files, and
-  thumbnails. Schedule a daily backup and send copies to local storage,
-  S3-compatible storage, WebDAV, SFTP, or Google Drive. PostgreSQL needs
-  operator-managed database backups; Library source originals need separate backups.
+- Create, verify, and restore backups of file-backed SQLite or PostgreSQL,
+  managed files, and thumbnails. PostgreSQL is stored in the archive as a
+  portable SQLite-format database snapshot. Schedule one opt-in daily backup and
+  send copies to local storage, S3-compatible storage, WebDAV, SFTP, or Google
+  Drive. Library source originals need separate backups.
 - Export or import a portable library archive with files, metadata, tags,
   Collections, history, favorites, saved views, and captured source information.
   Export metadata alone as JSON or CSV when you need it for analysis.
@@ -302,8 +303,8 @@ actions, diagnostics, and the hardware validation record.
   and optional remote storage transports. Lite stores STEP files without mesh
   previews and retains native local and S3 managed storage.
 - **Backups have a defined scope.** Built-in database backup/restore supports
-  SQLite; PostgreSQL and files indexed from external Library sources need
-  separate backup procedures.
+  file-backed SQLite and PostgreSQL. Files indexed in place from external Library
+  sources remain outside the archive and need separate backups.
 - **One server process per library.** The supported deployment runs one API
   process per Vault. Printer actions, uploads, and library data require that
   server to be online, including when using the installed web app.

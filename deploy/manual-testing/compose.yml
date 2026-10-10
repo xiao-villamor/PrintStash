@@ -45,7 +45,7 @@ services:
       VAULT_STORAGE_BACKEND: "${VAULT_STORAGE_BACKEND:-s3}"
       # Every app path lives under the one /data volume below.
       # PostgreSQL is the default. Set VAULT_DB_URL in deploy/manual-testing/.env
-      # to sqlite:////data/db/printstash.sqlite for the SQLite backup/restore mode.
+      # to sqlite:////data/db/printstash.sqlite to test SQLite backup/restore.
       VAULT_DB_URL: "${VAULT_DB_URL:-postgresql+psycopg://printstash:printstash-manual-db@printstash-db:5432/printstash}"
       VAULT_BACKUP_RETENTION_DAYS: "${VAULT_BACKUP_RETENTION_DAYS:-30}"
       VAULT_S3_BUCKET: "${VAULT_S3_BUCKET:-printstash-manual}"

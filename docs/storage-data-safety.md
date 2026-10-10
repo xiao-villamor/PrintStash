@@ -87,10 +87,13 @@ The backup is verified again at finalization. Losing the archive, changing its
 source identity or changing active storage blocks deletion. A backup in another
 prefix of the same provider is not an independent failure domain.
 
-This automatic gate currently requires the built-in SQLite backup workflow.
-PostgreSQL deployments must continue using operator-managed backups and should
-leave automatic physical GC unapproved until an equivalent witness integration
-exists.
+Automatic physical GC requires Verified active storage and a fresh, fully
+verified, application-compatible backup on an independent S3 provider, for both
+SQLite and PostgreSQL. PostgreSQL archives contain a portable SQLite-format
+database snapshot. Keep the same witness checks: the archive must be no more than
+24 hours old, its S3 provider identity must differ from active Vault storage,
+and the exact source, archive digest, and full verification must still match at
+finalization.
 
 ## Quarantine And Finalization
 

@@ -204,6 +204,34 @@ class TestSearchPassages:
             assert subjects == [title.id, body.id]
             assert rows[0][1] > rows[1][1] > 0
 
+    def test_composes_independent_library_search_scopes(self, passage_engine):
+        from app.db.models import Model
+        from app.modules.search.lexical_index import rebuild_partition
+        from app.modules.search.lexical_query import LibrarySearch
+
+        engine, config = passage_engine
+        command.upgrade(config, "head")
+        with Session(engine) as session:
+            first = build_model(session, "Bracket left")
+            second = build_model(session, "Bracket right")
+            for model in (first, second):
+                sync_subject(session, SearchSubject(SubjectType.MODEL, model.id))
+            rebuild_partition(session)
+            session.commit()
+            searcher = LibrarySearch()
+            left = searcher.model_matches(
+                session, "bracket", select(Model.id).where(Model.id == first.id)
+            )
+            right = searcher.model_matches(
+                session, "bracket", select(Model.id).where(Model.id == second.id)
+            )
+
+            rows = session.exec(
+                select(left.c.model_id).union_all(select(right.c.model_id))
+            ).all()
+
+            assert sorted(row[0] for row in rows) == sorted([first.id, second.id])
+
     def test_recovers_spelling_using_the_indexed_vocabulary(self, passage_engine):
         from app.modules.search.lexical_index import rebuild_partition
         from app.modules.search.lexical_query import name_candidates

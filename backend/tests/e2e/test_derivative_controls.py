@@ -1,6 +1,9 @@
 """An administrator disables processing, uploads, and resumes the missing preview."""
 
+import io
+
 import pytest
+from PIL import Image
 from sqlmodel import Session
 
 from app.db.models import SystemConfig
@@ -45,4 +48,9 @@ class TestDerivativeControls:
         thumbnail = await api.get(f"/api/v1/files/{file_id}/thumbnail", headers=headers)
         assert thumbnail.status_code == 200
         assert thumbnail.headers["content-type"].startswith("image/")
-        assert len(thumbnail.content) > 0
+        decoded = Image.open(io.BytesIO(thumbnail.content))
+        assert decoded.format == "WEBP"
+        assert decoded.size == (640, 480)
+        lossless = io.BytesIO()
+        decoded.save(lossless, format="WEBP", lossless=True, exact=True, method=6)
+        assert len(thumbnail.content) < len(lossless.getvalue()) * 0.6

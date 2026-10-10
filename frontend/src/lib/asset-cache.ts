@@ -1,7 +1,7 @@
 import { getAuthenticatedBlob } from "@/lib/api";
 import { onAuthChange } from "@/lib/auth-store";
 
-const MAX_DOWNLOADS = 4;
+const MAX_DOWNLOADS = 2;
 const MAX_INACTIVE_ENTRIES = 400;
 const MAX_INACTIVE_BYTES = 32 * 1024 * 1024;
 

@@ -2,6 +2,7 @@
 
 from sqlmodel import select
 
+from app.core.time import utcnow
 from app.db.models import CollectionRole, Model
 from app.modules.similarity.projections import has_open_candidates, summaries
 
@@ -44,6 +45,69 @@ class TestProjections:
             select(Model.id).where(has_open_candidates(db_session, actor))
         ).all()
         assert set(matches) == {a.id, b.id}
+
+    def test_rechecks_the_actor_after_a_previous_badge_read(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_user,
+        make_collection,
+        grant_role,
+        make_geometry_fingerprint,
+        make_similarity_candidate,
+        make_similarity_observation,
+    ):
+        a, b = [
+            make_model(collection=make_collection(path=name))
+            for name in ("first", "second")
+        ]
+        administrator = make_user(superuser=True)
+        restricted = make_user()
+        grant_role(restricted, a.collection_id, CollectionRole.EDIT)
+        fa, fb = [
+            make_geometry_fingerprint(make_file(model), state="ready")
+            for model in (a, b)
+        ]
+        pair = make_similarity_candidate(a, b)
+        make_similarity_observation(pair, fa, fb)
+
+        assert summaries(db_session, administrator, [a.id]) == {
+            a.id: {"open_candidates": 1, "confirmed": 0}
+        }
+        assert summaries(db_session, restricted, [a.id]) == {}
+        grant_role(restricted, b.collection_id, CollectionRole.EDIT)
+        assert summaries(db_session, restricted, [a.id]) == {
+            a.id: {"open_candidates": 1, "confirmed": 0}
+        }
+
+    def test_rechecks_candidate_visibility_after_lifecycle_changes(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_user,
+        make_geometry_fingerprint,
+        make_similarity_candidate,
+        make_similarity_observation,
+    ):
+        actor = make_user(superuser=True)
+        a, b = make_model(), make_model()
+        fa, fb = [
+            make_geometry_fingerprint(make_file(model), state="ready")
+            for model in (a, b)
+        ]
+        pair = make_similarity_candidate(a, b)
+        make_similarity_observation(pair, fa, fb)
+        assert summaries(db_session, actor, [a.id]) == {
+            a.id: {"open_candidates": 1, "confirmed": 0}
+        }
+
+        b.deleted_at = utcnow()
+        db_session.add(b)
+        db_session.commit()
+
+        assert summaries(db_session, actor, [a.id]) == {}
 
     def test_excludes_stale_or_decided_pairs_from_open_filter(
         self,

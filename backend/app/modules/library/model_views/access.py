@@ -14,14 +14,14 @@ from app.db.scopes import live
 from app.modules.identity import rbac
 
 
-def _apply_model_access(stmt, session: Session, user: User):
+def _apply_model_access(stmt, session: Session, user: User, *, visible=None):
     if user.is_superuser:
         return stmt
-    return stmt.where(
-        Model.collection_id.in_(  # type: ignore[union-attr]
-            rbac.accessible_collection_ids_stmt(session, user, CollectionRole.VIEW)
+    if visible is None:
+        visible = rbac.accessible_collection_ids_stmt(
+            session, user, CollectionRole.VIEW
         )
-    )
+    return stmt.where(Model.collection_id.in_(visible))  # type: ignore[union-attr]
 
 
 def accessible_live_model_ids_stmt(session: Session, user: User):

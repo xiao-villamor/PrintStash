@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
 
+import type { OutlinerParams } from "@/types/outliner";
 import type { CollectionRole } from "@/types";
 
 /**
@@ -42,6 +43,9 @@ onAuthChange(() => queryClient.clear());
 // ---------------------------------------------------------------------------
 export const queryKeys = {
   outliner: ["outliner"] as const,
+  outlinerRestore: ["outliner", "restore"] as const,
+  outlinerCollections: (params: OutlinerParams) => ["outliner", "collections", params] as const,
+  outlinerEntries: (params: OutlinerParams) => ["outliner", "entries", params] as const,
   models: ["models"] as const,
   model: (id: number) => ["models", id] as const,
   multipartModels: ["multipart-models"] as const,

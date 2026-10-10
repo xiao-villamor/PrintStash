@@ -46,6 +46,7 @@ class PreviewProfile:
     supersample_max_output_width: int
     supersample_small_factor: int
     supersample_large_factor: int
+    encoding_quality: int
     encoding_method: int
     recipe_fingerprint: str
 
@@ -87,6 +88,9 @@ def _load_profile() -> PreviewProfile:
     margin = _number(root, "marginFraction")
     if not 0 < margin < 0.5:
         raise ValueError("preview_profile_invalid_margin")
+    quality = _integer(encoding, "quality")
+    if not 0 <= quality <= 100:
+        raise ValueError("preview_profile_invalid_quality")
     return PreviewProfile(
         version=_integer(root, "version"),
         aspect_ratio=(int(aspect[0]), int(aspect[1])),
@@ -99,6 +103,7 @@ def _load_profile() -> PreviewProfile:
         supersample_max_output_width=_integer(supersampling, "maxOutputWidth"),
         supersample_small_factor=_integer(supersampling, "smallFactor"),
         supersample_large_factor=_integer(supersampling, "largeFactor"),
+        encoding_quality=quality,
         encoding_method=_integer(encoding, "method"),
         recipe_fingerprint=hashlib.sha256(payload).hexdigest()[:16],
     )

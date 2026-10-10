@@ -12685,6 +12685,30 @@
         "title": "OutlinerCollection",
         "type": "object"
       },
+      "OutlinerCollectionLevel": {
+        "properties": {
+          "page": {
+            "$ref": "#/components/schemas/OutlinerCollectionPage"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          }
+        },
+        "required": [
+          "parent_id",
+          "page"
+        ],
+        "title": "OutlinerCollectionLevel",
+        "type": "object"
+      },
       "OutlinerCollectionMatch": {
         "properties": {
           "collection": {
@@ -12784,6 +12808,30 @@
           "revealed"
         ],
         "title": "OutlinerCollectionPage",
+        "type": "object"
+      },
+      "OutlinerEntryLevel": {
+        "properties": {
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "page": {
+            "$ref": "#/components/schemas/OutlinerEntryPage"
+          }
+        },
+        "required": [
+          "collection_id",
+          "page"
+        ],
+        "title": "OutlinerEntryLevel",
         "type": "object"
       },
       "OutlinerEntryPage": {
@@ -13027,6 +13075,345 @@
           "name"
         ],
         "title": "OutlinerMultipart",
+        "type": "object"
+      },
+      "OutlinerRestoreQuery": {
+        "additionalProperties": false,
+        "description": "Restore at most sixteen known branches, each with its own bounded page.",
+        "properties": {
+          "collection": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection Id"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor"
+          },
+          "direct": {
+            "default": false,
+            "title": "Direct",
+            "type": "boolean"
+          },
+          "expanded_paths": {
+            "items": {
+              "maxLength": 512,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 16,
+            "title": "Expanded Paths",
+            "type": "array"
+          },
+          "favorites": {
+            "default": false,
+            "title": "Favorites",
+            "type": "boolean"
+          },
+          "file_type": {
+            "items": {
+              "$ref": "#/components/schemas/FileType"
+            },
+            "title": "File Type",
+            "type": "array"
+          },
+          "has_similar_candidates": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Similar Candidates"
+          },
+          "limit": {
+            "default": 50,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "material_type": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Material Type",
+            "type": "array"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "print_duration_max_s": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusive actual PrintJob duration: under three hours is 10800.",
+            "title": "Print Duration Max S"
+          },
+          "print_duration_min_s": {
+            "anyOf": [
+              {
+                "maximum": 2147483647.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inclusive actual PrintJob duration; null durations do not match.",
+            "title": "Print Duration Min S"
+          },
+          "print_outcome": {
+            "items": {
+              "$ref": "#/components/schemas/PrintJobState"
+            },
+            "title": "Print Outcome",
+            "type": "array"
+          },
+          "printed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printed"
+          },
+          "printed_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Inclusive finished_at lower bound; UTC when no offset is supplied.",
+            "title": "Printed After"
+          },
+          "printed_before": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Exclusive finished_at upper bound.",
+            "title": "Printed Before"
+          },
+          "printer_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Id"
+          },
+          "printer_model": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Printer Model",
+            "type": "array"
+          },
+          "printer_presence": {
+            "anyOf": [
+              {
+                "enum": [
+                  "any",
+                  "none"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Printer Presence"
+          },
+          "q": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q"
+          },
+          "reveal_id": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reveal Id"
+          },
+          "revision_status": {
+            "items": {
+              "$ref": "#/components/schemas/FileRevisionStatus"
+            },
+            "title": "Revision Status",
+            "type": "array"
+          },
+          "selected_path": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selected Path"
+          },
+          "slicer_name": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Slicer Name",
+            "type": "array"
+          },
+          "storage": {
+            "items": {
+              "enum": [
+                "vault",
+                "external"
+              ],
+              "type": "string"
+            },
+            "title": "Storage",
+            "type": "array"
+          },
+          "tag": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Tag",
+            "type": "array"
+          },
+          "uploaded_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded After"
+          },
+          "uploaded_before": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uploaded Before"
+          },
+          "view": {
+            "$ref": "#/components/schemas/OutlinerView",
+            "default": "all"
+          }
+        },
+        "title": "OutlinerRestoreQuery",
+        "type": "object"
+      },
+      "OutlinerRestoreRead": {
+        "properties": {
+          "collections": {
+            "items": {
+              "$ref": "#/components/schemas/OutlinerCollectionLevel"
+            },
+            "title": "Collections",
+            "type": "array"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/OutlinerEntryLevel"
+            },
+            "title": "Entries",
+            "type": "array"
+          }
+        },
+        "required": [
+          "collections",
+          "entries"
+        ],
+        "title": "OutlinerRestoreRead",
         "type": "object"
       },
       "OutlinerSearchPage": {
@@ -38503,6 +38890,52 @@
           }
         ],
         "summary": "Entries",
+        "tags": [
+          "outliner"
+        ]
+      }
+    },
+    "/api/v1/outliner/restore": {
+      "post": {
+        "operationId": "restore_api_v1_outliner_restore_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OutlinerRestoreQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutlinerRestoreRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Restore",
         "tags": [
           "outliner"
         ]

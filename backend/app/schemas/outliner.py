@@ -82,3 +82,27 @@ class OutlinerCollectionPage(BaseModel):
     next_cursor: str | None
     parent_direct_entry_count: int
     revealed: OutlinerCollection | None
+
+
+class OutlinerRestoreQuery(OutlinerQuery):
+    """Restore at most sixteen known branches, each with its own bounded page."""
+
+    expanded_paths: list[Annotated[str, Field(min_length=1, max_length=512)]] = Field(
+        default_factory=list, max_length=16
+    )
+    selected_path: Annotated[str, Field(min_length=1, max_length=512)] | None = None
+
+
+class OutlinerCollectionLevel(BaseModel):
+    parent_id: int | None
+    page: OutlinerCollectionPage
+
+
+class OutlinerEntryLevel(BaseModel):
+    collection_id: int | None
+    page: OutlinerEntryPage
+
+
+class OutlinerRestoreRead(BaseModel):
+    collections: list[OutlinerCollectionLevel]
+    entries: list[OutlinerEntryLevel]

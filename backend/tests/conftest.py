@@ -353,6 +353,28 @@ def _patch_engine(
     See ADR-0001.
     """
     override_session_factory(_test_factory)
+    # Query templates contain no rows, but keep their construction lifetime
+    # inside each case when a test changes mapper or database configuration.
+    from app.modules.library.collection_tree import (
+        _label_ancestry,
+        _subtree_counts_template,
+    )
+    from app.modules.library.model_views.projections import _list_related_queries
+    from app.modules.library.outliner import (
+        _administrator_restore_counts,
+        _page_descendants,
+    )
+    from app.modules.search.lexical_index import canonical_passage
+    from app.modules.similarity.candidates import _endpoint_queries, _evidence_predicate
+
+    canonical_passage.cache_clear()
+    _administrator_restore_counts.cache_clear()
+    _page_descendants.cache_clear()
+    _subtree_counts_template.cache_clear()
+    _list_related_queries.cache_clear()
+    _label_ancestry.cache_clear()
+    _endpoint_queries.cache_clear()
+    _evidence_predicate.cache_clear()
     _overlay.clear()
     _overlay["db_url"] = TEST_DB_URL
     _overlay["secrets_key"] = "printstash-test-secrets-key"

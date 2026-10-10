@@ -1,7 +1,9 @@
-import { getJson } from "./request";
+import { getJson, requestApi } from "./request";
 import { modelListSearch } from "./models";
 import type {
   OutlinerParams,
+  OutlinerRestoreParams,
+  OutlinerRestoreRead,
   OutlinerCollectionPage,
   OutlinerEntryPage,
   OutlinerSearchPage,
@@ -32,4 +34,16 @@ export function searchOutliner(
   signal?: AbortSignal,
 ): Promise<OutlinerSearchPage> {
   return getJson(`/api/v1/outliner/search?${params(query)}`, { signal });
+}
+
+export function restoreOutliner(
+  query: OutlinerRestoreParams,
+  signal?: AbortSignal,
+): Promise<OutlinerRestoreRead> {
+  return requestApi("/api/v1/outliner/restore", {
+    method: "POST",
+    body: JSON.stringify({ ...query, limit: 50 }),
+    headers: { "Content-Type": "application/json" },
+    signal,
+  });
 }
