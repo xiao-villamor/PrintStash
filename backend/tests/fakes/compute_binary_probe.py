@@ -88,9 +88,20 @@ def main():
         ]
         with ThreadPoolExecutor(max_workers=4) as pool:
             outputs = list(pool.map(request, ["one", "two", "three", "four"]))
+        import gc
+        import weakref
+
         from app.runtime.compute.geometry_cache import GeometryCache
 
+        retired = weakref.ref(
+            next(iter(owners[0].geometry_cache.entries.values())).prepared.vertices
+        )
         owners[0].geometry_cache = GeometryCache(1)
+        until = time.monotonic() + 2
+        while retired() is not None and time.monotonic() < until:
+            gc.collect()
+            time.sleep(0.01)
+        released_geometry = retired() is None
         capacity = request("too-large")
         owners[0].geometry_cache = GeometryCache()
         recovered = request("recovered")
@@ -98,6 +109,7 @@ def main():
         print(
             json.dumps(
                 {
+                    "released_geometry": released_geometry,
                     "capacity": capacity,
                     "recovered": recovered,
                     "reuploaded": reuploaded,

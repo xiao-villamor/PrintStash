@@ -302,6 +302,12 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                                 else Reason.DEADLINE
                             )
                         member.ready.set()
+                    # An idle scheduler must not retain retired tickets, arrays
+                    # or output frames outside their queue/cache reservations.
+                    # Handlers keep their own ticket until delivery completes.
+                    group.clear()
+                    ticket = candidate = arrival = member = None
+                    batch = combined = outputs = result = None
             for ticket in waiting:
                 ticket.result = error(Reason.BROKER_UNAVAILABLE)
                 ticket.ready.set()

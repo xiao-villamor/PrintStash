@@ -50,3 +50,6 @@ class TestBinaryRender:
     def test_uploads_again_after_cache_eviction(self, binary_report):
         assert binary_report["reuploaded"] == binary_report["uploaded"]
         assert binary_report["healthy"] == "healthy"
+
+    def test_releases_completed_geometry_after_eviction(self, binary_report):
+        assert binary_report["released_geometry"] is True

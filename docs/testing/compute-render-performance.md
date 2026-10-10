@@ -35,6 +35,7 @@ PNG encoding remains on CPU. Human visual acceptance remains with the operator.
 | 23 | Binary rendering accounts GPU workspace | Happy | Finalization-enabled request | Postprocess device buffers charged separately from host input | Unit | ✅ unit/runtime/compute/test_render_policy.py::TestAdmission::test_accounts_for_binary_owner_workspace |
 | 24 | Non-object descriptors rejected | Error | Null, scalar or array JSON | Invalid input classification | Unit | ✅ unit/modules/media/test_compute_geometry.py::TestDecode::test_rejects_non_object_descriptors |
 | 25 | Malformed cameras rejected | Error | Object, string, wrong shape or nonfinite matrix | Invalid input classification | Unit | ✅ unit/modules/media/test_compute_geometry.py::TestDecode::test_rejects_malformed_cameras |
+| 26 | Completed requests release geometry references | Edge | Clients finished; geometry evicted | Arrays become reclaimable without another request | Contract | ✅ contract/runtime/compute/test_client.py::TestBinaryRender::test_releases_completed_geometry_after_eviction |
 
 ## Controlled observations (RTX 5060, Docker/WSL)
 
@@ -86,7 +87,18 @@ ASGI ingestion runner. That elapsed time includes parsing and durable publicatio
 but is not a paired complete-ingestion performance qualification. No human visual
 acceptance was recorded by these comparisons.
 
-Local regression selection: 119 compute/media/IPC cases pass; eight additional
+Local regression selection: 120 compute/media/IPC cases pass; eight additional
 client-recovery/CPU-ingestion cases pass; the physical diagnostic passes 15 cases.
 Ruff, scoped formatting and pyright pass. Full backend and exact-head CI results
 are recorded in the PR validation section after completion.
+
+The retirement regression failed before clearing the scheduler's completed-ticket
+references: evicted input arrays remained reachable while the broker was idle.
+The scheduler now releases those references after signalling each result; handlers
+retain their own ticket and credits through delivery. The real-socket regression
+requires the evicted arrays to become reclaimable without another request.
+
+The full backend run began before this final reference-retirement follow-up.
+Its focused 120-case selection and exact-head CI cover the follow-up separately;
+the regression was observed failing before its fix. Rendering shaders and pixel
+semantics are unchanged by this lifetime correction.
