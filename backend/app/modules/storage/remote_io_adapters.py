@@ -72,7 +72,15 @@ class _RemoteAdapter:
             return self._operator
         import opendal
 
-        return layer(opendal.layers.TimeoutLayer(timeout=timeout, io_timeout=timeout))
+        operator = layer(
+            opendal.layers.TimeoutLayer(timeout=timeout, io_timeout=timeout)
+        )
+        to_async = getattr(operator, "to_async_operator", None)
+        if to_async is None:
+            return operator
+        from app.modules.storage.opendal_async_reads import AsyncReadOperator
+
+        return AsyncReadOperator(to_async())
 
     @property
     def storage_target(self) -> StorageTargetIdentity | None:
@@ -181,7 +189,7 @@ class _RemoteAdapter:
         return self._namespace
 
     def exists(self, key: str) -> bool:
-        return bool(self._operator.exists(self._relative(key)))
+        return bool(self._io_operator.exists(self._relative(key)))
 
     def publish_replica(self, source: BinaryIO, key: str) -> CreationReceipt:
         if self._read_only:
@@ -281,7 +289,7 @@ class _RemoteAdapter:
 
     def stat_size(self, key: str) -> int:
         try:
-            return int(self._operator.stat(self._relative(key)).content_length)
+            return int(self._io_operator.stat(self._relative(key)).content_length)
         except Exception as exc:
             if _is_not_found(exc):
                 raise FileNotFoundError(key) from exc
@@ -309,7 +317,7 @@ class _RemoteAdapter:
         )
 
     def read_bytes(self, key: str) -> bytes:
-        return bytes(self._operator.read(self._relative(key)))
+        return bytes(self._io_operator.read(self._relative(key)))
 
     @property
     def operator_capabilities(self):
@@ -317,7 +325,7 @@ class _RemoteAdapter:
         return self._operator.capability()
 
     def check(self) -> None:
-        self._operator.check()
+        self._io_operator.check()
 
     def _delete_versioned(self, key: str, version_id: str) -> None:
         if (
