@@ -294,7 +294,10 @@ class _RemoteAdapter:
             if not operator.exists(relative):
                 return None
             metadata = operator.stat(relative)
+        except StorageConfigurationError:
+            raise
         except Exception as exc:
+            operation_timeout()
             if _is_not_found(exc):
                 return None
             raise StorageConfigurationError("remote_storage_metadata_failed") from exc
@@ -393,6 +396,7 @@ class _RemoteAdapter:
             except StorageConfigurationError:
                 raise
             except Exception as exc:
+                operation_timeout()
                 if _is_not_found(exc):
                     raise FileNotFoundError(key) from exc
                 raise StorageConfigurationError("remote_storage_read_failed") from exc
@@ -507,7 +511,10 @@ class _RemoteReader(RawIOBase):
         try:
             read = getattr(self.reader, "read1", self.reader.read)
             chunk = read(len(buffer))
+        except StorageConfigurationError:
+            raise
         except Exception as exc:
+            operation_timeout()
             raise StorageConfigurationError("remote_storage_read_failed") from exc
         buffer[: len(chunk)] = chunk
         return len(chunk)
@@ -702,7 +709,10 @@ class _ChunkReader(RawIOBase):
                 self._pending = memoryview(next(self._chunks))
             except StopIteration:
                 return 0
+            except StorageConfigurationError:
+                raise
             except Exception as exc:
+                operation_timeout()
                 raise StorageConfigurationError("remote_storage_read_failed") from exc
         count = min(len(buffer), len(self._pending))
         buffer[:count] = self._pending[:count]
@@ -714,7 +724,10 @@ class _ChunkReader(RawIOBase):
             close = getattr(self._chunks, "close", None)
             if close is not None:
                 close()
+        except StorageConfigurationError:
+            raise
         except Exception as exc:
+            operation_timeout()
             raise StorageConfigurationError("remote_storage_read_failed") from exc
         finally:
             self._pending = memoryview(b"")

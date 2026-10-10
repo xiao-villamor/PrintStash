@@ -298,6 +298,8 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 ### Fixed
 
+- Preserve remote scan deadlines when native metadata or streaming reads time out, so bounded imports continue instead of entering provider-error backoff.
+
 - Continue manual remote-library scans across bounded pages and time slices using durable requests committed with the saved cursor. Cancellation and provider backoff remain distinct from normal continuation.
 
 - Normalize S3 library listing timestamps to HTTP HEAD precision so unchanged Cloudflare R2 models can be indexed; retain size, ETag, version and post-download change checks.
