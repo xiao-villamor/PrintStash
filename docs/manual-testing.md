@@ -323,13 +323,13 @@ evidence and reset the disposable volumes before changing modes.
 
 Keep a backup copy outside the harness volumes.
 
-Use the default PostgreSQL+S3 mode for database/storage behavior and migration
-testing. PrintStash's integrated backup/restore deliberately supports SQLite
-only: in PostgreSQL mode verify the stable `database_backup_not_supported`
-result and use the README's external `pg_dump`/`pg_restore` plus S3 snapshot
-procedure. After exporting evidence and resetting the disposable volumes, start
-the harness in its documented SQLite+S3 mode for every integrated backup/restore
-check below.
+Use the default PostgreSQL+S3 mode for database/storage behavior, migration,
+and integrated backup/restore testing. PostgreSQL backup creates a portable
+SQLite-format database snapshot in the PrintStash archive and restore applies it
+to PostgreSQL. Keep a copy of the archive outside the harness volumes. The
+opt-in automatic schedule is off by default and can claim at most one backup
+attempt per UTC day; it uses the same backup Job path for PostgreSQL and SQLite.
+Use the SQLite+S3 mode as well when validating SQLite-specific behavior.
 
 - [ ] PostgreSQL constraints, transactions, search/filter, concurrent updates,
       and migrations match supported SQLite behavior.
@@ -337,17 +337,23 @@ check below.
       purge, and restart persistence work against SeaweedFS.
 - [ ] Stop SeaweedFS during upload/read/delete. PrintStash fails closed without
       committing false success; recovery leaves no orphan temp data or rows.
-- [ ] **SQLite+S3:** Create/verify a backup with database, owned Artifacts, thumbnails, Documents,
-      provenance, and manifest hashes.
+- [ ] **PostgreSQL+S3 and SQLite+S3:** Create/verify a backup with database,
+      owned Artifacts, thumbnails, Documents, provenance, and manifest hashes.
+- [ ] **PostgreSQL+S3:** Confirm the archive contains a valid portable SQLite
+      database snapshot and the capability endpoint reports create/restore support.
+- [ ] **PostgreSQL+S3 and SQLite+S3:** When testing automatic backup, enable it
+      explicitly, verify the configured UTC time, confirm it attempts no more
+      than once per UTC day, and verify both backends use the same backup Job path.
 - [ ] Unreadable/changing owned blobs fail backup instead of being omitted; linked
       external bytes respect the ownership boundary.
-- [ ] **SQLite+S3:** Download a backup outside Compose volumes and, when in scope,
-      mirror one to backup S3.
-- [ ] **SQLite+S3:** Restore cleanly and compare record counts, sample hashes, permissions,
-      connections, thumbnails, and viewers.
+- [ ] **PostgreSQL+S3 and SQLite+S3:** Download a backup outside Compose
+      volumes and, when in scope, mirror one to backup S3.
+- [ ] **PostgreSQL+S3 and SQLite+S3:** Restore cleanly and compare record
+      counts, sample hashes, permissions, connections, thumbnails, and viewers.
 - [ ] Corrupt, truncated, traversal, wrong-version, and manifest-mismatched backups
       are rejected before replacement.
-- [ ] **SQLite+S3:** Interrupted restore preserves maintenance mode and documented recovery.
+- [ ] **PostgreSQL+S3 and SQLite+S3:** Interrupted restore preserves
+      maintenance mode and documented recovery.
 - [ ] JSON/CSV and portable archive export/import preserve hashes/invariants;
       re-import exercises conflicts.
 - [ ] Upgrade a previous-release SQLite volume and verify migrations and smoke data.
