@@ -1,0 +1,52 @@
+{
+  "manifest": {
+    "baseline_commit": "8d70c556",
+    "candidate_commit": "72c66550602fc36ef2fa206bf1bfca8b30f9ca1b",
+    "observations_per_comparison": 30,
+    "viewport": {
+      "width": 900,
+      "height": 700
+    },
+    "canvas": {
+      "width": 640,
+      "height": 480
+    },
+    "device_scale_factor": 1,
+    "interaction_frames": 120,
+    "workloads": [
+      "real-stl-small",
+      "real-stl-medium",
+      "real-stl-large",
+      "real-3mf-small",
+      "real-3mf-medium",
+      "real-3mf-large"
+    ],
+    "source_hashes": {
+      "real-stl-small": "20706141230e736ce915ceb8a8d1eb6e6974e1bc0251601c9558639b27677222",
+      "real-stl-medium": "9ee60e3375c0211bd7b3fa6b7d9dd629157b5dd637067177aa59ee54f493e03a",
+      "real-stl-large": "846bf9b3c8b026fb09f3d0abe969f9d6803a68d115d5b3ec49ff29fae38d093d",
+      "real-3mf-small": "ce0089863a5249fcf5feb644dee689c14eb6b9ebf60b4f9c3ed14a3f2b80f65d",
+      "real-3mf-medium": "5359123160210cdcf4e38915a17b2473f9ae80fb6bd785dcece71bf6a83c3284",
+      "real-3mf-large": "0ebb10a97f1a1c7fbf21b326c5fc719b5c3955dfe412745a818ed8eb7062fda5"
+    },
+    "baseline_three": "0.182.0",
+    "candidate_three": "0.186.1",
+    "scope": "Development comparison using private deployed model bytes: fresh browser contexts, warm Vite servers, readiness plus two animation frames is a proxy, not measured first visible paint. 3MF sources use offline application viewer-STL conversion. No production qualification.",
+    "required_p95_improvement": 0.2,
+    "maximum_ready_regression": 0.1
+  },
+  "browser": "154.0.8037.98",
+  "production_qualified": false,
+  "runtime_observed_after_campaign": {
+    "browser": "154.0.8037.98",
+    "adapter": {
+      "vendor": "nvidia",
+      "architecture": "blackwell",
+      "device": "",
+      "description": ""
+    },
+    "physical_device": "NVIDIA GeForce RTX 5060",
+    "driver_version": "610.88",
+    "fixture_sha256": "f44a886e5386a2ca02413e37d3e1bf5704c033e48153f39b1cda93b3bf7fc65b"
+  }
+}

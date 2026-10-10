@@ -14,30 +14,13 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import NoReturn, Protocol, cast
 
 import numpy as np
 from numpy.typing import NDArray
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
-
-class GpuFailure(StrEnum):
-    INVALID_REQUEST = "invalid_request"
-    DEPENDENCY_UNAVAILABLE = "dependency_unavailable"
-    CONTEXT_FAILED = "context_failed"
-    SHADER_FAILED = "shader_failed"
-    ALLOCATION_FAILED = "allocation_failed"
-    DRAW_FAILED = "draw_failed"
-    READBACK_FAILED = "readback_failed"
-    CLOSED = "closed"
-
-
-class GpuError(Exception):
-    def __init__(self, reason: GpuFailure):
-        self.reason = reason
-        super().__init__(reason.value)
+from scripts.render_backend import GpuError, GpuFailure, GpuStats
 
 
 class NativeResource(Protocol):
@@ -93,17 +76,6 @@ class NativeContext(NativeResource, Protocol):
     ) -> NativeVertexArray: ...
     def enable_only(self, flags: int) -> None: ...
     def finish(self) -> None: ...
-
-
-@dataclass
-class GpuStats:
-    requested_allocation_bytes: int
-    upload_bytes: int = 0
-    draw_calls: int = 0
-    readback_count: int = 0
-    upload_ms: float = 0.0
-    draw_ms: float = 0.0
-    readback_ms: float = 0.0
 
 
 MODERNGL_DEPTH_TEST = 2

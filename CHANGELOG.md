@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Request the platform-preferred GPU before enumerating other graphics backends in the optional research adapter. Preserve capability fallback, software exclusion and explicit adapter selection.
+
+- Retain expanded NVIDIA quality rejection, real-model browser comparisons and fresh-worker failure evidence; document an isolated experimental WSL/Docker diagnostic without changing production eligibility.
+
+- Automate fresh-worker GPU benchmark campaigns with retained failures and immutable output directories; add ASCII/binary STL and overlapping geometry controls.
+
+- Report native GPU readback separately from CPU face resolution and canonical shading in qualification measurements.
+
+- Record revised RTX 5060 control evidence: exact CPU/GPU images across 60 observations after precision and native cleanup fixes; production qualification remains gated.
+
+- PRI-16: preserve canonical interpolation precision in the optional WebGPU
+  adapter, bound retained geometry, and reject invalid face readback before publication.
+
+- Add an optional Python 3.14 WebGPU raster qualification adapter, adapter diagnostics,
+  frozen benchmark manifests and statistical reports. Production rendering remains CPU.
+
 - Avoid deep-cloning lexical search queries for each page; keep rank materialization
   local to each query and reuse immutable current-recipe predicates. Measure tab
   indicators after native layout instead of forcing layout during React commit.
