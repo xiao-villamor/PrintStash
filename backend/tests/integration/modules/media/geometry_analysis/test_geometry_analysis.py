@@ -223,7 +223,7 @@ class TestEmbeddingViews:
         from printstash_core.search.visual_inputs import VisualRecipe
 
         baseline = json.loads(
-            (FIXTURES_DIR / "media/visual-prepared-v1.json").read_text()
+            (FIXTURES_DIR / "media/visual-prepared-v2.json").read_text()
         )
         recipe = VisualRecipe.for_space(
             VisualRecipe.space(

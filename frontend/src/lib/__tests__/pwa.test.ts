@@ -70,11 +70,27 @@ describe("registerServiceWorker", () => {
 
   it("reloads once when an updated service worker takes control", () => {
     const reload = vi.fn<() => void>();
-    const handleControllerChange = createControllerChangeHandler(reload);
+    const handleControllerChange = createControllerChangeHandler(reload, true);
 
     handleControllerChange();
     handleControllerChange();
 
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the first visit when the installed worker takes control", () => {
+    const reload = vi.fn<() => void>();
+    const handler = createControllerChangeHandler(reload, false);
+    handler();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("reloads a later update after the first installation", () => {
+    const reload = vi.fn<() => void>();
+    const handler = createControllerChangeHandler(reload, false);
+    handler();
+    handler();
+    handler();
     expect(reload).toHaveBeenCalledTimes(1);
   });
 

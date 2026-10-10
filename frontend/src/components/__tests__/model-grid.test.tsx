@@ -476,7 +476,9 @@ describe("ModelBrowser", () => {
         startup: true,
         routes: { "GET /api/v1/models/browse": () => new Promise(() => {}) },
       });
-      await userEvent.click(screen.getAllByRole("button", { name: "Filters" })[0]);
+      // jsdom does not apply responsive CSS; target the desktop disclosure,
+      // not an earlier hidden mobile trigger whose catalogs are viewport-gated.
+      await userEvent.click(screen.getByRole("button", { name: "Filters", expanded: false }));
       await waitFor(() =>
         expect(requests().some((request) => request.url.startsWith("/api/v1/models/facets"))).toBe(
           true,
@@ -706,6 +708,28 @@ describe("ModelBrowser", () => {
   });
 
   describe("collection navigation", () => {
+    it("clears Model selection when entering another collection", async () => {
+      const user = userEvent.setup();
+      renderVault({
+        models: [aModelListItem({ name: "Benchy" })],
+        collections: [aCollection()],
+      });
+      await screen.findByText("Benchy");
+      await openLibraryTools();
+      await user.click(screen.getByRole("button", { name: "Select" }));
+      await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
+      expect(screen.getAllByText("1 selected").length).toBeGreaterThan(0);
+
+      await user.click(
+        within(screen.getByRole("complementary")).getByRole("button", {
+          name: "Parts",
+        }),
+      );
+
+      await waitFor(() => expect(screen.queryAllByText("1 selected")).toHaveLength(0));
+      expect(screen.getByRole("checkbox", { name: "Select Benchy" })).not.toBeChecked();
+    });
+
     it("keeps existing root collections visible beside an imported root", async () => {
       renderVault({
         collections: [
@@ -1025,11 +1049,10 @@ describe("ModelBrowser", () => {
 
       await user.hover(await folderCard("parts/brackets"));
 
-      await waitFor(() => {
-        for (const prefix of ["/api/v1/models/browse", "/api/v1/models/facets"]) {
-          expect(requestsFor(requests, prefix, "parts/brackets")).toHaveLength(1);
-        }
-      });
+      await waitFor(() =>
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
+      );
+      expect(requestsFor(requests, "/api/v1/models/facets", "parts/brackets")).toHaveLength(0);
     });
 
     it("opens a warmed folder without asking the server again", async () => {
@@ -1071,7 +1094,7 @@ describe("ModelBrowser", () => {
       );
     });
 
-    it("warms the readme of a hovered folder that has one", async () => {
+    it("loads a hovered folder description on navigation", async () => {
       const user = userEvent.setup();
       const { requests } = renderVault({
         at: "/?c=parts",
@@ -1092,10 +1115,13 @@ describe("ModelBrowser", () => {
       await user.hover(await folderCard("parts/brackets"));
 
       await waitFor(() =>
-        expect(
-          requests().filter((call) => call.url.endsWith("/api/v1/collections/2/readme")),
-        ).toHaveLength(1),
+        expect(requestsFor(requests, "/api/v1/models/browse", "parts/brackets")).toHaveLength(1),
       );
+      expect(
+        requests().filter((call) => call.url.endsWith("/api/v1/collections/2/readme")),
+      ).toHaveLength(0);
+      await user.click(await folderCard("parts/brackets"));
+      expect(await screen.findByText("Shelf brackets.")).toBeVisible();
     });
 
     it("does not re-warm the folder that is already open", async () => {
@@ -1666,11 +1692,18 @@ describe("ModelBrowser", () => {
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       await waitFor(() =>
-        expect(requestsWithMethod("POST").at(-1)?.url).toBe("/api/v1/collections"),
+        expect(
+          requestsWithMethod("POST").find((request) => request.url === "/api/v1/collections")?.url,
+        ).toBe("/api/v1/collections"),
       );
       // The parent travels as an id, not as a path prefix, so renaming the parent
       // cannot orphan a folder created under its old name.
-      expect(JSON.parse(requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
+      expect(
+        JSON.parse(
+          requestsWithMethod("POST").find((request) => request.url === "/api/v1/collections")
+            ?.body ?? "{}",
+        ),
+      ).toMatchObject({
         name: "Bolts",
         parent_id: 1,
       });
@@ -1690,7 +1723,12 @@ describe("ModelBrowser", () => {
       await user.click(screen.getByRole("button", { name: "Create" }));
 
       await waitFor(() =>
-        expect(JSON.parse(requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
+        expect(
+          JSON.parse(
+            requestsWithMethod("POST").find((request) => request.url === "/api/v1/collections")
+              ?.body ?? "{}",
+          ),
+        ).toMatchObject({
           name: "Bolts",
           parent_id: null,
         }),

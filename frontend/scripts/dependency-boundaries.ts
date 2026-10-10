@@ -67,6 +67,7 @@ export const FEATURE_PUBLIC_MODULES = new Set([
     "provenance",
     "mutations",
     "navigation-state",
+    "navigation-reads",
     "reading-position",
     "saved-views",
     "thumbnails",

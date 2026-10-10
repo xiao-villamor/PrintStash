@@ -389,7 +389,9 @@ def measure(spec: PilotSpec) -> dict[str, object]:
                         if spec.flow is Flow.MULTIVIEW and view == 0:
                             if payload is None:
                                 raise ValueError("thumbnail_encoding_unavailable")
-                            normalized = thumbnail.to_webp(payload, width=640)
+                            normalized = thumbnail.to_webp(
+                                payload, width=640, renderer_encoded=True
+                            )
                             rgb = thumbnail_input(normalized, spec.embedding_size).rgb
                             if rgb is None:
                                 raise ValueError("thumbnail_rgb_unavailable")

@@ -44,7 +44,8 @@ def measure(directory: Path, output: Path, profile: str):
                 width=640,
                 height=480,
                 output_format="WEBP",
-            )
+            ),
+            renderer_encoded=True,
         )
         query, candidate = provider.embed(
             (decode_image(photo, "image/jpeg"), decode_image(encoded, "image/webp")),

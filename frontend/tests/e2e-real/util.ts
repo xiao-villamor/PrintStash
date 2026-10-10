@@ -232,6 +232,11 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
 
   if (collection) {
     await dialog.getByRole("button", { name: "None" }).click();
+    // Destination results are paginated. Search by the leaf name before selecting
+    // the full displayed path, including when earlier flows created other folders.
+    await dialog
+      .getByRole("textbox", { name: "Find destination", exact: true })
+      .fill(collection.slice(collection.lastIndexOf("/") + 1));
     await dialog.getByRole("option", { name: new RegExp(collection) }).click();
   }
   if (tag) {

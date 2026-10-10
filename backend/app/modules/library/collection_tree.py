@@ -18,9 +18,10 @@ import base64
 import binascii
 import json
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any, Iterable, Sequence
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, bindparam, func, or_
 from sqlalchemy import select as sa_select
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, select
@@ -118,24 +119,12 @@ class SubtreeCounts:
     collections: int
 
 
-def _subtree_counts(
-    session: Session, rows: Sequence[_Row], visible: SelectOfScalar[int]
-) -> dict[str, SubtreeCounts]:
-    """Live Models and collections below each row, keyed by path, counted in SQL.
-
-    Walk indexed parent ids from the page rows, then group below each root.
-    The recursive query returns one count row per page item without loading
-    the descendants into Python or comparing every collection path to a page
-    path. A deleted or inaccessible descendant contributes to neither count.
-    """
-    if not rows:
-        return {}
+@lru_cache(maxsize=1)
+def _subtree_counts_template():
+    """Immutable traversal structure; roots and current visibility are applied per read."""
     descendants = (
-        sa_select(
-            Collection.id.label("root_id"),
-            Collection.id.label("below_id"),
-        )
-        .where(Collection.id.in_([row.id for row in rows]))  # type: ignore[union-attr]
+        sa_select(Collection.id.label("root_id"), Collection.id.label("below_id"))
+        .where(Collection.id.in_(bindparam("count_root_ids", expanding=True)))
         .cte("descendants", recursive=True)
     )
     child = aliased(Collection)
@@ -144,34 +133,41 @@ def _subtree_counts(
             child, child.parent_id == descendants.c.below_id
         )
     )
-    page = aliased(Collection)
-    below = aliased(Collection)
-    # Aggregate Models once per collection before joining the descendants, so
-    # the recursive result has one row per collection rather than per Model.
+    page, below = aliased(Collection), aliased(Collection)
     direct = (
         sa_select(Model.collection_id, func.count(Model.id).label("models"))
         .where(live(Model))
         .group_by(Model.collection_id)
         .subquery()
     )
+    statement = (
+        sa_select(
+            page.path,
+            func.coalesce(func.sum(direct.c.models), 0),
+            func.count(below.id) - 1,
+        )
+        .select_from(descendants)
+        .join(page, page.id == descendants.c.root_id)
+        .join(below, below.id == descendants.c.below_id)
+        .outerjoin(direct, direct.c.collection_id == below.id)
+        .where(live(below))
+        .group_by(page.path)
+    )
+    return statement, below
+
+
+def _subtree_counts(
+    session: Session, rows: Sequence[_Row], visible: SelectOfScalar[int]
+) -> dict[str, SubtreeCounts]:
+    """Count live, authorized descendants without materializing the whole tree."""
+    if not rows:
+        return {}
+    statement, below = _subtree_counts_template()
     counts = {
         path: SubtreeCounts(models=int(models), collections=int(collections))
         for path, models, collections in session.execute(
-            sa_select(
-                page.path,
-                func.coalesce(func.sum(direct.c.models), 0),
-                # The row itself is in its own subtree; the rest are below it.
-                func.count(below.id) - 1,
-            )
-            .select_from(descendants)
-            .join(page, page.id == descendants.c.root_id)
-            .join(below, below.id == descendants.c.below_id)
-            .outerjoin(direct, direct.c.collection_id == below.id)
-            .where(
-                live(below),
-                below.id.in_(visible),
-            )
-            .group_by(page.path)
+            statement.where(below.id.in_(visible)),
+            {"count_root_ids": [row.id for row in rows]},
         ).all()
     }
     return {row.path: counts[row.path] for row in rows}
@@ -207,6 +203,35 @@ def collection_tags(
     return result
 
 
+@lru_cache(maxsize=1)
+def _label_ancestry():
+    # This is immutable SQL structure only. Paths are bound at execution and
+    # the caller appends its current authorization scope on every read.
+    lineage = (
+        sa_select(
+            Collection.path.label("target_path"),
+            Collection.id.label("ancestor_id"),
+            Collection.parent_id.label("parent_id"),
+        )
+        .where(Collection.path.in_(bindparam("label_paths", expanding=True)))  # type: ignore[union-attr]
+        .cte("lineage", recursive=True)
+    )
+    parent = aliased(Collection)
+    lineage = lineage.union_all(
+        sa_select(lineage.c.target_path, parent.id, parent.parent_id).join(
+            parent, parent.id == lineage.c.parent_id
+        )
+    )
+    ancestor = aliased(Collection)
+    return (
+        sa_select(lineage.c.target_path, ancestor.path, ancestor.name)
+        .select_from(lineage)
+        .join(ancestor, ancestor.id == lineage.c.ancestor_id)
+        .where(live(ancestor)),
+        ancestor.id,
+    )
+
+
 def _labels(
     session: Session, paths: Iterable[str], visible: SelectOfScalar[int]
 ) -> dict[str, str]:
@@ -219,31 +244,10 @@ def _labels(
     wanted = sorted(set(paths))
     if not wanted:
         return {}
-    lineage = (
-        sa_select(
-            Collection.path.label("target_path"),
-            Collection.id.label("ancestor_id"),
-            Collection.parent_id.label("parent_id"),
-        )
-        .where(Collection.path.in_(wanted))  # type: ignore[union-attr]
-        .cte("lineage", recursive=True)
-    )
-    parent = aliased(Collection)
-    lineage = lineage.union_all(
-        sa_select(lineage.c.target_path, parent.id, parent.parent_id).join(
-            parent, parent.id == lineage.c.parent_id
-        )
-    )
-    ancestor = aliased(Collection)
+    statement, ancestor_id = _label_ancestry()
     chains: dict[str, list[tuple[str, str]]] = {}
     for path, ancestor_path, name in session.execute(
-        sa_select(lineage.c.target_path, ancestor.path, ancestor.name)
-        .select_from(lineage)
-        .join(ancestor, ancestor.id == lineage.c.ancestor_id)
-        .where(
-            live(ancestor),
-            ancestor.id.in_(visible),
-        )
+        statement.where(ancestor_id.in_(visible)), {"label_paths": wanted}
     ).all():
         chains.setdefault(path, []).append((ancestor_path, name))
     return {

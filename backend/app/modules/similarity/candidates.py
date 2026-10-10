@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 
 from printstash_core.mesh.similarity.verification import Verification
 from sqlalchemy import and_, case, true, update
@@ -45,6 +46,13 @@ class CandidatePage:
 
 def current_evidence(candidate=SimilarityCandidate):
     """Correlated SQL predicate; source lifecycle invalidation needs no sweep."""
+    return _evidence_predicate(candidate, ALGORITHM_VERSION)
+
+
+@lru_cache(maxsize=1)
+def _evidence_predicate(candidate, algorithm_version: str):
+    # Reuse immutable SQL construction, never query results or user permissions.
+    # Every execution still reads current source, lifecycle and evidence rows.
     a, b = aliased(GeometryFingerprint), aliased(GeometryFingerprint)
     fa, fb = aliased(File), aliased(File)
     ma, mb = aliased(Model), aliased(Model)
@@ -67,7 +75,7 @@ def current_evidence(candidate=SimilarityCandidate):
             fb.sha256 == observation.input_hash_b,
             a.source_sha256 == fa.sha256,
             b.source_sha256 == fb.sha256,
-            candidate.algorithm_version == ALGORITHM_VERSION,
+            candidate.algorithm_version == algorithm_version,
             a.algorithm_version == candidate.algorithm_version,
             b.algorithm_version == candidate.algorithm_version,
             col(a.state).in_(("ready", "partial")),
@@ -88,27 +96,38 @@ def current_evidence(candidate=SimilarityCandidate):
     )
 
 
-def visible_query(session: Session, actor: User):
-    # Candidate endpoints are known identities. Correlated point lookups prevent
-    # stale small-catalog statistics from starting with a full Model scan.
-    # A primary-key scalar is at most one row. Keeping it scalar preserves
-    # keyed plans where flattening EXISTS reintroduced catalog scans.
+@lru_cache(maxsize=1)
+def _endpoint_queries():
+    # Cache aliases and invariant lifecycle predicates, never permissions or rows.
+    # SQLAlchemy's generative where() leaves these templates unchanged.
     a, b = aliased(Model), aliased(Model)
-    visible_endpoints = [
-        select(model.id)
-        .where(
-            model.id == endpoint,
-            live(model),
-            col(model.purge_token).is_(None),
-            editable_models(session, actor, model),
+    return tuple(
+        (
+            model,
+            select(model.id)
+            .where(
+                model.id == endpoint,
+                live(model),
+                col(model.purge_token).is_(None),
+            )
+            .correlate(SimilarityCandidate),
         )
-        .correlate(SimilarityCandidate)
-        .scalar_subquery()
-        .is_not(None)
         for model, endpoint in (
             (a, col(SimilarityCandidate.model_a_id)),
             (b, col(SimilarityCandidate.model_b_id)),
         )
+    )
+
+
+def visible_query(session: Session, actor: User):
+    # Candidate endpoints are known identities. Correlated point lookups prevent
+    # stale small-catalog statistics from starting with a full Model scan.
+    # Every execution composes the caller's current authorization predicate.
+    visible_endpoints = [
+        statement.where(editable_models(session, actor, model))
+        .scalar_subquery()
+        .is_not(None)
+        for model, statement in _endpoint_queries()
     ]
     return select(SimilarityCandidate).where(
         SimilarityCandidate.confidence > 0, *visible_endpoints

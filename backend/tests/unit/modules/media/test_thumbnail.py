@@ -6,7 +6,10 @@ import base64
 import io
 from pathlib import Path
 
+import numpy as np
 import pytest
+from PIL import Image
+from printstash_core.mesh.rasterizer import RenderedPixels, encode_rendered_pixels
 
 from app.core.config import _overlay
 from app.modules.media.thumbnail import _MAX_BLOCK_LINES, extract, to_webp
@@ -71,6 +74,19 @@ class TestExtract:
         assert extract(f) == real
 
 
+@pytest.fixture
+def detailed_preview() -> Image.Image:
+    """A shaded surface with fine detail and a smoothly antialiased silhouette."""
+    y, x = np.indices((480, 640), dtype=np.float32)
+    shade = 100 + 40 * np.sin(x / 20) + 30 * np.cos(y / 15)
+    detail = (x * 17 + y * 31) % 7
+    alpha = np.clip(
+        (1 - ((x - 320) / 255) ** 2 - ((y - 240) / 190) ** 2) * 1000, 0, 255
+    )
+    rgba = np.stack((shade + detail, shade + 20, shade + 40, alpha), axis=-1)
+    return Image.fromarray(rgba.astype(np.uint8))
+
+
 class TestWebpNormalization:
     def test_embedded_preview_is_centered_on_the_canonical_canvas(
         self, monkeypatch: pytest.MonkeyPatch
@@ -109,13 +125,66 @@ class TestWebpNormalization:
         from PIL import Image, ImageDraw
 
         monkeypatch.setitem(_overlay, "model_thumbnail_width", 320)
-        source = io.BytesIO()
         image = Image.new("RGBA", (320, 240), (0, 0, 0, 0))
         ImageDraw.Draw(image).rectangle((32, 24, 287, 215), fill=(90, 130, 210, 255))
-        image.save(source, format="WEBP", lossless=True, exact=True, method=6)
-        encoded = source.getvalue()
+        encoded = encode_rendered_pixels(
+            RenderedPixels(320, 240, image.tobytes()), output_format="WEBP"
+        )
 
-        assert to_webp(encoded) == encoded
+        assert to_webp(encoded, renderer_encoded=True) == encoded
+
+    def test_compresses_detailed_canonical_previews(self, detailed_preview) -> None:
+        source = io.BytesIO()
+        detailed_preview.save(
+            source, format="WEBP", lossless=True, exact=True, method=6
+        )
+
+        encoded = to_webp(source.getvalue(), width=640)
+
+        assert len(encoded) < len(source.getvalue()) * 0.6
+        assert Image.open(io.BytesIO(encoded)).size == (640, 480)
+
+    def test_preserves_thumbnail_transparency_exactly(self, detailed_preview) -> None:
+        source = io.BytesIO()
+        detailed_preview.save(source, format="PNG")
+
+        encoded = to_webp(source.getvalue(), width=640)
+
+        decoded = Image.open(io.BytesIO(encoded)).convert("RGBA")
+        assert (
+            decoded.getchannel("A").tobytes()
+            == detailed_preview.getchannel("A").tobytes()
+        )
+
+    def test_preserves_visible_thumbnail_detail(self, detailed_preview) -> None:
+        source = io.BytesIO()
+        detailed_preview.save(source, format="PNG")
+
+        encoded = to_webp(source.getvalue(), width=640)
+
+        actual = np.asarray(
+            Image.open(io.BytesIO(encoded)).convert("RGBA"), dtype=float
+        )
+        expected = np.asarray(detailed_preview, dtype=float)
+        visible = expected[:, :, 3] > 0
+        assert np.abs(actual[:, :, :3] - expected[:, :, :3])[visible].mean() < 4
+
+    def test_normalizes_mismatched_renderer_dimensions(self, detailed_preview) -> None:
+        encoded = encode_rendered_pixels(
+            RenderedPixels(640, 480, detailed_preview.tobytes()), output_format="WEBP"
+        )
+
+        resized = to_webp(encoded, width=320, renderer_encoded=True)
+
+        assert Image.open(io.BytesIO(resized)).size == (320, 240)
+
+    def test_rejects_empty_renderer_output(self) -> None:
+        encoded = encode_rendered_pixels(
+            RenderedPixels(320, 240, bytes(320 * 240 * 4)), output_format="WEBP"
+        )
+
+        with pytest.raises(ValueError, match="thumbnail_empty"):
+            to_webp(encoded, width=320, renderer_encoded=True)
 
 
 class TestInvalidThumbnailInput:

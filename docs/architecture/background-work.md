@@ -180,6 +180,12 @@ changed before the subscription took effect. Delivery is best effort: in one
 process it is in memory, across processes it is PostgreSQL `NOTIFY`, and a
 reconnect delivers `{"type": "resync"}` so clients refetch.
 
+Job notices include `task_visible`: true for user-owned Jobs and scheduled
+backups, matching the default `/jobs` list. The shared administrator socket also
+carries maintenance with this flag false. Task Center ignores those notices;
+the Background work page still refreshes. Reconnection always resynchronizes,
+and clients retain the old wake behavior when an older server omits the hint.
+
 ## Topologies
 
 | Topology | Settings | Needs |
@@ -274,8 +280,8 @@ are only ever recognised by their heartbeat going stale.
   the snapshot shows mid-archive) is cancelled through its cancel hook, and the
   snapshot's queued-pass marks are forgotten so they cannot suppress the
   reconcile. Everything else the snapshot says is owed is simply found again.
-  A PostgreSQL vault restored by the operator's own tooling, with the `dbos`
-  schema dropped or stale, converges the same way on its next start.
+  A PostgreSQL vault restored from the built-in portable snapshot, with the
+  `dbos` schema dropped or stale, converges the same way on its next start.
 - **Recovery resolves a restore.** A process that starts while an interrupted
   restore or Vault migration journal still governs holds its background work
   (`bootstrap.work.hold`). Recovery does not restart the process, so whatever
