@@ -82,9 +82,16 @@ and changelog instead of reconstructing their contents.
 4. Update the changelog and repository docs the change invalidates. Public site
    docs that live in `printstash-landing` are a separate repository change;
    identify it without editing another repository unless that scope was assigned.
-5. When the task includes commit or PR preparation, use one PR per bug/feature,
-   conventional commits, and the repository's configured git identity. Do not
-   reuse a historical release branch as precedent for combining unrelated work.
+5. Never leave task-owned changes uncommitted or unpushed when handing off.
+   This applies to every repository change, including documentation and skills,
+   without requiring a separate request to commit or push. Use conventional
+   commits and the repository's configured identity; include only task-owned
+   changes and preserve unrelated edits. Push the task branch, open or update
+   its PR, and verify required CI is green on the latest commit before declaring
+   completion. Report the PR URL, final commit, and verified CI result.
+   If a concrete blocker prevents committing, pushing, or completing CI, preserve
+   the work and report the blocker and remaining unpublished changes explicitly;
+   do not claim completion. This rule does not authorize merging a PR.
 6. When explicitly asked to cut a release, first confirm that each completed PR
    is independently merged to `main` and CI is green, then follow
    [references/release.md](references/release.md). Never collect feature work on
