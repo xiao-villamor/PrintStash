@@ -18,4 +18,13 @@ describe("filterValueText", () => {
     expect(filterValueText("print_duration_min_s", "0")).toBe("0s");
     expect(filterValueText("print_duration_max_s", "invalid")).toBe("invalid");
   });
+  it("writes file types the way the formats name themselves", () => {
+    expect(filterValueText("file_type", "stl")).toBe("STL");
+    expect(filterValueText("file_type", "3mf")).toBe("3MF");
+    expect(filterValueText("file_type", "gcode")).toBe("G-code");
+    expect(filterValueText("file_type", "dxf")).toBe("DXF");
+  });
+  it("still shows a file type the server added after this build", () => {
+    expect(filterValueText("file_type", "ply")).toBe("PLY");
+  });
 });

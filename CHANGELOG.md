@@ -673,6 +673,11 @@ image. See UPGRADE.md before pulling.**
 
 ### Changed
 
+- The Artifact filter groups STL, 3MF, OBJ and STEP under **Source meshes**,
+  which selects or clears them together; G-code and DXF stay as their own rows.
+  File types are written as the formats name themselves (STL, 3MF, G-code)
+  in the filter panel and active-filter chips.
+
 - Background work settings now lead with running, waiting, and failed work and
   show each active Job's state, progress and cancel action. They also show where
   to check a model's preview status. Queue tools and worker controls sit in

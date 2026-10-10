@@ -23,6 +23,9 @@ type FacetFilterKey =
 
 type FilterKey = FacetFilterKey | "has_similar_candidates";
 
+/** The printable source formats; sliced G-code and 2D DXF stay as their own rows. */
+const SOURCE_MESH_TYPES = new Set(["stl", "3mf", "obj", "step"]);
+
 const GROUPS: Array<{ key: FacetFilterKey; label: string }> = [
   {
     key: "file_type",
@@ -199,24 +202,24 @@ export function StructuredFilters({
                     id={contentId}
                     className="ml-4 space-y-0.5 border-l border-border py-0.5 pl-3"
                   >
-                    {values.map((item) => (
-                      <label
-                        key={item.value}
-                        className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors duration-press hover:bg-muted"
-                      >
-                        <Checkbox
-                          className="h-4 w-4"
+                    {key === "file_type" ? (
+                      <FileTypeOptions
+                        values={values}
+                        selected={selected}
+                        onToggle={(value) => toggleValue(key, value)}
+                        onChange={(next) => onChange(key, next)}
+                      />
+                    ) : (
+                      values.map((item) => (
+                        <FacetOption
+                          key={item.value}
+                          label={filterValueText(key, item.value)}
+                          count={item.count}
                           checked={selected.includes(item.value)}
                           onChange={() => toggleValue(key, item.value)}
                         />
-                        <span className="min-w-0 flex-1 truncate capitalize">
-                          {filterValueText(key, item.value)}
-                        </span>
-                        <span className="min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
-                          {item.count}
-                        </span>
-                      </label>
-                    ))}
+                      ))
+                    )}
                   </div>
                 )}
               </div>
@@ -262,5 +265,94 @@ export function StructuredFilters({
         </div>
       </section>
     </Localized>
+  );
+}
+
+function FacetOption({
+  label,
+  count,
+  checked,
+  onChange,
+  className = "",
+}: {
+  label: string;
+  count: number;
+  checked: boolean;
+  onChange: () => void;
+  className?: string;
+}) {
+  return (
+    <label
+      className={`flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors duration-press hover:bg-muted ${className}`}
+    >
+      <Checkbox className="h-4 w-4" checked={checked} onChange={onChange} />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
+        {count}
+      </span>
+    </label>
+  );
+}
+
+/**
+ * Source meshes nest under one row that selects or clears them together; G-code,
+ * DXF and any format the server adds later stay flat beside it. Each value is still
+ * its own `file_type`, so saved views and the API see exactly what they did before.
+ */
+function FileTypeOptions({
+  values,
+  selected,
+  onToggle,
+  onChange,
+}: {
+  values: FacetValueRead[];
+  selected: string[];
+  onToggle: (value: string) => void;
+  onChange: (values: string[]) => void;
+}) {
+  const meshes = values.filter((item) => SOURCE_MESH_TYPES.has(item.value));
+  const others = values.filter((item) => !SOURCE_MESH_TYPES.has(item.value));
+  const meshValues = meshes.map((item) => item.value);
+  const allMeshes = meshValues.length > 0 && meshValues.every((value) => selected.includes(value));
+
+  function toggleMeshes() {
+    const rest = selected.filter((value) => !SOURCE_MESH_TYPES.has(value));
+    onChange(allMeshes ? rest : [...rest, ...meshValues]);
+  }
+
+  return (
+    <>
+      {meshes.length > 0 && (
+        <div>
+          <FacetOption
+            label={uiText("Source meshes")}
+            count={meshes.reduce((total, item) => total + item.count, 0)}
+            checked={allMeshes}
+            onChange={toggleMeshes}
+            className="font-medium"
+          />
+          <div className="ml-4 space-y-0.5 border-l border-border pl-2">
+            {meshes.map((item) => (
+              <FacetOption
+                key={item.value}
+                label={filterValueText("file_type", item.value)}
+                count={item.count}
+                checked={selected.includes(item.value)}
+                onChange={() => onToggle(item.value)}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {others.map((item) => (
+        <FacetOption
+          key={item.value}
+          label={filterValueText("file_type", item.value)}
+          count={item.count}
+          checked={selected.includes(item.value)}
+          onChange={() => onToggle(item.value)}
+        />
+      ))}
+    </>
   );
 }
