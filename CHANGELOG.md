@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Enable mesh preview readiness after its first rendered frame; verify overlay alignment, display-mode pixels, and repeated resource cleanup on WebGL/WebGPU.
+
+- Extend native mesh preview checks for camera movement, screenshot scales, capture failures, and disposal; retain WebGPU as experimental after baseline comparison.
+
+- Release the mesh preview GPU device when renderer construction or initialization cleanup fails.
+
+- Parse mesh previews in a cancellable worker and add an experimental WebGPU
+  preference with camera-preserving WebGL recovery and asynchronous screenshots.
+  WebGL remains the default; GPU performance qualification is still pending.
+
 - Request the platform-preferred GPU before enumerating other graphics backends in the optional research adapter. Preserve capability fallback, software exclusion and explicit adapter selection.
 
 - Retain expanded NVIDIA quality rejection, real-model browser comparisons and fresh-worker failure evidence; document an isolated experimental WSL/Docker diagnostic without changing production eligibility.
