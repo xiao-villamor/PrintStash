@@ -25,6 +25,10 @@ from scripts.gpu_render_measurement import (
     library_versions,
     measure,
 )
+from scripts.render_backend import Candidate
+from scripts.render_qualification import revision, verify, working_tree_dirty
+from scripts.render_statistics import summarize
+from scripts.viewer_representation_corpus import source_suffix
 
 REPLY_LIMIT = 4 * 1024**2
 
@@ -74,6 +78,7 @@ def _worker(argv: list[str]) -> int:
     raw["mode"] = Mode(raw["mode"])
     raw["flow"] = Flow(raw["flow"])
     raw["output_format"] = OutputFormat(raw["output_format"])
+    raw["candidate"] = Candidate(raw["candidate"])
     spec = PilotSpec(**raw)
     reply = os.fdopen(os.dup(sys.stdout.fileno()), "wb", buffering=0)
     with open(os.devnull, "wb") as sink:
@@ -87,6 +92,7 @@ def _worker(argv: list[str]) -> int:
             **exception_details(exc),
             "versions": library_versions(),
         }
+    result["worker_pid"] = os.getpid()
     payload = json.dumps(result, allow_nan=False).encode()
     if len(payload) > REPLY_LIMIT:
         raise ValueError("gpu_pilot_reply_limit")
@@ -102,8 +108,26 @@ def main() -> int:
     parser.add_argument("--source", type=Path)
     parser.add_argument("--case", default="sharp-cube")
     parser.add_argument("--trials", type=int, default=1)
+    parser.add_argument(
+        "--processes",
+        type=int,
+        default=1,
+        help="Independent supervised workers per mode; observations within each worker use --trials",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--backend", choices=("egl",), default="egl")
+    parser.add_argument(
+        "--candidate",
+        type=Candidate,
+        choices=tuple(Candidate),
+        default=Candidate.MODERNGL,
+    )
+    parser.add_argument("--backend", choices=("egl", "auto"))
+    parser.add_argument("--adapter", dest="selector")
+    parser.add_argument(
+        "--allow-software",
+        action="store_true",
+        help="Conformance only; never qualifies physical acceleration",
+    )
     parser.add_argument("--chunk-size", type=int, default=64000)
     parser.add_argument("--allocation-limit", type=int, default=512 * 1024**2)
     parser.add_argument("--frame-width", type=int, default=640)
@@ -120,7 +144,16 @@ def main() -> int:
     parser.add_argument("--timeout-seconds", type=float, default=120)
     parser.add_argument("--memory-budget-mb", type=int)
     parser.add_argument("--telemetry", action="store_true")
+    parser.add_argument(
+        "--manifest", type=Path, help="Predeclared corpus/software/quality policy"
+    )
     args = parser.parse_args()
+    if args.backend is None:
+        args.backend = "auto" if args.candidate is Candidate.WGPU else "egl"
+    if args.backend != ("auto" if args.candidate is Candidate.WGPU else "egl"):
+        parser.error("wgpu uses auto; ModernGL uses egl")
+    if not 1 <= args.processes <= 100:
+        parser.error("processes must be 1..100")
     if not 1 <= args.trials <= 100 or not 1 <= args.views <= 6:
         parser.error("trials must be 1..100 and views 1..6")
     if (
@@ -141,15 +174,20 @@ def main() -> int:
         or args.output_format is not OutputFormat.WEBP
     ):
         parser.error("multiview requires 640x480 WEBP thumbnail")
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    args.output_dir.mkdir(parents=True, exist_ok=False)
     source = (
         args.source.absolute()
         if args.source
         else args.output_dir.absolute()
         / "sources"
-        / (args.case + (".stl" if args.case == "real-benchy" else ".3mf"))
+        / (args.case + source_suffix(args.case))
     )
     args.output_dir = args.output_dir.absolute()
+    if args.manifest is not None:
+        if args.source is None:
+            parser.error("--manifest requires an existing --source")
+        args.manifest = args.manifest.absolute()
+        verify(json.loads(args.manifest.read_text()), source, args.flow)
     with tempfile.TemporaryDirectory(prefix="gpu-pilot-vault-") as temporary:
         from scripts.bench_mesh_pipeline import (
             configure_private_vault,
@@ -171,7 +209,11 @@ def main() -> int:
                 teardown.callback(bind_inference, bind_inference(None))
                 teardown.callback(bind_pools, bind_pools(None))
                 export_private_settings(settings)
-                report = _run(args, source)
+                report = (
+                    _campaign(args, source)
+                    if args.processes > 1
+                    else _run(args, source)
+                )
         finally:
             for key in tuple(os.environ):
                 if key.startswith("VAULT_"):
@@ -186,6 +228,77 @@ def main() -> int:
         )
     )
     return 1 if report["decision"] == "declined" else 0
+
+
+def _campaign(args: argparse.Namespace, source: Path) -> dict[str, object]:
+    """Repeat the existing disposable-worker flow, preserving every raw report.
+
+    Each mode in each attempt creates a fresh supervised worker. Cold/reused
+    comparison workers also execute a CPU reference: their wall time must never
+    be advertised as GPU-only latency.
+    """
+    report: dict[str, object] = {
+        "schema_version": 1,
+        "scope": "fresh_supervised_worker_campaign_no_production_adoption",
+        "tested_commit": revision(),
+        "requested_processes_per_mode": args.processes,
+        "trials_per_process": args.trials,
+        "decision": "qualification_pending",
+        "attempts": [],
+    }
+    attempts = []
+    for index in range(args.processes):
+        if args.manifest is not None:
+            verify(json.loads(args.manifest.read_text()), source, args.flow)
+        directory = args.output_dir / f"process-{index:03d}"
+        directory.mkdir()
+        child = argparse.Namespace(**vars(args))
+        child.output_dir = directory
+        measured = _run(child, source)
+        attempts.append({"index": index, "report": measured})
+        report["attempts"] = attempts
+        report["decision"] = (
+            "declined"
+            if any(item["report"]["decision"] == "declined" for item in attempts)
+            else "qualification_pending"
+        )
+        report["supervised_statistics"] = {
+            mode.value: {
+                "all_attempts_ms": summarize(
+                    [
+                        float(cell["complete_supervised_ms"])
+                        for item in attempts
+                        for cell in item["report"]["cells"]
+                        if cell["mode"] == mode
+                    ]
+                ),
+                "completed_attempts_ms": summarize(
+                    [
+                        float(cell["complete_supervised_ms"])
+                        for item in attempts
+                        for cell in item["report"]["cells"]
+                        if cell["mode"] == mode and cell["status"] == "completed"
+                    ]
+                ),
+                "failed_attempts": sum(
+                    cell["status"] != "completed"
+                    for item in attempts
+                    for cell in item["report"]["cells"]
+                    if cell["mode"] == mode
+                ),
+            }
+            for mode in Mode
+        }
+        report["cost_scope"] = (
+            "supervised startup through cleanup; cold/reused include paired CPU "
+            "reference, not GPU-only or upload-to-thumbnail latency"
+        )
+        if measured.get("cancelled"):
+            report["cancelled"] = True
+        _save(args.output_dir / "report.json", report)
+        if report.get("cancelled"):
+            break
+    return report
 
 
 def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
@@ -226,7 +339,10 @@ def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
     if args.memory_budget_mb is not None:
         amount = Resources(1, args.memory_budget_mb * 1024**2)
     report: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "candidate": args.candidate,
+        "tested_commit": revision(),
+        "working_tree_dirty": working_tree_dirty(),
         "scope": "private_gpu_pilot_no_production_adoption",
         "quality_policy": POLICY,
         "flow": args.flow,
@@ -263,6 +379,9 @@ def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
                     args.flow,
                     args.embedding_size,
                     args.output_format,
+                    args.candidate,
+                    args.selector,
+                    args.allow_software,
                 )
                 with admission(amount, capacity, checkpoint=checkpoint) as permit:
                     result = supervise_result(
@@ -333,17 +452,19 @@ def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
             for item in samples
             if item["method"] == "gpu" and item["status"] == "completed"
         ]
-        renderers = [
-            item["device"]["GL_RENDERER"]
+        devices = [
+            item["device"]
             for item in samples
             if item["method"] == "gpu" and "device" in item
         ]
-        hardware = bool(renderers) and all(
-            not any(
-                token in name.lower()
+        hardware = bool(devices) and all(
+            device["physical_acceleration"]
+            if args.candidate is Candidate.WGPU
+            else not any(
+                token in device["GL_RENDERER"].lower()
                 for token in ("llvmpipe", "softpipe", "swiftshader", "software")
             )
-            for name in renderers
+            for device in devices
         )
         speedup = (
             median(cpu) / median(gpu) if len(cpu) == len(gpu) == args.trials else None
@@ -351,12 +472,17 @@ def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
         gates.append(
             {
                 "mode": cell["mode"],
+                "cpu_statistics": summarize(cpu),
+                "gpu_statistics": summarize(gpu),
+                "minimum_observations_met": len(cpu) >= 30 and len(gpu) >= 30,
                 "hardware_renderer": hardware,
                 "full_cold_source_median_speedup": speedup,
                 "accepted": cell["status"] == "completed"
                 and hardware
                 and speedup is not None
-                and speedup >= 1.5,
+                and speedup >= 1.5
+                and len(cpu) >= 30
+                and len(gpu) >= 30,
             }
         )
     report["cost_quality_hardware_gates"] = gates
@@ -368,6 +494,9 @@ def _run(args: argparse.Namespace, source: Path) -> dict[str, object]:
         else "qualification_pending"
     )
     report["remaining_qualification"] = [
+        "30 fresh supervised processes per declared workload family on both verification devices",
+        "Linux/Docker physical-device evidence tied to the tested commit",
+        "upload acceptance through retrievable thumbnail (production Jobs remain CPU)",
         "protected analytic components",
         "driver/context-loss/OOM/cancellation recovery",
     ]

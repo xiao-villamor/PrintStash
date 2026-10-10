@@ -106,6 +106,9 @@ ai = [
     "onnxruntime>=1.30,<2",
     "tokenizers>=0.23,<0.24",
 ]
+webgpu-pilot = [
+    "wgpu==0.32.0",
+]
 gpu-pilot = [
     "glcontext>=3.0.0,<4",
     "moderngl>=5.12.0,<6",
@@ -148,7 +151,7 @@ ignore = ["B008"]  # FastAPI Depends() in argument defaults is the standard patt
 extend_exclude = ["tests"]
 known_first_party = ["app"]
 # The GPU experiment is tooling, not an application backend.
-optional_dependencies_dev_groups = ["dev", "gpu-pilot"]
+optional_dependencies_dev_groups = ["dev", "gpu-pilot", "webgpu-pilot"]
 
 [tool.deptry.per_rule_ignores]
 # Runtime plugins/drivers are imported by their owning frameworks rather than

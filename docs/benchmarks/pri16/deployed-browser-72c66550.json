@@ -1,0 +1,211 @@
+{
+  "tested_commit": "72c66550602fc36ef2fa206bf1bfca8b30f9ca1b",
+  "scope": "native viewer with private source bytes; not authenticated deployment HTTP E2E or performance qualification",
+  "rows": [
+    {
+      "case": "real-stl-small",
+      "backend": "webgl",
+      "source_sha256": "20706141230e736ce915ceb8a8d1eb6e6974e1bc0251601c9558639b27677222",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgl",
+      "geometry_size": "74.05001068115234",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 92241,
+      "browser_errors": []
+    },
+    {
+      "case": "real-stl-small",
+      "backend": "webgpu",
+      "source_sha256": "20706141230e736ce915ceb8a8d1eb6e6974e1bc0251601c9558639b27677222",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgpu",
+      "geometry_size": "74.05001068115234",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 92262,
+      "browser_errors": []
+    },
+    {
+      "case": "real-stl-medium",
+      "backend": "webgl",
+      "source_sha256": "9ee60e3375c0211bd7b3fa6b7d9dd629157b5dd637067177aa59ee54f493e03a",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgl",
+      "geometry_size": "209.5",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 114133,
+      "browser_errors": []
+    },
+    {
+      "case": "real-stl-medium",
+      "backend": "webgpu",
+      "source_sha256": "9ee60e3375c0211bd7b3fa6b7d9dd629157b5dd637067177aa59ee54f493e03a",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgpu",
+      "geometry_size": "209.5",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 114234,
+      "browser_errors": []
+    },
+    {
+      "case": "real-stl-large",
+      "backend": "webgl",
+      "source_sha256": "846bf9b3c8b026fb09f3d0abe969f9d6803a68d115d5b3ec49ff29fae38d093d",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgl",
+      "geometry_size": "42.865666884928956",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 384090,
+      "browser_errors": []
+    },
+    {
+      "case": "real-stl-large",
+      "backend": "webgpu",
+      "source_sha256": "846bf9b3c8b026fb09f3d0abe969f9d6803a68d115d5b3ec49ff29fae38d093d",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgpu",
+      "geometry_size": "42.865666884928956",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 384103,
+      "browser_errors": []
+    },
+    {
+      "case": "real-3mf-small",
+      "backend": "webgl",
+      "source_sha256": "ce0089863a5249fcf5feb644dee689c14eb6b9ebf60b4f9c3ed14a3f2b80f65d",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgl",
+      "geometry_size": "166",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 124957,
+      "browser_errors": []
+    },
+    {
+      "case": "real-3mf-small",
+      "backend": "webgpu",
+      "source_sha256": "ce0089863a5249fcf5feb644dee689c14eb6b9ebf60b4f9c3ed14a3f2b80f65d",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgpu",
+      "geometry_size": "166",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 124964,
+      "browser_errors": []
+    },
+    {
+      "case": "real-3mf-medium",
+      "backend": "webgl",
+      "source_sha256": "5359123160210cdcf4e38915a17b2473f9ae80fb6bd785dcece71bf6a83c3284",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgl",
+      "geometry_size": "117.69408798217773",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 142673,
+      "browser_errors": []
+    },
+    {
+      "case": "real-3mf-medium",
+      "backend": "webgpu",
+      "source_sha256": "5359123160210cdcf4e38915a17b2473f9ae80fb6bd785dcece71bf6a83c3284",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgpu",
+      "geometry_size": "117.69408798217773",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 142689,
+      "browser_errors": []
+    },
+    {
+      "case": "real-3mf-large",
+      "backend": "webgl",
+      "source_sha256": "0ebb10a97f1a1c7fbf21b326c5fc719b5c3955dfe412745a818ed8eb7062fda5",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgl",
+      "geometry_size": "367.1497802734375",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 177019,
+      "browser_errors": []
+    },
+    {
+      "case": "real-3mf-large",
+      "backend": "webgpu",
+      "source_sha256": "0ebb10a97f1a1c7fbf21b326c5fc719b5c3955dfe412745a818ed8eb7062fda5",
+      "status": "completed",
+      "fixture_injected": true,
+      "hash_matched": true,
+      "effective_backend": "webgpu",
+      "geometry_size": "367.1497802734375",
+      "zoom_changed": true,
+      "png_dimensions": [
+        1280,
+        960
+      ],
+      "png_bytes": 177025,
+      "browser_errors": []
+    }
+  ],
+  "qualification": false
+}
