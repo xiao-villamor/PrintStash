@@ -33,3 +33,32 @@ class TestDecode:
     def test_rejects_oversized_headers(self):
         with pytest.raises(ValueError, match="compute_geometry_header"):
             decode(struct.pack("!I", 4097) + b"{}")
+
+    @pytest.mark.parametrize("header", [b"null", b"1", b"[]", b"[{}]"])
+    def test_rejects_non_object_descriptors(self, header):
+        from app.modules.media.compute_geometry import decode_header
+
+        with pytest.raises(ValueError, match="compute_geometry_header"):
+            decode_header(header)
+
+    @pytest.mark.parametrize(
+        "camera", [{}, "invalid", [1, 2], [[float("inf")] * 3] * 3]
+    )
+    def test_rejects_malformed_cameras(self, camera):
+        import json
+
+        from app.modules.media.compute_geometry import decode_header
+
+        header = json.dumps(
+            {
+                "vertices": 3,
+                "faces": 1,
+                "normals": 3,
+                "width": 64,
+                "height": 48,
+                "views": [camera],
+                "matte": False,
+            }
+        ).encode()
+        with pytest.raises(ValueError, match="compute_camera_invalid"):
+            decode_header(header)

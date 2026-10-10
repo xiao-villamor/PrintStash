@@ -2,6 +2,8 @@
 
 import base64
 import gc
+import hashlib
+import threading
 import time
 from pathlib import Path
 
@@ -17,7 +19,13 @@ from .contracts import (
     Reason,
 )
 from .discovery import discover, runtime_identity
-from .protocol import InferenceRequest, RenderRequest
+from .geometry_cache import (
+    INPUT_CACHE_BYTES,
+    INPUT_QUEUE_BYTES,
+    OUTPUT_QUEUE_BYTES,
+    GeometryCache,
+)
+from .protocol import BinaryRenderRequest, InferenceRequest, RenderRequest
 from .qualification import read_receipts
 
 
@@ -41,6 +49,8 @@ class Dispatcher:
         self.residency_hits = self.residency_misses = 0
         self.host_sizes = {}
         self.host_claim = None
+        self.host_lock = threading.Lock()
+        self.geometry_cache = GeometryCache()
         self.host_pool = None
         self.host_capacity = 0
         self.active_deadline = None
@@ -156,12 +166,25 @@ class Dispatcher:
             render_cache_hits=self.renderer.output_hits
             if self.renderer is not None
             else 0,
+            render_postprocess_gpu=self.renderer is not None
+            and self.renderer.postprocessor is not None,
+            geometry_input_bytes=self.geometry_cache.transferred,
+            geometry_input_cache_hits=self.geometry_cache.hits,
+            geometry_input_cache_bytes=self.geometry_cache.used,
             geometry_upload_bytes=self.renderer.transfers
             if self.renderer is not None
             else 0,
         )
 
     def admit_host(self, deadline: float) -> None:
+        if not self.host_lock.acquire(timeout=max(0, deadline - time.monotonic())):
+            raise ComputeUnavailable(Reason.DEADLINE)
+        try:
+            self._admit_host(deadline)
+        finally:
+            self.host_lock.release()
+
+    def _admit_host(self, deadline: float) -> None:
         if self.host_claim is not None:
             return
         from app.runtime.inference_resources import capacity
@@ -186,7 +209,13 @@ class Dispatcher:
 
     def make_host_room(self, key: str, size: int) -> None:
         # Leave room for Python, both runtimes and the immutable input frame.
-        available = self.host_capacity - 192 * 1024**2
+        available = (
+            self.host_capacity
+            - 192 * 1024**2
+            - INPUT_CACHE_BYTES
+            - INPUT_QUEUE_BYTES
+            - OUTPUT_QUEUE_BYTES
+        )
         for candidate in list(self.memory.entries):
             if (
                 sum(self.host_sizes.values()) - self.host_sizes.get(key, 0) + size
@@ -219,15 +248,21 @@ class Dispatcher:
                 return receipt
         raise ComputeUnavailable(Reason.UNQUALIFIED)
 
-    def execute(self, request: InferenceRequest | RenderRequest) -> bytes:
+    def execute(
+        self, request: InferenceRequest | RenderRequest | BinaryRenderRequest
+    ) -> bytes:
         if time.monotonic() >= request.deadline:
             raise ComputeUnavailable(Reason.DEADLINE) from None
         self.active_deadline = request.deadline
         started = time.monotonic()
-        self.input_bytes += len(request.payload)
+        self.input_bytes += (
+            request.geometry_bytes
+            if isinstance(request, BinaryRenderRequest)
+            else len(request.payload)
+        )
         try:
             self.memory.expire(time.monotonic())
-            if isinstance(request, RenderRequest):
+            if isinstance(request, (RenderRequest, BinaryRenderRequest)):
                 result = self.render(request)
             else:
                 result = self.inference(request)
@@ -344,7 +379,10 @@ class Dispatcher:
             raise ComputeUnavailable(Reason.DEADLINE)
         self.active_deadline = deadline
         started = time.monotonic()
-        self.input_bytes += sum(len(request.payload) for request in requests)
+        self.input_bytes += sum(
+            r.geometry_bytes if isinstance(r, BinaryRenderRequest) else len(r.payload)
+            for r in requests
+        )
         try:
             self.memory.expire(started)
             results = self.render_many(requests)
@@ -361,16 +399,31 @@ class Dispatcher:
     def render_many(self, requests: list[RenderRequest]) -> list[bytes]:
         from app.modules.media.webgpu_render import Renderer
 
-        from .render_policy import admission_many
+        from .render_policy import admission_decoded, admission_many
 
         if self.device is None:
             raise ComputeUnavailable(self.reason)
-        payloads = [
-            base64.b64decode(request.payload, validate=True) for request in requests
-        ]
-        requirement = admission_many(
-            payloads, [r.recipe for r in requests], [r.units for r in requests]
-        )
+        binary = all(isinstance(r, BinaryRenderRequest) for r in requests)
+        if binary:
+            if any(r._decoded is None for r in requests):
+                raise ValueError("compute_geometry_not_admitted")
+            decoded = [r._decoded for r in requests]
+            requirement = admission_decoded(
+                decoded,
+                [r.geometry_bytes for r in requests],
+                [r.recipe for r in requests],
+                [r.units for r in requests],
+                gpu_finalize=True,
+            )
+            from .protocol import MAX_FRAME
+
+            if requirement.readback_bytes + 13 > MAX_FRAME:
+                raise ComputeUnavailable(Reason.CAPACITY)
+        else:
+            payloads = [base64.b64decode(r.payload, validate=True) for r in requests]
+            requirement = admission_many(
+                payloads, [r.recipe for r in requests], [r.units for r in requests]
+            )
         device_bytes, host_bytes = requirement.device_bytes, requirement.host_bytes
         if self.renderer is not None:
             host_bytes += max(
@@ -382,6 +435,7 @@ class Dispatcher:
             device_bytes = (
                 max(requirement.projected_bytes, self.renderer.projected_size)
                 + requirement.attachment_bytes
+                + (self.renderer.postprocess_size if not binary else 0)
                 + max(requirement.readback_bytes, self.renderer.readback_size)
                 + 116
             )
@@ -422,8 +476,26 @@ class Dispatcher:
             self.renderer.workspace_limit = self.memory.entries[key].size
             from .recovery import allocation_failure
 
-            try:
+            def execute_render():
+                if binary:
+                    outputs = self.renderer.execute_prepared_many(
+                        decoded,
+                        ["geometry:" + r.geometry_key for r in requests],
+                        [
+                            hashlib.sha256(
+                                (r.geometry_key + r.header).encode()
+                            ).hexdigest()
+                            for r in requests
+                        ],
+                        raw=True,
+                        gpu_finalize=True,
+                    )
+                    tag = bytes([int(self.renderer.postprocessor is not None)])
+                    return [tag + output for output in outputs]
                 return self.renderer.execute_many(payloads)
+
+            try:
+                return execute_render()
             except Exception as exc:
                 if not allocation_failure(exc):
                     raise
@@ -433,7 +505,7 @@ class Dispatcher:
             if time.monotonic() >= deadline:
                 raise ComputeUnavailable(Reason.DEADLINE)
             try:
-                return self.renderer.execute_many(payloads)
+                return execute_render()
             except Exception as exc:
                 if allocation_failure(exc):
                     raise ComputeUnavailable(Reason.CAPACITY) from exc
@@ -450,3 +522,4 @@ class Dispatcher:
         if self.host_claim is not None:
             self.host_claim.__exit__(None, None, None)
             self.host_claim = None
+        self.geometry_cache.entries.clear()

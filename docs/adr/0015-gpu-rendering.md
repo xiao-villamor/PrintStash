@@ -27,7 +27,7 @@ This decision qualifies the ModernGL candidate only. A native WebGPU adapter usi
 
 ## Portable compute lifecycle
 
-The [portable compute implementation](../compute.md) uses a host-local broker for persistent wgpu and ONNX WebGPU ownership, bounded immutable array transfers, shared device admission and separately reserved host memory. Source parsing stays disposable. Geometry uploads serve all cameras and may stay cached; canonical framing and final CPU postprocessing remain in core through PreparedRasteriser.
+The [portable compute implementation](../compute.md) uses a host-local broker for persistent wgpu and ONNX WebGPU ownership, bounded immutable array transfers, shared device admission and separately reserved host memory. Source parsing stays disposable. Geometry uploads serve all cameras and may stay cached; canonical framing remains in core through PreparedRasteriser. Canonical postprocessing can execute in portable GPU compute passes after a byte-exact canary, retaining the CPU implementation as fallback.
 
 Automatic selection requires hardware and implementation-specific evidence. Missing evidence is ordinary CPU operation. Thumbnail recipe 12 and qualified-portable-v3 version the candidate independently of hardware. Original ModernGL measurements remain unchanged and cannot qualify this backend.
 
@@ -45,3 +45,14 @@ Preview admission is explicit and retains all resource/publication fences;
 it produces no qualification receipt. Visual acceptance belongs to the operator.
 Historical pilot numbers remain historical evidence; see
 [current render evaluation](../testing/compute-render-wsl.md).
+
+
+## Postprocessing and transport correction
+
+The WebGPU path now retains pixels on-device through separable Lanczos, alpha
+conversion and vignette. It downloads final-sized RGBA and encodes in the caller.
+The canary requires exact canonical bytes; it does not replace operator review
+or relax the rendering gate. Binary validated-geometry references remove repeated
+base64 serialization and uploads. Pooled readback copies only completed frames.
+The controlled render-only comparison and its limits are in
+[the performance record](../testing/compute-render-performance.md).

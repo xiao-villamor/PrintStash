@@ -1,7 +1,5 @@
 """Optional rendering accepts complete frames and preserves withdrawal semantics."""
 
-import base64
-import json
 import struct
 
 import numpy as np
@@ -31,10 +29,8 @@ class TestOptionalRender:
         payload = struct.pack("!III", 2, 2, 2) + red + blue
         monkeypatch.setattr(
             compute_render.client,
-            "exchange",
-            lambda request, **kwargs: json.dumps(
-                {"result": base64.b64encode(payload).decode()}
-            ).encode(),
+            "exchange_render",
+            lambda request, body, **kwargs: b"\x01" + payload,
         )
 
         frames = compute_render.render(prepared, 2, 2, [None, None], False)
@@ -46,10 +42,8 @@ class TestOptionalRender:
         payload = struct.pack("!III", 2, 2, 1) + b"short"
         monkeypatch.setattr(
             compute_render.client,
-            "exchange",
-            lambda request, **kwargs: json.dumps(
-                {"result": base64.b64encode(payload).decode()}
-            ).encode(),
+            "exchange_render",
+            lambda request, body, **kwargs: b"\x01" + payload,
         )
 
         assert compute_render.render(prepared, 2, 2, [None], False) is None
@@ -60,3 +54,30 @@ class TestOptionalRender:
         with cancellation_scope(lambda **kwargs: True):
             with pytest.raises(OperationCancelled):
                 compute_render.render(prepared, 2, 2, [None], False)
+
+
+class TestCpuPostprocessingFallback:
+    @pytest.mark.parametrize("width,factor", [(2, 2), (641, 1)])
+    def test_finalizes_raw_pixels_in_the_caller(
+        self, prepared, monkeypatch, width, factor
+    ):
+        from printstash_core.mesh.rasterizer import postprocess_rgba
+
+        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
+        raw = bytes([190, 80, 40, 128]) * (width * 2 * factor * factor)
+        wire = b"\x00" + struct.pack("!III", width * factor, 2 * factor, 1) + raw
+        monkeypatch.setattr(
+            compute_render.client, "exchange_render", lambda *args, **kwargs: wire
+        )
+        result = compute_render.render(prepared, width, 2, [None], False)
+        assert result[0].rgba == postprocess_rgba(raw, width, 2).rgba
+
+    @pytest.mark.parametrize(
+        "wire", [b"", b"\x02bad", b"\x01" + struct.pack("!III", 3, 3, 1) + bytes(36)]
+    )
+    def test_refuses_an_invalid_pixel_envelope(self, prepared, monkeypatch, wire):
+        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
+        monkeypatch.setattr(
+            compute_render.client, "exchange_render", lambda *args, **kwargs: wire
+        )
+        assert compute_render.render(prepared, 2, 2, [None], False) is None

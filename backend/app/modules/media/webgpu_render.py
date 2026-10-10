@@ -170,6 +170,11 @@ class Renderer:
         self.size = None
         self.projected_size = 0
         self.workspace_limit = self.memory.capacity
+        self.postprocessor = None
+        self.postprocess_attempted = False
+        self.postprocess_size = 0
+        self.gpu_finalize_active = False
+        self.readback_frame_bytes = None
 
     def upload(self, prepared, key):
         import wgpu
@@ -229,13 +234,17 @@ class Renderer:
     def attachments(self, width, height, size):
         import wgpu
 
+        frame_bytes = self.readback_frame_bytes
+        if frame_bytes is None:
+            frame_bytes = ((width * 4 + 255) // 256) * 256 * height
         if (
             max(size, self.projected_size)
             + width * height * 8
             + max(
                 self.readback_size,
-                ((width * 4 + 255) // 256) * 256 * height * self.readback_frames,
+                frame_bytes * self.readback_frames,
             )
+            + self.postprocess_size
             + 116
             > self.workspace_limit
         ):
@@ -249,7 +258,9 @@ class Renderer:
             self.color = self.device.create_texture(
                 size=(width, height, 1),
                 format="rgba8unorm",
-                usage=wgpu.TextureUsage.RENDER_ATTACHMENT | wgpu.TextureUsage.COPY_SRC,
+                usage=wgpu.TextureUsage.RENDER_ATTACHMENT
+                | wgpu.TextureUsage.COPY_SRC
+                | wgpu.TextureUsage.TEXTURE_BINDING,
             )
             self.depth = self.device.create_texture(
                 size=(width, height, 1),
@@ -264,7 +275,7 @@ class Renderer:
                 size=size, usage=wgpu.BufferUsage.STORAGE
             )
             self.projected_size = size
-        readback_size = ((width * 4 + 255) // 256) * 256 * height * self.readback_frames
+        readback_size = frame_bytes * self.readback_frames
         if readback_size > self.readback_size:
             if self.readback is not None:
                 self.readback.destroy()
@@ -348,16 +359,21 @@ class Renderer:
         frame.set_bind_group(0, draw_group)
         frame.draw(6, prepared.face_count)
         frame.end()
-        encoder.copy_texture_to_buffer(
-            {"texture": self.color},
-            {
-                "buffer": self.readback,
-                "offset": self.frame_offset,
-                "bytes_per_row": ((width * 4 + 255) // 256) * 256,
-                "rows_per_image": height,
-            },
-            (width, height, 1),
-        )
+        if self.gpu_finalize_active:
+            self.postprocessor.encode(
+                encoder, self.color, self.readback, self.frame_offset
+            )
+        else:
+            encoder.copy_texture_to_buffer(
+                {"texture": self.color},
+                {
+                    "buffer": self.readback,
+                    "offset": self.frame_offset,
+                    "bytes_per_row": ((width * 4 + 255) // 256) * 256,
+                    "rows_per_image": height,
+                },
+                (width, height, 1),
+            )
         self.device.queue.submit([encoder.finish()])
         self.submissions += 1
 
@@ -387,15 +403,50 @@ class Renderer:
         writes/submissions retain each camera's uniforms while pooled textures
         and projected geometry are reused. Readbacks occupy disjoint slots.
         """
-        import wgpu
-
         decoded = [decode(payload) for payload in payloads]
         dimensions = {(width, height) for _, width, height, _, _ in decoded}
         if len(dimensions) != 1:
             raise ValueError("compute_batch_dimensions")
-        width, height = next(iter(dimensions))
         keys = [
             hashlib.sha256(RASTERIZER_RECIPE.encode() + p).hexdigest() for p in payloads
+        ]
+        geometry_keys = [
+            self.geometry_key(p, d[0]) for p, d in zip(payloads, decoded, strict=True)
+        ]
+        return self.execute_prepared_many(decoded, geometry_keys, keys)
+
+    def execute_prepared_many(
+        self, decoded, geometry_keys, keys, *, raw=False, gpu_finalize=False
+    ):
+        import wgpu
+
+        dimensions = {(width, height) for _, width, height, _, _ in decoded}
+        if len(dimensions) != 1:
+            raise ValueError("compute_batch_dimensions")
+        width, height = next(iter(dimensions))
+        if gpu_finalize and not self.postprocess_attempted:
+            self.postprocess_attempted = True
+            from .gpu_postprocess import Postprocessor
+
+            candidate = None
+            try:
+                candidate = Postprocessor(self.device)
+                candidate.canary()
+                self.postprocessor = candidate
+            except Exception as exc:
+                # A failed native postprocess canary keeps rasterization usable;
+                # the already-admitted caller performs canonical CPU finalization.
+                if candidate is not None:
+                    candidate.close()
+                from app.core.logging import get_logger
+
+                get_logger(__name__).warning("GPU postprocess unavailable: %s", exc)
+        self.gpu_finalize_active = gpu_finalize and self.postprocessor is not None
+        raw = raw and not self.gpu_finalize_active
+        keys = [
+            ("gpu-final:" if self.gpu_finalize_active else "raw:" if raw else "final:")
+            + key
+            for key in keys
         ]
         missing = [i for i, key in enumerate(keys) if key not in self.outputs]
         frame_count = sum(len(decoded[i][3]) for i in missing)
@@ -405,8 +456,18 @@ class Renderer:
             raise ComputeUnavailable(Reason.CAPACITY)
         factor = PREVIEW_PROFILE.supersample_for(width)
         w, h = width * factor, height * factor
-        pitch = ((w * 4 + 255) // 256) * 256
-        frame_bytes = pitch * h
+        result_width, result_height = (
+            (width, height) if self.gpu_finalize_active else (w, h)
+        )
+        pitch = width * 4 if self.gpu_finalize_active else ((w * 4 + 255) // 256) * 256
+        frame_bytes = pitch * result_height
+        self.readback_frame_bytes = frame_bytes
+        if self.gpu_finalize_active:
+            from .gpu_postprocess import workspace_bytes
+
+            if self.postprocessor.size != (width, height, factor):
+                self.postprocessor.close()
+            self.postprocess_size = workspace_bytes(width, height, factor)
         pinned = []
         new_outputs = {}
         try:
@@ -417,9 +478,11 @@ class Renderer:
                 self.attachments(
                     w, h, max(decoded[i][0].face_count for i in missing) * 96
                 )
+            if missing and self.gpu_finalize_active:
+                self.postprocessor.prepare(width, height, factor)
             for i in missing:
                 prepared = decoded[i][0]
-                key = self.geometry_key(payloads[i], prepared)
+                key = geometry_keys[i]
                 self.upload(prepared, key)
                 self.memory.pin(key, time.monotonic())
                 pinned.append(key)
@@ -441,7 +504,9 @@ class Renderer:
                 started = time.monotonic()
                 self.readback.map_sync(wgpu.MapMode.READ)
                 try:
-                    pixels = bytes(self.readback.read_mapped())
+                    pixels = bytes(
+                        self.readback.read_mapped(size=frame_count * frame_bytes)
+                    )
                 finally:
                     self.readback.unmap()
                 self.transfer_seconds += time.monotonic() - started
@@ -457,14 +522,18 @@ class Renderer:
                                 count=frame_bytes,
                                 offset=index * frame_bytes,
                             )
-                            .reshape(h, pitch)[:, : w * 4]
+                            .reshape(result_height, pitch)[:, : result_width * 4]
                             .copy()
                         )
                         frames.append(
-                            core.postprocess_rgba(rgba.tobytes(), width, height).rgba
+                            rgba.tobytes()
+                            if raw or self.gpu_finalize_active
+                            else core.postprocess_rgba(
+                                rgba.tobytes(), width, height
+                            ).rgba
                         )
                     new_outputs[i] = struct.pack(
-                        "!III", width, height, count
+                        "!III", w if raw else width, h if raw else height, count
                     ) + b"".join(frames)
             results = []
             for i, key in enumerate(keys):
@@ -491,10 +560,15 @@ class Renderer:
             return results
         finally:
             self.readback_frames, self.frame_offset = 1, 0
+            self.readback_frame_bytes = None
+            self.gpu_finalize_active = False
             for key in pinned:
                 self.memory.unpin(key)
 
     def close(self):
+        if self.postprocessor is not None:
+            self.postprocessor.close()
+        self.postprocess_size = 0
         self.outputs.clear()
         self.output_bytes = 0
         for resource in (

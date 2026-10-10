@@ -57,3 +57,17 @@ class TestAdmission:
         with pytest.raises(ComputeUnavailable) as exc:
             admission_many([payload] * 9, [recipe] * 9, [1] * 9)
         assert exc.value.reason is Reason.CAPACITY
+
+    def test_accounts_for_binary_owner_workspace(self, frame):
+        from app.modules.media.compute_geometry import decode
+        from app.modules.media.gpu_postprocess import workspace_bytes
+        from app.runtime.compute.render_policy import admission_decoded
+
+        payload, recipe = frame
+        legacy = admission(payload, recipe, 1)
+        binary = admission_decoded(
+            [decode(payload)], [len(payload)], [recipe], [1], gpu_finalize=True
+        )
+        assert binary.device_bytes == legacy.device_bytes + workspace_bytes(640, 480, 2)
+        assert binary.host_bytes >= binary.readback_bytes + 96 * 1024**2
+        assert binary.host_bytes < legacy.host_bytes

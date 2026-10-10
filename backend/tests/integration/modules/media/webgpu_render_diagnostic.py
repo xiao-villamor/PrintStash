@@ -211,3 +211,104 @@ class TestWarmPoolAdmission:
             assert owner.memory.used <= owner.memory.capacity
         finally:
             owner.close()
+
+
+class TestGpuPostprocess:
+    def test_matches_partial_alpha_canaries(self, gpu_device):
+        from app.modules.media.gpu_postprocess import Postprocessor
+
+        owner = Postprocessor(gpu_device)
+        try:
+            owner.canary()
+        finally:
+            owner.close()
+
+    @pytest.mark.parametrize("width,height", [(64, 48), (640, 480), (641, 33)])
+    def test_preserves_canonical_mesh_pixels(self, renderer, width, height):
+        import hashlib
+
+        import trimesh
+
+        from app.modules.media.compute_geometry import decode
+
+        payload = encode(
+            prepare_mesh_render(trimesh.creation.icosphere(subdivisions=2)),
+            width,
+            height,
+            [None],
+            False,
+        )
+        decoded = decode(payload)
+        expected = renderer.execute(payload)
+        actual = renderer.execute_prepared_many(
+            [decoded],
+            [renderer.geometry_key(payload, decoded[0])],
+            [hashlib.sha256(payload).hexdigest()],
+            raw=True,
+            gpu_finalize=True,
+        )[0]
+        assert renderer.postprocessor is not None
+        assert actual == expected
+
+    def test_reuses_final_shaded_outputs(self, renderer):
+        import trimesh
+
+        from app.modules.media.compute_geometry import decode
+
+        payload = encode(
+            prepare_mesh_render(trimesh.creation.box()), 64, 48, [None], False
+        )
+        decoded = decode(payload)
+        args = ([decoded], [renderer.geometry_key(payload, decoded[0])], ["same"])
+        first = renderer.execute_prepared_many(*args, raw=True, gpu_finalize=True)
+        submissions = renderer.submissions
+        second = renderer.execute_prepared_many(*args, raw=True, gpu_finalize=True)
+        assert first == second
+        assert renderer.submissions == submissions
+        assert renderer.output_hits == 1
+
+    def test_limits_readback_after_large_batch(self, renderer, monkeypatch):
+        import trimesh
+
+        prepared = prepare_mesh_render(trimesh.creation.box())
+        renderer.execute(encode(prepared, 64, 48, [None] * 8, False))
+        buffer = renderer.readback
+        original = buffer.read_mapped
+        copied = []
+
+        def read(*args, **kwargs):
+            result = original(*args, **kwargs)
+            copied.append(len(result))
+            return result
+
+        monkeypatch.setattr(buffer, "read_mapped", read)
+        output = renderer.execute(encode(prepared, 64, 48, [None], False))
+        assert struct.unpack("!III", output[:12]) == (64, 48, 1)
+        assert copied == [128 * 96 * 4]
+
+    def test_falls_back_after_postprocess_canary_refusal(self, renderer, monkeypatch):
+        import trimesh
+        from printstash_core.mesh.rasterizer import postprocess_rgba
+
+        from app.modules.media.compute_geometry import decode
+        from app.modules.media.gpu_postprocess import Postprocessor
+
+        def refuse(self):
+            raise ValueError("injected_postprocess_refusal")
+
+        monkeypatch.setattr(Postprocessor, "canary", refuse)
+        payload = encode(
+            prepare_mesh_render(trimesh.creation.box()), 64, 48, [None], False
+        )
+        decoded = decode(payload)
+        expected = renderer.execute(payload)
+        raw = renderer.execute_prepared_many(
+            [decoded],
+            [renderer.geometry_key(payload, decoded[0])],
+            ["raw-fallback"],
+            raw=True,
+            gpu_finalize=True,
+        )[0]
+        assert renderer.postprocessor is None
+        assert struct.unpack("!III", raw[:12]) == (128, 96, 1)
+        assert postprocess_rgba(raw[12:], 64, 48).rgba == expected[12:]

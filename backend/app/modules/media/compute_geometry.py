@@ -1,5 +1,6 @@
 """Bounded immutable array frames for prepared geometry; no archive or pickle codec."""
 
+import hashlib
 import json
 import struct
 
@@ -57,8 +58,17 @@ def decode(payload: bytes):
     length = struct.unpack("!I", payload[:4])[0]
     if length > 4096:
         raise ValueError("compute_geometry_header")
-    header = json.loads(payload[4 : 4 + length])
-    if set(header) != {
+    header = payload[4 : 4 + length]
+    counts, width, height, views, matte = decode_header(header)
+    prepared = decode_arrays(memoryview(payload)[4 + length :], counts)
+    return prepared, width, height, views, matte
+
+
+def decode_header(header: bytes):
+    if len(header) > 4096:
+        raise ValueError("compute_geometry_header")
+    header = json.loads(header)
+    if not isinstance(header, dict) or set(header) != {
         "vertices",
         "faces",
         "normals",
@@ -87,7 +97,26 @@ def decode(payload: bytes):
         or not 1 <= len(header["views"]) <= 8
     ):
         raise ValueError("compute_camera_budget")
-    body = memoryview(payload)[4 + length :]
+    views = []
+    for value in header["views"]:
+        try:
+            view = None if value is None else np.asarray(value, dtype=np.float64)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("compute_camera_invalid") from exc
+        if view is not None and (
+            view.shape != (3, 3)
+            or not np.isfinite(view).all()
+            or not np.allclose(view @ view.T, np.eye(3), atol=1e-6)
+        ):
+            raise ValueError("compute_camera_invalid")
+        views.append(view)
+
+    return (n, f, k), header["width"], header["height"], views, header["matte"]
+
+
+def decode_arrays(body: bytes | memoryview, counts: tuple[int, int, int]):
+    body = memoryview(body)
+    n, f, k = counts
     sizes = (n * 12, f * 24, n * 8, k * 24)
     if sum(sizes) != len(body):
         raise ValueError("compute_geometry_size")
@@ -110,20 +139,26 @@ def decode(payload: bytes):
         or identities.max() >= k
     ):
         raise ValueError("compute_geometry_invalid")
-    views = []
-    for value in header["views"]:
-        view = None if value is None else np.asarray(value, dtype=np.float64)
-        if view is not None and (
-            view.shape != (3, 3)
-            or not np.isfinite(view).all()
-            or not np.allclose(view @ view.T, np.eye(3), atol=1e-6)
-        ):
-            raise ValueError("compute_camera_invalid")
-        views.append(view)
 
     def chunks(size):
         for start in range(0, f, size):
             yield faces[start : start + size]
 
     prepared = PreparedRender(vertices, f, chunks, identities, normals)
-    return prepared, header["width"], header["height"], views, header["matte"]
+    return prepared
+
+
+def identity(counts: tuple[int, int, int], body: bytes | memoryview) -> str:
+    from printstash_core.mesh.preview_profile import RASTERIZER_RECIPE
+
+    digest = hashlib.sha256(RASTERIZER_RECIPE.encode() + struct.pack("!III", *counts))
+    digest.update(body)
+    return digest.hexdigest()
+
+
+def split(payload: bytes) -> tuple[str, str, bytes]:
+    length = struct.unpack("!I", payload[:4])[0]
+    header = payload[4 : 4 + length]
+    counts, *_ = decode_header(header)
+    body = payload[4 + length :]
+    return identity(counts, body), header.decode(), body

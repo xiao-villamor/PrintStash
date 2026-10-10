@@ -79,3 +79,50 @@ class TestBroker:
         assert result.returncode == 0, result.stderr
         report = json.loads(result.stdout)
         assert report == {"refusal": "capacity", "healthy": "healthy", "cooldown": 0.0}
+
+
+class TestPeerLiveness:
+    def test_checks_idle_peer_without_timeout_delay(self):
+        import socket
+        import time
+
+        from app.runtime.compute.protocol import peer_disconnected
+
+        left, right = socket.socketpair()
+        try:
+            left.settimeout(1)
+            start = time.monotonic()
+            assert peer_disconnected(left) is False
+            assert time.monotonic() - start < 0.25
+        finally:
+            left.close()
+            right.close()
+
+    def test_detects_closed_peer(self):
+        import socket
+
+        from app.runtime.compute.protocol import peer_disconnected
+
+        left, right = socket.socketpair()
+        try:
+            left.settimeout(1)
+            right.close()
+            assert peer_disconnected(left) is True
+        finally:
+            left.close()
+            right.close()
+
+    def test_preserves_pending_peer_bytes(self):
+        import socket
+
+        from app.runtime.compute.protocol import peer_disconnected
+
+        left, right = socket.socketpair()
+        try:
+            left.settimeout(1)
+            right.sendall(b"x")
+            assert peer_disconnected(left) is False
+            assert left.recv(1) == b"x"
+        finally:
+            left.close()
+            right.close()

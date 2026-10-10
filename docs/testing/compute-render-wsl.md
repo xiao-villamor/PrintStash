@@ -110,3 +110,13 @@ Physical diagnostics are opt-in and are not silently counted as ordinary CI test
 | 36 | S3 restore preserved | Happy | Backup from shipped gpu-render image | Backup restores successfully | E2E image | ✅ `e2e/runtime_image.py::TestRuntimeImageBackup::test_restores_s3_backup_from_shipped_image` |
 | 37 | SFTP restore preserved | Happy | Backup from shipped gpu-render image | Backup restores successfully | E2E image | ✅ `e2e/runtime_image.py::TestRuntimeImageBackup::test_restores_sftp_backup_from_shipped_image` |
 | 38 | CPU-only metadata avoids GPU cold start | Edge | Metadata-only, thumbnail and visual-analysis requests | Owner starts only for visual work | Integration | ✅ `integration/modules/media/test_mesh_isolation.py::TestComputeStartupPlacement::test_warms_render_owner_only_for_visual_work` |
+
+
+## Subsequent render corrections
+
+The follow-up moves canonical postprocessing to GPU, adds binary geometry
+references and corrects socket/readback overhead. A repeated 92-file ingestion
+matches all previous GPU thumbnails pixel-for-pixel. See the separate
+[performance correction record](compute-render-performance.md) for current
+implementation, timing scope, final regression cases and memory accounting.
+The earlier observations on this page remain historical measurements.

@@ -78,6 +78,10 @@ class ComputeStatus(BaseModel):
     render_frames: int = Field(default=0, ge=0)
     render_cache_hits: int = Field(default=0, ge=0)
     geometry_upload_bytes: int = Field(default=0, ge=0)
+    render_postprocess_gpu: bool = False
+    geometry_input_bytes: int = Field(default=0, ge=0)
+    geometry_input_cache_hits: int = Field(default=0, ge=0)
+    geometry_input_cache_bytes: int = Field(default=0, ge=0)
 
 
 class ComputeUnavailable(Exception):

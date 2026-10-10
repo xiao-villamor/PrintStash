@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -25,7 +26,15 @@ from .contracts import (
 from .discovery import runtime_identity
 from .health import cooling
 from .profile import identity as profile_identity
-from .protocol import InferenceRequest, Priority, StatusRequest, receive, send_admitted
+from .protocol import (
+    BinaryRenderRequest,
+    InferenceRequest,
+    Priority,
+    StatusRequest,
+    receive,
+    send_admitted,
+    send_body,
+)
 
 ROOT_ENV = "PRINTSTASH_COMPUTE_ROOT"
 _disabled_until = 0.0
@@ -283,3 +292,50 @@ def infer(
 
 def is_warm(identity: str) -> bool:
     return available() and identity in status().resident_model_ids
+
+
+def exchange_render(
+    request: BinaryRenderRequest, body: bytes, *, checkpoint=lambda: None
+) -> bytes:
+    """Negotiate a content reference on every connection, including after restart."""
+    root = directory()
+    if root is None:
+        raise ComputeUnavailable(Reason.BROKER_UNAVAILABLE)
+    checkpoint()
+    try:
+        with _connect(
+            root,
+            min(request.deadline, time.monotonic() + 30),
+            start=request.priority == Priority.BACKGROUND,
+        ) as connection:
+            connection.settimeout(0.05)
+            send_admitted(
+                connection,
+                request.model_dump_json().encode(),
+                request.deadline,
+                checkpoint=checkpoint,
+            )
+            response = json.loads(
+                receive(connection, request.deadline, checkpoint=checkpoint)
+            )
+            if "error" in response:
+                raise ComputeUnavailable(Reason(response["error"]))
+            if response == {"geometry": "upload"}:
+                send_body(
+                    connection,
+                    struct.pack("!I", len(body)),
+                    request.deadline,
+                    checkpoint=checkpoint,
+                )
+                send_body(connection, body, request.deadline, checkpoint=checkpoint)
+            elif response != {"geometry": "cached"}:
+                raise ComputeUnavailable(Reason.INVALID_INPUT)
+            result = receive(connection, request.deadline, checkpoint=checkpoint)
+            checkpoint()
+            if result.startswith(b"\x00"):
+                return result[1:]
+            error = json.loads(result[1:] if result.startswith(b"\x01") else result)
+            raise ComputeUnavailable(Reason(error["error"]))
+    except OSError:
+        cooldown()
+        raise ComputeUnavailable(Reason.BROKER_UNAVAILABLE) from None

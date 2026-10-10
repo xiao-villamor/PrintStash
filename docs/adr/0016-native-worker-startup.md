@@ -54,3 +54,11 @@ startup does not initialize ONNX. WSL uses the maintained Mesa GL/D3D12 route,
 with independent DXCore hardware evidence; see [compute deployment](../compute.md)
 and [render evaluation](../testing/compute-render-wsl.md). Cold-start cost and
 warm work remain separate observations; operator visual acceptance is pending.
+
+
+The render owner also retains postprocessing shaders and per-resolution data.
+Validated host geometry uses a bounded pinned cache, while active parser permits
+remain owned until their processes and buffers exit. Binary IPC can reference
+this geometry across cameras; broker restart naturally requires a fresh upload.
+Canonical CPU finalization, when the GPU canary refuses it, runs in the already
+reserved caller. No source parser state is pooled across Artifacts.

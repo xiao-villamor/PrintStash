@@ -4270,6 +4270,24 @@
             "title": "Fallbacks",
             "type": "integer"
           },
+          "geometry_input_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Geometry Input Bytes",
+            "type": "integer"
+          },
+          "geometry_input_cache_bytes": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Geometry Input Cache Bytes",
+            "type": "integer"
+          },
+          "geometry_input_cache_hits": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Geometry Input Cache Hits",
+            "type": "integer"
+          },
           "geometry_upload_bytes": {
             "default": 0,
             "minimum": 0.0,
@@ -4331,6 +4349,11 @@
             "minimum": 0.0,
             "title": "Render Frames",
             "type": "integer"
+          },
+          "render_postprocess_gpu": {
+            "default": false,
+            "title": "Render Postprocess Gpu",
+            "type": "boolean"
           },
           "rendering_transfer_seconds": {
             "minimum": 0.0,

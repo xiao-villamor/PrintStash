@@ -2,13 +2,14 @@
 
 import json
 import math
+import select
 import socket
 import struct
 import time
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter
 
 from .contracts import ComputeUnavailable, Reason
 
@@ -47,8 +48,20 @@ class RenderRequest(WorkRequest):
     units: int = Field(ge=1)
 
 
+class BinaryRenderRequest(WorkRequest):
+    operation: Literal["render_binary"] = "render_binary"
+    geometry_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    geometry_bytes: int = Field(gt=0, le=48 * 1024**2)
+    header: str = Field(min_length=1, max_length=4096)
+    recipe: str = Field(min_length=1, max_length=256)
+    units: int = Field(ge=1)
+    # Only the broker can attach validated arrays, never the wire decoder.
+    _decoded: tuple | None = PrivateAttr(default=None)
+
+
 Request = Annotated[
-    StatusRequest | InferenceRequest | RenderRequest, Field(discriminator="operation")
+    StatusRequest | InferenceRequest | RenderRequest | BinaryRenderRequest,
+    Field(discriminator="operation"),
 ]
 request_type = TypeAdapter(Request)
 
@@ -109,6 +122,12 @@ def send_admitted(
         raise ComputeUnavailable(Reason(acknowledgement["error"]))
     if acknowledgement != {"ready": True}:
         raise ComputeUnavailable(Reason.INVALID_INPUT)
+    send_body(connection, payload, deadline, checkpoint=checkpoint)
+
+
+def send_body(
+    connection, payload: bytes, deadline: float, *, checkpoint=lambda: None
+) -> None:
     remaining = memoryview(payload)
     while remaining:
         checkpoint()
@@ -129,3 +148,13 @@ def encode(value) -> bytes:
 
 def valid_deadline(deadline: float, now: float) -> bool:
     return math.isfinite(deadline) and now < deadline <= now + 300
+
+
+def peer_disconnected(connection: socket.socket) -> bool:
+    """Never let timeout-mode recv delay a completed ticket."""
+    if not select.select([connection], [], [], 0)[0]:
+        return False
+    try:
+        return connection.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT) == b""
+    except BlockingIOError, socket.timeout:
+        return False

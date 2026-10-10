@@ -5,6 +5,7 @@ import fcntl
 import os
 import queue
 import socket
+import struct
 import sys
 import threading
 import time
@@ -24,21 +25,24 @@ from .dispatcher import Dispatcher
 from .health import failed
 from .profile import identity as profile_identity
 from .protocol import (
+    BinaryRenderRequest,
     InferenceRequest,
     Priority,
     RenderRequest,
     StatusRequest,
     encode,
+    peer_disconnected,
     receive,
     request_type,
     send,
+    send_body,
     valid_deadline,
 )
 
 
 @dataclass
 class Ticket:
-    request: InferenceRequest | RenderRequest
+    request: InferenceRequest | RenderRequest | BinaryRenderRequest
     received: float
     ready: threading.Event = field(default_factory=threading.Event)
     cancelled: threading.Event = field(default_factory=threading.Event)
@@ -71,7 +75,11 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
         slots = threading.BoundedSemaphore(16)
         # Three copies cover framing, JSON decoding and base64 staging. Credits
         # live until execution releases the ticket, even after client cancellation.
-        queue_budget = QueueBudget(192 * 1024**2)
+        from .geometry_cache import INPUT_QUEUE_BYTES, OUTPUT_QUEUE_BYTES
+
+        queue_budget = QueueBudget(INPUT_QUEUE_BYTES)
+        output_budget = QueueBudget(OUTPUT_QUEUE_BYTES)
+        handlers = []
         dispatcher = dispatcher_factory(
             root,
             mode=ComputeMode(settings.compute_mode),
@@ -159,7 +167,7 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                 # may coalesce. Interactive work never waits for a batch.
                 render_group = False
                 if (
-                    isinstance(ticket.request, RenderRequest)
+                    isinstance(ticket.request, (RenderRequest, BinaryRenderRequest))
                     and ticket.request.priority == Priority.BACKGROUND
                     and not ticket.cancelled.is_set()
                 ):
@@ -186,7 +194,7 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                         if len(group) >= 8:
                             break
                         if (
-                            isinstance(candidate.request, RenderRequest)
+                            isinstance(candidate.request, type(ticket.request))
                             and candidate.request.priority == Priority.BACKGROUND
                             and candidate.request.recipe == ticket.request.recipe
                             and not candidate.cancelled.is_set()
@@ -198,6 +206,11 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
 
                 waiting_count = len(waiting)
 
+                def encode_output(member, result):
+                    if isinstance(member.request, BinaryRenderRequest):
+                        return b"\x00" + result
+                    return encode({"result": base64.b64encode(result).decode()})
+
                 def execute_one(member):
                     if member.cancelled.is_set():
                         return error(Reason.CANCELLED)
@@ -205,7 +218,7 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                         return error(Reason.DEADLINE)
                     try:
                         result = dispatcher.execute(member.request)
-                        return encode({"result": base64.b64encode(result).decode()})
+                        return encode_output(member, result)
                     except ComputeUnavailable as exc:
                         dispatcher.fallbacks += 1
                         return error(exc.reason)
@@ -227,8 +240,12 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                                 [member.request for member in group]
                             )
                             for member, output in zip(group, outputs, strict=True):
-                                member.result = encode(
-                                    {"result": base64.b64encode(output).decode()}
+                                member.result = (
+                                    b"\x00" + output
+                                    if isinstance(member.request, BinaryRenderRequest)
+                                    else encode(
+                                        {"result": base64.b64encode(output).decode()}
+                                    )
                                 )
                         except ValueError, ComputeUnavailable:
                             # Re-admit each member independently after a batch budget
@@ -242,8 +259,12 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                             result = dispatcher.execute(batch.request)
                             outputs = batch.split(result)
                             for member, output in zip(group, outputs, strict=True):
-                                member.result = encode(
-                                    {"result": base64.b64encode(output).decode()}
+                                member.result = (
+                                    b"\x00" + output
+                                    if isinstance(member.request, BinaryRenderRequest)
+                                    else encode(
+                                        {"result": base64.b64encode(output).decode()}
+                                    )
                                 )
                         except EmbeddingError, ValueError, ComputeUnavailable:
                             # Fault isolation belongs to original ticket boundaries;
@@ -294,6 +315,8 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
             nonlocal last_used
             ticket = None
             reserved = 0
+            output_reserved = 0
+            geometry_entry = None
 
             def admit(length):
                 nonlocal reserved
@@ -307,48 +330,121 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                 send(connection, encode({"ready": True}))
 
             try:
-                with connection:
-                    connection.settimeout(0.2)
-                    request = request_type.validate_json(
-                        receive(connection, time.monotonic() + 5, admit=admit)
-                    )
-                    last_used = time.monotonic()
-                    if isinstance(request, StatusRequest):
-                        send(
-                            connection,
-                            dispatcher.status(
-                                pending.qsize() + waiting_count, queue_budget.used
-                            )
-                            .model_dump_json()
-                            .encode(),
+                connection.settimeout(0.2)
+                request = request_type.validate_json(
+                    receive(connection, time.monotonic() + 5, admit=admit)
+                )
+                last_used = time.monotonic()
+                if isinstance(request, StatusRequest):
+                    send(
+                        connection,
+                        dispatcher.status(
+                            pending.qsize() + waiting_count, queue_budget.used
                         )
+                        .model_dump_json()
+                        .encode(),
+                    )
+                    return
+                if not valid_deadline(request.deadline, time.monotonic()):
+                    send(connection, error(Reason.DEADLINE))
+                    return
+                if isinstance(request, BinaryRenderRequest):
+                    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+
+                    from app.modules.media.compute_geometry import (
+                        decode_arrays,
+                        decode_header,
+                        identity,
+                    )
+
+                    counts, width, height, views, matte = decode_header(
+                        request.header.encode()
+                    )
+                    n, f, k = counts
+                    if request.geometry_bytes != n * 20 + f * 24 + k * 24:
+                        raise ValueError("compute_geometry_size")
+                    factor = PREVIEW_PROFILE.supersample_for(width)
+                    output_reserved = 3 * (
+                        12 + width * height * factor**2 * 4 * len(views)
+                    )
+                    # A rejected reserve must not be released in finally.
+                    amount = output_reserved
+                    output_reserved = 0
+                    output_budget.reserve(amount)
+                    output_reserved = amount
+                    dispatcher.admit_host(min(request.deadline, time.monotonic() + 5))
+                    geometry_entry = dispatcher.geometry_cache.acquire(
+                        request.geometry_key, request.geometry_bytes, counts
+                    )
+                    if geometry_entry is None:
+                        amount = 2 * request.geometry_bytes
+                        queue_budget.reserve(amount)
+                        reserved += amount
+                        send(connection, encode({"geometry": "upload"}))
+
+                        def check_length(length):
+                            if length != request.geometry_bytes:
+                                raise ValueError("compute_geometry_size")
+
+                        body = receive(
+                            connection,
+                            min(request.deadline, time.monotonic() + 5),
+                            admit=check_length,
+                        )
+                        if identity(counts, body) != request.geometry_key:
+                            raise ValueError("compute_geometry_digest")
+                        prepared = decode_arrays(body, counts)
+                        geometry_entry = dispatcher.geometry_cache.insert(
+                            request.geometry_key, len(body), counts, prepared
+                        )
+                    else:
+                        send(connection, encode({"geometry": "cached"}))
+                    request._decoded = (
+                        geometry_entry.prepared,
+                        width,
+                        height,
+                        views,
+                        matte,
+                    )
+                ticket = Ticket(request, time.monotonic())
+                pending.put_nowait(ticket)
+                while not ticket.ready.wait(0.05):
+                    if stop.is_set() or time.monotonic() >= request.deadline:
+                        ticket.cancelled.set()
                         return
-                    if not valid_deadline(request.deadline, time.monotonic()):
-                        send(connection, error(Reason.DEADLINE))
+                    if peer_disconnected(connection):
+                        ticket.cancelled.set()
                         return
-                    ticket = Ticket(request, time.monotonic())
-                    pending.put_nowait(ticket)
-                    while not ticket.ready.wait(0.05):
-                        if stop.is_set() or time.monotonic() >= request.deadline:
-                            ticket.cancelled.set()
-                            return
-                        try:
-                            if (
-                                connection.recv(
-                                    1, socket.MSG_PEEK | socket.MSG_DONTWAIT
-                                )
-                                == b""
-                            ):
-                                ticket.cancelled.set()
-                                return
-                        except BlockingIOError, socket.timeout:
-                            pass
-                    if ticket.result is not None and not ticket.cancelled.is_set():
-                        send(connection, ticket.result)
-            except OSError, ComputeUnavailable, ValueError, queue.Full:
+                if ticket.result is not None and not ticket.cancelled.is_set():
+                    result = ticket.result
+                    if isinstance(request, BinaryRenderRequest):
+                        if not result.startswith(b"\x00"):
+                            result = b"\x01" + result
+                        send_body(
+                            connection,
+                            struct.pack("!I", len(result)),
+                            request.deadline,
+                        )
+                        send_body(connection, result, request.deadline)
+                    else:
+                        send(connection, result)
+            except (ComputeUnavailable, ValueError) as exc:
+                if ticket is not None:
+                    ticket.cancelled.set()
+                try:
+                    reason = (
+                        exc.reason
+                        if isinstance(exc, ComputeUnavailable)
+                        else Reason.INVALID_INPUT
+                    )
+                    send(connection, error(reason))
+                except OSError:
+                    pass
+            except OSError, queue.Full:
                 if ticket is not None:
                     ticket.cancelled.set()
             finally:
+                connection.close()
                 if (
                     ticket is not None
                     and not ticket.ready.is_set()
@@ -357,6 +453,9 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                     ticket.cancelled.set()
                     while not ticket.ready.wait(0.05) and not stop.is_set():
                         pass
+                if geometry_entry is not None:
+                    dispatcher.geometry_cache.release(geometry_entry)
+                output_budget.release(output_reserved)
                 queue_budget.release(reserved)
                 slots.release()
 
@@ -389,13 +488,21 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                     if not slots.acquire(blocking=False):
                         connection.close()
                         continue
-                    threading.Thread(
+                    handlers = [thread for thread in handlers if thread.is_alive()]
+                    thread = threading.Thread(
                         target=handle, args=(connection,), daemon=True
-                    ).start()
+                    )
+                    handlers.append(thread)
+                    thread.start()
         finally:
             stop.set()
             executor.join(timeout=5)
             if executor.is_alive():
+                os._exit(74)
+            until = time.monotonic() + 6
+            for thread in handlers:
+                thread.join(timeout=max(0, until - time.monotonic()))
+            if any(thread.is_alive() for thread in handlers):
                 os._exit(74)
             dispatcher.close()
             address.unlink(missing_ok=True)

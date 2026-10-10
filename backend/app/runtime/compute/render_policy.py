@@ -28,6 +28,12 @@ def admission(payload: bytes, recipe: str, units: int) -> RenderAdmission:
 
 def admission_many(payloads, recipes, units) -> RenderAdmission:
     decoded = [decode(payload) for payload in payloads]
+    return admission_decoded(decoded, list(map(len, payloads)), recipes, units)
+
+
+def admission_decoded(
+    decoded, sizes, recipes, units, *, gpu_finalize=False
+) -> RenderAdmission:
     dimensions = {(width, height) for _, width, height, _, _ in decoded}
     if len(dimensions) != 1:
         raise ValueError("compute_batch_dimensions")
@@ -52,10 +58,20 @@ def admission_many(payloads, recipes, units) -> RenderAdmission:
     # Staging/validation copies, canonical postprocess arrays, one normal-prep
     # chunk, joined outputs and a bounded 32 MiB shaded-image cache.
     host_bytes = (
-        3 * sum(map(len, payloads))
+        3 * sum(sizes)
         + w * h * 96
         + readback
         + width * height * 8 * frames
         + 96 * 1024**2
     )
-    return RenderAdmission(projected_bytes, w * h * 8, readback, host_bytes)
+    extra = 0
+    if gpu_finalize:
+        from app.modules.media.gpu_postprocess import workspace_bytes
+
+        extra = workspace_bytes(width, height, factor)
+        # Binary input bodies are already charged to the pinned geometry cache
+        # and upload queue. Raw fallback finalization runs in the caller, not
+        # this owner. Retain normal-preparation scratch, shaded output cache,
+        # readback and joined frame copies in the renderer reservation.
+        host_bytes = readback + width * height * 8 * frames + 96 * 1024**2
+    return RenderAdmission(projected_bytes, w * h * 8 + extra, readback, host_bytes)

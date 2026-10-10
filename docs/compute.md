@@ -129,3 +129,36 @@ uv run --extra gpu-render pytest tests/integration/modules/media/webgpu_render_d
 The diagnostic allows software adapters for development and must never generate an automatic-selection receipt. Physical qualification must separately cover Linux, Docker and WSL configurations on representative NVIDIA, AMD and Intel systems. Keep injected allocation errors, killed processes and actual hardware OOM/device-loss evidence separate.
 
 Thumbnail recipe 12 and canonical raster recipe qualified-portable-v3 version output behavior independently of device. Device choice never changes embedding-space identity; changed models, preprocessing or precision still require the existing generation workflow.
+
+
+## Render transfer and postprocessing lifecycle
+
+The parser sends a bounded descriptor containing the geometry digest, dimensions
+and cameras. The owner acknowledges either a cached geometry reference or an
+admitted binary upload. It validates array bounds and digest before scheduling.
+The host geometry cache is capped at 128 MiB, pins active entries and expires
+idle entries after 60 seconds. Input upload queues and output queues each have a separate 192 MiB ceiling.
+Both are included in the owner host reservation; they are not GPU allocations.
+The device residency ledger still covers geometry, shaders' runtime allowance,
+framebuffers, readback and compute postprocessing buffers together.
+
+Canonical Lanczos resampling, premultiplied-alpha rounding and the vignette run
+as portable WGSL compute passes before readback. Coefficients and vignette data
+are uploaded once per resolution. A byte-exact startup canary checks partial
+transparency and both supersampling factors against the pinned CPU algorithm.
+If this canary fails, the parser's existing reservation covers CPU finalization
+of raw pixels; it does not occupy the GPU owner's CPU thread. Image encoding
+remains in the existing CPU path. No inference runtime is started by rendering.
+
+Only the used readback span is copied, even if the retained pool was grown for
+a larger batch. At 640×480 the GPU-finalized path downloads 1,228,800 bytes per
+frame instead of 4,915,200 supersampled bytes. Geometry, compiled shaders and
+framebuffers stay warm across independently admitted Artifacts. The existing
+eight-frame ceiling and 10 ms ready-work wait remain in force.
+
+Administrator diagnostics include render_postprocess_gpu, geometry_input_bytes,
+geometry_input_cache_hits and geometry_input_cache_bytes. Input transfer counters
+measure accepted uploads; device upload counters measure GPU transfers separately.
+Runtime identity includes the postprocessing implementation, so older qualification
+receipts cannot silently qualify it. Pixel semantics and output recipes are unchanged.
+See [correction evidence and coverage](testing/compute-render-performance.md).
