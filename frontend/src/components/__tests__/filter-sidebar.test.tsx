@@ -3,6 +3,7 @@
  * Counts describe the whole visible branch; pages describe only downloaded
  * rows. Global name search is independent of which branches are open.
  */
+import { setLocale } from "@/lib/locale";
 import { queryKeys } from "@/lib/query-client";
 import { outlinerRoutes } from "@/test-support/outliner";
 
@@ -145,6 +146,14 @@ async function openFolder(user: ReturnType<typeof userEvent.setup>, name: string
 }
 
 describe("FilterSidebar", () => {
+  it("translates an already mounted Multipart Model leaf", async () => {
+    renderSidebar({ multipartModels: [multipartSet()] });
+    const leaf = await screen.findByRole("button", { name: "Dragon figure" });
+    expect(leaf).toHaveAttribute("title", "Dragon figure · Multipart set");
+    act(() => setLocale("es"));
+    expect(leaf).toHaveAttribute("title", "Dragon figure · Conjunto multiparte");
+  });
+
   it("keeps the gesture version when an outliner read changes during dragging", async () => {
     const user = userEvent.setup();
     const models = [aOutlinerModel({ id: 1, name: "Original model", edit_version: 7 })];
@@ -656,7 +665,7 @@ describe("FilterSidebar", () => {
   });
 
   describe("remembering the open folders", () => {
-    it("publishes a restored branch while another remains pending", async () => {
+    it("keeps a restored branch usable while a newly opened branch is pending", async () => {
       const user = userEvent.setup();
       const slow = Promise.withResolvers<Response>();
       const started = Promise.withResolvers<void>();
@@ -672,7 +681,7 @@ describe("FilterSidebar", () => {
         collection: "toys",
         collection_id: 3,
       });
-      sessionStorage.setItem("ps-filter-expanded", JSON.stringify(["parts", "toys"]));
+      sessionStorage.setItem("ps-filter-expanded", JSON.stringify(["parts"]));
       renderSidebar({
         models: [fastModel, slowModel],
         routes: {
@@ -690,6 +699,8 @@ describe("FilterSidebar", () => {
         },
       });
       try {
+        await screen.findByRole("button", { name: "Restored bracket" });
+        await openFolder(user, "Toys");
         await started.promise;
         expect(await screen.findByRole("button", { name: "Restored bracket" })).toBeVisible();
         expect(screen.queryByRole("button", { name: "Pending toy" })).not.toBeInTheDocument();
@@ -1093,8 +1104,10 @@ describe("outliner pages", () => {
       }),
     );
     const app = renderSidebar({ collections, selectedCollection: "folder-64" });
-    await screen.findByRole("button", { name: "Folder 064" });
-    expect(screen.getAllByRole("button", { name: "Folder 064" })).toHaveLength(1);
+    const selected = await screen.findByText("Folder 064");
+    expect(selected).toBeVisible();
+    expect(selected.closest("button")).toHaveAccessibleName("Folder 064");
+    expect(screen.getAllByText("Folder 064")).toHaveLength(1);
     expect(
       app
         .requests()
@@ -1102,8 +1115,8 @@ describe("outliner pages", () => {
         .every((r) => !new URL(r.url, "http://test").searchParams.has("cursor")),
     ).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "Show more folders" }));
-    await screen.findByRole("button", { name: "Folder 063" });
-    expect(screen.getAllByRole("button", { name: "Folder 064" })).toHaveLength(1);
+    expect(await screen.findByText("Folder 063")).toBeVisible();
+    expect(screen.getAllByText("Folder 064")).toHaveLength(1);
   });
 
   it("restores the expanded tree after Escape from global search", async () => {

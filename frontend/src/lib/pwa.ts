@@ -1,6 +1,14 @@
-export function createControllerChangeHandler(reload: () => void): () => void {
+export function createControllerChangeHandler(
+  reload: () => void,
+  initiallyControlled: boolean,
+): () => void {
+  let controlled = initiallyControlled;
   let reloading = false;
   return () => {
+    if (!controlled) {
+      controlled = true;
+      return;
+    }
     if (reloading) return;
     reloading = true;
     reload();
@@ -12,7 +20,10 @@ export function registerPwa(enabled = import.meta.env.PROD): void {
   if (!enabled || !("window" in globalThis) || !("serviceWorker" in navigator)) return;
   navigator.serviceWorker.addEventListener(
     "controllerchange",
-    createControllerChangeHandler(() => window.location.reload()),
+    createControllerChangeHandler(
+      () => window.location.reload(),
+      navigator.serviceWorker.controller !== null,
+    ),
   );
   window.addEventListener(
     "load",

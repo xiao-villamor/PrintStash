@@ -25,17 +25,21 @@ class ThumbnailValidationError(ValueError):
     """A decodable candidate failed the canonical thumbnail contract."""
 
 
-def to_webp(data: bytes, *, normalize: bool = True, width: int | None = None) -> bytes:
-    """Re-encode image bytes (PNG from slicers/rasteriser) as lossless WebP.
+def to_webp(
+    data: bytes,
+    *,
+    normalize: bool = True,
+    width: int | None = None,
+    renderer_encoded: bool = False,
+) -> bytes:
+    """Validate and frame a thumbnail using the shared compact WebP policy.
 
-    Single conversion seam for every thumbnail write. Lossless keeps the
-    output pixel-identical to the source — no colour shift, no edge bleed on
-    the transparent background — while still shrinking these flat-shaded
-    renders below the original PNG. ``exact=True`` preserves the RGB of fully
-    transparent pixels so the encoder can't recolour hidden areas.
-
-    Raises a stable error when validation or encoding fails. Callers treat the
-    thumbnail as a retryable derivative; hostile input is never stored raw.
+    Color uses quality 90; alpha stays lossless. Only bytes produced by the
+    current native renderer may bypass a second lossy encode, and only after
+    decoding, size and framing validation. Embedded images and uploads always
+    pass through the encoder, including older canonical lossless WebPs.
+    ``renderer_encoded`` is internal provenance, never inferred from a file's
+    format or metadata.
     """
     try:
         from PIL import Image
@@ -100,17 +104,22 @@ def to_webp(data: bytes, *, normalize: bool = True, width: int | None = None) ->
                         )
                         canvas.alpha_composite(rgba, dest=offset)
                         rgba = canvas
-                    elif source_is_webp:
-                        # The full renderer already encoded the canonical,
-                        # lossless recipe. Validation above is still shared;
-                        # only the redundant second WebP encode is skipped.
+                    elif source_is_webp and renderer_encoded:
+                        # Preserve the current renderer's encoded color once;
+                        # validation still precedes this trusted fast path.
                         return data
                 else:
                     rgba.thumbnail((width, height), Image.Resampling.LANCZOS)
 
-                buf = io.BytesIO()
-                rgba.save(buf, format="WEBP", lossless=True, exact=True, method=6)
-                return buf.getvalue()
+                from printstash_core.mesh.rasterizer import (
+                    RenderedPixels,
+                    encode_rendered_pixels,
+                )
+
+                return encode_rendered_pixels(
+                    RenderedPixels(rgba.width, rgba.height, rgba.tobytes()),
+                    output_format="WEBP",
+                )
     except ThumbnailValidationError:
         raise
     except Exception as exc:

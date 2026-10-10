@@ -19,7 +19,9 @@ from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 class TestPreviewProfile:
     @staticmethod
     def test_canonical_thumbnail_profile_is_stable() -> None:
-        assert PREVIEW_PROFILE.version == 2
+        assert PREVIEW_PROFILE.version == 3
+        assert PREVIEW_PROFILE.encoding_quality == 90
+        assert PREVIEW_PROFILE.encoding_method == 4
         assert PREVIEW_PROFILE.aspect_ratio == (4, 3)
         assert PREVIEW_PROFILE.margin_fraction == 0.10
         assert PREVIEW_PROFILE.material_albedo == (0.70, 0.75, 0.84)
@@ -73,6 +75,9 @@ class TestPreviewProfile:
         "mutate",
         [
             lambda payload: payload.__setitem__("aspectRatio", [4]),
+            lambda payload: payload["encoding"].__setitem__("quality", -1),
+            lambda payload: payload["encoding"].__setitem__("quality", 101),
+            lambda payload: payload["encoding"].__setitem__("quality", True),
             lambda payload: payload.__setitem__("marginFraction", 0.5),
             lambda payload: payload.__setitem__("material", {"albedo": [1, 2]}),
         ],

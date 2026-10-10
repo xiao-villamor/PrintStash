@@ -5,17 +5,73 @@ A failure here means a restart could strand state or delete staging it cannot ow
 
 from datetime import timedelta
 
+import pytest
 from sqlmodel import Session
 
 from app.core.config import settings
 from app.core.time import utcnow
 from app.db.models import ArtifactUploadState, JobKind, JobState
 from app.db.session import SQLiteSessionFactory
-from app.modules.ingestion.artifact_uploads import reconcile_artifact_uploads
+from app.modules.ingestion.artifact_uploads import (
+    SqlArtifactUploadManager,
+    reconcile_artifact_uploads,
+)
 from tests._env import use_local_storage
 
 
 class TestReconcileArtifactUploads:
+    @pytest.mark.parametrize(
+        ("state", "expired"),
+        [
+            (ArtifactUploadState.VERIFYING, False),
+            (ArtifactUploadState.INGESTING, False),
+            (ArtifactUploadState.VERIFYING, True),
+        ],
+    )
+    def test_preserves_live_upload_operations(
+        self, db_session, make_user, make_artifact_upload, tmp_path, state, expired
+    ):
+        use_local_storage(tmp_path)
+        upload = make_artifact_upload(
+            make_user("live-upload-owner"),
+            state=state,
+            error_code="artifact_upload_verification_active",
+            expires_at=utcnow() + timedelta(hours=-1 if expired else 1),
+        )
+        manager = SqlArtifactUploadManager(db_session)
+        with manager.operation(upload.id) as acquired:
+            assert acquired
+            result = reconcile_artifact_uploads(
+                SQLiteSessionFactory(db_session.get_bind())
+            )
+
+        db_session.refresh(upload)
+        assert result.reconciled == result.expired == result.retained == 0
+        assert upload.state == state
+        assert upload.error_code == "artifact_upload_verification_active"
+
+    def test_recovers_verification_after_operation_exits(
+        self, db_session, make_user, make_artifact_upload, tmp_path
+    ):
+        use_local_storage(tmp_path)
+        upload = make_artifact_upload(
+            make_user("interrupted-operation-owner"),
+            state=ArtifactUploadState.VERIFYING,
+            error_code="artifact_upload_verification_active",
+        )
+        manager = SqlArtifactUploadManager(db_session)
+        with pytest.raises(RuntimeError, match="request interrupted"):
+            with manager.operation(upload.id) as acquired:
+                assert acquired
+                raise RuntimeError("request interrupted")
+
+        result = reconcile_artifact_uploads(SQLiteSessionFactory(db_session.get_bind()))
+
+        db_session.refresh(upload)
+        assert result.reconciled == 1
+        assert upload.error_code == "artifact_upload_verification_interrupted"
+        assert upload.retryable is True
+
     def test_expiry_retains_state_when_the_adapter_is_unknown(
         self,
         db_session: Session,

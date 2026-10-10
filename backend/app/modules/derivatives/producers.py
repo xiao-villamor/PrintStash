@@ -47,6 +47,7 @@ from app.modules.media.mesh_contracts import (
     PreviewCoverage,
     ThumbnailFailureReason,
     ThumbnailRequest,
+    ThumbnailStrategy,
 )
 from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.media.source_preparation import reserve_sources
@@ -202,10 +203,13 @@ def _publish_thumbnail(
     duration_ms: int | None = None,
     peak_rss_bytes: int | None = None,
     abort_on_failure: bool = False,
+    renderer_encoded: bool = False,
 ) -> DerivativeState:
     assert file_row.id is not None
     try:
-        encoded = thumbnail.to_webp(image, normalize=normalize)
+        encoded = thumbnail.to_webp(
+            image, normalize=normalize, renderer_encoded=renderer_encoded
+        )
     except ValueError:
         _fail(
             attempt,
@@ -379,6 +383,7 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                     attempt=attempts[kind],
                     normalize=True,
                     strategy=frame.strategy.value,
+                    renderer_encoded=frame.strategy is ThumbnailStrategy.FULL,
                     complete=frame.coverage.preview
                     in (PreviewCoverage.COMPLETE, PreviewCoverage.DOCUMENT_SUPPLIED),
                     duration_ms=frame.duration_ms,

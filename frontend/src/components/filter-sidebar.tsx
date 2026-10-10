@@ -1,12 +1,20 @@
 "use client";
 
+import {
+  EXPANDED_KEY,
+  readExpandedPaths,
+  useOutlinerRestoration,
+} from "@/lib/use-outliner-restoration";
+
 import { captureModelDrag, type ModelDrag } from "@/lib/model-dnd";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
+import type { StartupOutcome } from "@/lib/library-startup-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
+import { useViewportAdmission } from "@/lib/use-viewport-admission";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/navigation";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { CollectionNodeRead, OutlinerModelRead, PrinterRead, TagRead } from "@/types";
@@ -84,20 +92,7 @@ function collectionDropTarget(event: DragEndEvent): CollectionDropData | null {
   return data as CollectionDropData;
 }
 
-const EXPANDED_KEY = "ps-filter-expanded";
 const ALL_EXPANDED_KEY = "ps-filter-all-expanded";
-
-/** The expanded collection paths persisted this session, or null if none are. */
-function readExpandedPaths(): Set<string> | null {
-  try {
-    const saved = sessionStorage.getItem(EXPANDED_KEY);
-    if (!saved) return null;
-    const parsed: unknown = JSON.parse(saved);
-    return Array.isArray(parsed) ? new Set(parsed.map(String)) : null;
-  } catch {
-    return null;
-  }
-}
 
 /** Is the "All Models" group expanded? Open unless this session closed it. */
 function readAllModelsExpanded(): boolean {
@@ -115,6 +110,7 @@ function DraggableModelLeaf({
   model: OutlinerModelRead;
   isDraggingThisModel: boolean;
 }) {
+  "use memo";
   useUiLocale();
   const router = useRouter();
   const { attributes, listeners, setNodeRef } = useDraggable({
@@ -135,10 +131,11 @@ function DraggableModelLeaf({
         onKeyDown={(event) => {
           if (event.key === "Enter") router.push(`/models/${model.id}`);
         }}
-        className={`flex items-center gap-2 rounded px-2 py-1 text-xs cursor-grab active:cursor-grabbing select-none hover:bg-muted transition-colors ${
+        className={`flex items-center gap-2 rounded pl-7 pr-2 py-1 text-xs cursor-grab active:cursor-grabbing select-none hover:bg-muted transition-colors ${
           isDraggingThisModel ? "opacity-30 pointer-events-none" : "text-muted-foreground"
         }`}
         title={model.name}
+        data-outliner-entry={`/models/${model.id}`}
       >
         <Box className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/40" />
         <span className="truncate">{model.name}</span>
@@ -148,7 +145,8 @@ function DraggableModelLeaf({
 }
 
 function MultipartLeaf({ multipart }: { multipart: OutlinerModelRead }) {
-  useUiLocale();
+  "use memo";
+  const { t: uiText } = useI18n();
   const router = useRouter();
 
   return (
@@ -160,8 +158,9 @@ function MultipartLeaf({ multipart }: { multipart: OutlinerModelRead }) {
         onKeyDown={(event) => {
           if (event.key === "Enter") router.push(`/multipart-models/${multipart.id}`);
         }}
-        className="flex cursor-default select-none items-center gap-2 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
+        className="flex cursor-default select-none items-center gap-2 rounded pl-7 pr-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted"
         title={uiText("{value1} · Multipart set", { value1: String(multipart.name) })}
+        data-outliner-entry={`/multipart-models/${multipart.id}`}
       >
         <Boxes className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
         <span className="truncate">{multipart.name}</span>
@@ -177,6 +176,7 @@ function OutlinerLeaves({
   entries: OutlinerEntry[];
   dragging: DragPayload | null;
 }) {
+  "use memo";
   return entries.map((entry) =>
     entry.kind === "model" ? (
       <DraggableModelLeaf
@@ -193,10 +193,12 @@ function OutlinerLeaves({
 interface TreeContext {
   selected: string | null;
   onSelect: (path: string | null) => void;
-  onIntent?: (path: string) => void;
+  onIntent?: (path: string | null) => void;
   expanded: Set<string>;
   toggle: (path: string) => void;
   params: OutlinerParams;
+  restoring: boolean;
+  report: (key: string, status: StartupOutcome | null) => void;
   revealNodes: CollectionNodeRead[];
   dragging: DragPayload | null;
   onDelete?: (id: number, recursive: boolean) => void;
@@ -261,9 +263,26 @@ function PageControls({
   );
 }
 
+function useTreeReadiness(ctx: TreeContext, key: string, status: StartupOutcome) {
+  const report = ctx.report;
+  useEffect(() => {
+    report(key, status);
+    return () => report(key, null);
+  }, [report, key, status]);
+}
+
 function EntryLevel({ collectionId, ctx }: { collectionId: number | null; ctx: TreeContext }) {
-  useUiLocale();
-  const query = useOutlinerEntries({ ...ctx.params, collection_id: collectionId ?? undefined });
+  "use memo";
+  const { t: uiText } = useI18n();
+  const query = useOutlinerEntries(
+    { ...ctx.params, collection_id: collectionId ?? undefined },
+    !ctx.restoring,
+  );
+  useTreeReadiness(
+    ctx,
+    `entries:${collectionId}`,
+    query.isError ? "failed" : query.isPending ? "pending" : "ready",
+  );
   const entries = query.data?.pages.flatMap((page) => page.items) ?? [];
   return (
     <>
@@ -278,11 +297,15 @@ function EntryLevel({ collectionId, ctx }: { collectionId: number | null; ctx: T
 }
 
 function CollectionLevel({ parentId, ctx }: { parentId: number | null; ctx: TreeContext }) {
-  useUiLocale();
-  const query = useOutlinerCollections({
-    ...ctx.params,
-    parent_id: parentId ?? undefined,
-  });
+  "use memo";
+  const { t: uiText } = useI18n();
+  const query = useOutlinerCollections(
+    {
+      ...ctx.params,
+      parent_id: parentId ?? undefined,
+    },
+    !ctx.restoring,
+  );
   const nodes = new Map<number, OutlinerCollection>();
   for (const page of query.data?.pages ?? []) {
     for (const node of page.items) nodes.set(node.id, node);
@@ -295,6 +318,15 @@ function CollectionLevel({ parentId, ctx }: { parentId: number | null; ctx: Tree
   const reveal = useOutlinerCollections(
     { ...ctx.params, parent_id: parentId ?? undefined, reveal_id: selectedId },
     query.isSuccess && needsReveal,
+  );
+  useTreeReadiness(
+    ctx,
+    `collections:${parentId}`,
+    query.isError || (needsReveal && reveal.isError)
+      ? "failed"
+      : query.isPending || (needsReveal && reveal.isPending)
+        ? "pending"
+        : "ready",
   );
   if (needsReveal) {
     for (const page of reveal.data?.pages ?? []) {
@@ -336,6 +368,7 @@ function SearchResults({
   useUiLocale();
   const router = useRouter();
   const query = useOutlinerSearch({ ...ctx.params, q: text });
+  useTreeReadiness(ctx, "search", query.isError ? "failed" : query.isPending ? "pending" : "ready");
   const matches = query.data?.pages.flatMap((page) => page.items) ?? [];
   function locate(path: string | null) {
     ctx.onSelect(path);
@@ -390,7 +423,8 @@ function SearchResults({
 }
 
 function CollectionTreeRow({ node, ctx }: { node: OutlinerCollection; ctx: TreeContext }) {
-  useUiLocale();
+  "use memo";
+  const { t: uiText } = useI18n();
   const [confirming, setConfirming] = useState(false);
   const { selected, onSelect, onIntent, expanded, toggle, dragging, onDelete } = ctx;
 
@@ -492,7 +526,7 @@ function CollectionTreeRow({ node, ctx }: { node: OutlinerCollection; ctx: TreeC
         ) : (
           <div
             ref={rowRef}
-            className={`group/row relative flex items-center gap-1 rounded px-2 py-1 transition-colors ${
+            className={`group/row relative flex min-w-32 items-center gap-1 rounded px-2 py-1 transition-colors ${
               isOver && dragging !== null && canDrop
                 ? "z-10 bg-accent"
                 : isSelected
@@ -524,9 +558,12 @@ function CollectionTreeRow({ node, ctx }: { node: OutlinerCollection; ctx: TreeC
               onPointerDown={(e) => e.stopPropagation()}
               onPointerEnter={() => onIntent?.(node.path)}
               onFocus={() => onIntent?.(node.path)}
+              onPointerLeave={() => onIntent?.(null)}
+              onBlur={() => onIntent?.(null)}
               onClick={() => onSelect(node.path)}
               className="flex flex-1 min-w-0 items-center gap-1.5 text-left text-sm font-medium truncate"
               title={node.name}
+              data-outliner-collection={node.path}
               {...attributes}
             >
               {isOpen || isSelected ? (
@@ -536,42 +573,48 @@ function CollectionTreeRow({ node, ctx }: { node: OutlinerCollection; ctx: TreeC
               )}
               <span className="truncate">{node.name}</span>
             </button>
-            <span
-              {...listeners}
-              onPointerDown={(e) => e.stopPropagation()}
-              className="p-0.5 text-muted-foreground/30 hover:text-muted-foreground cursor-grab active:cursor-grabbing opacity-0 group-hover/row:opacity-100 flex-shrink-0"
-              title={uiText("Drag to reorder")}
-            >
-              <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 16 16">
-                <circle cx="5" cy="4" r="1.2" />
-                <circle cx="11" cy="4" r="1.2" />
-                <circle cx="5" cy="8" r="1.2" />
-                <circle cx="11" cy="8" r="1.2" />
-                <circle cx="5" cy="12" r="1.2" />
-                <circle cx="11" cy="12" r="1.2" />
-              </svg>
-            </span>
-            {onDelete && (
-              <button
-                type="button"
-                onPointerDown={(e) => e.stopPropagation()}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setConfirming(true);
-                }}
-                className="p-0.5 text-muted-foreground/30 hover:text-red-500 opacity-0 group-hover/row:opacity-100 flex-shrink-0 rounded transition-colors"
-                title={uiText("Delete collection")}
+            <span className="relative flex-shrink-0">
+              <span
+                className={`absolute right-full top-1/2 -translate-y-1/2 mr-1 flex items-center rounded invisible group-hover/row:visible group-focus-within/row:visible ${isSelected ? "bg-accent" : "bg-sidebar"}`}
               >
-                <Trash2 className="h-2.5 w-2.5" />
-              </button>
-            )}
-            <span className="flex-shrink-0 min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
-              {node.subtree_entry_count}
+                <span
+                  {...listeners}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  className="p-0.5 text-muted-foreground/30 hover:text-muted-foreground cursor-grab active:cursor-grabbing flex-shrink-0"
+                  title={uiText("Drag to reorder")}
+                >
+                  <svg className="h-2.5 w-2.5" fill="currentColor" viewBox="0 0 16 16">
+                    <circle cx="5" cy="4" r="1.2" />
+                    <circle cx="11" cy="4" r="1.2" />
+                    <circle cx="5" cy="8" r="1.2" />
+                    <circle cx="11" cy="8" r="1.2" />
+                    <circle cx="5" cy="12" r="1.2" />
+                    <circle cx="11" cy="12" r="1.2" />
+                  </svg>
+                </span>
+                {onDelete && (
+                  <button
+                    type="button"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirming(true);
+                    }}
+                    className="p-0.5 text-muted-foreground/30 hover:text-red-500 flex-shrink-0 rounded transition-colors"
+                    title={uiText("Delete collection")}
+                  >
+                    <Trash2 className="h-2.5 w-2.5" />
+                  </button>
+                )}
+              </span>
+              <span className="block min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground">
+                {node.subtree_entry_count}
+              </span>
             </span>
           </div>
         )}
         {isOpen && hasNestedItems && !confirming && (
-          <div className="ml-4 border-l border-border pl-3 min-w-0">
+          <div className="ml-1 border-l border-border pl-1 min-w-0">
             {node.visible_child_count > 0 && <CollectionLevel parentId={node.id} ctx={ctx} />}
             {node.direct_entry_count > 0 && <EntryLevel collectionId={node.id} ctx={ctx} />}
           </div>
@@ -655,13 +698,22 @@ export function FilterSidebarContent({
   canViewPrinters = true,
   structuredFilters,
   filtersOpen = true,
+  readinessEnabled = true,
   libraryView,
   onLibraryViewChange,
 }: FilterSidebarProps) {
-  useUiLocale();
-  const { t } = useI18n();
+  "use memo";
+  const { t, locale } = useI18n();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
+  const requestSecondary = startup.request;
+  const { ref: filtersRef, admitted: filtersVisible } = useViewportAdmission();
+  const contentRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!readinessEnabled) return;
+    settleStartup("tree", "pending");
+    return () => settleStartup("tree", "idle");
+  }, [settleStartup, readinessEnabled]);
   const outlinerQ = (outlinerFilter ?? "").trim();
   const [searchText, setSearchText] = useState(outlinerQ);
   useEffect(() => {
@@ -674,7 +726,6 @@ export function FilterSidebarContent({
       ? [...lookup.data.ancestors, lookup.data.collection]
       : [];
   const params: OutlinerParams = { ...outlinerFilters, view: libraryView };
-  const roots = useOutlinerCollections(params, outlinerQ === "");
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     // A first visit starts at the top level: the tree loads a level only when
     // it is opened, and opening a large library whole is what #295 was.
@@ -685,10 +736,72 @@ export function FilterSidebarContent({
     return initial;
   });
   const [allModelsExpanded, setAllModelsExpanded] = useState(readAllModelsExpanded);
+  const {
+    restore,
+    enabled: restoreEnabled,
+    restoring,
+  } = useOutlinerRestoration(params, selectedCollection, outlinerQ === "", expanded);
+  const roots = useOutlinerCollections(params, outlinerQ === "" && !restoring);
+  const [levels, setLevels] = useState<ReadonlyMap<string, StartupOutcome>>(() => new Map());
+  const treeLayoutReady =
+    roots.data !== undefined &&
+    !restoring &&
+    levels.size > 0 &&
+    [...levels.values()].every((state) => state === "ready");
   useEffect(() => {
-    if (roots.data !== undefined) settleStartup("tree", "ready");
-    else if (roots.isError) settleStartup("tree", "failed");
-  }, [roots.data, roots.isError, settleStartup]);
+    // A short loading placeholder can temporarily expose controls that the
+    // restored tree will push below the viewport. Observe the settled layout.
+    if (readinessEnabled && filtersOpen && treeLayoutReady && filtersVisible)
+      requestSecondary("filters");
+  }, [readinessEnabled, filtersOpen, treeLayoutReady, filtersVisible, requestSecondary]);
+  const report = useCallback((key: string, status: StartupOutcome | null) => {
+    setLevels((current) => {
+      if (status === null ? !current.has(key) : current.get(key) === status) return current;
+      const next = new Map(current);
+      if (status === null) next.delete(key);
+      else next.set(key, status);
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    if (!readinessEnabled) return;
+    const states = [...levels.values()];
+    if (roots.isError || (restoreEnabled && restore.isError) || states.includes("failed"))
+      settleStartup("tree", "failed");
+    else if (
+      roots.data !== undefined &&
+      !restoring &&
+      states.length > 0 &&
+      states.every((state) => state === "ready")
+    ) {
+      let frame = 0;
+      const painted = () => {
+        const drawer = contentRef.current?.closest('[role="dialog"]');
+        // Restored rows in a sliding drawer are not yet usable. Observe the
+        // primitive's real transition rather than duplicating its duration.
+        if (
+          drawer?.getAnimations &&
+          (drawer.getAttribute("data-state") !== "open" ||
+            drawer.getAnimations().some((animation) => animation.playState === "running"))
+        ) {
+          frame = requestAnimationFrame(painted);
+          return;
+        }
+        settleStartup("tree", "ready");
+      };
+      frame = requestAnimationFrame(painted);
+      return () => cancelAnimationFrame(frame);
+    } else settleStartup("tree", "pending");
+  }, [
+    readinessEnabled,
+    roots.data,
+    roots.isError,
+    restoreEnabled,
+    restore.isError,
+    restoring,
+    levels,
+    settleStartup,
+  ]);
   const [tagFilter, setTagFilter] = useState("");
   const [showAllTags, setShowAllTags] = useState(false);
   const [printerExpanded, setPrinterExpanded] = useState(false);
@@ -791,6 +904,8 @@ export function FilterSidebarContent({
     expanded,
     toggle: toggleExpanded,
     params,
+    restoring,
+    report,
     revealNodes,
     dragging,
     onDelete: onDeleteCollection,
@@ -819,7 +934,7 @@ export function FilterSidebarContent({
             : "bg-slate-400";
 
   const statusLabel = (status: string) =>
-    knownUiText(status.charAt(0).toUpperCase() + status.slice(1));
+    knownUiText(status.charAt(0).toUpperCase() + status.slice(1), locale);
 
   const statusTextColor = (s: string) =>
     s === "printing"
@@ -844,7 +959,7 @@ export function FilterSidebarContent({
           setDragging(null);
         }}
       >
-        <div className="flex-1 overflow-auto py-4 px-3 space-y-6">
+        <div ref={contentRef} className="flex-1 overflow-auto py-4 px-3 space-y-6">
           <section>
             <h3 className="mb-2 pl-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
               {t("libraryView.title")}
@@ -872,12 +987,12 @@ export function FilterSidebarContent({
           <section>
             <div className="flex items-center justify-between mb-2 pl-2 pr-1">
               <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                {uiText("Collections")}
+                {t("Collections")}
               </h3>
               <button
                 onClick={onCreateCollection}
                 className="p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted rounded transition-colors"
-                title={uiText("Create Collection")}
+                title={t("Create Collection")}
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
@@ -903,6 +1018,19 @@ export function FilterSidebarContent({
                   )
                 ) : (
                   <>
+                    {restoreEnabled && restore.isError && (
+                      <div role="status" className="py-1 text-xs text-muted-foreground">
+                        {t("Could not load this list.")}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={restore.isFetching}
+                          onClick={() => void restore.refetch()}
+                        >
+                          {t("Retry")}
+                        </Button>
+                      </div>
+                    )}
                     <DroppableAllModels
                       selected={selectedCollection === null}
                       onClick={() => onCollectionChange(null)}
@@ -911,7 +1039,7 @@ export function FilterSidebarContent({
                       count={roots.data?.pages[0]?.parent_direct_entry_count ?? 0}
                       ctx={treeContext}
                     />
-                    <div className="ml-5 border-l border-border pl-4 min-w-0">
+                    <div className="ml-1 border-l border-border pl-1 min-w-0">
                       <CollectionLevel parentId={null} ctx={treeContext} />
                     </div>
                   </>
@@ -921,12 +1049,19 @@ export function FilterSidebarContent({
           </section>
 
           {filtersOpen && (
-            <div className="space-y-6" aria-label={uiText("Filters")} role="region">
+            <div
+              ref={treeLayoutReady ? filtersRef : undefined}
+              onFocusCapture={() => requestSecondary("filters")}
+              onPointerDownCapture={() => requestSecondary("filters")}
+              className="space-y-6"
+              aria-label={t("Filters")}
+              role="region"
+            >
               {/* Printer */}
               {canViewPrinters && (
                 <section>
                   <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
-                    {uiText("Printer")}
+                    {t("Printer")}
                   </h3>
                   <div className="space-y-0.5">
                     <button
@@ -953,7 +1088,7 @@ export function FilterSidebarContent({
                           strokeWidth="2"
                         />
                       </svg>
-                      {uiText("Any location")}
+                      {t("Any location")}
                     </button>
                     <div className="space-y-0.5">
                       <button
@@ -984,13 +1119,13 @@ export function FilterSidebarContent({
                             strokeWidth="2"
                           />
                         </svg>
-                        <span className="font-medium">{uiText("On a printer")}</span>
+                        <span className="font-medium">{t("On a printer")}</span>
                       </button>
                       {printerExpanded && (
                         <div className="ml-4 border-l border-border">
                           {printers.length === 0 ? (
                             <p className="pl-4 py-1 text-2xs text-muted-foreground font-mono">
-                              {uiText("No printers configured")}
+                              {t("No printers configured")}
                             </p>
                           ) : (
                             printers.map((printer) => (
@@ -1035,7 +1170,7 @@ export function FilterSidebarContent({
                       }`}
                     >
                       <Folder className="h-4 w-4 mr-2 text-primary" />
-                      {uiText("Vault only")}
+                      {t("Vault only")}
                     </button>
                   </div>
                 </section>
@@ -1048,13 +1183,13 @@ export function FilterSidebarContent({
               {tags.length > 0 && (
                 <section>
                   <h3 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2 pl-2">
-                    {uiText("Tags")}
+                    {t("Tags")}
                   </h3>
                   <div className="relative mb-2">
                     <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
                     <input
                       type="text"
-                      placeholder={uiText("Filter tags...")}
+                      placeholder={t("Filter tags...")}
                       value={tagFilter}
                       onChange={(e) => {
                         setTagFilter(e.target.value);
@@ -1074,7 +1209,7 @@ export function FilterSidebarContent({
                   </div>
                   {filteredTags.length === 0 ? (
                     <p className="text-3xs text-muted-foreground font-mono px-1 py-2">
-                      {uiText("No matching tags.")}
+                      {t("No matching tags.")}
                     </p>
                   ) : (
                     <div className="flex flex-wrap gap-1.5">
@@ -1108,8 +1243,8 @@ export function FilterSidebarContent({
                       className="mt-2 w-full text-center font-mono text-3xs text-muted-foreground hover:text-foreground transition-colors py-1"
                     >
                       {showAllTags
-                        ? uiText("Show fewer")
-                        : uiText("Show all {value1} tags", { value1: String(filteredTags.length) })}
+                        ? t("Show fewer")
+                        : t("Show all {value1} tags", { value1: String(filteredTags.length) })}
                     </button>
                   )}
                 </section>
@@ -1133,7 +1268,7 @@ export interface FilterSidebarProps {
   selectedPrinterPresence: "any" | "none" | null;
   onCollectionChange: (path: string | null) => void;
   /** Hover/focus on a folder: the parent may warm that folder's data. */
-  onCollectionIntent?: (path: string) => void;
+  onCollectionIntent?: (path: string | null) => void;
   onTagsChange: (tags: string[]) => void;
   onPrinterChange: (printerId: number | null) => void;
   onPrinterPresenceChange: (presence: "any" | "none" | null) => void;
@@ -1146,6 +1281,7 @@ export interface FilterSidebarProps {
   outlinerFilter?: string;
   structuredFilters?: React.ReactNode;
   filtersOpen?: boolean;
+  readinessEnabled?: boolean;
   libraryView: LibraryViewMode;
   onLibraryViewChange: (view: LibraryViewMode) => void;
 }

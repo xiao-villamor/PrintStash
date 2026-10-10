@@ -62,36 +62,54 @@ export function formatCost(value: number | null | undefined, locale = "en"): str
     : "—";
 }
 
+// Locale formatters are expensive to construct for every visible card. Keep
+// only the current locale's immutable formatters; dates and elapsed time stay live.
+function createDateFormatters(locale: string) {
+  return {
+    locale,
+    relative: new Intl.RelativeTimeFormat(locale, { numeric: "auto" }),
+    narrow: new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "narrow" }),
+    minutes: new Intl.RelativeTimeFormat(locale, { style: "narrow" }),
+    calendar: new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }),
+  };
+}
+let dateFormatters: ReturnType<typeof createDateFormatters> | undefined;
+function dateFormats(locale: string) {
+  if (dateFormatters?.locale !== locale) dateFormatters = createDateFormatters(locale);
+  return dateFormatters;
+}
+
+function calendarDate(dateStr: string, locale: string): string {
+  const date = new Date(dateStr);
+  // Date#toLocaleDateString has a display value for invalid dates; Intl throws.
+  return Number.isNaN(date.getTime())
+    ? date.toLocaleDateString(locale)
+    : dateFormats(locale).calendar.format(date);
+}
+
 export function timeAgo(dateStr: string, locale = "en"): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
-  const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "narrow" });
+  const relative = dateFormats(locale).narrow;
   if (mins < 1) return relative.format(0, "second");
   if (mins < 60) return relative.format(-mins, "minute");
   const hours = Math.floor(mins / 60);
   if (hours < 24) return relative.format(-hours, "hour");
   const days = Math.floor(hours / 24);
   if (days < 7) return relative.format(-days, "day");
-  return new Date(dateStr).toLocaleDateString(locale, {
-    month: "short",
-    day: "numeric",
-  });
+  return calendarDate(dateStr, locale);
 }
 
 /** Variant used on cards: collapses today/yesterday into words. */
 export function timeAgoShort(dateStr: string, locale = "en"): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
-  const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  const relative = dateFormats(locale).relative;
   if (mins < 1) return relative.format(0, "second");
-  if (mins < 60)
-    return new Intl.RelativeTimeFormat(locale, { style: "narrow" }).format(-mins, "minute");
+  if (mins < 60) return dateFormats(locale).minutes.format(-mins, "minute");
   const hours = Math.floor(mins / 60);
   if (hours < 24) return relative.format(0, "day");
   const days = Math.floor(hours / 24);
   if (days < 7) return relative.format(-days, "day");
-  return new Date(dateStr).toLocaleDateString(locale, {
-    month: "short",
-    day: "numeric",
-  });
+  return calendarDate(dateStr, locale);
 }

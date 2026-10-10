@@ -409,6 +409,23 @@ class TestRenderMeshThumbnail:
             assert decoded.format == "WEBP"
             assert decoded.size == (80, 60)
 
+    def test_compresses_native_rendered_frames(self) -> None:
+        mesh = box_mesh()
+        png = render_mesh_thumbnail(mesh, "box.stl", width=640, height=480)
+        assert png is not None
+        original = Image.open(io.BytesIO(png))
+        lossless = io.BytesIO()
+        original.save(lossless, format="WEBP", lossless=True, exact=True, method=6)
+
+        encoded = render_mesh_thumbnail(
+            mesh, "box.stl", width=640, height=480, output_format="WEBP"
+        )
+
+        assert encoded is not None
+        assert len(encoded) < len(lossless.getvalue()) * 0.6
+        decoded = Image.open(io.BytesIO(encoded)).convert("RGBA")
+        assert decoded.getchannel("A").tobytes() == original.getchannel("A").tobytes()
+
     def test_accepts_a_mesh_through_the_structural_interface(self) -> None:
         # `SimpleNamespace` with `vertices`/`faces` — not a Trimesh object.
         # Trimesh is not importable from this module by design, so callers that
@@ -1486,17 +1503,26 @@ class TestDeferredRasteriser:
 
 
 class TestEncodeRenderedPixels:
-    @pytest.mark.parametrize("format", ["PNG", "WEBP"], ids=["png", "webp"])
-    def test_preserves_exact_decoded_rgba(self, format):
+    def test_preserves_exact_decoded_rgba(self):
         rgba = bytes([10, 20, 30, 255, 255, 0, 0, 0, 194, 207, 220, 18])
         frame = RenderedPixels(3, 1, rgba)
+
+        encoded = rasterizer.encode_rendered_pixels(frame, output_format="PNG")
+
+        with Image.open(io.BytesIO(encoded)) as decoded:
+            assert decoded.format == "PNG"
+            assert decoded.size == (3, 1)
+            assert decoded.convert("RGBA").tobytes() == rgba
+
+    @pytest.mark.parametrize("format", ["PNG", "WEBP"], ids=["png", "webp"])
+    def test_preserves_decoded_alpha(self, format):
+        frame = RenderedPixels(3, 1, bytes([10, 20, 30, 255, 255, 0, 0, 0, 194, 207, 220, 18]))
 
         encoded = rasterizer.encode_rendered_pixels(frame, output_format=format)
 
         with Image.open(io.BytesIO(encoded)) as decoded:
-            assert decoded.format == format
             assert decoded.size == (3, 1)
-            assert decoded.convert("RGBA").tobytes() == rgba
+            assert decoded.getchannel("A").tobytes() == bytes([255, 0, 18])
 
     def test_refuses_unknown_encoder_format(self):
         frame = RenderedPixels(1, 1, bytes([10, 20, 30, 255]))

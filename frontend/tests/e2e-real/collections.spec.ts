@@ -23,7 +23,10 @@ test.describe("collections", () => {
     await expect(collection).toBeVisible();
 
     await collection.hover();
-    await collection.locator("xpath=following-sibling::button[@title='Delete collection']").click();
+    await collection
+      .locator("..")
+      .getByRole("button", { name: "Delete collection", exact: true })
+      .click();
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(collection).toHaveCount(0);
 
@@ -43,14 +46,20 @@ test.describe("collections", () => {
     await parentRow.locator("xpath=preceding-sibling::button[@aria-label='Expand']").click();
     const childRow = sidebar.getByRole("button", { name: child, exact: true });
     await childRow.hover();
-    await childRow.locator("xpath=following-sibling::button[@title='Delete collection']").click();
+    await childRow
+      .locator("..")
+      .getByRole("button", { name: "Delete collection", exact: true })
+      .click();
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(childRow).toHaveCount(0);
 
     // The parent deletes cleanly even though it once had a (now soft-deleted)
     // child — regression guard for the has-children check ignoring trashed rows.
     await parentRow.hover();
-    await parentRow.locator("xpath=following-sibling::button[@title='Delete collection']").click();
+    await parentRow
+      .locator("..")
+      .getByRole("button", { name: "Delete collection", exact: true })
+      .click();
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(parentRow).toHaveCount(0);
   });
@@ -84,7 +93,10 @@ test.describe("collections", () => {
     await sidebar.screenshot({ path: testInfo.outputPath("nested-collection-counts.png") });
 
     await parentRow.hover();
-    await parentRow.locator("xpath=following-sibling::button[@title='Delete collection']").click();
+    await parentRow
+      .locator("..")
+      .getByRole("button", { name: "Delete collection", exact: true })
+      .click();
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(parentRow).toHaveCount(0);
 
@@ -110,7 +122,10 @@ test.describe("collections", () => {
     const label = sidebar.getByRole("button", { name: col, exact: true });
     await expect(label).toBeVisible();
     await label.hover();
-    await label.locator("xpath=following-sibling::button[@title='Delete collection']").click();
+    await label
+      .locator("..")
+      .getByRole("button", { name: "Delete collection", exact: true })
+      .click();
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(sidebar.getByRole("button", { name: col, exact: true })).toHaveCount(0);
 

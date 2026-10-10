@@ -147,3 +147,40 @@ describe("timeAgo", () => {
     expect(timeAgoShort("2026-05-01T12:00:00Z")).toBe("May 1");
   });
 });
+
+describe("date labels across renders", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("follows locale changes for relative labels", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
+    const date = "2026-06-13T12:00:00Z";
+    expect(timeAgoShort(date, "en")).toBe("yesterday");
+    expect(timeAgoShort(date, "es")).toBe("ayer");
+    expect(timeAgoShort(date, "en")).toBe("yesterday");
+    expect(timeAgo(date, "es")).toBe("ayer");
+  });
+
+  it("updates labels as time advances", () => {
+    vi.useFakeTimers();
+    const date = "2026-06-14T06:00:00Z";
+    vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
+    expect(timeAgoShort(date)).toBe("today");
+    vi.setSystemTime(new Date("2026-06-15T12:00:00Z"));
+    expect(timeAgoShort(date)).toBe("yesterday");
+  });
+
+  it("follows locale changes for absolute labels", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
+    const date = "2026-05-01T12:00:00Z";
+    expect(timeAgoShort(date, "en")).toBe("May 1");
+    expect(timeAgoShort(date, "es")).toBe("1 may");
+    expect(timeAgo(date, "en")).toBe("May 1");
+  });
+
+  it("retains invalid date display", () => {
+    expect(timeAgo("invalid", "en")).toBe("Invalid Date");
+    expect(timeAgoShort("invalid", "es")).toBe("Invalid Date");
+  });
+});
