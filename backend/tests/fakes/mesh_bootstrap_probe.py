@@ -16,20 +16,7 @@ def _publish_readiness(path: Path, content: str) -> None:
 
 def main():
     case = sys.argv[1]
-    if case == "visual_credit":
-        import json
-
-        from app.runtime.preparation_runtime import (
-            VISUAL_PERMIT_ENV,
-            VISUAL_PERMIT_PATH_ENV,
-        )
-
-        descriptor = int(os.environ[VISUAL_PERMIT_ENV])
-        info = os.fstat(descriptor)
-        owned = Path(os.environ[VISUAL_PERMIT_PATH_ENV]).stat()
-        assert (info.st_dev, info.st_ino) == (owned.st_dev, owned.st_ino)
-        print(json.loads(os.pread(descriptor, 4096, 0))["request"][1], flush=True)
-    elif case == "priority":
+    if case == "priority":
         from app.core.work_priority import current_priority
 
         print(current_priority().value, flush=True)

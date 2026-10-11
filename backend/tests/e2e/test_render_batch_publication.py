@@ -275,7 +275,7 @@ class TestRenderBatchPublication:
             assert persisted[files[1]].storage_key is not None
 
 
-class TestStagedThumbnailPublication:
+class TestThumbnailFallbackPublication:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "failure,color",
@@ -284,20 +284,18 @@ class TestStagedThumbnailPublication:
             pytest.param(None, (180, 60, 30, 0), id="empty-frame"),
         ],
     )
-    async def test_publishes_from_owned_geometry_after_gpu_failure(
+    async def test_publishes_after_gpu_failure(
         self,
         api,
         superuser_headers,
         e2e_db,
         work_engine,
         qualified_renderer,
-        caplog,
+        monkeypatch,
         failure,
         color,
     ):
-        import json
-        import logging
-
+        from app.modules.media import mesh_isolation
         from app.modules.media.native_process import native_capacity
         from app.modules.media.source_preparation import capacity as prepared_capacity
         from app.runtime import native_runtime, preparation_runtime
@@ -326,27 +324,25 @@ class TestStagedThumbnailPublication:
         run_pass(JobKind.DERIVATIVES_MESH)
         derivative = _derivative_job(file_id)
         work_engine.launch(listen_lanes=[LaneName.DERIVE_NATIVE])
-        with caplog.at_level(
-            logging.INFO, logger="app.modules.media.mesh_observability"
-        ):
-            for _ in range(20):
-                if jobs.get(derivative.id).state.value == "completed":
-                    break
-                outcome = work_engine.run_one()
-                assert outcome is not None
-                assert outcome.error is None
-            else:
-                raise AssertionError("staged derivative did not settle")
+        executions = []
+        supervise = mesh_isolation.supervise_result
+
+        def observe(command, **kwargs):
+            executions.append(command)
+            return supervise(command, **kwargs)
+
+        monkeypatch.setattr(mesh_isolation, "supervise_result", observe)
+        for _ in range(20):
+            if jobs.get(derivative.id).state.value == "completed":
+                break
+            outcome = work_engine.run_one()
+            assert outcome is not None
+            assert outcome.error is None
+        else:
+            raise AssertionError("combined derivative did not settle")
         assert len(controls.batches) == 1
-        events = [
-            json.loads(record.getMessage().split(" ", 1)[1])
-            for record in caplog.records
-            if record.getMessage().startswith("mesh_thumbnail_handoff ")
-        ]
-        assert len(events) == 1
-        assert events[0]["mode"] == "render"
-        assert events[0]["parser_execution_id"] != events[0]["finalizer_execution_id"]
-        assert events[0]["finalizer_supervision_ns"] > 0
+        assert len(executions) == 1
+        assert "app.modules.media.mesh_worker" in executions[0]
         rows = (
             await api.get(f"/api/v1/files/{file_id}/derivatives", headers=headers)
         ).json()
@@ -382,7 +378,4 @@ class TestStagedThumbnailPublication:
             pass
         prepared = prepared_capacity()
         with preparation_runtime.reserve(prepared, prepared, checkpoint=check):
-            with preparation_runtime.visual_slot(
-                preparation_runtime.VISUAL_CAPACITY.bytes, checkpoint=check
-            ):
-                pass
+            pass

@@ -1,7 +1,6 @@
-"""Lightweight framing shared by the parser supervisor and the compute owner.
+"""Bounded geometry framing and identity shared with the compute owner.
 
-Array validation stays in the owner. This module imports no native numerical
-libraries, so inspecting an owned staging packet does not enlarge the API.
+Array validation stays in the decoder. Framing imports no numerical libraries.
 """
 
 from __future__ import annotations
@@ -111,44 +110,3 @@ def identity(
     digest = hashlib.sha256(prefix + struct.pack("!III", *layout.counts))
     digest.update(body)
     return digest.hexdigest()
-
-
-@dataclass(frozen=True)
-class ThumbnailWire:
-    geometry_key: str
-    header: str
-    body: memoryview
-    width: int
-    height: int
-    face_count: int
-
-
-def split_thumbnail(payload: bytes | memoryview) -> ThumbnailWire:
-    """Validate a single default-camera staging frame without copying its arrays.
-
-    The caller owns the sealed file/buffer until the exchange completes. The
-    receiving owner independently validates every coordinate and array index.
-    """
-    view = memoryview(payload)
-    if view.ndim != 1 or view.itemsize != 1 or not view.c_contiguous:
-        raise ValueError("compute_geometry_invalid")
-    if len(view) < 4 or len(view) > MAX_GEOMETRY_BYTES + 4096:
-        raise ValueError("compute_geometry_budget")
-    length = struct.unpack_from("!I", view)[0]
-    if length > 4096 or length + 4 > len(view):
-        raise ValueError("compute_geometry_header")
-    header = bytes(view[4 : 4 + length])
-    value, layout = descriptor(header)
-    if value["views"] != [None] or value["matte"]:
-        raise ValueError("compute_camera_invalid")
-    body = view[4 + length :]
-    if len(body) != body_size(layout):
-        raise ValueError("compute_geometry_size")
-    return ThumbnailWire(
-        identity(layout, body),
-        header.decode(),
-        body,
-        value["width"],
-        value["height"],
-        layout.counts[1],
-    )

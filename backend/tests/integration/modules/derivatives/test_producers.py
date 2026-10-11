@@ -2182,27 +2182,39 @@ def staged_mesh_outputs():
 
 
 class TestStagedMeshPublication:
-    def test_retains_one_worker_for_bounded_geometry(
-        self, db_session, stored, monkeypatch
+    @pytest.mark.parametrize(
+        "file_type", ["stl", "3mf"], ids=["weighted-share", "whole-pool"]
+    )
+    def test_retains_one_worker_per_source(
+        self, db_session, stored, monkeypatch, file_type
     ):
-        from app.modules.media import native_process, thumbnail_staging
+        import trimesh
+
+        from app.modules.media import native_process
         from app.runtime.compute import client
         from app.runtime.native_admission import Resources
 
-        artifact = stored("small.stl", content.binary_stl())
+        payload = trimesh.creation.box().export(file_type=file_type)
+        artifact = stored(f"mesh.{file_type}", payload)
         monkeypatch.setattr(client, "available", lambda **kwargs: True)
         monkeypatch.setattr(client, "warm_render", lambda: None)
         monkeypatch.setattr(
             native_process, "native_capacity", lambda: Resources(4, 2 * 1024**3)
         )
 
-        def unexpected(*args, **kwargs):
-            pytest.fail("small mesh acquired a separate visual stage")
+        executions = []
+        supervise = mesh_isolation.supervise_result
 
-        monkeypatch.setattr(thumbnail_staging, "reserve", unexpected)
+        def observe(command, **kwargs):
+            executions.append(command)
+            return supervise(command, **kwargs)
+
+        monkeypatch.setattr(mesh_isolation, "supervise_result", observe)
 
         outcome = producers.derive_mesh(artifact.id)
 
+        assert len(executions) == 1
+        assert "app.modules.media.mesh_worker" in executions[0]
         assert outcome.kinds == {
             DerivativeKind.METADATA: DerivativeState.READY,
             DerivativeKind.THUMBNAIL: DerivativeState.READY,

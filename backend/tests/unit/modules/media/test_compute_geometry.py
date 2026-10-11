@@ -182,3 +182,165 @@ class TestDeferredCodec:
         external = memoryview(bytearray(body)).toreadonly()
         with pytest.raises(ValueError, match="compute_geometry_mutable"):
             decode_arrays(external, layout_for(deferred_geometry))
+
+
+@pytest.fixture(params=["canonical", "deferred", "visual"], ids=str)
+def packet_geometry(request):
+    from printstash_core.mesh.render_geometry import (
+        PreparedRender,
+        PreparedRenderGeometry,
+    )
+
+    from app.modules.media.gpu_normals import DeferredRender, VisualRender
+
+    # Strided/big-endian input exercises normalization before buffer joining.
+    storage = np.zeros((3, 6), dtype=">f8")
+    vertices = storage[:, ::2]
+    vertices[:] = [[-0.5, 0, 0], [2, 0, 0], [0, 3, 0.25]]
+    faces = np.asarray([[0, 1, 2], [2, 1, 0]], dtype=">i8")
+    identities = np.asarray([0, 1, 2], dtype=">i8")
+    normals = np.asfortranarray([[0, 0, 1], [0, 1, 0], [1, 0, 0]], dtype=">f8")
+    geometry = PreparedRenderGeometry(
+        vertices, 2, lambda size: iter((faces[:1], faces[1:]))
+    )
+    if request.param == "visual":
+        prepared = VisualRender(geometry)
+    elif request.param == "deferred":
+        prepared = DeferredRender(geometry, identities, 3)
+    else:
+        prepared = PreparedRender(
+            vertices, 2, geometry.face_chunks, identities, normals
+        )
+    return request.param, prepared, (vertices, faces, identities, normals)
+
+
+class TestEncode:
+    def test_preserves_exact_wire_bytes(self, packet_geometry):
+        mode, prepared, _ = packet_geometry
+        header = (
+            b'{"vertices":3,"faces":2,"normals":3,"width":64,"height":48,'
+            b'"views":[null,[[1.0,0.0,0.0],[0.0,1.0,0.0],[0.0,0.0,1.0]]],'
+            b'"matte":false'
+        )
+        body = struct.pack("<9f", -0.5, 0, 0, 2, 0, 0, 0, 3, 0.25)
+        if mode == "canonical":
+            body += struct.pack("<6q", 0, 1, 2, 2, 1, 0)
+            body += struct.pack("<3q", 0, 1, 2)
+            body += struct.pack("<9d", 0, 0, 1, 0, 1, 0, 1, 0, 0)
+        elif mode == "deferred":
+            header += b',"normal_mode":"gpu-angle-csr-v1"'
+            body += struct.pack("<6I3I", 0, 1, 2, 2, 1, 0, 0, 1, 2)
+        else:
+            header += b',"normal_mode":"gpu-visual-v2"'
+            body += struct.pack("<6I", 0, 1, 2, 2, 1, 0)
+        header += b"}"
+        expected = struct.pack("!I", len(header)) + header + body
+
+        actual = encode(prepared, 64, 48, [None, np.eye(3)], False)
+
+        assert isinstance(actual, bytes)
+        assert actual == expected
+        assert len(actual) == 4 + len(header) + len(body)
+
+    def test_snapshots_mutable_source_arrays(self, packet_geometry):
+        _, prepared, arrays = packet_geometry
+        payload = encode(prepared, 64, 48, [None], False)
+        before = bytes(bytearray(payload))
+
+        for array in arrays:
+            array[:] = 0
+
+        assert payload == before
+        restored, *_ = decode(payload)
+        np.testing.assert_array_equal(
+            restored.vertices, [[-0.5, 0, 0], [2, 0, 0], [0, 3, 0.25]]
+        )
+        np.testing.assert_array_equal(
+            next(restored.face_chunks(2)), [[0, 1, 2], [2, 1, 0]]
+        )
+
+    def test_rejects_nonfinite_camera_json(self, deferred_geometry):
+        camera = np.eye(3)
+        camera[0, 0] = np.nan
+
+        with pytest.raises(ValueError, match="Out of range float values"):
+            encode(deferred_geometry, 64, 48, [camera], False)
+
+    @pytest.mark.parametrize(
+        ("limit", "accepted"),
+        [(180, True), (179, False)],
+        ids=["at-limit", "over-limit"],
+    )
+    def test_retains_geometry_admission_boundary(
+        self, packet_geometry, monkeypatch, limit, accepted
+    ):
+        from app.modules.media import compute_geometry_wire
+
+        _, prepared, _ = packet_geometry
+        monkeypatch.setattr(compute_geometry_wire, "MAX_GEOMETRY_BYTES", limit)
+        if accepted:
+            payload = encode(prepared, 64, 48, [None], False)
+            assert decode(payload)[0].face_count == 2
+        else:
+            with pytest.raises(ValueError, match="compute_geometry_budget"):
+                encode(prepared, 64, 48, [None], False)
+
+
+class TestSplit:
+    def test_returns_readonly_view_of_packet_owner(self, packet_geometry):
+        from app.modules.media.compute_geometry import decode_header, identity, split
+
+        _, prepared, _ = packet_geometry
+        payload = encode(prepared, 64, 48, [None], False)
+        length = struct.unpack_from("!I", payload)[0]
+
+        key, header, body = split(payload)
+
+        assert isinstance(body, memoryview)
+        assert body.obj is payload
+        assert body.readonly
+        assert body.c_contiguous
+        assert body.format == "B"
+        assert bytes(body) == payload[4 + length :]
+        assert header.encode() == payload[4 : 4 + length]
+        layout, *_ = decode_header(header.encode())
+        assert key == identity(layout, payload[4 + length :])
+        with pytest.raises(TypeError, match="read-only"):
+            body[0] = 0
+
+    def test_keeps_decoded_cache_alive_after_releasing_body_view(self, packet_geometry):
+        from app.modules.media.compute_geometry import (
+            decode_arrays,
+            decode_header,
+            split,
+        )
+
+        _, prepared, _ = packet_geometry
+        payload = encode(prepared, 64, 48, [None], False)
+        key, header, body = split(payload)
+        del payload
+        layout, *_ = decode_header(header.encode())
+        cache = {key: decode_arrays(body, layout)}
+        body.release()
+        del body
+
+        restored = cache[key]
+        np.testing.assert_array_equal(
+            restored.vertices, [[-0.5, 0, 0], [2, 0, 0], [0, 3, 0.25]]
+        )
+        faces = next(restored.face_chunks(2))
+        np.testing.assert_array_equal(faces, [[0, 1, 2], [2, 1, 0]])
+        assert not restored.vertices.flags.writeable
+        assert not faces.flags.writeable
+
+    @pytest.mark.parametrize(
+        "readonly", [False, True], ids=["bytearray", "readonly-view"]
+    )
+    def test_rejects_mutable_packet_backing(self, deferred_geometry, readonly):
+        from app.modules.media.compute_geometry import split
+
+        payload = bytearray(encode(deferred_geometry, 64, 48, [None], False))
+        external = memoryview(payload).toreadonly() if readonly else payload
+
+        with pytest.raises(ValueError, match="compute_geometry_mutable"):
+            split(external)

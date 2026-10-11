@@ -5,7 +5,6 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_RECIPE
@@ -16,11 +15,7 @@ from app.core.config import settings
 from app.core.work_priority import WorkPriority, current_priority
 from app.runtime.compute import client
 from app.runtime.compute.contracts import ComputeUnavailable, Reason
-from app.runtime.compute.protocol import BinaryRenderRequest, Priority
-
-if TYPE_CHECKING:
-    from .compute_geometry_wire import ThumbnailWire
-
+from app.runtime.compute.protocol import MAX_FRAME, BinaryRenderRequest, Priority
 
 RECIPE = "webgpu-native-raster-v4"
 _background_render: ContextVar[bool] = ContextVar("background_render", default=False)
@@ -76,12 +71,17 @@ def render(prepared, width, height, views, matte):
             recipe=f"{RECIPE}:{RASTERIZER_RECIPE}:{width}x{height}:{len(views)}:{int(matte)}",
             units=prepared.face_count * len(views),
         )
-        response = client.exchange_render(request, body, checkpoint=checkpoint)
+        factor = PREVIEW_PROFILE.supersample_for(width)
+        w, h = width * factor, height * factor
+        response = client.exchange_render(
+            request,
+            body,
+            checkpoint=checkpoint,
+            response_limit=min(MAX_FRAME, 14 + w * h * 4 * len(views)),
+        )
         if not response or response[0] not in (0, 1):
             raise ValueError("compute_render_output")
         finalized, data = bool(response[0]), response[1:]
-        factor = PREVIEW_PROFILE.supersample_for(width)
-        w, h = width * factor, height * factor
         if len(data) < 12:
             raise ValueError("compute_render_output")
         actual_width, actual_height, count = struct.unpack("!III", data[:12])
@@ -110,49 +110,5 @@ def render(prepared, width, height, views, matte):
         checkpoint()
         return tuple(frames)
     except ComputeUnavailable, ValueError, KeyError:
-        checkpoint()
-        return None
-
-
-def render_staged(wire: "ThumbnailWire", *, deadline: float) -> RenderedPixels | None:
-    """Dispatch validated owned bytes without importing a numerical runtime.
-
-    Postprocessing is part of the accelerated response. A broker that returns
-    intermediate pixels leaves the whole bounded fallback to the isolated worker.
-    """
-    checkpoint()
-    if not client.available(render=True):
-        return None
-    request = BinaryRenderRequest(
-        deadline=min(
-            deadline, time.monotonic() + min(settings.mesh_step_timeout_seconds, 300)
-        ),
-        priority=Priority.BACKGROUND,
-        request_id=uuid4().hex,
-        geometry_key=wire.geometry_key,
-        geometry_bytes=len(wire.body),
-        header=wire.header,
-        recipe=f"{RECIPE}:{RASTERIZER_RECIPE}:{wire.width}x{wire.height}:1:0",
-        units=wire.face_count,
-    )
-    try:
-        response = client.exchange_render(
-            request,
-            wire.body,
-            checkpoint=checkpoint,
-            response_limit=14 + wire.width * wire.height * 4,
-        )
-        size = wire.width * wire.height * 4
-        if (
-            len(response) != 13 + size
-            or response[0] != 1
-            or struct.unpack_from("!III", response, 1) != (wire.width, wire.height, 1)
-        ):
-            raise ValueError("compute_staged_output")
-        checkpoint()
-        return _require_visible_frame(
-            RenderedPixels(wire.width, wire.height, response[13:])
-        )
-    except ComputeUnavailable, ValueError:
         checkpoint()
         return None

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict
-from typing import TYPE_CHECKING
 
 from prometheus_client import Counter, Histogram
 
@@ -17,9 +16,6 @@ from app.modules.media.mesh_telemetry import (
     PhaseStats,
     SupervisionStats,
 )
-
-if TYPE_CHECKING:
-    from app.modules.media.thumbnail_staging import FinalizationMode
 
 logger = get_logger(__name__)
 _worker_exits = Counter(
@@ -162,38 +158,3 @@ def record_phases(stats: tuple[PhaseStats, ...], supervision: SupervisionStats) 
                 _phase_triangles.labels(phase).observe(stage.triangle_count)
     except Exception:
         logger.exception("failed to publish mesh phase metrics")
-
-
-def record_thumbnail_handoff(
-    *,
-    parser_execution_id: str,
-    finalizer: SupervisionStats,
-    mode: FinalizationMode,
-    prepared_bytes: int,
-    prepared_read_ns: int,
-    dispatch_ns: int,
-    finalizer_queue_ns: int,
-) -> None:
-    """Correlate two isolated lifetimes without mistaking RPC time for GPU busy."""
-    try:
-        logger.info(
-            "mesh_thumbnail_handoff %s",
-            json.dumps(
-                {
-                    "version": 1,
-                    "parser_execution_id": parser_execution_id,
-                    "finalizer_execution_id": finalizer.execution_id,
-                    "mode": mode.value,
-                    "prepared_bytes": prepared_bytes,
-                    "prepared_read_ns": prepared_read_ns,
-                    "dispatch_ns": dispatch_ns,
-                    "finalizer_queue_ns": finalizer_queue_ns,
-                    "finalizer_supervision_ns": finalizer.elapsed_ns,
-                    "finalizer_exit_cause": finalizer.exit_cause.value,
-                },
-                allow_nan=False,
-                separators=(",", ":"),
-            ),
-        )
-    except Exception:
-        logger.exception("failed to publish thumbnail handoff metrics")

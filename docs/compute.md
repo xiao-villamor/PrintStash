@@ -14,7 +14,7 @@ The **gpu-render** extra adds only wgpu for rendering. The optional **gpu** extr
 | Eligible visual position welding and smooth normals | Portable WGSL with bounded local flat-normal recovery |
 | Resampling, premultiplied-alpha rounding and vignette | Canary-checked portable WGSL, otherwise canonical CPU |
 | Bounds and camera framing | Portable WGSL reductions over cached geometry |
-| Lossless image encoding | Bounded isolated CPU finalizer |
+| Lossless image encoding | CPU inside the same bounded mesh worker |
 | Image, text, point and sparse ONNX inference | Qualified native WebGPU graph, otherwise CPU worker |
 | Caption generation | Existing remote API |
 
@@ -226,41 +226,32 @@ recipe 12 and fingerprint/point semantics remain unchanged. Changed visual-input
 semantics use the existing generation workflow; choosing a device alone never
 changes embedding identity. No AI feature or model download is enabled.
 
-## Parser handoff and finalization
+## Combined mesh-worker ownership
 
-Thumbnail requests without fingerprint work may reserve an owned geometry packet
-before parsing. After source materialization, the existing conservative native
-estimate is computed once and retained as the supervisor admission plan. Only
-requests that claim the entire native memory pool use the separate handoff; small
-models retain one combined parser/render/encoder process. The staged child writes
-a bounded descriptor and packet, then exits.
-The supervisor accepts it only after a clean exit, process-tree cleanup and
-reap. It then releases the parser's native RAM permit before waiting for GPU
-execution. The packet remains charged to the existing prepared-byte capacity
-and a stricter four-slot/192 MiB visual staging sublimit. At 640×480 the conservative
-packet-plus-three-RGBA reservation permits three maximal staged requests under
-that byte ceiling; four is a slot ceiling, not promised parallelism.
+Each source stays in one disposable, guarded mesh worker through parsing,
+measurement, GPU dispatch or CPU fallback, and encoding. The worker retains its
+conservative native-memory claim until process-tree cleanup and reap. Unknown
+complexity still claims the entire native pool. Prepared-source custody, durable
+Job concurrency, FIFO/backfill policy, cancellation and publication fences are
+unchanged. Broker launch waits honor cancellation checkpoints.
 
-The supervisor uses stdlib framing and bounded binary responses. Finalized pixels
-are encoded in a fresh resource-limited CPU worker; a missing/failed GPU or raw
-postprocess response renders the same owned geometry packet in an isolated CPU
-worker instead. It does not reopen or reparse the source. The original absolute
-deadline, cancellation checkpoint, Job attempt and publication fence survive the
-handoff. Fingerprint-producing work retains its existing combined-worker path.
-Encoding workers introduce their own startup cost; the handoff event records
-parser/finalizer execution identities, staging read, dispatch, finalizer wait and
-supervision intervals so complete-pipeline measurements include that cost. The
-encoder loads neither application configuration nor numerical/parser libraries
-for an RGBA-only request. Broker launch waits also honor cancellation checkpoints.
+The automatic parser handoff was removed after measurement. The first 200-model
+candidate added a finalizer to every eligible source and regressed by 28.5%.
+Restricting it to whole-pool claims produced 54 extra workers and 76.48 seconds of
+accumulated finalizer supervision; overall publication was 445.15 seconds versus
+447.57 seconds for the baseline, below the measurement's five-second polling
+resolution. Whole-pool admission indicates uncertain or large memory needs; it
+does not establish that GPU waiting will amortize another process. These summed
+supervision intervals overlap and do not predict a source-to-publication saving.
 
-Derivative FIFO, configured Job concurrency and single-backfill ownership stay
-unchanged. This handoff releases parser capacity earlier; it does not manufacture
-eight simultaneously ready models or parse extra models to fill a GPU batch.
-The first unconditional handoff made the 200-model pipeline 28.5% slower despite
-halving broker execution; that evidence motivated selective staging. See the
-[matched pipeline audit](testing/compute-native-pipeline-200.md),
-[visual preparation validation](testing/compute-visual-preparation.md) and
-[encoding measurements](testing/compute-encoding.md).
+The staging packet, finalizer, visual-credit pool and their private protocol are
+removed rather than retained behind a feature flag. The compact renderer,
+lossless encoding profile, validated frame preservation and empty-GPU-frame CPU
+fallback remain active. Final throughput qualification uses matched continuous
+source-to-publication measurements; no improvement is inferred from removing the
+handoff. See the [historical handoff and active coverage](testing/compute-thumbnail-handoff.md),
+[matched pipeline audit](testing/compute-native-pipeline-200.md) and
+[visual preparation validation](testing/compute-visual-preparation.md).
 
 
 ## Lossless thumbnail encoding

@@ -928,5 +928,606 @@
     },
     "visual_approval": "pending_user"
   },
-  "corrected_candidate": null
+  "corrected_candidate": {
+    "schema_version": 1,
+    "arm": "candidate",
+    "revision": "5814e6e7e2a6a11b6042898c29e78d66ed6fe712",
+    "image_id": "sha256:ee6b856fc02e35b593f6693526be2af39cd95e6aa9cf133c416ef1b757e0335f",
+    "selection_sha256": "077e93816fab660a38764f72a356bcda906bb5fea45118567b77af31ef7672a8",
+    "report_sha256": "8c6d692a0791ccc9f39c191d8cd81f4b159879c3bc2e3534a04da55145a33991",
+    "count": 200,
+    "formats": {
+      ".obj": {
+        "models": 83,
+        "metadata_ready": 83,
+        "thumbnail_ready": 83,
+        "thumbnail_failed": 0,
+        "both_ready": 83,
+        "outcomes": {
+          "metadata:ready": 83,
+          "thumbnail:ready": 83
+        },
+        "artifact_latency": {
+          "clock": "database_utc",
+          "monotonic_qualification": false,
+          "count": 83,
+          "p50_seconds": 108.419752,
+          "p95_seconds": 128.4891053,
+          "unavailable": 0,
+          "unavailable_reasons": {},
+          "timestamp_sources": {
+            "frozen_ingestion_job": 83
+          }
+        },
+        "worker_reported_duration_ms": {
+          "metadata": {
+            "count": 83,
+            "sum_seconds": 104.28,
+            "p50_seconds": 1.225,
+            "p95_seconds": 1.494299999999999
+          },
+          "thumbnail": {
+            "count": 83,
+            "sum_seconds": 168.849,
+            "p50_seconds": 1.493,
+            "p95_seconds": 5.723299999999994
+          }
+        },
+        "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+      },
+      ".step": {
+        "models": 33,
+        "metadata_ready": 33,
+        "thumbnail_ready": 33,
+        "thumbnail_failed": 0,
+        "both_ready": 33,
+        "outcomes": {
+          "metadata:ready": 33,
+          "thumbnail:ready": 33
+        },
+        "artifact_latency": {
+          "clock": "database_utc",
+          "monotonic_qualification": false,
+          "count": 33,
+          "p50_seconds": 44.25783,
+          "p95_seconds": 78.77624759999999,
+          "unavailable": 0,
+          "unavailable_reasons": {},
+          "timestamp_sources": {
+            "frozen_ingestion_job": 33
+          }
+        },
+        "worker_reported_duration_ms": {
+          "metadata": {
+            "count": 33,
+            "sum_seconds": 39.588,
+            "p50_seconds": 1.152,
+            "p95_seconds": 1.3106
+          },
+          "thumbnail": {
+            "count": 33,
+            "sum_seconds": 189.579,
+            "p50_seconds": 5.575,
+            "p95_seconds": 9.4212
+          }
+        },
+        "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+      },
+      ".stl": {
+        "models": 84,
+        "metadata_ready": 84,
+        "thumbnail_ready": 84,
+        "thumbnail_failed": 0,
+        "both_ready": 84,
+        "outcomes": {
+          "metadata:ready": 84,
+          "thumbnail:ready": 84
+        },
+        "artifact_latency": {
+          "clock": "database_utc",
+          "monotonic_qualification": false,
+          "count": 84,
+          "p50_seconds": 89.9885235,
+          "p95_seconds": 116.68538269999992,
+          "unavailable": 0,
+          "unavailable_reasons": {},
+          "timestamp_sources": {
+            "frozen_ingestion_job": 84
+          }
+        },
+        "worker_reported_duration_ms": {
+          "metadata": {
+            "count": 84,
+            "sum_seconds": 152.546,
+            "p50_seconds": 1.3745,
+            "p95_seconds": 4.186199999999992
+          },
+          "thumbnail": {
+            "count": 84,
+            "sum_seconds": 222.954,
+            "p50_seconds": 1.6745,
+            "p95_seconds": 6.566199999999997
+          }
+        },
+        "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+      }
+    },
+    "outcomes": {
+      "metadata:ready": 200,
+      "thumbnail:ready": 200
+    },
+    "source_integrity": {
+      "originals_verified": 200,
+      "thumbnails_verified": 200,
+      "r2_requests": 0,
+      "request_ledger_unchanged": true
+    },
+    "timings": {
+      "publication_monotonic_seconds": 445.147974388,
+      "publication_realtime_seconds": 470.906018807,
+      "windows_qpc": {
+        "seconds": 470.7101989,
+        "clock": "Windows Stopwatch / QPC",
+        "scope": "Two independent Windows host counter observations enclosing source upload through durable publication. Includes boundary placement/process invocation gaps; wrapper intervals recorded in WSL clocks independently. Not corrected or substituted for WSL timings."
+      },
+      "qpc_boundary_wrappers": [
+        {
+          "available": true,
+          "ticks": 325718355792,
+          "frequency": 10000000,
+          "wrapper_before": {
+            "monotonic_ns": 31089761967576,
+            "realtime_ns": 1791746513246076693
+          },
+          "wrapper_after": {
+            "monotonic_ns": 31090087380172,
+            "realtime_ns": 1791746513571489383
+          },
+          "wrapper_monotonic_seconds": 0.325412596,
+          "wrapper_realtime_seconds": 0.32541269
+        },
+        {
+          "available": true,
+          "ticks": 330425457781,
+          "frequency": 10000000,
+          "wrapper_before": {
+            "monotonic_ns": 31535239114214,
+            "realtime_ns": 1791746984481297405
+          },
+          "wrapper_after": {
+            "monotonic_ns": 31535535156681,
+            "realtime_ns": 1791746984777309273
+          },
+          "wrapper_monotonic_seconds": 0.296042467,
+          "wrapper_realtime_seconds": 0.296011868
+        }
+      ],
+      "cold_first_wave": {
+        "count": 4,
+        "seconds_monotonic": 18.643261068,
+        "seconds_realtime": 18.643261923,
+        "outputs": {
+          "metadata:ready": 4,
+          "thumbnail:ready": 4
+        },
+        "scope": "First four fresh source uploads through durable requested outputs, includes broker startup when lazily started; excludes deployment/API boot."
+      },
+      "warm_remaining": {
+        "count": 196,
+        "seconds_monotonic": 426.434965696,
+        "seconds_realtime": 452.193009449,
+        "scope": "Remaining196 source files through durable outputs after cold first wave; descriptive subcohort, not a200-model claim."
+      },
+      "note": "Clocks retained independently. QPC includes process invocation boundary gaps; UTC artifact latencies remain diagnostic. No global clock calibration or format walltime claimed."
+    },
+    "comparison": {
+      "baseline_revision": "26b8f4b4f5964a16fd879285648f334bf4a72e84",
+      "same_sources": 200,
+      "duration_candidate_over_base": {
+        "wsl_monotonic": 0.9945805257227283,
+        "wsl_realtime": 0.997797514454702,
+        "windows_qpc": 0.9963902186873899
+      },
+      "interpretation": "Same200 source order, closed waves4. Candidate includes rendering, preparation, staging and encoding changes, not device-only isolation. Cold4 and warm196 are descriptive subsets, not independent200-model experiments."
+    },
+    "authoritative_geometry": {
+      "same_source_count": 200,
+      "exact_geometry_count": 200,
+      "by_format": {
+        ".obj": {
+          "count": 83,
+          "exact_geometry_count": 83
+        },
+        ".step": {
+          "count": 33,
+          "exact_geometry_count": 33
+        },
+        ".stl": {
+          "count": 84,
+          "exact_geometry_count": 84
+        }
+      }
+    },
+    "compute": {
+      "budget_bytes": 1073741824,
+      "reserved_bytes": 176354008,
+      "resident_entries": 21,
+      "queue_depth": 0,
+      "completed": 199,
+      "fallbacks": 0,
+      "cold_start_seconds": 2.360922781001136,
+      "queue_seconds": 0.05943515796752763,
+      "execution_seconds": 7.288370570011466,
+      "input_bytes": 218697592,
+      "output_bytes": 244533787,
+      "batch_inputs": 0,
+      "residency_hits": 4,
+      "residency_misses": 195,
+      "host_reserved_bytes": 1073741824,
+      "queued_bytes": 66,
+      "rendering_transfer_seconds": 1.620005557029799,
+      "inference_batches": 0,
+      "render_batches": 191,
+      "render_frames": 195,
+      "render_submissions": 191,
+      "render_upload_calls": 191,
+      "render_bounds_vertices": 9923854,
+      "geometry_local_normal_fallback_vertices": 4013,
+      "render_batch_model_counts": [
+        187,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "render_batch_frame_counts": [
+        187,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "render_interactive_requests": 0,
+      "render_background_requests": 199,
+      "render_cache_hits": 4,
+      "geometry_upload_bytes": 185103188,
+      "geometry_gpu_uploads": 195,
+      "geometry_cpu_uploads": 0,
+      "geometry_gpu_normal_uploads": 31,
+      "geometry_cpu_normal_fallbacks": 0,
+      "geometry_normal_seconds": 0.18091275300685083,
+      "geometry_packing_seconds": 1.9693552580174583,
+      "render_postprocess_gpu": true,
+      "geometry_input_bytes": 218670424,
+      "geometry_input_cache_hits": 4,
+      "geometry_input_cache_bytes": 16523952
+    },
+    "compute_snapshot_note": "Final counters in fresh deployment. Reserved values are final snapshots, not peaks. Histograms count render batches, not necessarily native queue.submit calls. CPU placement is included in whole-pipeline outcomes.",
+    "events": {
+      "available": true,
+      "malformed_events": 0,
+      "phases": {
+        "admission": {
+          "count": 200,
+          "sum_seconds": 0.491228889,
+          "p50_seconds": 0.000136248,
+          "p95_seconds": 0.007319659299999989
+        },
+        "load": {
+          "count": 200,
+          "sum_seconds": 275.969733453,
+          "p50_seconds": 1.236515492,
+          "p95_seconds": 1.5307220472999992
+        },
+        "measurements": {
+          "count": 200,
+          "sum_seconds": 19.815971737,
+          "p50_seconds": 0.0073278465000000004,
+          "p95_seconds": 0.4909040832999995
+        },
+        "render": {
+          "count": 200,
+          "sum_seconds": 44.430139068,
+          "p50_seconds": 0.237730508,
+          "p95_seconds": 0.35268193279999954
+        }
+      },
+      "native_waits": {
+        "count": 254,
+        "sum_seconds": 450.663027458,
+        "p50_seconds": 0.0329773445,
+        "p95_seconds": 6.2390339954
+      },
+      "supervision": {
+        "count": 254,
+        "sum_seconds": 823.510469526,
+        "p50_seconds": 3.399265334,
+        "p95_seconds": 4.707653048849999
+      },
+      "native_admissions": 254,
+      "whole_pool_claims": 54,
+      "capacity_bytes": [
+        4146845696
+      ],
+      "admission_outcomes": {
+        "admitted": 254
+      },
+      "peak_worker_tree_rss_bytes": 565936128
+    },
+    "handoff": {
+      "count": 54,
+      "modes": {
+        "encode": 54
+      },
+      "exit_causes": {
+        "exited_zero": 54
+      },
+      "durations": {
+        "prepared_read_ns": {
+          "count": 54,
+          "sum_seconds": 0.279777553,
+          "p50_seconds": 0.002503566,
+          "p95_seconds": 0.020440884449999946
+        },
+        "dispatch_ns": {
+          "count": 54,
+          "sum_seconds": 15.792266771,
+          "p50_seconds": 0.23294260049999999,
+          "p95_seconds": 0.6594028104499994
+        },
+        "finalizer_queue_ns": {
+          "count": 54,
+          "sum_seconds": 147.525963319,
+          "p50_seconds": 2.605826472,
+          "p95_seconds": 6.506345181749998
+        },
+        "finalizer_supervision_ns": {
+          "count": 54,
+          "sum_seconds": 76.482688245,
+          "p50_seconds": 1.4118152595,
+          "p95_seconds": 1.78417495885
+        }
+      },
+      "prepared_bytes": {
+        "sum": 48629495,
+        "maximum": 12352555
+      },
+      "supervision_by_stage": {
+        "parser": {
+          "count": 200,
+          "sum_seconds": 747.027781281,
+          "p50_seconds": 3.480882582,
+          "p95_seconds": 4.991644893799999
+        },
+        "finalizer": {
+          "count": 54,
+          "sum_seconds": 76.482688245,
+          "p50_seconds": 1.4118152595,
+          "p95_seconds": 1.78417495885
+        }
+      },
+      "note": "Accumulated per-request durations may overlap; finalizer supervision includes process startup/imports/encoding/cleanup and is not encoder-only CPU time."
+    },
+    "hardware": {
+      "available": true,
+      "scope": "One-second samples during publication, whole physical adapter including unrelated Windows work; not per-process allocation or qualification.",
+      "malformed_samples": 0,
+      "metrics": {
+        "gpu_utilization_percent": {
+          "count": 445,
+          "median": 0.0,
+          "p95": 2.0,
+          "maximum": 12.0
+        },
+        "memory_utilization_percent": {
+          "count": 445,
+          "median": 3.0,
+          "p95": 12.799999999999955,
+          "maximum": 24.0
+        },
+        "device_memory_used_mib": {
+          "count": 445,
+          "median": 1291.0,
+          "p95": 1480.0,
+          "maximum": 1532.0
+        }
+      }
+    },
+    "ingestion_intervals": {
+      "clock": "database_utc",
+      "qualification": "diagnostic_only_not_monotonic",
+      "unavailable_reasons": {},
+      "by_format": {
+        "all": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 200,
+            "p50_seconds": 3.3403445,
+            "p95_seconds": 7.674342749999995
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 200,
+            "p50_seconds": 92.474151,
+            "p95_seconds": 118.58651194999996
+          }
+        },
+        ".step": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 33,
+            "p50_seconds": 2.54583,
+            "p95_seconds": 5.0848108
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 33,
+            "p50_seconds": 39.535111,
+            "p95_seconds": 75.74976199999999
+          }
+        },
+        ".stl": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 84,
+            "p50_seconds": 3.521091,
+            "p95_seconds": 8.586761499999998
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 84,
+            "p50_seconds": 85.0455705,
+            "p95_seconds": 112.8860027999999
+          }
+        },
+        ".obj": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 83,
+            "p50_seconds": 3.337057,
+            "p95_seconds": 7.6546527
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 83,
+            "p50_seconds": 104.587495,
+            "p95_seconds": 120.9731514
+          }
+        }
+      },
+      "note": "Exact retained ingestion Job ID maps creation/terminal to the frozen requested derivative terminal timestamps. Publication may overlap ingestion; these are observed intervals, not serial CPU costs or attributable residuals."
+    },
+    "visual_approval": "pending_user",
+    "baseline_source_provenance": {
+      "image_revision": "26b8f4b4f5964a16fd879285648f334bf4a72e84",
+      "source_equivalence_revision": "b898824f0439d2b605c0129b203f87125252edce",
+      "verification": "git tree object identities equal for app/core/frontend source paths; no image relabeling. Backend/core dependency manifest diff is empty.",
+      "trees": {
+        "backend/app": {
+          "image_revision_tree_oid": "cca79e680ab690619890b29a2f5e13b6f97936a3",
+          "documented_revision_tree_oid": "cca79e680ab690619890b29a2f5e13b6f97936a3"
+        },
+        "backend/packages/printstash-core/src": {
+          "image_revision_tree_oid": "9542954efb171c441ac88a803fd9c4d90b3c36c1",
+          "documented_revision_tree_oid": "9542954efb171c441ac88a803fd9c4d90b3c36c1"
+        },
+        "frontend/src": {
+          "image_revision_tree_oid": "fc4ef974c139aa31cdabe05c9dea1e7bfb7f9c5a",
+          "documented_revision_tree_oid": "fc4ef974c139aa31cdabe05c9dea1e7bfb7f9c5a"
+        }
+      }
+    },
+    "saved_frame_content": {
+      "count": 200,
+      "alpha_outcomes": {
+        "foreground_present": 200
+      },
+      "dimensions": {
+        "(640, 480)": 200
+      },
+      "note": "Saved-frame presence diagnostic only, not visual approval."
+    },
+    "handoff_formats": {
+      "matched_phase_rows": 200,
+      "ambiguous_formats": 0,
+      "unmatched": 0,
+      "handoff_by_format": {
+        ".step": {
+          "prepared_bytes": {
+            "count": 33,
+            "sum": 1667631,
+            "median": 2401
+          },
+          "finalizer_queue_ns": {
+            "count": 33,
+            "sum": 91249520232,
+            "median": 2736917967
+          },
+          "finalizer_supervision_ns": {
+            "count": 33,
+            "sum": 47297245758,
+            "median": 1430996358
+          },
+          "dispatch_ns": {
+            "count": 33,
+            "sum": 10734480340,
+            "median": 269520723
+          }
+        },
+        ".stl": {
+          "prepared_bytes": {
+            "count": 9,
+            "sum": 33375714,
+            "median": 1299225
+          },
+          "finalizer_queue_ns": {
+            "count": 9,
+            "sum": 23863197371,
+            "median": 52954493
+          },
+          "finalizer_supervision_ns": {
+            "count": 9,
+            "sum": 15228359631,
+            "median": 1737624711
+          },
+          "dispatch_ns": {
+            "count": 9,
+            "sum": 4302595179,
+            "median": 413034643
+          }
+        },
+        ".obj": {
+          "prepared_bytes": {
+            "count": 12,
+            "sum": 13586150,
+            "median": 683882.0
+          },
+          "finalizer_queue_ns": {
+            "count": 12,
+            "sum": 32413245716,
+            "median": 2662875406.0
+          },
+          "finalizer_supervision_ns": {
+            "count": 12,
+            "sum": 13957082856,
+            "median": 1176747700.5
+          },
+          "dispatch_ns": {
+            "count": 12,
+            "sum": 755191252,
+            "median": 60660546.5
+          }
+        }
+      }
+    },
+    "ingestion_checkpoint": {
+      "all_accepted_monotonic_seconds": 334.81406793600036,
+      "ready_at_first_publication_snapshot": {
+        "metadata:ready": 124,
+        "thumbnail:ready": 124,
+        "metadata:running": 4,
+        "thumbnail:running": 4
+      },
+      "note": "First snapshot occurs after all ingestion Jobs terminal; no attribution of remaining queue time to one processing component."
+    }
+  },
+  "corrected_candidate_note": "Selective handoff experiment at 5814e6e7; no demonstrated end-to-end improvement within final polling and boundary granularity. Final combined-worker continuous40 measurements are separate and pending.",
+  "continuous40": {
+    "base": null,
+    "combined_worker_candidate": null
+  }
 }

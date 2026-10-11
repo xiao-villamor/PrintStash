@@ -1,4 +1,95 @@
-# Thumbnail preparation handoff
+# Combined thumbnail ownership and retired handoff evidence
+
+Automatic handoff is retired. Production now uses one guarded worker per source
+for parsing, measurement, GPU dispatch or CPU fallback, and encoding. This keeps
+the unchanged native claim through cleanup. There is no handoff flag, packet,
+finalizer, visual pool or prepared-thumbnail protocol left in the runtime.
+
+The `5814e6e7` selective experiment completed 200/200 sources with exact geometry
+and zero R2 requests, but did not establish an end-to-end gain: 445.148 seconds
+monotonic versus 447.574 baseline, below five-second observation resolution. Its
+54 finalizers accumulated 76.483 seconds of supervision and 147.526 seconds of
+readmission; their GPU dispatch accumulated 15.792 seconds. These sums overlap
+and must not be subtracted from wall time. Whole-pool admission is a conservative
+memory decision, not evidence of profitable process separation. The final
+combined-worker measurement remains pending.
+
+The active replacement retains the compact GPU renderer, binary framing limits,
+empty-frame CPU fallback, shared lossless encoder, generated-frame preservation,
+cooperative cancellation, original bytes and authoritative geometry. The E2E
+covers both a device refusal and an all-transparent response through the same
+single worker and existing publication fences.
+
+## Active replacement coverage
+
+| Behaviour / test | Category | Precondition / input | Observable outcome | Tier | Status |
+|---|---|---|---|---|---|
+| `backend/tests/integration/modules/derivatives/test_producers.py::TestStagedMeshPublication::test_retains_one_worker_per_source` | lifecycle | Known STL or unknown-complexity 3MF | One guarded execution publishes metadata and thumbnail | integration | Verified |
+| `backend/tests/e2e/test_render_batch_publication.py::TestThumbnailFallbackPublication::test_publishes_after_gpu_failure` | fallback publication | Real ingest/Job/parser/broker; device failure or empty GPU response | One worker publishes CPU fallback; source and exact measurements retained; full native/prepared capacity recoverable | E2E | Verified |
+| `backend/tests/e2e/test_render_batch_publication.py::TestRenderBatchPublication::test_publishes_the_healthy_member_when_a_batched_job_is_cancelled` | cancellation | Two model Jobs share a controlled render fence | Healthy output publishes; cancelled output has no storage pointer | E2E | Verified |
+| `backend/tests/unit/modules/media/test_compute_render.py::TestOptionalRender::test_refuses_empty_gpu_frames` | failure | Raw or finalized pixels with zero alpha | Existing CPU fallback selected | unit | Verified |
+| `backend/tests/unit/modules/media/test_compute_render.py::TestOptionalRender::test_preserves_nonzero_alpha` | boundary | Only final pixel has alpha 1, 128 or 255 | Exact GPU pixels retained | unit | Verified |
+| `backend/tests/unit/modules/media/test_compute_render.py::TestOptionalRender::test_requires_visibility_in_each_view` | multiview | One requested view is empty | Whole model falls back with view association preserved | unit | Verified |
+| `backend/tests/unit/modules/media/test_compute_geometry_wire.py::TestGeometryWire::test_preserves_geometry_identity` | protocol | Canonical, deferred or visual geometry | Parser framing and owner use matching identity | unit | Verified |
+| `backend/tests/unit/modules/media/test_compute_geometry_wire.py::TestGeometryWire::test_refuses_malformed_geometry_framing` | protocol refusal | Truncated body/header or invalid layout | Wire refused before use | unit | Verified |
+| `backend/tests/unit/modules/media/test_compute_geometry_wire.py::TestGeometryWire::test_owner_validates_framed_arrays` | array validation | Well-framed invalid coordinate/index | Owner refuses invalid arrays | unit | Verified |
+| `backend/tests/integration/modules/derivatives/test_producers.py::TestStagedMeshPublication::test_publishes_the_renderer_frame` | publication | Valid full-render frame | Original validated image bytes stored | integration | Verified |
+| `backend/tests/unit/modules/media/test_thumbnail.py::TestGeneratedFrame::test_rejects_invalid_generated_frames` | publication validation | Empty, wrong-sized or border-touching generated image | Validation refusal retained | unit | Verified |
+| `backend/tests/unit/runtime/compute/test_client.py::TestConnect::test_withdraws_without_terminating_shared_owner` | cancellation | Caller withdraws while shared broker starts | Caller stops; shared process remains owned | unit | Verified |
+| `backend/tests/unit/modules/media/test_compute_render.py::TestOptionalRender::test_bounds_readback_to_requested_frames` | response admission | Two requested supersampled views | IPC response allowance follows the requested frames before body allocation | unit | Verified |
+| `backend/tests/unit/modules/media/test_mesh_render.py::TestAcceleratedEncoding::test_renders_cpu_fallback_after_compute_refusal` | fallback | Accelerated call refuses prepared geometry | Exactly one GPU attempt then nonempty CPU thumbnail | unit | Verified |
+
+Validation after retirement: the initial serial selection reported **778 passed,
+3 failed and 2 deselected in 278.29 seconds**. All three failures were in the
+adapted framing test: it incorrectly expected the encoder's trusted-packet split
+helper to implement the external decoder's byte validation. Only that test was
+changed to call the actual decoder. Its complete file then passed **11/11 in
+3.44 seconds**, including the three corrected cases; scoped test hygiene passed
+**6/6 in 3.82 seconds**. The other 778 successful checks were not unnecessarily
+repeated. The configured full Pyright gate reported zero errors and warnings;
+Ruff passed on 24 affected files and the corrected test. `git diff --check` passed.
+The existing Starlette/AnyIO deprecation warning was unchanged.
+
+Commands from `backend`, executed serially for pytest:
+
+```bash
+PRINTSTASH_TEST_NO_EXTERNAL=1 .venv/bin/python -m pytest \
+  tests/unit/modules/media/test_compute_render.py \
+  tests/unit/modules/media/test_compute_geometry_wire.py \
+  tests/unit/modules/media/test_mesh_protocol.py \
+  tests/unit/modules/media/test_native_budget.py \
+  tests/unit/modules/media/test_thumbnail.py \
+  tests/unit/modules/media/test_mesh_render.py \
+  tests/unit/modules/media/test_worker_bootstrap.py \
+  tests/unit/runtime/compute/test_client.py \
+  tests/integration/modules/derivatives/test_producers.py \
+  tests/integration/modules/media/test_native_budget.py \
+  tests/integration/modules/media/test_thumbnail_engine.py \
+  tests/integration/modules/media/test_mesh_isolation.py \
+  tests/integration/modules/media/test_worker_bootstrap.py \
+  tests/integration/modules/media/test_native_execution.py \
+  tests/integration/runtime/test_preparation_runtime.py \
+  tests/integration/bootstrap/test_native_resources.py \
+  tests/repo/test_architecture.py tests/repo/test_mesh_boundaries.py \
+  tests/e2e/test_render_batch_publication.py \
+  -q -n 0 --tb=short \
+  -m 'not slow and not coverage_gate and not scale and not postgres and not s3 and not remote_storage and not bgcode and not native_host'
+PRINTSTASH_TEST_NO_EXTERNAL=1 .venv/bin/python -m pytest \
+  tests/unit/modules/media/test_compute_geometry_wire.py -q -n 0 --tb=short
+PRINTSTASH_TEST_NO_EXTERNAL=1 .venv/bin/python -m pytest \
+  tests/repo/test_test_hygiene.py -k test_compute_geometry_wire -q -n 0 --tb=short
+.venv/bin/pyright
+```
+
+## Archived evidence scope
+
+Everything below describes the historical handoff implementation and its checks
+at `3988d697`/`5814e6e7`, before retirement. Removed test names and commands are
+preserved as historical evidence, not runnable instructions or current runtime
+contracts. The active matrix above supersedes the retired-path coverage. The
+publication, encoding and cancellation safeguards themselves remain active.
+
+## Historical handoff implementation
 
 A visual-only derivative whose conservative native estimate claims the whole memory pool can release its parser's native CPU/RAM permit before waiting for the compute broker and image encoding. The parser writes a bounded geometry packet and emits a distinct `PreparedThumbnailOutput`; it does not claim an image or completed preview. After a clean parser exit and descendant reap, the supervisor validates directory identity, regular-file ownership, size, digest, and the lightweight wire envelope. Array validation remains in the compute owner or isolated CPU fallback.
 

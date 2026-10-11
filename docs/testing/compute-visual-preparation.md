@@ -168,3 +168,30 @@ These are correctness diagnostics, not performance measurements. Private failure
 captures and the reintroduced-device red run remain under
 `/tmp/printstash-rgba-investigation`; final complete-run logs are
 `/tmp/printstash-rgba-isolated-full-{1,2,3}.log` on the test host.
+
+
+## Immutable geometry IPC
+
+The geometry encoder now joins the validated, normalized array buffers directly
+into one immutable packet. Splitting that packet returns a readonly memoryview
+whose owner is the original bytes object; decoded arrays retain that owner after
+the caller releases its view. This removes intermediate full-body copies without
+changing the JSON descriptor, array dtypes, packet bytes, geometry identities,
+admission ceiling or render recipe. Mutable packet backing is rejected, including
+a readonly view of a bytearray. Transport framing, cancellation and cache ownership
+remain covered by the existing client and broker contract tests.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | preserves exact wire bytes | Regression | Canonical, deferred and visual geometry; strided big-endian source arrays; automatic and explicit cameras | Packet equals an independent literal-JSON and struct-packed oracle; immutable bytes and exact size | Unit | ✅ [`TestEncode::test_preserves_exact_wire_bytes`](../../backend/tests/unit/modules/media/test_compute_geometry.py#L218), 3 cases passed |
+| 2 | snapshots mutable source arrays | Lifetime | Each geometry mode encoded before source arrays are overwritten | Packet and decoded vertices/faces retain their original values | Unit | ✅ [`TestEncode::test_snapshots_mutable_source_arrays`](../../backend/tests/unit/modules/media/test_compute_geometry.py#L245), 3 cases passed |
+| 3 | rejects nonfinite camera JSON | Error | Camera contains NaN | Encoding rejects the JSON value before returning a packet | Unit | ✅ [`TestEncode::test_rejects_nonfinite_camera_json`](../../backend/tests/unit/modules/media/test_compute_geometry.py#L262) |
+| 4 | retains geometry admission boundary | Boundary | Each geometry mode with its canonical-equivalent envelope at or one byte over the configured limit | Exact-limit geometry encodes/decodes; over-limit geometry is refused | Unit | ✅ [`TestEncode::test_retains_geometry_admission_boundary`](../../backend/tests/unit/modules/media/test_compute_geometry.py#L274), 6 cases passed |
+| 5 | returns readonly view of packet owner | Ownership | Each encoded geometry mode | Body shares the packet owner, is contiguous and readonly, and preserves header/body identity | Unit | ✅ [`TestSplit::test_returns_readonly_view_of_packet_owner`](../../backend/tests/unit/modules/media/test_compute_geometry.py#L290), 3 cases passed |
+| 6 | keeps decoded cache alive after releasing body view | Lifetime | Packet variable deleted and caller view explicitly released | Cached decoded arrays remain valid and readonly | Unit | ✅ [`TestSplit::test_keeps_decoded_cache_alive_after_releasing_body_view`](../../backend/tests/unit/modules/media/test_compute_geometry.py#L311), 3 cases passed |
+| 7 | rejects mutable packet backing | Error | Bytearray or its readonly memoryview | Split refuses backing that can still change outside the view | Unit | ✅ [`TestSplit::test_rejects_mutable_packet_backing`](../../backend/tests/unit/modules/media/test_compute_geometry.py#L339), 2 cases passed |
+
+All 21 new cases passed within a 143-test focused gate covering geometry codec and
+wire validation, render requests, batch/cache ownership, client transport and real
+socket broker contracts. No GPU workload or performance measurement was run for
+this copy-only follow-up; the removed copies do not establish an end-to-end speedup.

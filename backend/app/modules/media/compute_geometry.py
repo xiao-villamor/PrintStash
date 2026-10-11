@@ -88,10 +88,14 @@ def encode(prepared: RenderInput, width: int, height: int, views, matte: bool) -
     if deferred:
         header["normal_mode"] = prepared.normal_mode
     encoded_header = json.dumps(header, allow_nan=False, separators=(",", ":")).encode()
-    return (
-        struct.pack("!I", len(encoded_header))
-        + encoded_header
-        + b"".join(array.tobytes() for array in arrays)
+    # Join directly from contiguous array buffers into the immutable packet.
+    # Per-array bytes and a separately joined body would each copy all arrays.
+    return b"".join(
+        [
+            struct.pack("!I", len(encoded_header)),
+            encoded_header,
+            *(memoryview(array).cast("B") for array in arrays),
+        ]
     )
 
 
@@ -188,9 +192,13 @@ def decode_arrays(
     return PreparedRender(vertices, f, chunks, identities, normals)
 
 
-def split(payload: bytes) -> tuple[str, str, bytes]:
+def split(payload: bytes) -> tuple[str, str, memoryview]:
+    # The view retains this immutable owner until the exchange/cache releases it.
+    # A readonly view of mutable backing would not provide the same guarantee.
+    if not isinstance(payload, bytes):
+        raise ValueError("compute_geometry_mutable")
     length = struct.unpack("!I", payload[:4])[0]
     header = payload[4 : 4 + length]
     counts, *_ = decode_header(header)
-    body = payload[4 + length :]
+    body = memoryview(payload)[4 + length :]
     return identity(counts, body), header.decode(), body

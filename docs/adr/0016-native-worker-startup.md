@@ -93,36 +93,28 @@ numerical/parser dependencies. These changes do not introduce preloaded forks or
 persistent untrusted source parsers.
 
 
-## Release parser capacity before GPU waits (2026-10-11)
+## Parser handoff experiment retired (2026-10-11)
 
-Thumbnail-only work can hand off an owned, bounded geometry packet after its
-source parser exits cleanly and the supervisor reaps its process tree. Only then
-is the native parser claim released. Staging retains the existing prepared-byte
-reservation and a four-slot/192MiB sublimit, with custody descriptors inherited by
-the guardian. The lightweight supervisor dispatches validated framing to the
-broker and reacquires native admission for a disposable encoder or CPU fallback
-using that same packet. Existing Job authority and the absolute deadline remain
-unchanged. Fingerprint work retains the combined worker path.
+A bounded handoff was implemented and verified to release the parser permit only
+after clean reap, then reacquire admission for an isolated encoder or CPU
+fallback. It retained source identity, deadline, guardian custody and publication
+fences. The first 200-source version added 199 finalizers and regressed total
+publication by 28.5%. Selective whole-pool staging reduced this to 54 finalizers,
+but added 76.48 seconds of accumulated supervision plus 147.53 seconds of
+accumulated readmission waiting. The 445.15-second publication result versus
+447.57 seconds for the baseline does not demonstrate improvement at the
+five-second observation resolution. These component sums overlap.
 
-This extends neither untrusted parser lifetime nor configured Job concurrency.
-The encoder adds a process startup, so per-handoff telemetry records its queue
-and complete supervision cost separately; only a matched source-to-publication
-benchmark can establish whether the change improves ingestion. Numerical imports
-are not preloaded into a fork server. The earlier startup measurements and their
-limits remain historical evidence rather than qualification of this new handoff.
+The production decision is one combined disposable mesh worker. Native memory
+estimates and hard process ceilings are unchanged; unknown source complexity
+continues to claim the whole pool. Automatic handoff and its exclusive packet,
+finalizer, native-plan reuse and visual-credit code are removed. There is no
+manual feature flag or dormant implementation. Rendering, encoding, cooperative
+cancellation and validated publication improvements remain independently active.
+The original source-array custody and CPU fallback stay inside the worker.
 
-
-### Measured scope of the handoff
-
-The initial 200-model implementation staged every eligible request. It halved
-broker execution but increased total source-to-publication time by about 28.5%,
-with 399 native admissions for 200 sources. The final policy therefore uses the
-separate stage only when the existing native estimate claims the entire memory
-pool; smaller requests keep their combined disposable process. The exact same
-preflight plan is consumed at native admission rather than recomputed. This does
-not lower unknown-complexity reservations or relax process limits.
-
-The RGBA encoder has a minimal import boundary verified in a fresh interpreter:
-no configuration, Pydantic, NumPy or source parser libraries. CPU fallback remains
-behind the existing media rendering facade in a guarded worker. See the
-[measurement and regression record](../testing/compute-native-pipeline-200.md).
+The historical tests and measurements remain in the
+[handoff record](../testing/compute-thumbnail-handoff.md) and
+[pipeline comparison](../testing/compute-native-pipeline-200.md). Their former
+coverage is not presented as validation of a still-active handoff. A subsequent
+matched complete-pipeline comparison determines the combined route's outcome.

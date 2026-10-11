@@ -37,6 +37,23 @@ class TestOptionalRender:
 
         assert tuple(frame.rgba for frame in frames) == (red, blue)
 
+    def test_bounds_readback_to_requested_frames(self, prepared, monkeypatch):
+        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
+        pixels = bytes([190, 80, 40, 255]) * 4
+        response = b"\x01" + struct.pack("!III", 2, 2, 2) + pixels * 2
+        limits = []
+
+        def exchange(request, body, *, checkpoint, response_limit):
+            limits.append(response_limit)
+            return response
+
+        monkeypatch.setattr(compute_render.client, "exchange_render", exchange)
+
+        compute_render.render(prepared, 2, 2, [None, None], False)
+
+        # Protocol tag, output tag/header and two 4x4 supersampled RGBA frames.
+        assert limits == [14 + 2 * 4 * 4 * 4]
+
     @pytest.mark.parametrize("finalized,size", [(False, 4), (True, 2)])
     def test_refuses_empty_gpu_frames(self, prepared, monkeypatch, finalized, size):
         monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
@@ -157,64 +174,3 @@ class TestRenderPriority:
             priority = compute_render.render_priority()
 
         assert priority is Priority.BACKGROUND
-
-
-class TestStagedRender:
-    @pytest.mark.parametrize("alpha", [1, 128, 255])
-    def test_keeps_owned_geometry_through_dispatch(self, monkeypatch, alpha):
-        import time
-
-        from app.modules.media.compute_geometry_wire import ThumbnailWire
-        from app.runtime.compute.protocol import Priority
-
-        body = memoryview(b"owned geometry")
-        wire = ThumbnailWire("a" * 64, "{}", body, 2, 2, 7)
-        deadline = time.monotonic() + 5
-        pixels = bytes(12) + bytes([12, 24, 36, alpha])
-        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
-
-        def exchange(request, data, **kwargs):
-            assert data is body
-            assert request.deadline == deadline
-            assert request.priority is Priority.BACKGROUND
-            assert request.units == 7
-            return b"\x01" + struct.pack("!III", 2, 2, 1) + pixels
-
-        monkeypatch.setattr(compute_render.client, "exchange_render", exchange)
-        assert compute_render.render_staged(wire, deadline=deadline).rgba == pixels
-
-    @pytest.mark.parametrize(
-        "payload",
-        [
-            b"\x00" + struct.pack("!III", 4, 4, 1) + bytes(64),
-            b"\x01" + struct.pack("!III", 2, 2, 1) + b"short",
-            b"\x01" + struct.pack("!III", 2, 2, 1) + bytes([12, 24, 36, 0]) * 4,
-        ],
-        ids=["unprocessed", "truncated", "empty"],
-    )
-    def test_leaves_rejected_pixels_for_isolated_fallback(self, monkeypatch, payload):
-        import time
-
-        from app.modules.media.compute_geometry_wire import ThumbnailWire
-
-        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
-        monkeypatch.setattr(
-            compute_render.client, "exchange_render", lambda *args, **kwargs: payload
-        )
-        monkeypatch.setattr(
-            compute_render,
-            "postprocess_rgba",
-            lambda *args: pytest.fail("supervisor imported image work"),
-        )
-        wire = ThumbnailWire("a" * 64, "{}", memoryview(b"owned"), 2, 2, 1)
-        assert compute_render.render_staged(wire, deadline=time.monotonic() + 5) is None
-
-    def test_propagates_staged_withdrawal(self, monkeypatch):
-        import time
-
-        from app.modules.media.compute_geometry_wire import ThumbnailWire
-
-        wire = ThumbnailWire("a" * 64, "{}", memoryview(b"owned"), 2, 2, 1)
-        with cancellation_scope(lambda **kwargs: True):
-            with pytest.raises(OperationCancelled):
-                compute_render.render_staged(wire, deadline=time.monotonic() + 5)

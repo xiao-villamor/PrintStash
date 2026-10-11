@@ -46,22 +46,11 @@ def launch_resources(permit: NativePermit) -> LaunchResources:
 
     descriptors = [permit.fileno]
     environment = {PERMIT_ENV: str(permit.fileno), PERMIT_PATH_ENV: str(permit.path)}
-    from app.runtime.preparation_runtime import (
-        VISUAL_PERMIT_ENV,
-        VISUAL_PERMIT_PATH_ENV,
-        current_visual_permit,
-    )
-
     prepared = current_permit()
     if prepared is not None:
         descriptors.append(prepared.fileno)
         environment[PREPARATION_ENV] = str(prepared.fileno)
         environment[PREPARATION_PATH_ENV] = str(prepared.path)
-    visual = current_visual_permit()
-    if visual is not None:
-        descriptors.append(visual.fileno)
-        environment[VISUAL_PERMIT_ENV] = str(visual.fileno)
-        environment[VISUAL_PERMIT_PATH_ENV] = str(visual.path)
     return LaunchResources(tuple(descriptors), environment)
 
 
@@ -377,18 +366,6 @@ def main(argv: list[str]) -> int:
             credits.enter_context(
                 NativePermit.inherit(
                     int(prepared), Path(os.environ[PREPARATION_PATH_ENV])
-                )
-            )
-        from app.runtime.preparation_runtime import (
-            VISUAL_PERMIT_ENV,
-            VISUAL_PERMIT_PATH_ENV,
-        )
-
-        visual = os.environ.get(VISUAL_PERMIT_ENV)
-        if visual is not None:
-            credits.enter_context(
-                NativePermit.inherit(
-                    int(visual), Path(os.environ[VISUAL_PERMIT_PATH_ENV])
                 )
             )
         return _run(argv)

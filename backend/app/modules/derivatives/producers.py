@@ -45,7 +45,6 @@ from app.modules.media import (
     mesh_isolation,
     stl_isolation,
     thumbnail,
-    thumbnail_staging,
 )
 from app.modules.media.mesh_contracts import (
     GeometryReady,
@@ -56,7 +55,6 @@ from app.modules.media.mesh_contracts import (
     ThumbnailStrategy,
 )
 from app.modules.media.mesh_isolation import MeshWorkerError
-from app.modules.media.source_preparation import capacity as prepared_capacity
 from app.modules.media.source_preparation import reserve_sources
 from app.modules.media.thumbnail_publication import (
     ThumbnailPublicationError,
@@ -404,37 +402,13 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
 
     try:
         with ExitStack() as stack:
-            from app.runtime.compute import client
-
-            width = settings.model_thumbnail_width
-            height = round(width * 3 / 4)
-            stage_visual = (
-                plan is None
-                and DerivativeKind.THUMBNAIL in attempts
-                and client.available(render=True)
-                and 2 * file_row.size_bytes
-                + thumbnail_staging.resident_bytes(width, height)
-                <= prepared_capacity().bytes
-            )
-            prepared = stack.enter_context(
-                reserve_sources(
-                    (resolve(file_row),),
-                    output_bytes=thumbnail_staging.resident_bytes(width, height)
-                    if stage_visual
-                    else 0,
-                )
-            )
+            prepared = stack.enter_context(reserve_sources((resolve(file_row),)))
             claim = CapacityManager(get_session_factory()).reserve(
                 f"derive:mesh:{file_id}:{time.monotonic_ns()}",
                 [
                     CapacityResource.for_path(
                         prepared.directory,
-                        file_row.size_bytes * 2
-                        + (
-                            thumbnail_staging.output_bytes(width, height)
-                            if stage_visual
-                            else 0
-                        ),
+                        file_row.size_bytes * 2,
                         role="mesh source preparation",
                     ),
                     CapacityResource.for_path(
@@ -459,21 +433,7 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                 if plan is not None
                 else MAX_ANALYSIS_FACES,
             )
-            native_plan = mesh_isolation.plan_native(request) if stage_visual else None
-            staging = (
-                stack.enter_context(
-                    thumbnail_staging.reserve(prepared.directory, width, height)
-                )
-                if native_plan is not None and native_plan.owns_whole_pool
-                else None
-            )
-            result = (
-                mesh_isolation.generate(
-                    request, on_output=publish, staging=staging, native_plan=native_plan
-                )
-                if native_plan is not None
-                else mesh_isolation.generate(request, on_output=publish)
-            )
+            result = mesh_isolation.generate(request, on_output=publish)
             if result.fingerprint_result is not None:
                 if pending is None:
                     raise RuntimeError("fingerprint_completion_without_pending_input")
