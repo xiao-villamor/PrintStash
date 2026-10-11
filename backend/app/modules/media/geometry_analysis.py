@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from printstash_core.inference import EmbeddingInput
-from printstash_core.mesh.render_geometry import PreparedRender
 from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 from printstash_core.mesh.similarity.components import ExpandedScene
@@ -194,7 +193,7 @@ def canonical_frames():
     )
 
 
-def _render_views(prepared: PreparedRender, image_size: int, frames):
+def _render_views(prepared: mesh_render.RenderInput, image_size: int, frames):
     import numpy as np
 
     from .compute_render import render
@@ -251,7 +250,7 @@ def visual_views(
 ) -> VisualViews:
     """One source load and render permit for the thumbnail and canonical views."""
     prepared = None
-    visual: PreparedRender | None = None
+    visual: mesh_render.RenderInput | None = None
     try:
         with mesh_policy.render_admission():
             # Visual encoding needs triangles only. The parent owns temporary

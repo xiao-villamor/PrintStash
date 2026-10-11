@@ -183,7 +183,7 @@ class DbosJobEngine(JobEngine):
         schema: str | None,
         executor_id: str,
         app_version: str | None = None,
-        polling_interval_seconds: float = 1.0,
+        polling_interval_seconds: float | None = None,
         tick_seconds: int | None = None,
     ) -> None:
         self.catalog = catalog
@@ -191,7 +191,11 @@ class DbosJobEngine(JobEngine):
         self.schema = schema
         self._executor_id = executor_id
         self.app_version = app_version or settings.app_version
-        self.polling = polling_interval_seconds
+        self.polling = (
+            settings.jobs_queue_poll_interval_seconds
+            if polling_interval_seconds is None
+            else polling_interval_seconds
+        )
         self.tick_seconds = tick_seconds or settings.jobs_reconcile_interval_seconds
         self._queues: dict[LaneName, Queue] = {}
         self._launched = False

@@ -11,6 +11,7 @@ import os
 import sys
 from pathlib import Path
 
+from app.modules.media.compute_render import background_render_scope
 from app.modules.media.mesh_contracts import ThumbnailRequest
 from app.modules.media.mesh_isolation import read_spec
 from app.modules.media.mesh_protocol import BasicOutput, FingerprintFinal, encode_frame
@@ -42,7 +43,10 @@ def main(argv: list[str]) -> int:
         sequence += 1
 
     try:
-        result = ThumbnailEngine().generate(request, on_output=emit)
+        # This worker produces asynchronous Artifact outputs. Its Job priority
+        # is retained for admission, but renders can share one GPU submission.
+        with background_render_scope():
+            result = ThumbnailEngine().generate(request, on_output=emit)
         output.write(
             encode_frame(
                 FingerprintFinal(

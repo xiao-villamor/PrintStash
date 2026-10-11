@@ -111,6 +111,12 @@ resource pools. Interactive waiters precede unaged backfill; backfill waiting
 30 seconds joins the interactive rank in registration order, allowing a large
 claim to accumulate enough free capacity. Active work is never preempted.
 Waiting for capacity does not create a new Job or derivative attempt.
+The supervisor passes the logical priority into each disposable native child;
+an exec boundary cannot promote backfill to interactive. Asynchronous mesh
+thumbnail workers separately mark render dispatch as batchable background work,
+including freshly uploaded Artifacts. This permits the compute broker to group
+ready models for up to 10ms without changing their Job FIFO position or native
+resource tier. Direct interactive render callers retain immediate dispatch.
 
 Recovery selects one active backfill per shared FIFO lane, preferring running
 work, then already reserved or accepted epochs, then oldest unsubmitted intent. Other retained intents wait without spending attempts. The owner
@@ -203,6 +209,7 @@ both Compose files run the first with no setting.
 
 | Setting (`VAULT_…`) | Default | Meaning |
 | --- | --- | --- |
+| `JOBS_QUEUE_POLL_INTERVAL_SECONDS` | 0.25 | DBOS lane dispatch polling (0.05–5 seconds); lower values trade more local database polling for shorter queue handoffs |
 | `JOBS_RECONCILE_INTERVAL_SECONDS` | 300 | Safety-net tick |
 | `JOBS_RECONCILE_BATCH` | 500 | Most Jobs one pass creates |
 | `JOBS_LANE_HEADROOM_FACTOR` | 2 | Pending depth multiplier for ordinary lanes; derivation lanes reserve concurrency plus one |

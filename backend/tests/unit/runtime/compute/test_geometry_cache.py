@@ -19,6 +19,19 @@ class TestGeometryCache:
         assert cache.transferred == 40
         cache.release(second)
 
+    def test_does_not_alias_different_normal_representations(self):
+        from app.modules.media.compute_geometry import GeometryLayout
+        from app.modules.media.gpu_normals import NORMAL_MODE
+
+        cache = GeometryCache(100)
+        entry = cache.insert("a", 40, GeometryLayout((3, 1, 3)), object())
+
+        with pytest.raises(ValueError, match="compute_geometry_reference"):
+            cache.acquire("a", 40, GeometryLayout((3, 1, 3), NORMAL_MODE))
+
+        assert entry.pins == 1
+        cache.release(entry)
+
     def test_evicts_idle_inputs(self):
         cache = GeometryCache(100)
         first = cache.insert("a", 60, (3, 1, 3), object())

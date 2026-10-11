@@ -85,6 +85,7 @@ from app.modules.media.native_budget import (
 )
 from app.modules.media.native_execution import admission
 from app.modules.media.worker_bootstrap import (
+    PRIORITY_ENV,
     RESOURCE_EXIT,
     WorkerLifecycle,
     launch_resources,
@@ -419,6 +420,8 @@ def supervise_result(
     assert temporary_path is not None
     if not temporary_path.is_dir():
         raise ValueError("worker temporary directory must exist")
+    from app.core.work_priority import current_priority
+
     inherited = launch_resources(permit) if permit is not None else None
     try:
         try:
@@ -437,6 +440,7 @@ def supervise_result(
                     "MKL_NUM_THREADS": "1",
                     "NUMEXPR_NUM_THREADS": "1",
                     "TMPDIR": str(temporary_path),
+                    PRIORITY_ENV: current_priority().value,
                     **(inherited.environment if inherited is not None else {}),
                 },
                 cwd=Path(application_file).resolve().parent.parent,

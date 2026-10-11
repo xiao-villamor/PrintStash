@@ -93,6 +93,26 @@ def registered(monkeypatch) -> dict[str, dict]:
 
 
 class TestQueues:
+    def test_dispatch_cadence_uses_the_deployment_setting(self, registered, monkeypatch):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "jobs_queue_poll_interval_seconds", 0.25)
+        _engine()._register_queue(Lane(LaneName.DERIVE_NATIVE, 4))
+
+        assert registered["derive.native"]["polling_interval_sec"] == 0.25
+
+    def test_explicit_cadence_overrides_the_deployment_default(self, registered):
+        engine = DbosJobEngine(
+            WorkCatalog(lanes=default_lanes()),
+            system_database_url="sqlite:////data/db/engine.sqlite",
+            schema=None,
+            executor_id="test",
+            polling_interval_seconds=0.05,
+        )
+        engine._register_queue(Lane(LaneName.INGEST, 2))
+
+        assert registered["ingest"]["polling_interval_sec"] == 0.05
+
     def test_a_worker_lane_bounds_each_process(self, registered) -> None:
         _engine()._register_queue(Lane(LaneName.INGEST, 2))
 

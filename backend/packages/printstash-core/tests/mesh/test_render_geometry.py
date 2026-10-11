@@ -107,6 +107,44 @@ def source_mesh():
 
 
 class TestPrepareMeshRender:
+    @pytest.mark.parametrize(
+        ("vertices", "faces", "expected_normal"),
+        [
+            pytest.param(
+                [[0, 0, 0], [10, 0, 0], [0, 10, 0]],
+                [[0, 1, 2]],
+                [0, 0, 1],
+                id="plane",
+            ),
+            pytest.param(
+                [[0, 0, 0], [10, 0, 0], [20, 0, 0]],
+                [[0, 1, 2]],
+                [0, 0, 0],
+                id="degenerate-face",
+            ),
+            pytest.param(
+                [[0, 0, 0], [10, 0, 0], [0, 10, 0]],
+                [[0, 1, 2], [0, 2, 1]],
+                [0, 0, 0],
+                id="opposed-faces",
+            ),
+        ],
+    )
+    def test_preserves_normalization_for_zero_lengths(
+        self, vertices, faces, expected_normal
+    ):
+        source = SimpleNamespace(
+            vertices=np.asarray(vertices, dtype=np.float64),
+            faces=np.asarray(faces, dtype=np.int64),
+        )
+
+        prepared = prepare_mesh_render(source, face_chunk_size=1)
+
+        assert prepared is not None
+        np.testing.assert_array_equal(
+            prepared.smooth_normals, np.tile(expected_normal, (3, 1))
+        )
+
     def test_snapshots_source_geometry(self, source_mesh):
         prepared = prepare_mesh_render(source_mesh, face_chunk_size=2)
         assert prepared is not None
@@ -213,3 +251,35 @@ class TestPrepareSceneRender:
         monkeypatch.setattr(np, "empty", allocate)
         with pytest.raises(GeometryError, match="scene_resource_limit"):
             prepare_scene_render(scene)
+
+
+class TestDeferredNormalHelpers:
+    def test_reuses_canonical_welding_without_requantizing(
+        self, source_mesh, monkeypatch
+    ):
+        from printstash_core.mesh import render_geometry
+
+        expected = render_geometry.prepare_mesh_render(source_mesh)
+        geometry = render_geometry.prepare_mesh(source_mesh)
+        identities = render_geometry.weld_positions(geometry)
+        assert not identities.flags.writeable
+        monkeypatch.setattr(
+            render_geometry,
+            "weld_positions",
+            lambda *_: pytest.fail("welding repeated"),
+        )
+        actual = render_geometry.prepare_normals(geometry, position_ids=identities)
+        np.testing.assert_array_equal(actual.position_ids, expected.position_ids)
+        np.testing.assert_array_equal(actual.smooth_normals, expected.smooth_normals)
+
+    @pytest.mark.parametrize(
+        "identities", [[0, 1], [-1, 0, 1, 2], [0, 1, 2, 4], [0.0, 1.0, 2.0, 3.0]]
+    )
+    def test_rejects_invalid_shared_identities(self, source_mesh, identities):
+        from printstash_core.mesh import render_geometry
+
+        geometry = render_geometry.prepare_mesh(source_mesh)
+        with pytest.raises(ValueError, match="invalid_render_welding"):
+            render_geometry.prepare_normals(
+                geometry, position_ids=np.asarray(identities)
+            )

@@ -54,7 +54,9 @@ class Residency:
         ):
             if self.used + size <= self.capacity:
                 break
-            if not self.entries[key].pins:
+            entry = self.entries.get(key)
+            # An owner's release callback may retire its child allocations.
+            if entry is not None and not entry.pins:
                 self.remove(key)
         if self.used + size > self.capacity:
             raise ComputeUnavailable(Reason.CAPACITY)
@@ -78,8 +80,17 @@ class Residency:
         entry.release()
         del self.entries[key]
 
+    def evict_idle(self) -> None:
+        for key in list(self.entries):
+            entry = self.entries.get(key)
+            if entry is not None and not entry.pins:
+                self.remove(key)
+
     def expire(self, now: float, idle_seconds: float = 300) -> None:
-        for key, entry in list(self.entries.items()):
+        for key in list(self.entries):
+            entry = self.entries.get(key)
+            if entry is None:
+                continue
             timeout = (
                 min(60, idle_seconds) if key.startswith("geometry:") else idle_seconds
             )

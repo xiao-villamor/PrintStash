@@ -46,6 +46,7 @@ class Dispatcher:
         self.renderer = None
         self.queue_seconds = self.execution_seconds = 0.0
         self.input_bytes = self.output_bytes = self.batch_inputs = 0
+        self.render_interactive_requests = self.render_background_requests = 0
         self.residency_hits = self.residency_misses = 0
         self.host_sizes = {}
         self.host_claim = None
@@ -163,6 +164,14 @@ class Dispatcher:
             if self.renderer is not None
             else 0,
             render_frames=self.renderer.submissions if self.renderer is not None else 0,
+            render_batch_model_counts=tuple(self.renderer.batch_model_counts)
+            if self.renderer is not None
+            else (0,) * 8,
+            render_batch_frame_counts=tuple(self.renderer.batch_frame_counts)
+            if self.renderer is not None
+            else (0,) * 8,
+            render_interactive_requests=self.render_interactive_requests,
+            render_background_requests=self.render_background_requests,
             render_cache_hits=self.renderer.output_hits
             if self.renderer is not None
             else 0,
@@ -171,6 +180,27 @@ class Dispatcher:
             geometry_input_bytes=self.geometry_cache.transferred,
             geometry_input_cache_hits=self.geometry_cache.hits,
             geometry_input_cache_bytes=self.geometry_cache.used,
+            geometry_gpu_uploads=self.renderer.gpu_geometry_uploads
+            if self.renderer is not None
+            else 0,
+            geometry_cpu_uploads=self.renderer.cpu_geometry_uploads
+            if self.renderer is not None
+            else 0,
+            geometry_gpu_normal_uploads=self.renderer.geometry_gpu_normal_uploads
+            if self.renderer is not None
+            else 0,
+            geometry_cpu_normal_fallbacks=self.renderer.geometry_cpu_normal_fallbacks
+            if self.renderer is not None
+            else 0,
+            geometry_normal_seconds=self.renderer.geometry_normal_seconds
+            if self.renderer is not None
+            else 0,
+            geometry_packing_min_faces=self.renderer.packing_min_faces
+            if self.renderer is not None
+            else None,
+            geometry_packing_seconds=self.renderer.geometry_packing_seconds
+            if self.renderer is not None
+            else 0,
             geometry_upload_bytes=self.renderer.transfers
             if self.renderer is not None
             else 0,
@@ -222,7 +252,8 @@ class Dispatcher:
                 <= available
             ):
                 break
-            if candidate != key and not self.memory.entries[candidate].pins:
+            entry = self.memory.entries.get(candidate)
+            if candidate != key and entry is not None and not entry.pins:
                 self.memory.remove(candidate)
         if (
             sum(self.host_sizes.values()) - self.host_sizes.get(key, 0) + size
@@ -364,17 +395,16 @@ class Dispatcher:
         try:
             from .recovery import execute
 
-            def evict():
-                for idle in list(self.memory.entries):
-                    if not self.memory.entries[idle].pins:
-                        self.memory.remove(idle)
-
-            return execute(self.workers[key], payload, request.deadline, evict)
+            return execute(
+                self.workers[key], payload, request.deadline, self.memory.evict_idle
+            )
         finally:
             self.memory.unpin(key)
 
     def execute_render_batch(self, requests: list[RenderRequest]) -> list[bytes]:
-        deadline = min(request.deadline for request in requests)
+        # Shared execution stays bounded while an admitted member is still live.
+        # The broker fences each original deadline independently at delivery.
+        deadline = max(request.deadline for request in requests)
         if time.monotonic() >= deadline:
             raise ComputeUnavailable(Reason.DEADLINE)
         self.active_deadline = deadline
@@ -448,7 +478,7 @@ class Dispatcher:
                 )
                 device_bytes = max(device_bytes, receipt.peak_device_bytes)
                 host_bytes = max(host_bytes, receipt.peak_host_bytes)
-        deadline = min(request.deadline for request in requests)
+        deadline = max(request.deadline for request in requests)
         self.admit_host(deadline)
         key = "renderer"
         if key in self.memory.entries and self.memory.entries[key].size < device_bytes:
@@ -499,9 +529,7 @@ class Dispatcher:
             except Exception as exc:
                 if not allocation_failure(exc):
                     raise
-            for idle in list(self.memory.entries):
-                if not self.memory.entries[idle].pins:
-                    self.memory.remove(idle)
+            self.memory.evict_idle()
             if time.monotonic() >= deadline:
                 raise ComputeUnavailable(Reason.DEADLINE)
             try:
@@ -514,8 +542,15 @@ class Dispatcher:
             self.memory.unpin(key)
 
     def close(self) -> None:
-        for key in sorted(self.memory.entries, key=lambda key: key == "runtime"):
-            entry = self.memory.entries[key]
+        # Renderer close fences pending work and retires its pinned staging and
+        # completion buffer. Close that owner before its child ledger entries;
+        # the native device is destroyed only after every other allocation.
+        for key in sorted(
+            self.memory.entries, key=lambda key: (key != "renderer", key == "runtime")
+        ):
+            entry = self.memory.entries.get(key)
+            if entry is None:
+                continue
             while entry.pins:
                 self.memory.unpin(key)
             self.memory.remove(key)

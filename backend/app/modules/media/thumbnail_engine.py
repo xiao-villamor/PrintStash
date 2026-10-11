@@ -35,7 +35,6 @@ from app.modules.media import (
     mesh_render,
     mesh_resources,
     stl_fallback,
-    stl_streaming,
 )
 from app.modules.media.fingerprints import (
     FingerprintResult,
@@ -82,7 +81,6 @@ from app.modules.media.mesh_telemetry import (
     PhaseOutcome,
     PhaseRecorder,
 )
-from app.modules.media.scene_measurements import VolumeTopologyRequired, measure_scene
 from app.modules.media.stl_reader import (
     InvalidSTL,
     STLMeasurements,
@@ -448,6 +446,11 @@ class ThumbnailEngine:
                                     }
                                 )
                         elif source_scene is not None:
+                            from app.modules.media.scene_measurements import (
+                                VolumeTopologyRequired,
+                                measure_scene,
+                            )
+
                             # Unique-resource topology caches also own native cycles.
                             # Release them before rendering, even without fingerprints.
                             scene_cleanup_pending = True
@@ -627,6 +630,8 @@ class ThumbnailEngine:
                             if release_buffers:
                                 mesh_policy.reclaim_memory()
                             phases.start(MeshPhase.STREAMING, input_bytes=source_bytes)
+                            from app.modules.media import stl_streaming
+
                             streamed = (
                                 stl_streaming.render_stl_preview_isolated(
                                     request.path,

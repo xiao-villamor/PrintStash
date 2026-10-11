@@ -11,6 +11,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from printstash_core.inference import EmbeddingError
 from pydantic import ValidationError
@@ -18,7 +19,7 @@ from pydantic import ValidationError
 from app.core.config import settings
 from app.modules.media.native_process import process_rss_bytes
 
-from .batching import merge
+from .batching import merge, render_batch_fits
 from .budget import QueueBudget
 from .contracts import ComputeMode, ComputeUnavailable, Reason
 from .dispatcher import Dispatcher
@@ -51,6 +52,25 @@ class Ticket:
 
 def error(reason: Reason) -> bytes:
     return encode({"error": reason.value})
+
+
+def active_tickets[T: Ticket](tickets: list[T], now: float) -> list[T]:
+    """Retire withdrawn members before shared execution can consume their inputs."""
+    active = []
+    for ticket in tickets:
+        if ticket.cancelled.is_set():
+            ticket.result = error(Reason.CANCELLED)
+        elif ticket.request.deadline <= now:
+            ticket.result = error(Reason.DEADLINE)
+        else:
+            active.append(ticket)
+            continue
+        if isinstance(ticket.request, BinaryRenderRequest):
+            # Detach scheduler-owned array references before the handler may
+            # release its upload reservation and final geometry-cache pin.
+            ticket.request._decoded = None
+        ticket.ready.set()
+    return active
 
 
 def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
@@ -101,6 +121,7 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                 while not pending.empty():
                     waiting.append(pending.get_nowait())
                 now = time.monotonic()
+                waiting = active_tickets(waiting, now)
                 waiting.sort(
                     key=lambda t: (
                         t.request.priority != Priority.INTERACTIVE
@@ -190,6 +211,18 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                     ):
                         waiting.append(ticket)
                         continue
+                    from app.modules.media.gpu_geometry import GPU_PACK_MIN_FACES
+
+                    packing_min_faces = (
+                        dispatcher.renderer.packing_min_faces
+                        if dispatcher.renderer is not None
+                        else GPU_PACK_MIN_FACES
+                    )
+                    device_bytes = dispatcher.memory.capacity - sum(
+                        entry.size
+                        for entry in tuple(dispatcher.memory.entries.values())
+                        if entry.pins
+                    )
                     for candidate in list(waiting):
                         if len(group) >= 8:
                             break
@@ -199,12 +232,34 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                             and candidate.request.recipe == ticket.request.recipe
                             and not candidate.cancelled.is_set()
                             and candidate.request.deadline > time.monotonic()
+                            and render_batch_fits(
+                                [member.request for member in (*group, candidate)],
+                                device_bytes=device_bytes,
+                                packing_min_faces=packing_min_faces,
+                            )
                         ):
                             group.append(candidate)
                             waiting.remove(candidate)
                     render_group = len(group) > 1
 
                 waiting_count = len(waiting)
+                # A member can expire or disconnect during bounded coalescing.
+                # Its independent owner may release input credits only after
+                # this retirement; survivors retain their existing ticket order.
+                had_inference_batch = batch is not None
+                batch = combined = None
+                group = active_tickets(group, time.monotonic())
+                if not group:
+                    ticket = candidate = arrival = None
+                    batch = combined = None
+                    continue
+                ticket = group[0]
+                render_group = render_group and len(group) > 1
+                if had_inference_batch:
+                    # Only inference tickets can have produced this batch.
+                    batch = merge(
+                        [cast(InferenceRequest, member.request) for member in group]
+                    )
 
                 def encode_output(member, result):
                     if isinstance(member.request, BinaryRenderRequest):
@@ -358,6 +413,7 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                     from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
                     from app.modules.media.compute_geometry import (
+                        body_size,
                         decode_arrays,
                         decode_header,
                         identity,
@@ -366,8 +422,7 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                     counts, width, height, views, matte = decode_header(
                         request.header.encode()
                     )
-                    n, f, k = counts
-                    if request.geometry_bytes != n * 20 + f * 24 + k * 24:
+                    if request.geometry_bytes != body_size(counts):
                         raise ValueError("compute_geometry_size")
                     factor = PREVIEW_PROFILE.supersample_for(width)
                     output_reserved = 3 * (
@@ -414,9 +469,18 @@ def serve(root: Path, *, dispatcher_factory=Dispatcher) -> None:
                     )
                 ticket = Ticket(request, time.monotonic())
                 pending.put_nowait(ticket)
+                if isinstance(request, (RenderRequest, BinaryRenderRequest)):
+                    if request.priority is Priority.INTERACTIVE:
+                        dispatcher.render_interactive_requests += 1
+                    else:
+                        dispatcher.render_background_requests += 1
                 while not ticket.ready.wait(0.05):
                     if stop.is_set() or time.monotonic() >= request.deadline:
                         ticket.cancelled.set()
+                        if not stop.is_set():
+                            # Report the actual expiry before closing; an EOF
+                            # otherwise looks like peer cancellation to callers.
+                            send(connection, error(Reason.DEADLINE))
                         return
                     if peer_disconnected(connection):
                         ticket.cancelled.set()

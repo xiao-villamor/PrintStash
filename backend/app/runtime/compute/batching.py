@@ -142,3 +142,52 @@ def merge(requests: list[InferenceRequest]) -> Batch | None:
         tuple(len(message.inputs) for message in messages),
         reference.config_hash,
     )
+
+
+def render_batch_fits(
+    requests, *, device_bytes: int, packing_min_faces: int | None = None
+) -> bool:
+    """Pack validated binary inputs without decoding during coalescing.
+
+    Legacy requests retain dispatcher admission. Binary callers have already
+    paid independent input/output reservations before entering the ready queue.
+    This preflight leaves a request queued when the combined frame/workspace
+    budget cannot fit; the dispatcher still owns final residency admission.
+    """
+    from .contracts import ComputeUnavailable
+    from .protocol import MAX_FRAME, BinaryRenderRequest
+    from .render_policy import admission_decoded
+
+    if not all(isinstance(request, BinaryRenderRequest) for request in requests):
+        return True
+    if any(request._decoded is None for request in requests):
+        return False
+    try:
+        requirement = admission_decoded(
+            [request._decoded for request in requests],
+            [request.geometry_bytes for request in requests],
+            [request.recipe for request in requests],
+            [request.units for request in requests],
+            gpu_finalize=True,
+        )
+    except ValueError, ComputeUnavailable:
+        return False
+    geometry = {
+        request.geometry_key: request._decoded[0].face_count * 96
+        for request in requests
+    }
+    from app.modules.media.gpu_geometry import input_sizes
+    from app.modules.media.gpu_normals import DeferredRender, device_input_bytes
+
+    staging = {}
+    for request in requests:
+        prepared = request._decoded[0]
+        if isinstance(prepared, DeferredRender):
+            staging[request.geometry_key] = device_input_bytes(prepared)
+        elif packing_min_faces is not None and prepared.face_count >= packing_min_faces:
+            staging[request.geometry_key] = sum(input_sizes(prepared))
+    return (
+        requirement.readback_bytes + 13 <= MAX_FRAME
+        and requirement.device_bytes + sum(geometry.values()) + sum(staging.values())
+        <= device_bytes
+    )

@@ -77,6 +77,26 @@ def _volume_from_closed_mesh(mesh: Trimesh) -> VolumeMeasured | VolumeUnavailabl
     return VolumeMeasured(integral)
 
 
+def _has_sequential_facets(mesh: Trimesh) -> bool:
+    """Recognize independent STL facet indices without building edge topology.
+
+    Each consecutive triple owns its vertices, so no two faces can share an
+    indexed edge. This proves only that welding is required before evaluating
+    volume; the welded copy still follows every canonical topology check.
+    """
+    import numpy as np
+
+    faces = mesh.faces
+    if len(mesh.vertices) != faces.size:
+        return False
+    for offset in range(0, len(faces), _VOLUME_INTEGRAL_BATCH_FACES):
+        end = min(offset + _VOLUME_INTEGRAL_BATCH_FACES, len(faces))
+        expected = np.arange(offset * 3, end * 3).reshape(-1, 3)
+        if not np.array_equal(faces[offset:end], expected):
+            return False
+    return True
+
+
 def geometry_from_mesh(mesh: Trimesh | None) -> MeshMeasurements:
     unavailable = MeshMeasurements.unavailable()
     if mesh is None:
@@ -100,7 +120,7 @@ def geometry_from_mesh(mesh: Trimesh | None) -> MeshMeasurements:
 
     try:
         measured = mesh
-        if not measured.is_watertight:
+        if _has_sequential_facets(measured) or not measured.is_watertight:
             # STL stores independent facet vertices. A measurement copy welds
             # them without repairing winding or changing source buffers.
             measured = mesh.copy()

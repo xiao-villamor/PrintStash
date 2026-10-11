@@ -47,6 +47,40 @@ def run_worker(tmp_path, monkeypatch):
 
 
 class TestMain:
+    @pytest.mark.parametrize("job_priority", ["interactive", "backfill"], ids=str)
+    def test_derivative_frames_use_batchable_compute_dispatch(
+        self, run_worker, monkeypatch, job_priority
+    ):
+        import struct
+
+        from app.core.work_priority import WorkPriority, priority_scope
+        from app.modules.media import compute_render
+        from app.runtime.compute.protocol import Priority
+
+        observed = []
+        monkeypatch.setattr(compute_render.client, "available", lambda **kw: True)
+
+        def exchange(request, body, **kw):
+            observed.append((request.priority, bool(body)))
+            return b"\x01" + struct.pack("!III", 16, 12, 1) + bytes([20, 40, 60, 255]) * 192
+
+        monkeypatch.setattr(compute_render.client, "exchange_render", exchange)
+        with priority_scope(WorkPriority(job_priority)):
+            status, reply = run_worker(width=16, height=12)
+
+        from pathlib import Path
+
+        from app.modules.media.mesh_contracts import ThumbnailRequest
+        from app.modules.media.mesh_protocol import FrameDecoder, ThumbnailOutput
+
+        decoder = FrameDecoder(ThumbnailRequest(Path("cube.stl"), width=16, height=12))
+        frames = list(decoder.feed(reply))
+        decoder.finish()
+        thumbnail = next(frame for frame in frames if isinstance(frame, ThumbnailOutput))
+        assert status == 0
+        assert thumbnail.image is not None
+        assert observed == [(Priority.BACKGROUND, True)]
+
     def test_writes_requested_basics_before_terminal_frame(self, run_worker):
         from pathlib import Path
 

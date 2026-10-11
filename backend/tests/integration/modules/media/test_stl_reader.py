@@ -7,7 +7,13 @@ import pytest
 from printstash_core.mesh.similarity import GeometryError
 
 from app.modules.media import mesh_loading, stl_fallback, stl_streaming
-from app.modules.media.stl_reader import InvalidSTL, scan_stl
+from app.modules.media.stl_reader import (
+    InvalidSTL,
+    STLBudgetExceeded,
+    STLReadLimits,
+    count_ascii_triangles,
+    scan_stl,
+)
 from tests.factories import content
 
 FACETS = [
@@ -462,3 +468,44 @@ class TestSampleFingerprintRecipe:
         assert values["eigen_ratio_0"] == pytest.approx(
             golden["eigen_ratio_0"], rel=1e-10
         )
+
+
+class TestCountAsciiTriangles:
+    def test_validates_complete_source_facets(self, tmp_path):
+        source = tmp_path / "mesh.stl"
+        source.write_bytes(content.ascii_stl_facets(FACETS))
+
+        count = count_ascii_triangles(source, limits=STLReadLimits())
+
+        assert count == 2
+
+    def test_preserves_missing_endsolid_compatibility(self, tmp_path):
+        source = tmp_path / "mesh.stl"
+        source.write_bytes(content.ascii_stl_facets(FACETS).split(b"endsolid")[0])
+
+        count = count_ascii_triangles(source, limits=STLReadLimits())
+
+        assert count == 2
+
+    @pytest.mark.parametrize(
+        "limits,message",
+        [
+            pytest.param(
+                STLReadLimits(max_triangles=1, deadline=1e12),
+                "triangle budget",
+                id="triangles",
+            ),
+            pytest.param(
+                STLReadLimits(max_source_bytes=1, deadline=1e12),
+                "source budget",
+                id="bytes",
+            ),
+            pytest.param(STLReadLimits(deadline=0), "deadline", id="deadline"),
+        ],
+    )
+    def test_refuses_incomplete_bounded_count(self, tmp_path, limits, message):
+        source = tmp_path / "mesh.stl"
+        source.write_bytes(content.ascii_stl_facets(FACETS))
+
+        with pytest.raises(STLBudgetExceeded, match=message):
+            count_ascii_triangles(source, limits=limits)

@@ -19,7 +19,11 @@ A descriptor lock elects one host-local broker per data root. API processes, wor
 
 The broker owns execution only. It accepts bounded JSON and validated immutable array frames, never Python mesh objects or file parsing requests. Existing Jobs recover unfinished work after broker/client death. Existing source, generation and attempt fences decide whether results may publish.
 
-Geometry buffers are keyed by content, array descriptors and preparation recipe, and uploaded once for all cameras. Up to eight compatible ready render frames share a completion/readback fence. The scheduler can coalesce independently admitted background Artifacts for at most 10 ms; interactive requests dispatch immediately and aged background work retains service. A batch that cannot fit is re-admitted as individual requests with the original deadlines. No parser is started to fill a batch, and singleton qualification never certifies cross-Artifact batching.
+Geometry buffers are keyed by content, array descriptors and preparation recipe, and uploaded once for all cameras. Up to eight compatible ready render frames share a completion/readback fence. Packing counts cameras across requests and checks device/readback budgets: two four-view requests can share a batch, while a third waits for the next one. The scheduler coalesces independently admitted background work for at most 10 ms from the original ready-work window; interactive requests dispatch immediately and aged background work retains service. No parser is started to fill a batch, and singleton qualification never certifies cross-Artifact batching.
+
+Scheduling priority is explicitly propagated across disposable-worker exec. Thumbnail/derivative work in the mesh worker also enters a background render scope, allowing its prepared frames to coalesce while the Job and native admission keep their original priority. Direct interactive rendering retains interactive compute dispatch. A ContextVar default alone cannot preserve the parent's priority across exec.
+
+Members are revalidated individually before execution. An expired or cancelled member receives its own result without invalidating live members; the shared watchdog accommodates the remaining live deadlines. Each output keeps its original deadline, cancellation and publication fences. Retired decoded geometry is released before its handler can return queue credits. Final admission can split an over-budget batch into individually admitted requests. See the [ready-model batching diagnosis and coverage matrix](testing/compute-model-batching.md) for the preparation corrections and pending 1000-model comparison.
 
 A 32 MiB host cache retains final RGBA frames by full validated input and recipe, avoiding repeated projection/shading/postprocessing. The shared GPU ledger pins active geometries and can keep several models resident; readback slots, projected buffers and attachments are pooled. Shaders are compiled once per renderer lifetime. Canonical postprocessing is shared with CPU, without allocating the CPU rasterizer's screen/depth/shading arrays in the GPU path. Only visual work warms the owner before entering a disposable parser; metadata-only work avoids that startup. Persistent ownership amortizes startup across a 40-model import even when the durable derivative lane is sequential. Shader pipelines, projected buffers and framebuffers stay warm. Submissions complete at bounded frame readback without per-face-chunk synchronization. Idle geometry is evicted before weights and expires after 60 seconds. Model sessions expire after 300 seconds. Active allocations are pinned in one shared device ledger. Separate host reservations use the existing inference RAM partition; parser credits remain held until their processes and buffers die.
 
@@ -44,7 +48,7 @@ Portable runtimes do not expose dependable free-device-memory information on eve
 
 A staging handshake reserves aggregate queue bytes before clients upload request bodies. Capacity refusal preserves the healthy owner and routes that item back to CPU; it does not start the infrastructure cooldown. Host staging is charged separately from GPU bytes and broker RSS is monitored. Stop all deployment processes before changing native memory policies, as for existing native quotas.
 
-Administrator-only **GET /api/v1/system/compute** reports hardware/runtime identity, readiness reasons, resident model identities, device/host reservations, queue bytes, queue/execution/cold-start times, rendering transfers, batches, cache hits and fallback counts. Render counters include completion batches, submitted frames, shaded-output cache hits and geometry upload bytes. ONNX is initialized only by an inference request; thumbnail startup never probes it. ONNX transfers remain included in execution time rather than reported as separately measured telemetry.
+Administrator-only **GET /api/v1/system/compute** reports hardware/runtime identity, readiness reasons, resident model identities, device/host reservations, queue bytes, queue/execution/cold-start times, rendering transfers, batches, cache hits and fallback counts. Render counters include completion batches, submitted frames, shaded-output cache hits and geometry upload bytes. `render_interactive_requests` and `render_background_requests` count admitted render requests. `render_batch_model_counts` and `render_batch_frame_counts` contain eight exact bins for one through eight model inputs or frames per completed readback batch. Model inputs count requests with uncached output, not unique geometry keys; completely cached outputs add no batch. The histograms distinguish multiple cameras of one input from multiple inputs in a batch. ONNX is initialized only by an inference request; thumbnail startup never probes it. ONNX transfers remain included in execution time rather than reported as separately measured telemetry.
 
 ## Linux, Docker and WSL
 
@@ -128,7 +132,7 @@ uv run --extra gpu-render pytest tests/integration/modules/media/webgpu_render_d
 
 The diagnostic allows software adapters for development and must never generate an automatic-selection receipt. Physical qualification must separately cover Linux, Docker and WSL configurations on representative NVIDIA, AMD and Intel systems. Keep injected allocation errors, killed processes and actual hardware OOM/device-loss evidence separate.
 
-Thumbnail recipe 12 and canonical raster recipe qualified-portable-v3 version output behavior independently of device. Device choice never changes embedding-space identity; changed models, preprocessing or precision still require the existing generation workflow.
+Thumbnail recipe 13 and canonical raster recipe qualified-portable-v4 version output behavior independently of device. Device choice never changes embedding-space identity; changed models, preprocessing or precision still require the existing generation workflow.
 
 
 ## Render transfer and postprocessing lifecycle
@@ -160,5 +164,48 @@ Administrator diagnostics include render_postprocess_gpu, geometry_input_bytes,
 geometry_input_cache_hits and geometry_input_cache_bytes. Input transfer counters
 measure accepted uploads; device upload counters measure GPU transfers separately.
 Runtime identity includes the postprocessing implementation, so older qualification
-receipts cannot silently qualify it. Pixel semantics and output recipes are unchanged.
+receipts cannot silently qualify it. Postprocessing preserves the pinned pixel
+semantics; the later preparation and encoding changes are versioned below.
 See [correction evidence and coverage](testing/compute-render-performance.md).
+
+
+## Indexed packing and deferred normals
+
+The render adapter keeps source parsing, exact measurements and canonical
+position welding on CPU. For eligible geometry with at least 20,000 faces, it
+sends relative positions, triangle indices and weld identities without first
+computing CPU smooth normals. The private descriptor explicitly tags this
+representation; it cannot alias a prepared-normal cache entry. Both encoded and
+old-equivalent input size must fit the existing 48 MiB geometry ceiling.
+
+Inside the admitted owner, bounded stable CSR adjacency feeds portable WGSL
+normal accumulation and indexed packing. The buffers are shared with rendering;
+normal arrays are not downloaded. Per-geometry status words share the final
+frame completion fence. Excessive valence, unsupported numerical ranges, failed
+canaries and ill-conditioned arithmetic use canonical CPU normals for that
+model. Healthy batch members retain their completed outputs. Unverified GPU
+geometry is never retained for later reuse. Small models retain CPU preparation.
+
+Host CSR/fallback scratch is reserved separately from GPU inputs, face terms,
+normal outputs and status buffers. Active allocations remain pinned through
+completion, including exceptional cleanup. Numerical retries run one geometry
+at a time so their host peak matches the admitted scratch bound. GPU contexts,
+shaders and reusable geometry remain resident across independently admitted Jobs;
+source parsers remain disposable.
+
+Administrator counters distinguish `geometry_gpu_uploads`,
+`geometry_cpu_uploads`, `geometry_gpu_normal_uploads` and
+`geometry_cpu_normal_fallbacks`. GPU normal uploads count submissions, including
+later numerical refusals. `geometry_packing_seconds` and
+`geometry_normal_seconds` include host submission/preparation time; they are
+not GPU timestamp measurements. Completed-readback histograms can include a
+numerically refused attempt followed by its bounded retry.
+
+Accelerated images now use the same canonical lossless WebP encoder as CPU
+images. Thumbnail recipe 13, raster recipe `qualified-portable-v4`, visual recipe
+`canonical-views-media-thumbnail-v4` and compute recipe
+`webgpu-canonical-raster-v3` invalidate affected old outputs and evidence. Exact
+geometry recipe 12, fingerprints, point inputs and paired model identity remain
+unchanged. No optional inference feature is enabled by discovery or rendering.
+The [measurement and coverage record](testing/compute-model-batching.md) keeps
+preparation microbenchmarks separate from full ingestion and operator review.

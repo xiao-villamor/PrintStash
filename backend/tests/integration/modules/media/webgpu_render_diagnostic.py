@@ -62,6 +62,8 @@ class TestWebGpuRender:
         assert renderer.transfers == transferred == prepared.face_count * 96
         assert renderer.output_hits == 1
         assert renderer.readback_batches == 1
+        assert renderer.batch_model_counts == [1, 0, 0, 0, 0, 0, 0, 0]
+        assert renderer.batch_frame_counts == [0, 1, 0, 0, 0, 0, 0, 0]
         assert renderer.submissions == 2
         actual = np.frombuffer(first[12 : 12 + size], dtype=np.uint8).reshape(-1, 4)
         baseline = np.frombuffer(expected.rgba, dtype=np.uint8).reshape(-1, 4)
@@ -109,6 +111,8 @@ class TestWebGpuRender:
         assert len(outputs) == 2
         assert outputs[0] != outputs[1]
         assert renderer.readback_batches == 1
+        assert renderer.batch_model_counts == [0, 1, 0, 0, 0, 0, 0, 0]
+        assert renderer.batch_frame_counts == [0, 1, 0, 0, 0, 0, 0, 0]
         assert renderer.submissions == 2
         assert renderer.uploads == 2
         assert len(renderer.geometry) == 2
@@ -117,6 +121,188 @@ class TestWebGpuRender:
         assert [renderer.execute(p) for p in payloads] == outputs
         assert renderer.uploads == 2
         assert renderer.cache_hits == 2
+        assert renderer.batch_model_counts == [2, 1, 0, 0, 0, 0, 0, 0]
+        assert renderer.batch_frame_counts == [2, 1, 0, 0, 0, 0, 0, 0]
+
+    def test_packs_indexed_models_on_gpu(self, gpu_device):
+        import trimesh
+
+        prepared = prepare_mesh_render(trimesh.creation.icosphere(subdivisions=2))
+        payload = encode(prepared, 64, 64, [None], False)
+        baseline = Renderer(gpu_device, packing_min_faces=None)
+        candidate = Renderer(gpu_device, packing_min_faces=1)
+        try:
+            expected = baseline.execute(payload)
+            actual = candidate.execute(payload)
+
+            assert candidate.gpu_geometry_uploads == 1
+            assert candidate.cpu_geometry_uploads == 0
+            assert candidate.packer is not None
+            assert candidate.packer.pending == []
+            assert not any(
+                key.startswith("packing:") for key in candidate.memory.entries
+            )
+            old = np.frombuffer(expected[12:], dtype=np.uint8).reshape(-1, 4)
+            new = np.frombuffer(actual[12:], dtype=np.uint8).reshape(-1, 4)
+            np.testing.assert_array_equal(new[:, 3], old[:, 3])
+            assert np.abs(new.astype(int) - old.astype(int)).max() <= 8
+        finally:
+            baseline.close()
+            candidate.close()
+            for key in list(baseline.memory.entries):
+                baseline.memory.remove(key)
+            for key in list(candidate.memory.entries):
+                candidate.memory.remove(key)
+
+    def test_reuses_renderer_after_unrendered_packing(self, gpu_device):
+        import trimesh
+
+        prepared = prepare_mesh_render(trimesh.creation.box())
+        owner = Renderer(gpu_device, packing_min_faces=1)
+        try:
+            owner.upload(prepared, "cleanup:first")
+            first = owner.packer
+            assert first is not None and first.pending
+
+            # No rendered frame has mapped a readback. Exercise the actual
+            # preallocated cleanup fence, including after workspace eviction.
+            owner.close()
+            assert first.pending == []
+            assert first.fence.closed
+            assert owner.packer is None
+            owner.upload(prepared, "cleanup:second")
+            assert owner.gpu_geometry_uploads == 2
+            assert owner.packer is not None and owner.packer is not first
+            owner.close()
+            assert not any(key.startswith("packing") for key in owner.memory.entries)
+        finally:
+            owner.close()
+            for key in list(owner.memory.entries):
+                owner.memory.remove(key)
+        assert owner.memory.used == 0
+
+    def test_preserves_healthy_members_during_normal_recovery(self, gpu_device):
+        import trimesh
+        from printstash_core.mesh.render_geometry import prepare_mesh
+
+        from app.modules.media.gpu_normals import canonical, defer
+
+        healthy = trimesh.creation.box()
+        vertices = np.asarray([[1.0, 2.0, 3.0], [2.25, -1.0, 1.5], [-0.5, 3.75, 2.1]])
+        opposed = np.asarray([[0, 1, 2], [0, 2, 1]])
+        meshes = [
+            healthy,
+            trimesh.Trimesh(vertices=vertices, faces=opposed, process=False),
+            trimesh.Trimesh(vertices=vertices * 1.5, faces=opposed, process=False),
+        ]
+        deferred = [defer(prepare_mesh(mesh)) for mesh in meshes]
+        baseline = Renderer(gpu_device, packing_min_faces=1)
+        candidate = Renderer(gpu_device, packing_min_faces=1)
+        try:
+            expected = baseline.execute_many(
+                [encode(canonical(item), 64, 64, [None], False) for item in deferred]
+            )
+            payloads = [encode(item, 64, 64, [None], False) for item in deferred]
+            actual = candidate.execute_many(payloads)
+
+            assert candidate.geometry_gpu_normal_uploads == 3
+            assert candidate.geometry_cpu_normal_fallbacks == 2
+            assert candidate.readback_batches == 3
+            assert candidate.batch_model_counts == [2, 0, 1, 0, 0, 0, 0, 0]
+            assert candidate.uploads == 5
+            assert actual[1:] == expected[1:]
+            old = np.frombuffer(expected[0][12:], dtype=np.uint8).reshape(-1, 4)
+            new = np.frombuffer(actual[0][12:], dtype=np.uint8).reshape(-1, 4)
+            np.testing.assert_array_equal(new[:, 3], old[:, 3])
+            assert np.abs(new.astype(int) - old.astype(int)).max() <= 8
+            assert candidate.unverified_normals == set()
+            assert candidate.packer is not None and candidate.packer.pending == []
+            assert candidate.execute_many(payloads) == actual
+            assert candidate.readback_batches == 3
+        finally:
+            baseline.close()
+            candidate.close()
+            for owner in (baseline, candidate):
+                for key in list(owner.memory.entries):
+                    owner.memory.remove(key)
+
+    @pytest.mark.parametrize(
+        ("shape", "fallbacks"), [("sphere", 0), ("sliver", 0), ("subnormal_facet", 1)]
+    )
+    def test_preserves_rendered_pixels_with_deferred_normals(
+        self, gpu_device, shape, fallbacks
+    ):
+        import trimesh
+        from printstash_core.mesh.render_geometry import prepare_mesh
+
+        from app.modules.media.gpu_normals import canonical, defer
+
+        if shape == "sphere":
+            mesh = trimesh.creation.icosphere(subdivisions=3)
+        elif shape == "sliver":
+            mesh = trimesh.creation.box(extents=[40, 20, 0.001])
+        else:
+            # Keep a visible protected body while one nonzero cross enters the
+            # driver's subnormal range. Only this geometry should be retried.
+            tiny = trimesh.Trimesh(
+                vertices=[[0, 0, 0], [1e-20, 0, 0], [0, 1e-20, 0]],
+                faces=[[0, 1, 2]],
+                process=False,
+            )
+            mesh = trimesh.util.concatenate([trimesh.creation.box(), tiny])
+        prepared = defer(prepare_mesh(mesh))
+        baseline = Renderer(gpu_device, packing_min_faces=1)
+        candidate = Renderer(gpu_device, packing_min_faces=1)
+        try:
+            expected = baseline.execute(
+                encode(canonical(prepared), 224, 224, [None], False)
+            )
+            payload = encode(prepared, 224, 224, [None], False)
+            actual = candidate.execute(payload)
+
+            assert candidate.geometry_gpu_normal_uploads == 1
+            assert candidate.geometry_cpu_normal_fallbacks == fallbacks
+            assert candidate.readback_batches == 1 + fallbacks
+            old = np.frombuffer(expected[12:], dtype=np.uint8).reshape(-1, 4)
+            new = np.frombuffer(actual[12:], dtype=np.uint8).reshape(-1, 4)
+            np.testing.assert_array_equal(new[:, 3], old[:, 3])
+            assert np.abs(new.astype(int) - old.astype(int)).max() <= 8
+            assert candidate.execute(payload) == actual
+            assert candidate.readback_batches == 1 + fallbacks
+            assert candidate.unverified_normals == set()
+        finally:
+            for owner in (baseline, candidate):
+                owner.close()
+                for key in list(owner.memory.entries):
+                    owner.memory.remove(key)
+
+    def test_discards_unverified_normal_geometry_before_reuse(self, gpu_device):
+        import trimesh
+        from printstash_core.mesh.render_geometry import prepare_mesh
+
+        from app.modules.media.gpu_normals import defer
+
+        prepared = defer(prepare_mesh(trimesh.creation.icosphere(subdivisions=1)))
+        owner = Renderer(gpu_device, packing_min_faces=1)
+        try:
+            owner.upload(prepared, "unverified")
+            assert owner.unverified_normals == {"unverified"}
+            owner.close()
+            assert owner.geometry == {}
+            assert owner.unverified_normals == set()
+            assert owner.memory.used == 0
+
+            output = owner.execute(encode(prepared, 64, 64, [None], False))
+            assert len(output) == 12 + 64 * 64 * 4
+            assert owner.geometry_gpu_normal_uploads == 2
+            assert owner.geometry_cpu_normal_fallbacks == 0
+            assert owner.readback_batches == 1
+            assert owner.unverified_normals == set()
+        finally:
+            owner.close()
+            for key in list(owner.memory.entries):
+                owner.memory.remove(key)
+        assert owner.memory.used == 0
 
     def test_rejects_oversized_camera_batch(self, renderer):
         import trimesh
@@ -262,9 +448,11 @@ class TestGpuPostprocess:
         args = ([decoded], [renderer.geometry_key(payload, decoded[0])], ["same"])
         first = renderer.execute_prepared_many(*args, raw=True, gpu_finalize=True)
         submissions = renderer.submissions
+        batches = tuple(renderer.batch_model_counts)
         second = renderer.execute_prepared_many(*args, raw=True, gpu_finalize=True)
         assert first == second
         assert renderer.submissions == submissions
+        assert tuple(renderer.batch_model_counts) == batches
         assert renderer.output_hits == 1
 
     def test_limits_readback_after_large_batch(self, renderer, monkeypatch):

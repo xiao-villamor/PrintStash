@@ -2,7 +2,7 @@
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt
 
 
 class ComputeMode(StrEnum):
@@ -76,8 +76,25 @@ class ComputeStatus(BaseModel):
     inference_batches: int = Field(ge=0)
     render_batches: int = Field(default=0, ge=0)
     render_frames: int = Field(default=0, ge=0)
+    # Exact bins for 1..8 inputs/frames per completed readback fence.
+    render_batch_model_counts: tuple[NonNegativeInt, ...] = Field(
+        default=(0,) * 8, min_length=8, max_length=8
+    )
+    render_batch_frame_counts: tuple[NonNegativeInt, ...] = Field(
+        default=(0,) * 8, min_length=8, max_length=8
+    )
+    render_interactive_requests: int = Field(default=0, ge=0)
+    render_background_requests: int = Field(default=0, ge=0)
     render_cache_hits: int = Field(default=0, ge=0)
     geometry_upload_bytes: int = Field(default=0, ge=0)
+    geometry_gpu_uploads: int = Field(default=0, ge=0)
+    geometry_cpu_uploads: int = Field(default=0, ge=0)
+    geometry_gpu_normal_uploads: int = Field(default=0, ge=0)
+    geometry_cpu_normal_fallbacks: int = Field(default=0, ge=0)
+    geometry_normal_seconds: float = Field(default=0.0, ge=0)
+    geometry_packing_min_faces: int | None = Field(default=None, ge=1)
+    # Host preparation and upload submission; execution includes the GPU fence.
+    geometry_packing_seconds: float = Field(default=0.0, ge=0)
     render_postprocess_gpu: bool = False
     geometry_input_bytes: int = Field(default=0, ge=0)
     geometry_input_cache_hits: int = Field(default=0, ge=0)

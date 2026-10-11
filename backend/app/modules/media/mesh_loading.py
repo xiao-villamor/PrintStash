@@ -254,6 +254,24 @@ def load_mesh(path: Path, *, file_type: str | None = None) -> Trimesh | None:
         # instances. Looking only at ``loaded.geometry.values()`` would return
         # the source mesh once at its untransformed coordinates.
         try:
+            # The freshly loaded scene belongs only to this call. A single,
+            # identity-placed mesh can transfer ownership directly: dump()
+            # otherwise copies its arrays and visual data before applying a
+            # transform that changes nothing. Repeated placements and every
+            # non-identity transform still use the canonical scene flattener.
+            nodes = loaded.graph.nodes_geometry
+            if len(nodes) == 1:
+                import numpy as np
+
+                node = nodes[0]
+                transform, geometry_name = loaded.graph[node]
+                geometry = loaded.geometry[geometry_name]
+                if isinstance(geometry, trimesh.Trimesh) and np.array_equal(
+                    transform, np.eye(4)
+                ):
+                    geometry.metadata["name"] = geometry_name
+                    geometry.metadata["node"] = node
+                    return geometry
             meshes = [
                 geometry
                 for geometry in loaded.dump()

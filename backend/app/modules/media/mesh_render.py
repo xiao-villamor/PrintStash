@@ -8,18 +8,18 @@ from typing import TYPE_CHECKING, Any, Callable, Literal, Optional
 from printstash_core.mesh import rasterizer as _core
 from printstash_core.mesh.render_geometry import (
     PreparedRender,
+    PreparedRenderGeometry,
     RenderableMesh,
-)
-from printstash_core.mesh.render_geometry import (
-    prepare_mesh_render as _prepare_mesh_render,
-)
-from printstash_core.mesh.render_geometry import (
-    prepare_scene_render as _prepare_scene_render,
+    prepare_mesh,
+    prepare_normals,
+    prepare_scene,
 )
 from printstash_core.mesh.similarity.components import ExpandedScene
 
 from app.core.config import settings
 from app.core.logging import get_logger
+
+from .gpu_normals import GPU_NORMALS_MIN_FACES, RenderInput, canonical, defer, eligible
 
 if TYPE_CHECKING:
     import numpy as np
@@ -84,22 +84,34 @@ def render_mesh_thumbnail(
     )
 
 
-def prepare_mesh_render(mesh: RenderableMesh | None) -> PreparedRender | None:
-    """Prepare one owned geometry snapshot using the application chunk budget."""
-    return _prepare_mesh_render(
-        mesh, face_chunk_size=settings.mesh_render_face_chunk_size
+def _prepare_geometry(geometry: PreparedRenderGeometry) -> RenderInput:
+    from app.runtime.compute.client import available
+
+    if geometry.face_count >= GPU_NORMALS_MIN_FACES and available(render=True):
+        candidate = defer(geometry)
+        if eligible(candidate):
+            return candidate
+        return canonical(
+            candidate, face_chunk_size=settings.mesh_render_face_chunk_size
+        )
+    return prepare_normals(
+        geometry, face_chunk_size=settings.mesh_render_face_chunk_size
     )
 
 
-def prepare_scene_render(scene: ExpandedScene) -> PreparedRender:
-    """Prepare retained placements without composing a whole source mesh."""
-    return _prepare_scene_render(
-        scene, face_chunk_size=settings.mesh_render_face_chunk_size
-    )
+def prepare_mesh_render(mesh: RenderableMesh | None) -> RenderInput | None:
+    """Choose the prepared representation before computing CPU smooth normals."""
+    geometry = prepare_mesh(mesh)
+    return None if geometry is None else _prepare_geometry(geometry)
+
+
+def prepare_scene_render(scene: ExpandedScene) -> RenderInput:
+    """Retain source placements and select bounded optional normal preparation."""
+    return _prepare_geometry(prepare_scene(scene))
 
 
 def render_prepared_thumbnail(
-    prepared: PreparedRender,
+    prepared: RenderInput,
     name: str,
     width: int = 640,
     height: int = 480,
@@ -113,17 +125,11 @@ def render_prepared_thumbnail(
 
     accelerated = render(prepared, width, height, (view_rotation,), matte)
     if accelerated is not None:
-        from io import BytesIO
-
-        from PIL import Image
-
-        output = BytesIO()
-        Image.frombytes("RGBA", (width, height), accelerated[0].rgba).save(
-            output, format=output_format
-        )
-        return output.getvalue()
+        return _core.encode_rendered_pixels(accelerated[0], output_format=output_format)
     return _core.render_prepared_thumbnail(
-        prepared,
+        canonical(
+            prepared, cache=True, face_chunk_size=settings.mesh_render_face_chunk_size
+        ),
         name,
         width=width,
         height=height,
@@ -137,7 +143,7 @@ def render_prepared_thumbnail(
 
 
 def render_prepared_pixels(
-    prepared: PreparedRender,
+    prepared: RenderInput,
     name: str,
     width: int = 640,
     height: int = 480,
@@ -155,7 +161,9 @@ def render_prepared_pixels(
     if accelerated is not None:
         return accelerated[0]
     return _core.render_prepared_pixels(
-        prepared,
+        canonical(
+            prepared, cache=True, face_chunk_size=settings.mesh_render_face_chunk_size
+        ),
         name,
         width=width,
         height=height,
@@ -202,6 +210,7 @@ __all__ = [
     "FLAT_MESH_THICKNESS_RATIO",
     "RasterBudget",
     "PreparedRender",
+    "RenderInput",
     "RenderedPixels",
     "RGBBackground",
     "prepare_mesh_render",

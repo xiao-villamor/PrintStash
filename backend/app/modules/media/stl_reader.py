@@ -136,7 +136,7 @@ def binary_stl_info(path: Path) -> tuple[int, int] | None:
         ):
             return None
         return count, size
-    except (OSError, struct.error):
+    except OSError, struct.error:
         return None
 
 
@@ -239,6 +239,27 @@ def _iter_ascii_facets(
     # unambiguous and safe to accept; an unfinished loop/facet remains invalid.
     if state is not _FacetState.OUTSIDE or not saw_facet:
         raise InvalidSTL("truncated ASCII STL")
+
+
+def count_ascii_triangles(path: Path, *, limits: STLReadLimits) -> int:
+    """Validate and count a stable ASCII source without importing native arrays."""
+    with path.open("rb") as stream:
+        source = _identity(os.fstat(stream.fileno()))
+        if source != snapshot_stl(path):
+            raise STLSourceChanged("source changed while opening")
+        if source.size > limits.max_source_bytes:
+            raise STLBudgetExceeded("source budget")
+        count = 0
+        for _facet in _iter_ascii_facets(stream, limits):
+            count += 1
+            if count > limits.max_triangles:
+                raise STLBudgetExceeded("triangle budget")
+        check_deadline(limits)
+        if source != _identity(os.fstat(stream.fileno())) or source != snapshot_stl(
+            path
+        ):
+            raise STLSourceChanged("source changed while counting")
+        return count
 
 
 def iter_stl_blocks(

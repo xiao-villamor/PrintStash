@@ -62,3 +62,32 @@ remain owned until their processes and buffers exit. Binary IPC can reference
 this geometry across cameras; broker restart naturally requires a fresh upload.
 Canonical CPU finalization, when the GPU canary refuses it, runs in the already
 reserved caller. No source parser state is pooled across Artifacts.
+
+## Ready-model preparation follow-up (2026-10-11)
+
+Disposable exec now receives and restores the parent's scheduling priority.
+Asynchronous mesh-worker outputs separately use background compute priority so
+already-admitted frames can coalesce; Job/native admission retains its original
+priority. Source parser lifetime and hard worker ceilings remain unchanged.
+
+An optional bounded preflight validates small ASCII STL/OBJ sources before using
+the existing weighted native claim. Unknown syntax, exceeded bounds and changed
+sources retain whole-pool admission. Identity-only scene loading avoids a copy;
+independent STL facets retain canonical welded topology/volume validation; normal
+preparation reuses computed lengths. DBOS queue dispatch polls every 0.25 seconds
+by default through deployment configuration, independently of recovery scanning.
+
+The [batching/preparation evidence and matrix](../testing/compute-model-batching.md)
+record these corrections and the earlier 1000-model aggregate baseline. The next
+comparison of those cached models remains pending. Persistent untrusted parser
+state, further GPU preparation candidates and operator visual acceptance are not
+qualified by these changes.
+
+
+Deferred normal preparation keeps the parser's source arrays and RAM permit alive
+until compute completion or canonical fallback. Only validated relative geometry
+crosses IPC; CSR construction, shader sessions and GPU buffers belong to the
+persistent owner and its separate reservations. Fresh workers defer optional
+format, fingerprint and inference imports, but still import their necessary
+numerical/parser dependencies. These changes do not introduce preloaded forks or
+persistent untrusted source parsers.

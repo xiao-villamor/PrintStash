@@ -88,3 +88,26 @@ class TestBackendSelection:
         )
         discovery.configure_backend()
         assert selected == ([] if expected is None else [{"backends": [expected]}])
+
+
+class TestRuntimeIdentity:
+    @pytest.mark.parametrize("source_name", ["gpu_geometry.py", "gpu_normals.py"])
+    def test_geometry_shader_changes_invalidate_qualification(
+        self, monkeypatch, source_name
+    ):
+        from pathlib import Path
+
+        from app.runtime.compute.discovery import runtime_identity
+
+        before = runtime_identity()
+        original = Path.read_bytes
+
+        def changed_source(path):
+            data = original(path)
+            if path.name == source_name:
+                return data + b"\n# changed geometry shader implementation\n"
+            return data
+
+        monkeypatch.setattr(Path, "read_bytes", changed_source)
+
+        assert runtime_identity() != before

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 RESOURCE_EXIT = 72
 WORKER_MARKER = "PRINTSTASH_ISOLATED_MESH_WORKER"
+PRIORITY_ENV = "PRINTSTASH_WORKER_PRIORITY"
 
 
 class WorkerLifecycle(Enum):
@@ -310,7 +311,13 @@ def _run(argv: list[str]) -> int:
     os.environ[WORKER_MARKER] = str(os.getpid())
     sys.argv = [module, *arguments]
     try:
-        runpy.run_module(module, run_name="__main__")
+        from app.core.work_priority import WorkPriority, priority_scope
+
+        # ContextVars do not cross exec. Bind the supervisor's scheduling tier
+        # before application code can perform nested admission or GPU dispatch.
+        priority = WorkPriority(os.environ.get(PRIORITY_ENV, WorkPriority.INTERACTIVE))
+        with priority_scope(priority):
+            runpy.run_module(module, run_name="__main__")
     except MemoryError:
         os._exit(RESOURCE_EXIT)
     except ImportError as exc:

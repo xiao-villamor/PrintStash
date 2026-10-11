@@ -35,6 +35,52 @@ def oriented_tetrahedra():
 
 
 class TestGeometryFromMesh:
+    @pytest.mark.parametrize(
+        "face_order",
+        [np.arange(12), np.arange(12)[::-1]],
+        ids=["sequential-facets", "reordered-facets"],
+    )
+    def test_measures_independent_facets_without_changing_source(self, face_order):
+        mesh = trimesh.creation.box(extents=[10, 25, 50])
+        mesh.unmerge_vertices()
+        mesh.faces = mesh.faces[face_order]
+        vertices, faces = mesh.vertices.copy(), mesh.faces.copy()
+
+        result = mesh_measurements.geometry_from_mesh(mesh)
+
+        assert result.volume == VolumeMeasured(12_500)
+        assert result.geometry == {
+            "bbox_x_mm": 10.0,
+            "bbox_y_mm": 25.0,
+            "bbox_z_mm": 50.0,
+            "volume_mm3": 12_500.0,
+            "triangle_count": 12,
+        }
+        np.testing.assert_array_equal(mesh.vertices, vertices)
+        np.testing.assert_array_equal(mesh.faces, faces)
+
+    def test_retains_open_independent_facet_volume_refusal(self):
+        mesh = trimesh.creation.box(extents=[10, 25, 50])
+        mesh.faces = mesh.faces[:-1]
+        mesh.unmerge_vertices()
+
+        result = mesh_measurements.geometry_from_mesh(mesh)
+
+        assert result.volume == VolumeUnavailable(VolumeUnavailableCause.NOT_WATERTIGHT)
+        assert result.geometry["triangle_count"] == 11
+
+    def test_retains_inverted_independent_facet_volume_refusal(self):
+        mesh = trimesh.creation.box(extents=[10, 25, 50])
+        mesh.invert()
+        mesh.unmerge_vertices()
+
+        result = mesh_measurements.geometry_from_mesh(mesh)
+
+        assert result.volume == VolumeUnavailable(
+            VolumeUnavailableCause.NON_POSITIVE_INTEGRAL
+        )
+        assert result.geometry["triangle_count"] == 12
+
     @pytest.mark.parametrize("edge", [0.001, 0.123456789, 123.456789])
     def test_preserves_measurement_precision(self, edge):
         mesh = trimesh.creation.box(extents=[edge, edge, edge])

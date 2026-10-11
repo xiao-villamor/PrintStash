@@ -224,9 +224,8 @@ def prepare_scene_render(
     return _prepare_normals(prepare_scene(scene), face_chunk_size)
 
 
-def _prepare_normals(
-    geometry: PreparedRenderGeometry, face_chunk_size: int
-) -> PreparedRender:
+def weld_positions(geometry: PreparedRenderGeometry) -> IntArray:
+    """Return canonical position identities without preparing smooth normals."""
     import numpy as np
 
     verts = geometry.vertices
@@ -236,8 +235,40 @@ def _prepare_normals(
     span = q.max(axis=0) + 1
     key = (q[:, 0] * span[1] + q[:, 1]) * span[2] + q[:, 2]
     _, pos_id = np.unique(key, return_inverse=True)
+    pos_id.flags.writeable = False
+    return pos_id
+
+
+def prepare_normals(
+    geometry: PreparedRenderGeometry,
+    *,
+    face_chunk_size: int = 64_000,
+    position_ids: IntArray | None = None,
+) -> PreparedRender:
+    """Complete owned geometry, optionally reusing validated canonical welding."""
+    _validate_chunk(face_chunk_size)
+    return _prepare_normals(geometry, face_chunk_size, position_ids=position_ids)
+
+
+def _prepare_normals(
+    geometry: PreparedRenderGeometry,
+    face_chunk_size: int,
+    *,
+    position_ids: IntArray | None = None,
+) -> PreparedRender:
+    import numpy as np
+
+    verts = geometry.vertices
+    if position_ids is not None and position_ids.dtype.kind not in "iu":
+        raise ValueError("invalid_render_welding")
+    pos_id = (
+        weld_positions(geometry)
+        if position_ids is None
+        else np.asarray(position_ids, dtype=np.int64)
+    )
+    if pos_id.shape != (len(verts),) or pos_id.min() < 0 or pos_id.max() >= len(verts):
+        raise ValueError("invalid_render_welding")
     n_pos = int(pos_id.max()) + 1
-    del q, key
 
     # Angle-weighted object-space normals are shared across every camera.
     # Accumulate bounded facet chunks into the whole welded-position table.
@@ -245,11 +276,9 @@ def _prepare_normals(
     for fc in geometry.face_chunks(face_chunk_size):
         f_obj = verts[fc]  # (c, 3, 3)
         fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
-        fn = fn / np.where(
-            np.linalg.norm(fn, axis=1, keepdims=True) == 0,
-            1.0,
-            np.linalg.norm(fn, axis=1, keepdims=True),
-        )
+        normal_lengths = np.linalg.norm(fn, axis=1, keepdims=True)
+        fn = fn / np.where(normal_lengths == 0, 1.0, normal_lengths)
+        del normal_lengths
         # Angle-weighted normals (Thürmer–Wüthrich): weight each face's
         # contribution to a vertex by the triangle's interior angle there.
         # Plain incident-face averaging over-counts directions that simply
@@ -270,12 +299,9 @@ def _prepare_normals(
                 flat_pos, weights=fn_per_corner[:, a], minlength=n_pos
             )
         del f_obj, fn, flat_pos, fn_per_corner, e_ab, e_ac, ang
-    vsm = vacc / np.where(
-        np.linalg.norm(vacc, axis=1, keepdims=True) == 0,
-        1.0,
-        np.linalg.norm(vacc, axis=1, keepdims=True),
-    )
-    del vacc
+    accumulated_lengths = np.linalg.norm(vacc, axis=1, keepdims=True)
+    vsm = vacc / np.where(accumulated_lengths == 0, 1.0, accumulated_lengths)
+    del vacc, accumulated_lengths
 
     pos_id.flags.writeable = False
     vsm.flags.writeable = False

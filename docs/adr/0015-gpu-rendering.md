@@ -29,7 +29,7 @@ This decision qualifies the ModernGL candidate only. A native WebGPU adapter usi
 
 The [portable compute implementation](../compute.md) uses a host-local broker for persistent wgpu and ONNX WebGPU ownership, bounded immutable array transfers, shared device admission and separately reserved host memory. Source parsing stays disposable. Geometry uploads serve all cameras and may stay cached; canonical framing remains in core through PreparedRasteriser. Canonical postprocessing can execute in portable GPU compute passes after a byte-exact canary, retaining the CPU implementation as fallback.
 
-Automatic selection requires hardware and implementation-specific evidence. Missing evidence is ordinary CPU operation. Thumbnail recipe 12 and qualified-portable-v3 version the candidate independently of hardware. Original ModernGL measurements remain unchanged and cannot qualify this backend.
+Automatic selection requires hardware and implementation-specific evidence. Missing evidence is ordinary CPU operation. Thumbnail recipe 13 and qualified-portable-v4 version the candidate independently of hardware. Original ModernGL measurements remain unchanged and cannot qualify this backend.
 
 
 ## Render-only WSL follow-up (2026-10-10)
@@ -56,3 +56,35 @@ or relax the rendering gate. Binary validated-geometry references remove repeate
 base64 serialization and uploads. Pooled readback copies only completed frames.
 The controlled render-only comparison and its limits are in
 [the performance record](../testing/compute-render-performance.md).
+
+## Ready-model batching follow-up (2026-10-11)
+
+The earlier 1000-model GPU run recorded 967 frames in 967 singleton completion
+batches. Disposable exec lost the parent's priority ContextVar, leaving backfill
+rendering eligible for the interactive default. The supervisor/bootstrap now
+propagate scheduling priority explicitly, and asynchronous mesh-worker outputs
+use a background render scope while retaining their Job/native admission priority.
+The broker packs already-ready camera frames within the existing eight-frame,
+10 ms and resource limits, with individual cancellation/deadline handling.
+New exact-bin model-input/frame histograms expose whether real batching occurs;
+fully cached outputs add no batch. Model-input counts do not deduplicate geometry.
+
+Bounded preparation and dispatch corrections accompany this work. The
+[diagnosis, aggregate baseline and 53-behaviour matrix](../testing/compute-model-batching.md)
+separate complete-pipeline, overlapping admission-wait and broker timings.
+The new comparison of the same 1000 cached models, further GPU preparation
+candidate and operator visual acceptance remain pending. These corrections do
+not alter the historical ModernGL decision or create a qualification receipt.
+
+
+## Portable geometry preparation follow-up
+
+Large eligible render inputs may now defer smooth normals to the persistent
+owner, using guarded portable WGSL accumulation and indexed packing. A tagged
+immutable descriptor, separate host/device admission and per-model status at the
+shared frame fence preserve CPU recovery and independently publishable outputs.
+The selected 20,000-face crossover comes from measured warm preparation/render
+work; it does not supply whole-ingestion or mixed-load qualification. Changed
+normal arithmetic and corrected canonical WebP encoding bump thumbnail/visual
+recipes. The operator retains visual acceptance, and automatic admission still
+requires current qualification evidence. See [compute preparation](../compute.md#indexed-packing-and-deferred-normals).

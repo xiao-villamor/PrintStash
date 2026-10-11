@@ -11,6 +11,8 @@ unmeasurable input into an optimistic allocation.
 from __future__ import annotations
 
 import math
+import os
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -39,6 +41,11 @@ DEFAULT_FACE_BYTES = 3000
 # This whole-pipeline coefficient includes the existing startup envelope.
 WEBP_FACE_BYTES = 4000
 THREE_MF_FACE_BYTES = 3600
+# Optional text preflight must stay cheap in the supervisor. Exhausting any
+# bound keeps the original unknown-complexity claim; it never rejects a source.
+TEXT_PREFLIGHT_BYTES = 8 * 1024**2
+TEXT_PREFLIGHT_LINE_BYTES = 4096
+TEXT_PREFLIGHT_SECONDS = 0.1
 
 
 class RasterCodec(str, Enum):
@@ -172,20 +179,128 @@ def face_capacity(memory: int, suffix: str) -> int:
     return memory // cost
 
 
+def _obj_triangle_count(path: Path, *, deadline: float) -> int | None:
+    """Count a bounded plain-geometry OBJ; other dialects remain unknown.
+
+    Materials can load independent textures, and continuations change lexical
+    boundaries. Neither belongs in a cheap supervisor estimate. Unreferenced
+    vertex storage is bounded by the face envelope before a smaller claim is
+    granted. The isolated loader still owns parsing and the hard memory ceiling.
+    """
+    from app.modules.media.stl_reader import STLSourceSnapshot
+
+    with path.open("rb") as stream:
+        before = STLSourceSnapshot.from_stat(os.fstat(stream.fileno()))
+        if before.size > TEXT_PREFLIGHT_BYTES:
+            return None
+        coordinate_counts = [0, 0, 0]
+        largest_references = [0, 0, 0]
+        triangles = scanned = 0
+        while True:
+            if time.monotonic() >= deadline:
+                return None
+            raw = stream.readline(TEXT_PREFLIGHT_LINE_BYTES + 1)
+            if not raw:
+                break
+            scanned += len(raw)
+            if (
+                len(raw) > TEXT_PREFLIGHT_LINE_BYTES
+                or scanned > TEXT_PREFLIGHT_BYTES
+                or b"\\" in raw
+                or b"\x00" in raw
+                # Trimesh searches for this substring even inside comments.
+                or b"mtllib" in raw
+            ):
+                return None
+            parts = raw.decode("ascii").split()
+            if not parts or parts[0].startswith("#"):
+                continue
+            if parts[0] in {"v", "vt", "vn"}:
+                channel = {"v": 0, "vt": 1, "vn": 2}[parts[0]]
+                allowed_fields = (3, 4) if channel == 1 else (4,)
+                if len(parts) not in allowed_fields or not all(
+                    math.isfinite(float(value)) for value in parts[1:]
+                ):
+                    return None
+                coordinate_counts[channel] += 1
+            elif parts[0] in {"f", "l", "p"}:
+                if len(parts) < {"f": 4, "l": 3, "p": 2}[parts[0]]:
+                    return None
+                for value in parts[1:]:
+                    references = value.split("/")
+                    if len(references) > 3:
+                        return None
+                    for channel, field in enumerate(references):
+                        if not field:
+                            if channel == 1 and len(references) == 3:
+                                continue
+                            return None
+                        reference = int(field)
+                        if reference == 0 or reference < -coordinate_counts[channel]:
+                            return None
+                        largest_references[channel] = max(
+                            largest_references[channel], reference
+                        )
+                # The pinned mesh loader ignores OBJ polylines and points.
+                # Validate references without counting them as triangles.
+                if parts[0] == "f":
+                    triangles += len(parts) - 3
+            elif parts[0] not in {"o", "g", "s"}:
+                return None
+        if (
+            triangles == 0
+            or any(count > 3 * triangles for count in coordinate_counts)
+            or any(
+                reference > count
+                for reference, count in zip(
+                    largest_references, coordinate_counts, strict=True
+                )
+            )
+            or before != STLSourceSnapshot.from_stat(os.fstat(stream.fileno()))
+            or before != STLSourceSnapshot.from_stat(path.stat())
+        ):
+            return None
+        return triangles
+
+
+def _source_triangle_count(source: MeshSource) -> int | None:
+    from app.modules.media.stl_reader import (
+        InvalidSTL,
+        STLReadLimits,
+        binary_stl_info,
+        count_ascii_triangles,
+    )
+
+    suffix = source.file_type.lower().lstrip(".")
+    if suffix == "stl":
+        info = binary_stl_info(source.path)
+        if info is not None:
+            return info[0]
+    deadline = time.monotonic() + TEXT_PREFLIGHT_SECONDS
+    try:
+        if suffix == "stl":
+            return count_ascii_triangles(
+                source.path,
+                limits=STLReadLimits(
+                    max_source_bytes=TEXT_PREFLIGHT_BYTES,
+                    max_line_bytes=TEXT_PREFLIGHT_LINE_BYTES,
+                    deadline=deadline,
+                ),
+            )
+        if suffix == "obj":
+            return _obj_triangle_count(source.path, deadline=deadline)
+    except InvalidSTL, OSError, ValueError:
+        # Unknown, malformed, changing or expensive text retains full isolation.
+        return None
+    return None
+
+
 def estimate_sources(
     pool: Resources,
     sources: tuple[MeshSource, ...],
     *,
     work: WorkProfile = GeometryWork(),
 ) -> Resources:
-    from app.modules.media.stl_reader import binary_stl_info
-
-    counts: list[int | None] = []
-    for source in sources:
-        info = (
-            binary_stl_info(source.path)
-            if source.file_type.lower().lstrip(".") == "stl"
-            else None
-        )
-        counts.append(info[0] if info is not None else None)
-    return request(pool, tuple(counts), work=work)
+    return request(
+        pool, tuple(_source_triangle_count(source) for source in sources), work=work
+    )

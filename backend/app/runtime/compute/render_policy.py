@@ -74,4 +74,14 @@ def admission_decoded(
         # this owner. Retain normal-preparation scratch, shaded output cache,
         # readback and joined frame copies in the renderer reservation.
         host_bytes = readback + width * height * 8 * frames + 96 * 1024**2
+    from app.modules.media.gpu_normals import DeferredRender, host_scratch_bytes
+
+    # CSR construction and any canonical numerical fallback happen sequentially
+    # under this owner's reservation; upload buffers remain in the device ledger.
+    host_bytes += max(host_scratch_bytes(prepared) for prepared, *_ in decoded)
+    status_bytes = 4 * sum(
+        isinstance(prepared, DeferredRender) for prepared, *_ in decoded
+    )
+    readback += status_bytes
+    host_bytes += status_bytes
     return RenderAdmission(projected_bytes, w * h * 8 + extra, readback, host_bytes)

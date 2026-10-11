@@ -71,3 +71,41 @@ class TestAdmission:
         assert binary.device_bytes == legacy.device_bytes + workspace_bytes(640, 480, 2)
         assert binary.host_bytes >= binary.readback_bytes + 96 * 1024**2
         assert binary.host_bytes < legacy.host_bytes
+
+    def test_bounds_deferred_normal_batch_resources(
+        self, frame
+    ):
+        from printstash_core.mesh.render_geometry import PreparedRenderGeometry
+
+        from app.modules.media.compute_geometry import decode
+        from app.modules.media.gpu_normals import defer, host_scratch_bytes
+        from app.runtime.compute.render_policy import admission_decoded
+
+        payload, recipe = frame
+        prepared, width, height, views, matte = decode(payload)
+        deferred = defer(
+            PreparedRenderGeometry(
+                prepared.vertices, prepared.face_count, prepared.face_chunks
+            )
+        )
+        deferred_payload = encode(deferred, width, height, views, matte)
+        canonical = admission_decoded(
+            [decode(payload)] * 2,
+            [len(payload)] * 2,
+            [recipe] * 2,
+            [1] * 2,
+            gpu_finalize=True,
+        )
+        result = admission_decoded(
+            [decode(deferred_payload)] * 2,
+            [len(deferred_payload)] * 2,
+            [recipe] * 2,
+            [1] * 2,
+            gpu_finalize=True,
+        )
+
+        assert (
+            result.host_bytes == canonical.host_bytes + host_scratch_bytes(deferred) + 8
+        )
+        assert result.device_bytes == canonical.device_bytes + 8
+        assert result.readback_bytes == canonical.readback_bytes + 8

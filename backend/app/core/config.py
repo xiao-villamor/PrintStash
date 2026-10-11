@@ -216,6 +216,9 @@ class Settings(BaseSettings):
     api_runs_jobs: bool = True
     executor_id: str | None = Field(default=None, min_length=1, max_length=128)
     shared_storage: bool = False
+    # DBOS polls each lane. This is dispatch latency, separate from the
+    # recovery tick; chained ingest/reconcile/derive queues used to each wait 1s.
+    jobs_queue_poll_interval_seconds: float = Field(default=0.25, ge=0.05, le=5)
     jobs_reconcile_interval_seconds: int = Field(default=300, ge=10, le=86400)
     jobs_reconcile_batch: int = Field(default=500, ge=1, le=10000)
     jobs_lane_headroom_factor: int = Field(default=2, ge=1, le=100)

@@ -18,6 +18,20 @@ MB = 1024**2
 
 
 class TestWorkerBootstrap:
+    @pytest.mark.parametrize("priority", ["interactive", "backfill"], ids=str)
+    def test_preserves_scheduling_priority_in_the_disposable_child(self, priority):
+        from app.core.work_priority import WorkPriority, priority_scope
+        from app.modules.media.worker_bootstrap import command
+
+        with priority_scope(WorkPriority(priority)):
+            result = mesh_isolation.supervise(
+                command("tests.fakes.mesh_bootstrap_probe", ["priority"], 128 * MB),
+                memory_budget=128 * MB,
+                timeout_seconds=10,
+            )
+
+        assert result.decode().strip() == priority
+
     def test_refuses_sudden_allocation_before_rss_polling(
         self,
     ):

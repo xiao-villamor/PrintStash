@@ -808,8 +808,13 @@ class TestPreparedWorkerResult:
 
 class TestFreshWorkerDependencies:
     @pytest.fixture(autouse=True)
-    def child_application_dependencies(self, tmp_path, monkeypatch):
+    def child_application_dependencies(self, tmp_path, monkeypatch, request):
         """An external import refusal affects fresh children, never the parent."""
+        blocked = (
+            "app.modules.media.mesh_observability",
+            "sqlalchemy",
+            *getattr(request, "param", ()),
+        )
         boundary = tmp_path / "child-import-boundary"
         boundary.mkdir()
         (boundary / "sitecustomize.py").write_text(
@@ -817,7 +822,7 @@ class TestFreshWorkerDependencies:
             "import sys\n"
             "class ParentOnlyDependencies(importlib.abc.MetaPathFinder):\n"
             "    def find_spec(self, fullname, path=None, target=None):\n"
-            "        if fullname in ('app.modules.media.mesh_observability', 'sqlalchemy'):\n"
+            f"        if fullname in {blocked!r}:\n"
             "            raise ImportError('parent_only_application_dependency_in_child')\n"
             "        return None\n"
             "sys.meta_path.insert(0, ParentOnlyDependencies())\n"
@@ -836,10 +841,12 @@ class TestFreshWorkerDependencies:
     def startup_source(self, tmp_path, file_type):
         mesh = trimesh.creation.box(extents=[10, 20, 30])
         payload = (
-            mesh.export(file_type="stl")
-            if file_type == "stl"
-            else three_mf(meshes={1: mesh})
+            three_mf(meshes={1: mesh})
+            if file_type == "3mf"
+            else mesh.export(file_type=file_type)
         )
+        if isinstance(payload, str):
+            payload = payload.encode("utf-8")
         source = tmp_path / f"cube.{file_type}"
         source.write_bytes(payload)
         return source
@@ -896,6 +903,46 @@ class TestFreshWorkerDependencies:
             for entries in records.values()
             for entry in entries
         )
+
+    @pytest.mark.parametrize("file_type", ["stl", "obj"])
+    @pytest.mark.parametrize(
+        "child_application_dependencies",
+        [
+            (
+                "printstash_core.inference",
+                "printstash_core.mesh.similarity.descriptors",
+                "printstash_core.mesh.similarity.verification",
+                "app.modules.media.stl_streaming",
+                "app.modules.media.scene_measurements",
+            )
+        ],
+        indirect=True,
+        ids=["optional-dependencies-unavailable"],
+    )
+    def test_preserves_simple_mesh_outputs_without_optional_dependencies(
+        self, startup_source, file_type
+    ):
+        original = startup_source.read_bytes()
+        request = _request(
+            startup_source,
+            file_type=file_type,
+            include_fingerprint=False,
+            width=64,
+            height=48,
+        )
+        expected = ThumbnailEngine().generate(request)
+
+        actual = mesh_isolation.generate(request)
+
+        assert actual.geometry == expected.geometry
+        assert actual.geometry["triangle_count"] == 12
+        assert actual.volume == expected.volume == VolumeMeasured(6000.0)
+        assert actual.image is not None
+        assert actual.image == expected.image
+        assert actual.coverage == expected.coverage
+        assert actual.fingerprint_result is None
+        assert actual.failure_reason is None
+        assert startup_source.read_bytes() == original
 
     @pytest.mark.parametrize("file_type", ["stl", "3mf"], ids=["stl", "3mf"])
     def test_keeps_following_work_available_after_typed_refusal(

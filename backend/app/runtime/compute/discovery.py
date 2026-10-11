@@ -31,6 +31,8 @@ def runtime_identity() -> str:
         "modules/inference",
         "modules/media/webgpu_render.py",
         "modules/media/gpu_postprocess.py",
+        "modules/media/gpu_geometry.py",
+        "modules/media/gpu_normals.py",
         "modules/media/compute_geometry.py",
     ):
         path = root / name

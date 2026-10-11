@@ -4,6 +4,10 @@
 
 ### Performance
 
+- Prepare large render meshes with portable GPU normal accumulation and indexed packing, using guarded per-model CPU fallback and shared RAM/VRAM accounting. Keep small preparation on CPU, reuse resident GPU state, and encode accelerated WebP through the same lossless canonical encoder. Version changed thumbnail and visual recipes while preserving authoritative measurements and source bytes.
+
+- Coalesce independently admitted thumbnail work across Models, preserve per-item cancellation and deadlines, and report actual model/frame batch sizes. Keep disposable worker priorities across process startup, bound OBJ/ASCII STL admission preflight, avoid redundant mesh copies, topology work and unused worker imports, and reduce durable queue dispatch latency without changing concurrency or backfill ownership.
+
 - Drive native OpenDAL source reads through its asynchronous API so slow remote storage does not retain the Python GIL. Preserve bounded streaming and conditional reads, and interrupt waits at the existing cancellation and scan deadlines.
 
 - Keep GPU thumbnail resampling, alpha conversion and vignette on the device after an exact canonical canary. Download only final pixels, avoid timeout-mode socket polling delays, and reuse validated geometry through bounded binary references instead of repeated base64 transfers. Retire completed broker references so evicted geometry can release host RAM while the owner remains idle.

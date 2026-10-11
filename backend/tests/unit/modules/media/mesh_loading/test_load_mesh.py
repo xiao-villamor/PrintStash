@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import trimesh
 
 from app.modules.media import (
@@ -166,6 +167,62 @@ class TestLoadMesh:
         mesh = mesh_loading.load_mesh(p)
         assert mesh is not None
         assert len(mesh.faces) == 12
+
+    def test_transfers_single_identity_geometry_buffers(self, tmp_path, monkeypatch):
+        box = trimesh.creation.box(extents=[5, 10, 20])
+        box.metadata = {"source": "kept"}
+        scene = trimesh.Scene()
+        scene.add_geometry(box, geom_name="part", node_name="placement")
+        path = tmp_path / "single.obj"
+        path.write_bytes(b"placeholder")
+        monkeypatch.setattr(trimesh, "load_scene", lambda *args, **kwargs: scene)
+
+        mesh = mesh_loading.load_mesh(path)
+
+        assert mesh is not None
+        assert np.shares_memory(mesh.vertices, box.vertices)
+        assert np.shares_memory(mesh.faces, box.faces)
+        assert mesh.metadata == {
+            "source": "kept",
+            "name": "part",
+            "node": "placement",
+        }
+
+    def test_preserves_a_transformed_single_geometry(self, tmp_path, monkeypatch):
+        box = trimesh.creation.box(extents=[5, 10, 20])
+        source_vertices = box.vertices.copy()
+        scene = trimesh.Scene()
+        transform = np.eye(4)
+        transform[:3, 3] = [100, 50, 25]
+        scene.add_geometry(box, node_name="placed", transform=transform)
+        path = tmp_path / "placed.obj"
+        path.write_bytes(b"placeholder")
+        monkeypatch.setattr(trimesh, "load_scene", lambda *args, **kwargs: scene)
+
+        mesh = mesh_loading.load_mesh(path)
+
+        assert mesh is not None
+        np.testing.assert_array_equal(mesh.vertices, source_vertices + [100, 50, 25])
+        np.testing.assert_array_equal(box.vertices, source_vertices)
+        np.testing.assert_array_equal(mesh.faces, box.faces)
+
+    def test_preserves_repeated_geometry_placements(self, tmp_path, monkeypatch):
+        box = trimesh.creation.box(extents=[10, 10, 10])
+        scene = trimesh.Scene()
+        scene.add_geometry(box, geom_name="part", node_name="first")
+        transform = np.eye(4)
+        transform[0, 3] = 100
+        scene.graph.update(frame_to="second", matrix=transform, geometry="part")
+        path = tmp_path / "instances.obj"
+        path.write_bytes(b"placeholder")
+        monkeypatch.setattr(trimesh, "load_scene", lambda *args, **kwargs: scene)
+
+        mesh = mesh_loading.load_mesh(path)
+
+        assert mesh is not None
+        assert len(mesh.faces) == 24
+        np.testing.assert_array_equal(mesh.bounds, [[-5, -5, -5], [105, 5, 5]])
+        np.testing.assert_array_equal(box.bounds, [[-5, -5, -5], [5, 5, 5]])
 
     def test_load_mesh_returns_none_for_unsupported_loaded_type(
         self, tmp_path: Path, monkeypatch

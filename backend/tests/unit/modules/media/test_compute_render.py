@@ -81,3 +81,36 @@ class TestCpuPostprocessingFallback:
             compute_render.client, "exchange_render", lambda *args, **kwargs: wire
         )
         assert compute_render.render(prepared, 2, 2, [None], False) is None
+
+
+class TestRenderPriority:
+    def test_direct_render_preserves_interactive_dispatch(self):
+        from app.runtime.compute.protocol import Priority
+
+        assert compute_render.render_priority() is Priority.INTERACTIVE
+
+    def test_derivative_render_allows_background_coalescing(self):
+        from app.runtime.compute.protocol import Priority
+
+        with compute_render.background_render_scope():
+            priority = compute_render.render_priority()
+
+        assert priority is Priority.BACKGROUND
+
+    def test_background_scope_restores_the_callers_priority(self):
+        from app.runtime.compute.protocol import Priority
+
+        with pytest.raises(ValueError, match="abandoned"):
+            with compute_render.background_render_scope():
+                raise ValueError("abandoned")
+
+        assert compute_render.render_priority() is Priority.INTERACTIVE
+
+    def test_backfill_never_raises_compute_priority(self):
+        from app.core.work_priority import WorkPriority, priority_scope
+        from app.runtime.compute.protocol import Priority
+
+        with priority_scope(WorkPriority.BACKFILL):
+            priority = compute_render.render_priority()
+
+        assert priority is Priority.BACKGROUND

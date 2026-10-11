@@ -63,6 +63,13 @@ class TestComputeStatus:
 
         assert response.status_code == 200, response.text
         assert response.json()["mode"] == "cpu"
+        assert response.json()["geometry_gpu_uploads"] == 0
+        assert response.json()["geometry_cpu_uploads"] == 0
+        assert response.json()["geometry_gpu_normal_uploads"] == 0
+        assert response.json()["geometry_cpu_normal_fallbacks"] == 0
+        assert response.json()["geometry_normal_seconds"] == 0.0
+        assert response.json()["geometry_packing_min_faces"] is None
+        assert response.json()["geometry_packing_seconds"] == 0.0
         assert {item["reason"] for item in response.json()["capabilities"]} == {
             "disabled"
         }

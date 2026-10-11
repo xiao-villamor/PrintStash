@@ -1,11 +1,17 @@
 """Bounded host-side validated geometry, separate from device allocations."""
 
+from __future__ import annotations
+
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from threading import Lock
+from typing import TYPE_CHECKING
 
 from .contracts import ComputeUnavailable, Reason
+
+if TYPE_CHECKING:
+    from app.modules.media.compute_geometry import GeometryLayout
 
 INPUT_QUEUE_BYTES = 192 * 1024**2
 INPUT_CACHE_BYTES = 128 * 1024**2
@@ -16,7 +22,7 @@ OUTPUT_QUEUE_BYTES = 192 * 1024**2
 class GeometryEntry:
     prepared: object
     size: int
-    counts: tuple[int, int, int]
+    counts: GeometryLayout | tuple[int, int, int]
     used: float
     pins: int = 0
 

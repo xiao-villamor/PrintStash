@@ -24,7 +24,12 @@ from printstash_core.mesh.measurements import (
 from printstash_core.mesh.similarity import GeometryError
 
 from app.core.config import _overlay
-from app.modules.media import mesh_policy, mesh_resources, thumbnail_engine
+from app.modules.media import (
+    mesh_policy,
+    mesh_resources,
+    stl_streaming,
+    thumbnail_engine,
+)
 from app.modules.media.fingerprints import FingerprintResultState
 from app.modules.media.mesh_contracts import (
     GeometryNotLoaded,
@@ -415,7 +420,7 @@ class TestThumbnailEngine:
 
         monkeypatch.setattr(mesh_policy, "reclaim_memory", observe_reclaim)
         extract = thumbnail_engine.extract
-        stream = thumbnail_engine.stl_streaming.render_stl_preview_isolated
+        stream = stl_streaming.render_stl_preview_isolated
 
         def observe_extract(prepared):
             references.extend(
@@ -446,7 +451,7 @@ class TestThumbnailEngine:
             lambda *args, **kwargs: None,
         )
         monkeypatch.setattr(
-            thumbnail_engine.stl_streaming,
+            stl_streaming,
             "render_stl_preview_isolated",
             observe_stream,
         )
@@ -511,7 +516,7 @@ class TestThumbnailEngine:
             reclaim()
 
         monkeypatch.setattr(mesh_policy, "reclaim_memory", observe_reclaim)
-        stream = thumbnail_engine.stl_streaming.render_stl_preview_isolated
+        stream = stl_streaming.render_stl_preview_isolated
 
         def fail_construction(*, vertices, faces, process):
             references.extend((weakref.ref(vertices), weakref.ref(faces)))
@@ -526,7 +531,7 @@ class TestThumbnailEngine:
         monkeypatch.setattr(mesh_policy, "exceeds_cap", lambda *args, **kwargs: True)
         monkeypatch.setattr(trimesh, "Trimesh", fail_construction)
         monkeypatch.setattr(
-            thumbnail_engine.stl_streaming,
+            stl_streaming,
             "render_stl_preview_isolated",
             observe_stream,
         )
@@ -557,7 +562,7 @@ class TestThumbnailEngine:
 
         monkeypatch.setattr(mesh_policy, "reclaim_memory", observe_reclaim)
         prepare = thumbnail_engine.prepare_loaded_mesh
-        stream = thumbnail_engine.stl_streaming.render_stl_preview_isolated
+        stream = stl_streaming.render_stl_preview_isolated
 
         def fail_preparation(*args, **kwargs):
             prepared = prepare(*args, **kwargs)
@@ -582,7 +587,7 @@ class TestThumbnailEngine:
             lambda *args, **kwargs: None,
         )
         monkeypatch.setattr(
-            thumbnail_engine.stl_streaming,
+            stl_streaming,
             "render_stl_preview_isolated",
             observe_stream,
         )

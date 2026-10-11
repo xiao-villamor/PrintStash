@@ -16,7 +16,9 @@ from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_REC
 
 from app.runtime.compute.budget import Residency
 
-from .compute_geometry import decode
+from .compute_geometry import decode, identity, layout_for
+from .gpu_geometry import GPU_PACK_MIN_FACES, GeometryPacker, packed_chunks
+from .gpu_normals import DeferredRender, canonical
 
 OUTPUT_CACHE_BYTES = 32 * 1024**2
 
@@ -121,17 +123,35 @@ struct Fragment { @location(0) color: vec4<f32>, @builtin(frag_depth) depth: f32
 
 
 class Renderer:
-    def __init__(self, device, memory: Residency | None = None):
+    def __init__(
+        self,
+        device,
+        memory: Residency | None = None,
+        *,
+        packing_min_faces: int | None = GPU_PACK_MIN_FACES,
+    ):
         self.device = device
         self.memory = memory if memory is not None else Residency(1024**3)
         self.geometry = {}
+        self.unverified_normals: set[str] = set()
         self.transfers = self.cache_hits = self.uploads = 0
         self.output_hits = self.submissions = self.readback_batches = 0
+        self.batch_model_counts = [0] * 8
+        self.batch_frame_counts = [0] * 8
         self.outputs = OrderedDict()
         self.output_bytes = 0
         self.readback_frames = 1
         self.frame_offset = 0
         self.transfer_seconds = 0.0
+        self.packing_min_faces = packing_min_faces
+        self.packer = None
+        self.packing_attempted = False
+        self.gpu_geometry_uploads = self.cpu_geometry_uploads = 0
+        self.geometry_packing_seconds = 0.0
+        # GPU normal submissions include numerical refusals; fallback count
+        # reports the subset retried with canonical CPU preparation.
+        self.geometry_gpu_normal_uploads = self.geometry_cpu_normal_fallbacks = 0
+        self.geometry_normal_seconds = 0.0
         compute_source, vertex_source = SHADER.split("struct Vertex", 1)
         compute_shader = device.create_shader_module(code=compute_source)
         render_source = (
@@ -175,6 +195,7 @@ class Renderer:
         self.postprocess_size = 0
         self.gpu_finalize_active = False
         self.readback_frame_bytes = None
+        self.readback_status_bytes = 0
 
     def upload(self, prepared, key):
         import wgpu
@@ -189,47 +210,89 @@ class Renderer:
             raise ComputeUnavailable(Reason.CAPACITY)
         self.memory.make_room(size)
 
+        buffer = None
+
         def release():
-            self.geometry.pop(key).destroy()
+            if buffer is not None:
+                self.geometry.pop(key).destroy()
 
         self.memory.reserve(key, size, release, time.monotonic())
+        self.memory.pin(key, time.monotonic())
         try:
             buffer = self.device.create_buffer(
                 size=size, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST
             )
             self.geometry[key] = buffer
-            offset = 0
-            for faces in prepared.face_chunks(64000):
-                positions = prepared.vertices[faces]
-                flat = np.cross(
-                    positions[:, 1] - positions[:, 0], positions[:, 2] - positions[:, 0]
+            started = time.monotonic()
+            use_gpu = (
+                self.packing_min_faces is not None
+                and prepared.face_count >= self.packing_min_faces
+            )
+            if use_gpu and not self.packing_attempted:
+                self.packing_attempted = True
+                candidate = None
+                try:
+                    candidate = GeometryPacker(self.device, self.memory)
+                    candidate.canary()
+                    self.packer = candidate
+                except Exception as exc:
+                    # Shader/runtime failures decline this optional preparation
+                    # path. Validated geometry can still use canonical CPU packing.
+                    if candidate is not None:
+                        candidate.close()
+                    from app.core.logging import get_logger
+
+                    get_logger(__name__).warning(
+                        "GPU geometry packing unavailable: %s", exc
+                    )
+                    self.packing_min_faces = None
+            if use_gpu and self.packer is not None:
+                transferred = self.packer.transferred_bytes
+                transfer_seconds = self.packer.transfer_seconds
+                gpu_normals = self.packer.gpu_normal_uploads
+                cpu_normals = self.packer.cpu_normal_fallbacks
+                normal_seconds = self.packer.normal_seconds
+                self.packer.submit(prepared, buffer, key)
+                self.geometry_gpu_normal_uploads += (
+                    self.packer.gpu_normal_uploads - gpu_normals
                 )
-                lengths = np.linalg.norm(flat, axis=1, keepdims=True)
-                flat /= np.where(lengths == 0, 1.0, lengths)
-                smooth = prepared.smooth_normals[prepared.position_ids[faces]]
-                t = np.clip(
-                    (np.sum(smooth * flat[:, None, :], axis=2) - 0.75) / 0.17, 0.0, 1.0
+                self.geometry_cpu_normal_fallbacks += (
+                    self.packer.cpu_normal_fallbacks - cpu_normals
                 )
-                t = (t * t * (3.0 - 2.0 * t))[..., None]
-                normals = t * smooth + (1.0 - t) * flat[:, None, :]
-                lengths = np.linalg.norm(normals, axis=2, keepdims=True)
-                normals /= np.where(lengths == 0, 1.0, lengths)
-                values = np.zeros((len(faces), 6, 4), dtype="<f4")
-                values[:, :3, :3] = positions
-                values[:, 3:, :3] = normals
-                started = time.monotonic()
-                self.device.queue.write_buffer(buffer, offset, values)
-                self.transfer_seconds += time.monotonic() - started
-                offset += values.nbytes
-            self.transfers += size
-            self.uploads += 1
-            return buffer
-        except Exception:
-            if key in self.geometry:
-                self.memory.remove(key)
+                self.geometry_normal_seconds += (
+                    self.packer.normal_seconds - normal_seconds
+                )
+                if key in self.packer.normal_statuses():
+                    self.unverified_normals.add(key)
+                self.transfers += self.packer.transferred_bytes - transferred
+                self.transfer_seconds += self.packer.transfer_seconds - transfer_seconds
+                self.gpu_geometry_uploads += 1
             else:
-                del self.memory.entries[key]
+                if isinstance(prepared, DeferredRender):
+                    normal_started = time.monotonic()
+                    prepared = canonical(prepared)
+                    self.geometry_normal_seconds += time.monotonic() - normal_started
+                    self.geometry_cpu_normal_fallbacks += 1
+                offset = 0
+                for values in packed_chunks(prepared):
+                    transfer_started = time.monotonic()
+                    self.device.queue.write_buffer(buffer, offset, values)
+                    self.transfer_seconds += time.monotonic() - transfer_started
+                    offset += values.nbytes
+                self.transfers += size
+                self.cpu_geometry_uploads += 1
+            self.geometry_packing_seconds += time.monotonic() - started
+            self.uploads += 1
+        except BaseException:
+            try:
+                if self.packer is not None:
+                    self.packer.release_completed(fence_complete=False)
+            finally:
+                self.memory.unpin(key)
+                self.memory.remove(key)
             raise
+        self.memory.unpin(key)
+        return buffer
 
     def attachments(self, width, height, size):
         import wgpu
@@ -242,7 +305,7 @@ class Renderer:
             + width * height * 8
             + max(
                 self.readback_size,
-                frame_bytes * self.readback_frames,
+                frame_bytes * self.readback_frames + self.readback_status_bytes,
             )
             + self.postprocess_size
             + 116
@@ -275,7 +338,7 @@ class Renderer:
                 size=size, usage=wgpu.BufferUsage.STORAGE
             )
             self.projected_size = size
-        readback_size = frame_bytes * self.readback_frames
+        readback_size = frame_bytes * self.readback_frames + self.readback_status_bytes
         if readback_size > self.readback_size:
             if self.readback is not None:
                 self.readback.destroy()
@@ -360,6 +423,7 @@ class Renderer:
         frame.draw(6, prepared.face_count)
         frame.end()
         if self.gpu_finalize_active:
+            assert self.postprocessor is not None
             self.postprocessor.encode(
                 encoder, self.color, self.readback, self.frame_offset
             )
@@ -379,19 +443,7 @@ class Renderer:
 
     def geometry_key(self, payload, prepared):
         header_size = struct.unpack("!I", payload[:4])[0]
-        return (
-            "geometry:"
-            + hashlib.sha256(
-                RASTERIZER_RECIPE.encode()
-                + struct.pack(
-                    "!III",
-                    len(prepared.vertices),
-                    prepared.face_count,
-                    len(prepared.smooth_normals),
-                )
-                + payload[4 + header_size :]
-            ).hexdigest()
-        )
+        return "geometry:" + identity(layout_for(prepared), payload[4 + header_size :])
 
     def execute(self, payload: bytes) -> bytes:
         return self.execute_many([payload])[0]
@@ -416,6 +468,46 @@ class Renderer:
         return self.execute_prepared_many(decoded, geometry_keys, keys)
 
     def execute_prepared_many(
+        self, decoded, geometry_keys, keys, *, raw=False, gpu_finalize=False
+    ):
+        results, refused = self._execute_prepared_batch(
+            decoded, geometry_keys, keys, raw=raw, gpu_finalize=gpu_finalize
+        )
+        if refused:
+            # Keep healthy results, then hold CPU normals for only one refused
+            # geometry at a time: host admission covers the largest scratch, not
+            # a simultaneous canonical copy for every model in the batch.
+            groups: dict[str, list[int]] = {}
+            for index in refused:
+                groups.setdefault(geometry_keys[index], []).append(index)
+            for indices in groups.values():
+                started = time.monotonic()
+                cpu_prepared = canonical(decoded[indices[0]][0])
+                self.geometry_cpu_normal_fallbacks += 1
+                self.geometry_normal_seconds += time.monotonic() - started
+                fallback = [(cpu_prepared, *decoded[index][1:]) for index in indices]
+                recovered, still_refused = self._execute_prepared_batch(
+                    fallback,
+                    [geometry_keys[index] for index in indices],
+                    [keys[index] for index in indices],
+                    raw=raw,
+                    gpu_finalize=gpu_finalize,
+                )
+                if still_refused:
+                    raise RuntimeError("compute_canonical_normals_refused")
+                results.update(
+                    {index: recovered[offset] for offset, index in enumerate(indices)}
+                )
+                del fallback, cpu_prepared
+        return [results[index] for index in range(len(decoded))]
+
+    def _discard_unverified_geometry(self):
+        for key in list(self.unverified_normals):
+            if key in self.geometry:
+                self.memory.remove(key)
+            self.unverified_normals.discard(key)
+
+    def _execute_prepared_batch(
         self, decoded, geometry_keys, keys, *, raw=False, gpu_finalize=False
     ):
         import wgpu
@@ -462,7 +554,20 @@ class Renderer:
         pitch = width * 4 if self.gpu_finalize_active else ((w * 4 + 255) // 256) * 256
         frame_bytes = pitch * result_height
         self.readback_frame_bytes = frame_bytes
+        status_keys = list(
+            dict.fromkeys(
+                geometry_keys[index]
+                for index in missing
+                if geometry_keys[index] in self.unverified_normals
+                or (
+                    isinstance(decoded[index][0], DeferredRender)
+                    and geometry_keys[index] not in self.geometry
+                )
+            )
+        )
+        self.readback_status_bytes = len(status_keys) * 4
         if self.gpu_finalize_active:
+            assert self.postprocessor is not None
             from .gpu_postprocess import workspace_bytes
 
             if self.postprocessor.size != (width, height, factor):
@@ -470,6 +575,8 @@ class Renderer:
             self.postprocess_size = workspace_bytes(width, height, factor)
         pinned = []
         new_outputs = {}
+        refused = []
+        fence_complete = False
         try:
             self.readback_frames = max(1, frame_count)
             # Allocate the largest workspace first so later models cannot replace
@@ -479,6 +586,7 @@ class Renderer:
                     w, h, max(decoded[i][0].face_count for i in missing) * 96
                 )
             if missing and self.gpu_finalize_active:
+                assert self.postprocessor is not None
                 self.postprocessor.prepare(width, height, factor)
             for i in missing:
                 prepared = decoded[i][0]
@@ -501,17 +609,53 @@ class Renderer:
                     self.draw(prepared, key, rotation, w, h, matte)
                     frame_index += 1
             if missing:
+                assert self.readback is not None
+                statuses = (
+                    self.packer.normal_statuses() if self.packer is not None else {}
+                )
+                if any(key in statuses for key in status_keys):
+                    encoder = self.device.create_command_encoder()
+                    for index, key in enumerate(status_keys):
+                        if key in statuses:
+                            encoder.copy_buffer_to_buffer(
+                                statuses[key],
+                                0,
+                                self.readback,
+                                frame_count * frame_bytes + index * 4,
+                                4,
+                            )
+                    self.device.queue.submit([encoder.finish()])
                 started = time.monotonic()
                 self.readback.map_sync(wgpu.MapMode.READ)
+                fence_complete = True
                 try:
                     pixels = bytes(
-                        self.readback.read_mapped(size=frame_count * frame_bytes)
+                        self.readback.read_mapped(
+                            size=frame_count * frame_bytes + self.readback_status_bytes
+                        )
                     )
                 finally:
                     self.readback.unmap()
                 self.transfer_seconds += time.monotonic() - started
+                rejected_keys = set()
+                for index, key in enumerate(status_keys):
+                    if key in statuses:
+                        status = struct.unpack_from(
+                            "<I", pixels, frame_count * frame_bytes + index * 4
+                        )[0]
+                        if status:
+                            rejected_keys.add(key)
+                        else:
+                            self.unverified_normals.discard(key)
+                refused = [
+                    index for index in missing if geometry_keys[index] in rejected_keys
+                ]
                 self.readback_batches += 1
+                self.batch_model_counts[len(missing) - 1] += 1
+                self.batch_frame_counts[frame_count - 1] += 1
                 for i in missing:
+                    if i in refused:
+                        continue
                     first, count = spans[i]
                     frames = []
                     for index in range(first, first + count):
@@ -535,15 +679,17 @@ class Renderer:
                     new_outputs[i] = struct.pack(
                         "!III", w if raw else width, h if raw else height, count
                     ) + b"".join(frames)
-            results = []
+            results = {}
             for i, key in enumerate(keys):
+                if i in refused:
+                    continue
                 if i in new_outputs:
                     result = new_outputs[i]
                 else:
                     result = self.outputs[key]
                     self.outputs.move_to_end(key)
                     self.output_hits += 1
-                results.append(result)
+                results[i] = result
             # Bounded host RGBA cache avoids reshading repeated views. Its 32 MiB
             # ceiling is included in render_policy's host reservation.
             for i, result in new_outputs.items():
@@ -557,15 +703,30 @@ class Renderer:
                     if keys[i] not in self.outputs:
                         self.outputs[keys[i]] = result
                         self.output_bytes += len(result)
-            return results
+            return results, refused
         finally:
-            self.readback_frames, self.frame_offset = 1, 0
-            self.readback_frame_bytes = None
-            self.gpu_finalize_active = False
-            for key in pinned:
-                self.memory.unpin(key)
+            try:
+                if self.packer is not None:
+                    self.packer.release_completed(fence_complete=fence_complete)
+            finally:
+                self.readback_frames, self.frame_offset = 1, 0
+                self.readback_frame_bytes = None
+                self.readback_status_bytes = 0
+                self.gpu_finalize_active = False
+                for key in pinned:
+                    self.memory.unpin(key)
+                self._discard_unverified_geometry()
 
     def close(self):
+        if self.packer is not None:
+            try:
+                self.packer.close()
+            finally:
+                # Renderer workspaces may be evicted and then reused. The old
+                # packer owns a destroyed completion fence after close.
+                self.packer = None
+                self.packing_attempted = False
+                self._discard_unverified_geometry()
         if self.postprocessor is not None:
             self.postprocessor.close()
         self.postprocess_size = 0

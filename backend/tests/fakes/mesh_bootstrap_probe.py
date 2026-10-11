@@ -16,7 +16,11 @@ def _publish_readiness(path: Path, content: str) -> None:
 
 def main():
     case = sys.argv[1]
-    if case == "close_stdout_wait":
+    if case == "priority":
+        from app.core.work_priority import current_priority
+
+        print(current_priority().value, flush=True)
+    elif case == "close_stdout_wait":
         os.close(1)
         time.sleep(2)
     elif case == "burst":

@@ -4,19 +4,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from printstash_core.mesh.similarity import GeometryError, fingerprint_mesh
-from printstash_core.mesh.similarity.descriptors import (
-    SH_RECIPE,
-    VIEW_RECIPE,
-    describe_surface,
-)
-from printstash_core.mesh.similarity.geometry import prepare_surface
-from printstash_core.mesh.similarity.verification import VERIFICATION_VERSION
 
 from .mesh_facts import CompleteGeometry, FingerprintFailureCode, FingerprintResultState
-from .mesh_resources import PreparedMesh
+
+if TYPE_CHECKING:
+    from .mesh_resources import PreparedMesh
 
 ALGORITHM_VERSION = "geometry-v7-sh5f4577c4"
 SH_BASIS_DIGEST = "5f4577c4d06d73c281f343f4538adebcfff371b9d356185b42f5f11ddd41ea46"
@@ -189,6 +184,13 @@ def extract(prepared: PreparedMesh) -> FingerprintResult:
 
 def _describe(vertices: Any, faces: Any, *, partial: bool) -> dict[str, Any]:
     import numpy as np
+    from printstash_core.mesh.similarity.descriptors import (
+        SH_RECIPE,
+        VIEW_RECIPE,
+        describe_surface,
+    )
+    from printstash_core.mesh.similarity.geometry import prepare_surface
+    from printstash_core.mesh.similarity.verification import VERIFICATION_VERSION
 
     core = fingerprint_mesh(vertices, faces)
     surface = prepare_surface(vertices, faces)

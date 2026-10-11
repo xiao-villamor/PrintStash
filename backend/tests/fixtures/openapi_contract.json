@@ -4270,6 +4270,30 @@
             "title": "Fallbacks",
             "type": "integer"
           },
+          "geometry_cpu_normal_fallbacks": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Geometry Cpu Normal Fallbacks",
+            "type": "integer"
+          },
+          "geometry_cpu_uploads": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Geometry Cpu Uploads",
+            "type": "integer"
+          },
+          "geometry_gpu_normal_uploads": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Geometry Gpu Normal Uploads",
+            "type": "integer"
+          },
+          "geometry_gpu_uploads": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Geometry Gpu Uploads",
+            "type": "integer"
+          },
           "geometry_input_bytes": {
             "default": 0,
             "minimum": 0.0,
@@ -4287,6 +4311,30 @@
             "minimum": 0.0,
             "title": "Geometry Input Cache Hits",
             "type": "integer"
+          },
+          "geometry_normal_seconds": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Geometry Normal Seconds",
+            "type": "number"
+          },
+          "geometry_packing_min_faces": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Geometry Packing Min Faces"
+          },
+          "geometry_packing_seconds": {
+            "default": 0.0,
+            "minimum": 0.0,
+            "title": "Geometry Packing Seconds",
+            "type": "number"
           },
           "geometry_upload_bytes": {
             "default": 0,
@@ -4332,6 +4380,52 @@
             "title": "Queued Bytes",
             "type": "integer"
           },
+          "render_background_requests": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Render Background Requests",
+            "type": "integer"
+          },
+          "render_batch_frame_counts": {
+            "default": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "items": {
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 8,
+            "minItems": 8,
+            "title": "Render Batch Frame Counts",
+            "type": "array"
+          },
+          "render_batch_model_counts": {
+            "default": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "items": {
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "maxItems": 8,
+            "minItems": 8,
+            "title": "Render Batch Model Counts",
+            "type": "array"
+          },
           "render_batches": {
             "default": 0,
             "minimum": 0.0,
@@ -4348,6 +4442,12 @@
             "default": 0,
             "minimum": 0.0,
             "title": "Render Frames",
+            "type": "integer"
+          },
+          "render_interactive_requests": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Render Interactive Requests",
             "type": "integer"
           },
           "render_postprocess_gpu": {

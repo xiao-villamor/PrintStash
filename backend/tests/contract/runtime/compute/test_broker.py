@@ -5,7 +5,32 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from tests.paths import BACKEND_DIR
+
+
+@pytest.fixture
+def render_probe(tmp_path):
+    def run(scenario):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tests.fakes.compute_render_lifecycle_probe",
+                str(tmp_path),
+                scenario,
+            ],
+            cwd=BACKEND_DIR,
+            env={**os.environ, "VAULT_COMPUTE_MODE": "cpu"},
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)
+
+    return run
 
 
 class TestBroker:
@@ -126,3 +151,43 @@ class TestPeerLiveness:
         finally:
             left.close()
             right.close()
+
+
+class TestRenderLifecycle:
+    def test_packs_multiview_requests_within_eight_frames(self, render_probe):
+        report = render_probe("frames")
+
+        assert report["results"] == ["0", "1", "2"]
+        assert sorted(map(len, report["batches"][1:-1])) == [1, 2]
+        assert report["healthy"] == "healthy"
+
+    def test_preserves_live_members_after_a_deadline(self, render_probe):
+        report = render_probe("deadline")
+
+        assert report["results"] == ["deadline", "live"]
+        assert sorted(report["batches"][1]) == ["live", "short"]
+        assert report["healthy"] == "healthy"
+
+    def test_prioritizes_interactive_ready_work(self, render_probe):
+        report = render_probe("interactive")
+
+        assert report["batches"] == [
+            ["blocker"],
+            ["interactive"],
+            ["background"],
+            ["healthy"],
+        ]
+        assert report["results"] == ["background", "interactive"]
+
+    def test_preserves_live_members_after_cancellation(self, render_probe):
+        report = render_probe("cancel")
+
+        assert report["results"] == ["cancelled", "live"]
+        assert sorted(report["batches"][1]) == ["cancelled", "live"]
+        assert report["healthy"] == "healthy"
+
+    def test_reports_admitted_render_priorities(self, render_probe):
+        report = render_probe("interactive")
+
+        assert report["interactive"] == 2
+        assert report["background"] == 2
