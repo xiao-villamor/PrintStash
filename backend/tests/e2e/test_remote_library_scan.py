@@ -284,10 +284,16 @@ class TestRemoteLibraryScan:
 class TestDurableScanPages:
     @pytest.mark.s3
     @pytest.mark.asyncio
-    async def test_public_scans_resume_committed_inventory_until_completion(
+    async def test_one_public_scan_finishes_committed_inventory(
         self, api, superuser_headers, e2e_db, monkeypatch
     ):
-        from app.db.models import ExternalLibraryCheckpoint, RemoteDiscoveryInventory
+        from app.db.models import (
+            ExternalLibraryCheckpoint,
+            Job,
+            JobKind,
+            JobState,
+            RemoteDiscoveryInventory,
+        )
         from app.modules.sources import external_library
 
         monkeypatch.setattr(external_library, "_REMOTE_PAGE_LIMIT", 2)
@@ -338,22 +344,15 @@ class TestDurableScanPages:
                 ExternalLibraryCheckpoint.library_id == library_id
             )
         ).one()
-        assert checkpoint.complete is False
-        assert checkpoint.cursor is not None
-        assert (
-            len(
-                e2e_db.exec(
-                    select(File).where(File.external_library_id == library_id)
-                ).all()
-            )
-            == 2
-        )
-        epoch = checkpoint.epoch
-        assert (await api.post(url, headers=superuser_headers)).status_code == 202
-        settle()
-        e2e_db.expire_all()
         assert checkpoint.complete is True
-        assert checkpoint.epoch == epoch
+        scan_jobs = e2e_db.exec(
+            select(Job).where(
+                Job.kind == JobKind.SOURCES_SCAN,
+                Job.subject_key == f"library/{library_id}",
+            )
+        ).all()
+        assert len(scan_jobs) == 2
+        assert {job.state for job in scan_jobs} == {JobState.COMPLETED}
         rows = e2e_db.exec(
             select(File).where(File.external_library_id == library_id)
         ).all()
@@ -366,7 +365,8 @@ class TestDurableScanPages:
                 f"/api/v1/files/{row.id}/download", headers=superuser_headers
             )
             assert downloaded.status_code == 200
-            assert downloaded.content.startswith(payload)
+            index = row.source_key.rsplit("/", 1)[-1].removesuffix(".gcode")
+            assert downloaded.content == payload + f"\n; page {index}\n".encode()
 
 
 @pytest_asyncio.fixture
