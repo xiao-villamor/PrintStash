@@ -5,8 +5,10 @@ models from reaching the existing render coalescer together. It preserves the
 10 ms maximum ready-work wait, eight-frame ceiling, interactive priority,
 disposable parsing, resource ceilings and per-Artifact publication authority.
 It also records the earlier 1000-model baseline without treating renderer timing
-as complete-pipeline timing. The new comparison of the same 1000 cached models
-is pending; visual acceptance remains the operator's decision.
+as complete-pipeline timing. The completed comparison of the same 1000 cached
+models is recorded in
+[the cached-corpus audit](compute-cached-1000.md); visual acceptance remains
+the operator's decision.
 
 ## Diagnosis and scope
 
@@ -337,8 +339,8 @@ the separate physical diagnostics.
 | 13 | `test_publishes_the_healthy_member_when_a_batched_job_is_cancelled` | Error | Two parametrized cases: canonical geometry and deferred normals; two real mesh workers batch, then one Job is cancelled | Healthy Job publishes its associated thumbnail and metadata; cancelled member cannot publish after shared completion; original source bytes are preserved | E2E | ✅ `backend/tests/e2e/test_render_batch_publication.py::TestRenderBatchPublication::test_publishes_the_healthy_member_when_a_batched_job_is_cancelled` |
 
 The added diagnostics and OpenAPI snapshot passed 21 focused cases; the staging
-admission and broker group passed 29 cases. These are focused checks, not the
-pending full-suite or the requested 1000-model performance result. Owned-resource
+admission and broker group passed 29 cases. These are focused checks; the final
+suite and requested 1000-model evidence are recorded separately below. Owned-resource
 eviction regressions failed in all three initial cases, then 36 broker/packing
 cases and 15 final budget/recovery cases passed. Optional-import changes passed
 75 focused cases and two guarded-child fingerprint equivalence cases.
@@ -362,8 +364,10 @@ passes and one PostgreSQL generation failure. A single subsequent sequential
 run passed all 130 cases across the affected producers, geometry, normal and
 batch-association files plus the exact PostgreSQL case. Storage, generation and
 pixel assertions remained intact. The sequential recheck does not relabel the
-original full runs as successful. Final Ruff and format checks passed; CI is
-rerun after correcting CPU-only fake dependencies and the required test class.
+original full runs as successful. Final Ruff and format checks passed. After
+correcting CPU-only fake dependencies
+and the required test class, implementation commit `26b8f4b4` passed all 17 CI
+checks, including the PR gate ([run](https://github.com/xiao-villamor/PrintStash/actions/runs/38153612342)).
 
 A 12-model Docker/WSL smoke test completed all originals and requested outputs,
 with exact geometry matching the previous evidence. It observed three two-input
@@ -375,9 +379,20 @@ The requested performance run uses the same 1,000 cached models (481 STL,
 486 OBJ and 33 STEP), without further storage requests. Per operator instruction,
 only the new GPU arm is rerun; the existing CPU and GPU arms remain references.
 Their comparison measures the combined pipeline change, since CPU preparation
-also changed. Final normal fallback frequency, complete-pipeline timing and
-operator visual acceptance remain pending. Earlier focused checks and prototype
-timings do not qualify those outcomes.
+also changed. The new GPU arm recorded 2070.994 monotonic seconds: 1.956 times
+the historical CPU
+throughput and 1.556 times the historical GPU throughput. All 1000 original
+files were verified; 973 thumbnails became ready, their authoritative geometry
+matched the baseline exactly, and the same 27 invalid sources were refused.
+The broker observed 25 two-model
+batches and one three-model batch, plus 1042 singleton batches including
+normal-recovery attempts. Of 179 GPU normal attempts, 128 required canonical
+CPU normal recovery; there were no infrastructure fallbacks. The request-ledger
+digest remained unchanged, with zero R2 requests. See the
+[cached-corpus audit](compute-cached-1000.md) for scope, bottlenecks and the
+remaining visual/performance qualification gaps. Its UTC endpoints differ by
+98.080 seconds from monotonic elapsed time; these ratios are not qualified
+external wall-clock speedups.
 
 The contract probe uses real socket framing, scheduling and response handling
 with an injected executor seam. It proves lifecycle/packing decisions, not GPU
