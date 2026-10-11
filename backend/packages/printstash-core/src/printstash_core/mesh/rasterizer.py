@@ -193,7 +193,9 @@ def encode_rendered_pixels(
             format="WEBP",
             lossless=True,
             exact=True,
+            # Lossless quality controls compression effort, not decoded pixels.
             method=PREVIEW_PROFILE.encoding_method,
+            quality=PREVIEW_PROFILE.encoding_quality,
         )
     else:
         image.save(buffer, format="PNG", optimize=True)

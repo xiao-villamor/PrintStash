@@ -1,30 +1,26 @@
 """Bounded immutable array frames with distinct canonical/deferred normal tags."""
 
-import hashlib
 import json
 import struct
-from dataclasses import dataclass
-from typing import Final, Literal
 
 import numpy as np
 from printstash_core.mesh.render_geometry import PreparedRender, PreparedRenderGeometry
 
-from .gpu_normals import NORMAL_MODE, DeferredRender, RenderInput
-
-MAX_GEOMETRY_BYTES = 48 * 1024**2
-MAX_FACES = 2_000_000
-MAX_VERTICES = 6_000_000
-CANONICAL_MODE: Final = "canonical"
-NormalMode = Literal["canonical", "gpu-angle-csr-v1"]
-
-
-@dataclass(frozen=True)
-class GeometryLayout:
-    counts: tuple[int, int, int]
-    normal_mode: NormalMode = CANONICAL_MODE
-
-    def __iter__(self):
-        return iter(self.counts)
+from .compute_geometry_wire import (
+    CANONICAL_MODE,
+    MAX_GEOMETRY_BYTES,
+    NORMAL_MODE,
+    VISUAL_NORMAL_MODE,
+    GeometryLayout,
+    _layout,
+    _validate_layout,
+    descriptor,
+    identity,
+)
+from .compute_geometry_wire import (
+    body_size as body_size,
+)
+from .gpu_normals import MAX_ABS_COORDINATE, DeferredRender, RenderInput, VisualRender
 
 
 def layout_for(prepared: RenderInput) -> GeometryLayout:
@@ -33,49 +29,19 @@ def layout_for(prepared: RenderInput) -> GeometryLayout:
             len(prepared.vertices),
             prepared.face_count,
             prepared.position_count
-            if isinstance(prepared, DeferredRender)
+            if isinstance(prepared, (DeferredRender, VisualRender))
             else len(prepared.smooth_normals),
         ),
-        NORMAL_MODE if isinstance(prepared, DeferredRender) else CANONICAL_MODE,
+        prepared.normal_mode
+        if isinstance(prepared, (DeferredRender, VisualRender))
+        else CANONICAL_MODE,
     )
-
-
-def body_size(layout: GeometryLayout | tuple[int, int, int]) -> int:
-    layout = _layout(layout)
-    n, f, k = layout
-    return (
-        n * 16 + f * 12
-        if layout.normal_mode == NORMAL_MODE
-        else n * 20 + f * 24 + k * 24
-    )
-
-
-def _layout(value: GeometryLayout | tuple[int, int, int]) -> GeometryLayout:
-    return value if isinstance(value, GeometryLayout) else GeometryLayout(value)
-
-
-def _validate_layout(layout: GeometryLayout) -> None:
-    n, f, k = layout
-    if (
-        layout.normal_mode not in (CANONICAL_MODE, NORMAL_MODE)
-        or not all(type(v) is int and v > 0 for v in (n, f, k))
-        or n > MAX_VERTICES
-        or f > MAX_FACES
-        or k > n
-    ):
-        raise ValueError("compute_geometry_shape")
-    # A smaller deferred encoding must not silently enlarge source admission.
-    if (
-        n * 20 + f * 24 + k * 24 > MAX_GEOMETRY_BYTES
-        or body_size(layout) > MAX_GEOMETRY_BYTES
-    ):
-        raise ValueError("compute_geometry_budget")
 
 
 def encode(prepared: RenderInput, width: int, height: int, views, matte: bool) -> bytes:
     layout = layout_for(prepared)
     _validate_layout(layout)
-    deferred = isinstance(prepared, DeferredRender)
+    deferred = isinstance(prepared, (DeferredRender, VisualRender))
     faces = np.empty((prepared.face_count, 3), dtype="<u4" if deferred else "<i8")
     offset = 0
     for chunk in prepared.face_chunks(64_000):
@@ -97,8 +63,13 @@ def encode(prepared: RenderInput, width: int, height: int, views, matte: bool) -
     arrays = [
         np.ascontiguousarray(prepared.vertices, dtype="<f4"),
         faces,
-        np.ascontiguousarray(prepared.position_ids, dtype="<u4" if deferred else "<i8"),
     ]
+    if not isinstance(prepared, VisualRender):
+        arrays.append(
+            np.ascontiguousarray(
+                prepared.position_ids, dtype="<u4" if deferred else "<i8"
+            )
+        )
     if not deferred:
         assert isinstance(prepared, PreparedRender)
         arrays.append(np.ascontiguousarray(prepared.smooth_normals, dtype="<f8"))
@@ -115,7 +86,7 @@ def encode(prepared: RenderInput, width: int, height: int, views, matte: bool) -
         "matte": matte,
     }
     if deferred:
-        header["normal_mode"] = NORMAL_MODE
+        header["normal_mode"] = prepared.normal_mode
     encoded_header = json.dumps(header, allow_nan=False, separators=(",", ":")).encode()
     return (
         struct.pack("!I", len(encoded_header))
@@ -137,38 +108,9 @@ def decode(payload: bytes):
 
 
 def decode_header(header: bytes):
-    if len(header) > 4096:
-        raise ValueError("compute_geometry_header")
-    descriptor = json.loads(header)
-    fields = {"vertices", "faces", "normals", "width", "height", "views", "matte"}
-    if not isinstance(descriptor, dict) or set(descriptor) not in (
-        fields,
-        fields | {"normal_mode"},
-    ):
-        raise ValueError("compute_geometry_header")
-    if "normal_mode" in descriptor and descriptor["normal_mode"] != NORMAL_MODE:
-        raise ValueError("compute_geometry_normal_mode")
-    normal_mode: NormalMode = (
-        NORMAL_MODE if "normal_mode" in descriptor else CANONICAL_MODE
-    )
-    counts = GeometryLayout(
-        tuple(descriptor[name] for name in ("vertices", "faces", "normals")),
-        normal_mode,
-    )
-    _validate_layout(counts)
-    if any(
-        type(descriptor[name]) is not int or not 1 <= descriptor[name] <= 1280
-        for name in ("width", "height")
-    ):
-        raise ValueError("compute_frame_budget")
-    if (
-        type(descriptor["matte"]) is not bool
-        or not isinstance(descriptor["views"], list)
-        or not 1 <= len(descriptor["views"]) <= 8
-    ):
-        raise ValueError("compute_camera_budget")
+    descriptor_value, counts = descriptor(header)
     views = []
-    for value in descriptor["views"]:
+    for value in descriptor_value["views"]:
         try:
             view = None if value is None else np.asarray(value, dtype=np.float64)
         except (TypeError, ValueError) as exc:
@@ -180,7 +122,13 @@ def decode_header(header: bytes):
         ):
             raise ValueError("compute_camera_invalid")
         views.append(view)
-    return counts, descriptor["width"], descriptor["height"], views, descriptor["matte"]
+    return (
+        counts,
+        descriptor_value["width"],
+        descriptor_value["height"],
+        views,
+        descriptor_value["matte"],
+    )
 
 
 def decode_arrays(
@@ -196,6 +144,8 @@ def decode_arrays(
     sizes = (n * 12, f * 12, n * 4) if deferred else (n * 12, f * 24, n * 8, k * 24)
     dtypes = ("<f4", "<u4", "<u4") if deferred else ("<f4", "<i8", "<i8", "<f8")
     shapes = ((n, 3), (f, 3), (n,)) if deferred else ((n, 3), (f, 3), (n,), (k, 3))
+    if layout.normal_mode == VISUAL_NORMAL_MODE:
+        sizes, dtypes, shapes = (n * 12, f * 12), ("<f4", "<u4"), ((n, 3), (f, 3))
     if sum(sizes) != len(body):
         raise ValueError("compute_geometry_size")
     arrays = []
@@ -205,13 +155,13 @@ def decode_arrays(
             np.frombuffer(body[offset : offset + size], dtype=dtype).reshape(shape)
         )
         offset += size
-    vertices, faces, identities = arrays[:3]
+    vertices, faces = arrays[:2]
+    identities = arrays[2] if len(arrays) > 2 else None
     if (
         not np.isfinite(vertices).all()
         or faces.min() < 0
         or faces.max() >= n
-        or identities.min() < 0
-        or identities.max() >= k
+        or (identities is not None and (identities.min() < 0 or identities.max() >= k))
     ):
         raise ValueError("compute_geometry_invalid")
 
@@ -221,6 +171,11 @@ def decode_arrays(
         for start in range(0, f, size):
             yield faces[start : start + size]
 
+    if layout.normal_mode == VISUAL_NORMAL_MODE:
+        if np.max(np.abs(vertices)) > MAX_ABS_COORDINATE:
+            raise ValueError("compute_normals_numeric_range")
+        return VisualRender(PreparedRenderGeometry(vertices, f, chunks))
+    assert identities is not None
     if deferred:
         if identities.max() != k - 1:
             raise ValueError("compute_geometry_invalid")
@@ -231,20 +186,6 @@ def decode_arrays(
     if not np.isfinite(normals).all():
         raise ValueError("compute_geometry_invalid")
     return PreparedRender(vertices, f, chunks, identities, normals)
-
-
-def identity(
-    counts: GeometryLayout | tuple[int, int, int], body: bytes | memoryview
-) -> str:
-    from printstash_core.mesh.preview_profile import RASTERIZER_RECIPE
-
-    layout = _layout(counts)
-    prefix = RASTERIZER_RECIPE.encode()
-    if layout.normal_mode != CANONICAL_MODE:
-        prefix += b"\x00" + layout.normal_mode.encode() + b"\x00"
-    digest = hashlib.sha256(prefix + struct.pack("!III", *layout.counts))
-    digest.update(body)
-    return digest.hexdigest()
 
 
 def split(payload: bytes) -> tuple[str, str, bytes]:

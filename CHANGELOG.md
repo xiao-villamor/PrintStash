@@ -4,6 +4,8 @@
 
 ### Performance
 
+- Render compact indexed triangles with GPU bounds/framing and visual position welding, grouping model uploads and drawing into one bounded submission per batch. Retain multiple geometries in VRAM and repair degenerate normal neighborhoods locally. Release completed parser permits before GPU waits through owned staging, preserving isolated encoding/fallback and publication fences. Use faster lossless WebP compression; thumbnail/visual recipes track the changed rendering semantics.
+
 - Prepare large render meshes with portable GPU normal accumulation and indexed packing, using guarded per-model CPU fallback and shared RAM/VRAM accounting. Keep small preparation on CPU, reuse resident GPU state, and encode accelerated WebP through the same lossless canonical encoder. Version changed thumbnail and visual recipes while preserving authoritative measurements and source bytes.
 
 - Coalesce independently admitted thumbnail work across Models, preserve per-item cancellation and deadlines, and report actual model/frame batch sizes. Keep disposable worker priorities across process startup, bound OBJ/ASCII STL admission preflight, avoid redundant mesh copies, topology work and unused worker imports, and reduce durable queue dispatch latency without changing concurrency or backfill ownership.

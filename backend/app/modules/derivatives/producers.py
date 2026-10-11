@@ -40,7 +40,13 @@ from app.db.models import (
 from app.db.scopes import live
 from app.db.session import get_session_factory
 from app.modules.library.volume_metadata import apply_volume
-from app.modules.media import gcode_parser, mesh_isolation, stl_isolation, thumbnail
+from app.modules.media import (
+    gcode_parser,
+    mesh_isolation,
+    stl_isolation,
+    thumbnail,
+    thumbnail_staging,
+)
 from app.modules.media.mesh_contracts import (
     GeometryReady,
     MeshMeasurements,
@@ -49,6 +55,7 @@ from app.modules.media.mesh_contracts import (
     ThumbnailRequest,
 )
 from app.modules.media.mesh_isolation import MeshWorkerError
+from app.modules.media.source_preparation import capacity as prepared_capacity
 from app.modules.media.source_preparation import reserve_sources
 from app.modules.media.thumbnail_publication import (
     ThumbnailPublicationError,
@@ -392,13 +399,37 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
 
     try:
         with ExitStack() as stack:
-            prepared = stack.enter_context(reserve_sources((resolve(file_row),)))
+            from app.runtime.compute import client
+
+            width = settings.model_thumbnail_width
+            height = round(width * 3 / 4)
+            stage_visual = (
+                plan is None
+                and DerivativeKind.THUMBNAIL in attempts
+                and client.available(render=True)
+                and 2 * file_row.size_bytes
+                + thumbnail_staging.resident_bytes(width, height)
+                <= prepared_capacity().bytes
+            )
+            prepared = stack.enter_context(
+                reserve_sources(
+                    (resolve(file_row),),
+                    output_bytes=thumbnail_staging.resident_bytes(width, height)
+                    if stage_visual
+                    else 0,
+                )
+            )
             claim = CapacityManager(get_session_factory()).reserve(
                 f"derive:mesh:{file_id}:{time.monotonic_ns()}",
                 [
                     CapacityResource.for_path(
                         prepared.directory,
-                        file_row.size_bytes * 2,
+                        file_row.size_bytes * 2
+                        + (
+                            thumbnail_staging.output_bytes(width, height)
+                            if stage_visual
+                            else 0
+                        ),
                         role="mesh source preparation",
                     ),
                     CapacityResource.for_path(
@@ -409,22 +440,31 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                 ],
             )
             stack.callback(claim.release)
+            staging = (
+                stack.enter_context(
+                    thumbnail_staging.reserve(prepared.directory, width, height)
+                )
+                if stage_visual
+                else None
+            )
             (source,) = stack.enter_context(prepared.materialize(capacity_claimed=True))
-            result = mesh_isolation.generate(
-                ThumbnailRequest(
-                    path=source,
-                    file_type=file_row.file_type.value,
-                    include_geometry=DerivativeKind.METADATA in attempts,
-                    include_thumbnail=DerivativeKind.THUMBNAIL in attempts,
-                    reason="derivative",
-                    output_format="WEBP",
-                    include_fingerprint=plan is not None
-                    and (DerivativeKind.METADATA in attempts or pending is not None),
-                    triangle_cap=plan.triangle_cap
-                    if plan is not None
-                    else MAX_ANALYSIS_FACES,
-                ),
-                on_output=publish,
+            request = ThumbnailRequest(
+                path=source,
+                file_type=file_row.file_type.value,
+                include_geometry=DerivativeKind.METADATA in attempts,
+                include_thumbnail=DerivativeKind.THUMBNAIL in attempts,
+                reason="derivative",
+                output_format="WEBP",
+                include_fingerprint=plan is not None
+                and (DerivativeKind.METADATA in attempts or pending is not None),
+                triangle_cap=plan.triangle_cap
+                if plan is not None
+                else MAX_ANALYSIS_FACES,
+            )
+            result = (
+                mesh_isolation.generate(request, on_output=publish, staging=staging)
+                if staging is not None
+                else mesh_isolation.generate(request, on_output=publish)
             )
             if result.fingerprint_result is not None:
                 if pending is None:

@@ -103,8 +103,9 @@ class TestWebpNormalization:
         with pytest.raises(ValueError, match="thumbnail_empty"):
             to_webp(source.getvalue())
 
+    @pytest.mark.parametrize("method", [2, 6], ids=["current", "historical"])
     def test_canonical_renderer_webp_is_validated_without_reencoding(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, method: int
     ) -> None:
         from PIL import Image, ImageDraw
 
@@ -112,7 +113,9 @@ class TestWebpNormalization:
         source = io.BytesIO()
         image = Image.new("RGBA", (320, 240), (0, 0, 0, 0))
         ImageDraw.Draw(image).rectangle((32, 24, 287, 215), fill=(90, 130, 210, 255))
-        image.save(source, format="WEBP", lossless=True, exact=True, method=6)
+        image.save(
+            source, format="WEBP", lossless=True, exact=True, method=method, quality=80
+        )
         encoded = source.getvalue()
 
         assert to_webp(encoded) == encoded

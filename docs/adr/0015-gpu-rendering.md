@@ -29,7 +29,7 @@ This decision qualifies the ModernGL candidate only. A native WebGPU adapter usi
 
 The [portable compute implementation](../compute.md) uses a host-local broker for persistent wgpu and ONNX WebGPU ownership, bounded immutable array transfers, shared device admission and separately reserved host memory. Source parsing stays disposable. Geometry uploads serve all cameras and may stay cached; canonical framing remains in core through PreparedRasteriser. Canonical postprocessing can execute in portable GPU compute passes after a byte-exact canary, retaining the CPU implementation as fallback.
 
-Automatic selection requires hardware and implementation-specific evidence. Missing evidence is ordinary CPU operation. Thumbnail recipe 13 and qualified-portable-v4 version the candidate independently of hardware. Original ModernGL measurements remain unchanged and cannot qualify this backend.
+Automatic selection requires hardware and implementation-specific evidence. Missing evidence is ordinary CPU operation. Thumbnail recipe 14 and qualified-portable-v5 version the candidate independently of hardware. Original ModernGL measurements remain unchanged and cannot qualify this backend.
 
 
 ## Render-only WSL follow-up (2026-10-10)
@@ -88,3 +88,22 @@ work; it does not supply whole-ingestion or mixed-load qualification. Changed
 normal arithmetic and corrected canonical WebP encoding bump thumbnail/visual
 recipes. The operator retains visual acceptance, and automatic admission still
 requires current qualification evidence. See [compute preparation](../compute.md#indexed-packing-and-deferred-normals).
+
+
+## Native triangles and GPU visual preparation (2026-10-11)
+
+Operator-authorized visual evaluation no longer requires images identical to the
+CPU renderer. The historical ModernGL gate and failed evidence remain intact;
+they do not certify this new recipe. The portable owner now draws indexed native
+triangles, reduces bounds on the GPU and frames rotated bounding-box corners.
+Eligible visual position welding and normals move to bounded portable compute
+passes, with local flat-normal fallback instead of rejecting the complete model.
+These changes version thumbnail14/rasterv5/visualv5/compute-native-v4 together.
+
+Compatible models share mapped upload slabs and one submission/completion fence.
+Persistent compact geometry replaces expanded per-face object/projected arrays.
+All active scratch, staging, cached geometry and framebuffer allocations remain
+in the shared ledger. Production automatic selection still requires matching
+performance evidence; preview images remain subject to operator acceptance.
+The [new validation matrix](../testing/compute-visual-preparation.md) separates
+real-device execution, injected faults and complete-pipeline measurements.

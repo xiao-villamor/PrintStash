@@ -72,9 +72,7 @@ class TestAdmission:
         assert binary.host_bytes >= binary.readback_bytes + 96 * 1024**2
         assert binary.host_bytes < legacy.host_bytes
 
-    def test_bounds_deferred_normal_batch_resources(
-        self, frame
-    ):
+    def test_bounds_deferred_normal_batch_resources(self, frame):
         from printstash_core.mesh.render_geometry import PreparedRenderGeometry
 
         from app.modules.media.compute_geometry import decode
@@ -105,7 +103,12 @@ class TestAdmission:
         )
 
         assert (
-            result.host_bytes == canonical.host_bytes + host_scratch_bytes(deferred) + 8
+            result.host_bytes
+            == canonical.host_bytes
+            + host_scratch_bytes(deferred)
+            + 8
+            # Two models omit3 f32 normal triples from both host upload copies.
+            - 2 * 2 * 3 * 12
         )
         assert result.device_bytes == canonical.device_bytes + 8
         assert result.readback_bytes == canonical.readback_bytes + 8

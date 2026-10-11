@@ -27,10 +27,12 @@ from .discovery import runtime_identity
 from .health import cooling
 from .profile import identity as profile_identity
 from .protocol import (
+    MAX_FRAME,
     BinaryRenderRequest,
     InferenceRequest,
     Priority,
     StatusRequest,
+    admit_control_response,
     receive,
     send_admitted,
     send_body,
@@ -295,9 +297,20 @@ def is_warm(identity: str) -> bool:
 
 
 def exchange_render(
-    request: BinaryRenderRequest, body: bytes, *, checkpoint=lambda: None
+    request: BinaryRenderRequest,
+    body: bytes | memoryview,
+    *,
+    checkpoint=lambda: None,
+    response_limit: int = MAX_FRAME,
 ) -> bytes:
     """Negotiate a content reference on every connection, including after restart."""
+    if type(response_limit) is not int or not 0 < response_limit <= MAX_FRAME:
+        raise ValueError("compute_render_response_limit")
+
+    def admit_result(length: int) -> None:
+        if length > response_limit:
+            raise ComputeUnavailable(Reason.INVALID_INPUT)
+
     root = directory()
     if root is None:
         raise ComputeUnavailable(Reason.BROKER_UNAVAILABLE)
@@ -316,8 +329,15 @@ def exchange_render(
                 checkpoint=checkpoint,
             )
             response = json.loads(
-                receive(connection, request.deadline, checkpoint=checkpoint)
+                receive(
+                    connection,
+                    request.deadline,
+                    checkpoint=checkpoint,
+                    admit=admit_control_response,
+                )
             )
+            if not isinstance(response, dict):
+                raise ComputeUnavailable(Reason.INVALID_INPUT)
             if "error" in response:
                 raise ComputeUnavailable(Reason(response["error"]))
             if response == {"geometry": "upload"}:
@@ -330,7 +350,9 @@ def exchange_render(
                 send_body(connection, body, request.deadline, checkpoint=checkpoint)
             elif response != {"geometry": "cached"}:
                 raise ComputeUnavailable(Reason.INVALID_INPUT)
-            result = receive(connection, request.deadline, checkpoint=checkpoint)
+            result = receive(
+                connection, request.deadline, checkpoint=checkpoint, admit=admit_result
+            )
             checkpoint()
             if result.startswith(b"\x00"):
                 return result[1:]

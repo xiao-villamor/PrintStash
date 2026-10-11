@@ -64,10 +64,12 @@ from app.modules.media.mesh_facts import (
     SampledGeometry,
 )
 from app.modules.media.mesh_protocol import (
-    BasicOutput,
     GeometryOutput,
     OutputSink,
+    PreparedThumbnailOutput,
     ThumbnailOutput,
+    WorkerOutput,
+    WorkerOutputSink,
 )
 from app.modules.media.mesh_resources import (
     DetachedSceneMesh,
@@ -88,6 +90,11 @@ from app.modules.media.stl_reader import (
     scan_stl,
 )
 from app.modules.media.three_mf_scene import Unsupported3MFCapability, read_scene
+from app.modules.media.thumbnail_staging import (
+    StagedRender,
+    StagedThumbnailResult,
+    ThumbnailStaging,
+)
 from app.modules.media.worker_bootstrap import WORKER_MARKER
 
 if TYPE_CHECKING:
@@ -167,6 +174,37 @@ class ThumbnailEngine:
     def generate(
         self, request: ThumbnailRequest, *, on_output: OutputSink | None = None
     ) -> ThumbnailResult:
+        def deliver(output: WorkerOutput) -> None:
+            if not isinstance(output, (GeometryOutput, ThumbnailOutput)):
+                raise TypeError("unexpected_prepared_thumbnail")
+            if on_output is not None:
+                on_output(output)
+
+        result = self._generate(
+            request, on_output=deliver if on_output is not None else None, staging=None
+        )
+        assert isinstance(result, ThumbnailResult)
+        return result
+
+    def prepare(
+        self,
+        request: ThumbnailRequest,
+        staging: ThumbnailStaging,
+        *,
+        on_output: WorkerOutputSink | None = None,
+    ) -> ThumbnailResult | StagedThumbnailResult:
+        """Prepare an owned visual packet while all source buffers are admitted."""
+        if request.include_fingerprint or not request.include_thumbnail:
+            raise ValueError("invalid_staged_thumbnail_request")
+        return self._generate(request, on_output=on_output, staging=staging)
+
+    def _generate(
+        self,
+        request: ThumbnailRequest,
+        *,
+        on_output: WorkerOutputSink | None,
+        staging: ThumbnailStaging | None,
+    ) -> ThumbnailResult | StagedThumbnailResult:
         started = time.monotonic()
         phases = PhaseRecorder()
         try:
@@ -193,6 +231,7 @@ class ThumbnailEngine:
         preview_coverage = PreviewCoverage.NOT_PRODUCED
         failure: ThumbnailFailureReason | None = None
         image: bytes | None = None
+        staged: StagedRender | None = None
         mesh: Trimesh | None = None
         prepared: PreparedMesh | None = None
         detached_prepared: DetachedSceneMesh | None = None
@@ -208,7 +247,7 @@ class ThumbnailEngine:
         def coverage() -> MeshCoverage:
             return MeshCoverage(source_scan, geometry_representation, preview_coverage)
 
-        def deliver(output: BasicOutput) -> None:
+        def deliver(output: WorkerOutput) -> None:
             if on_output is not None:
                 try:
                     on_output(output)
@@ -244,7 +283,16 @@ class ThumbnailEngine:
             if image is not None:
                 failure = None
             thumbnail_emitted = True
-            if on_output is not None:
+            if staged is not None:
+                deliver(
+                    PreparedThumbnailOutput(
+                        staged,
+                        coverage(),
+                        max(round((time.monotonic() - started) * 1000), 0),
+                        _peak_rss_bytes(),
+                    )
+                )
+            elif on_output is not None:
                 deliver(
                     ThumbnailOutput(
                         image,
@@ -584,24 +632,56 @@ class ThumbnailEngine:
                                 )
                             else:
                                 try:
-                                    image = (
-                                        mesh_render.render_scene_thumbnail(
-                                            source_scene.scene,
-                                            request.path.name,
-                                            width=width,
-                                            height=height,
-                                            output_format=request.output_format,
+                                    if staging is not None:
+                                        visual = (
+                                            mesh_render.prepare_scene_render(
+                                                source_scene.scene
+                                            )
+                                            if source_scene is not None
+                                            else mesh_render.prepare_mesh_render(mesh)
                                         )
-                                        if source_scene is not None
-                                        else mesh_render.render_mesh_thumbnail(
-                                            mesh,
-                                            request.path.name,
-                                            width=width,
-                                            height=height,
-                                            output_format=request.output_format,
+                                        if visual is not None:
+                                            try:
+                                                staged = staging.write(visual)
+                                            except ValueError as exc:
+                                                # The transport ceiling does not reduce the
+                                                # existing isolated renderer's admission.
+                                                if (
+                                                    str(exc)
+                                                    != "compute_geometry_budget"
+                                                ):
+                                                    raise
+                                        if staged is None and visual is not None:
+                                            image = (
+                                                mesh_render.render_prepared_thumbnail(
+                                                    visual,
+                                                    request.path.name,
+                                                    width=width,
+                                                    height=height,
+                                                    output_format=request.output_format,
+                                                )
+                                            )
+                                    else:
+                                        image = (
+                                            mesh_render.render_scene_thumbnail(
+                                                source_scene.scene,
+                                                request.path.name,
+                                                width=width,
+                                                height=height,
+                                                output_format=request.output_format,
+                                            )
+                                            if source_scene is not None
+                                            else mesh_render.render_mesh_thumbnail(
+                                                mesh,
+                                                request.path.name,
+                                                width=width,
+                                                height=height,
+                                                output_format=request.output_format,
+                                            )
                                         )
-                                    )
                                 except Exception:  # noqa: BLE001 - bounded fallbacks remain
+                                    if staging is not None:
+                                        raise
                                     logger.exception(
                                         "thumbnail_engine: full renderer failed",
                                         extra={"format": suffix},
@@ -611,14 +691,19 @@ class ThumbnailEngine:
                                     preview_coverage = PreviewCoverage.COMPLETE
 
                         phases.finish(
-                            output_bytes=len(image) if image is not None else None,
-                            outcome=PhaseOutcome.COMPLETED
+                            output_bytes=len(image)
                             if image is not None
+                            else staged.size
+                            if staged is not None
+                            else None,
+                            outcome=PhaseOutcome.COMPLETED
+                            if image is not None or staged is not None
                             else PhaseOutcome.FAILED,
                         )
 
                         if (
                             image is None
+                            and staged is None
                             and suffix == ".stl"
                             and (over_cap or mesh is not None)
                         ):
@@ -681,7 +766,7 @@ class ThumbnailEngine:
                                         }
                                     )
 
-                        if image is None and suffix == ".stl":
+                        if image is None and staged is None and suffix == ".stl":
                             phases.start(MeshPhase.FALLBACK, input_bytes=source_bytes)
                             fallback = stl_fallback.render_stl_thumbnail(
                                 request.path, width=width, height=height
@@ -730,7 +815,7 @@ class ThumbnailEngine:
                                         }
                                     )
 
-                        if image is None and failure is None:
+                        if image is None and staged is None and failure is None:
                             failure = (
                                 ThumbnailFailureReason.RESOURCE_LIMIT
                                 if over_cap
@@ -916,7 +1001,11 @@ class ThumbnailEngine:
         labels = {
             "format": suffix.removeprefix(".") or "unknown",
             "strategy": strategy.value,
-            "outcome": "generated" if image is not None else "failed",
+            "outcome": "generated"
+            if image is not None
+            else "prepared"
+            if staged is not None
+            else "failed",
             "reason": failure.value if failure is not None else "none",
         }
         self.metrics.increment("thumbnail_generation_total", labels=labels)
@@ -943,7 +1032,7 @@ class ThumbnailEngine:
             self.metrics.observe(
                 "thumbnail_peak_rss_bytes", float(peak_rss), labels=labels
             )
-        return ThumbnailResult(
+        result = ThumbnailResult(
             image=image,
             geometry=geometry,
             geometry_outcome=geometry_outcome,
@@ -958,6 +1047,7 @@ class ThumbnailEngine:
             fingerprint_result=fingerprint_result,
             phase_stats=phases.snapshot(),
         )
+        return StagedThumbnailResult(result, staged) if staged is not None else result
 
 
 __all__ = [

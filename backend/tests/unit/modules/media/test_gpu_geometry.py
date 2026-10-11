@@ -19,7 +19,7 @@ from app.modules.media.gpu_geometry import (
     input_sizes,
     packed_chunks,
 )
-from app.modules.media.gpu_normals import DeferredRender, NormalPipeline, canonical
+from app.modules.media.gpu_normals import DeferredRender, NormalPipeline
 from app.runtime.compute.budget import Residency
 from app.runtime.compute.contracts import ComputeUnavailable, Reason
 
@@ -442,18 +442,14 @@ class TestDeferredGeometry:
         packer.close()
         assert memory.used == 0
 
-    def test_renderer_discards_unverified_geometry_on_close(
-        self, device, deferred, monkeypatch
-    ):
+    def test_renderer_discards_unverified_geometry_on_close(self, device, deferred):
         from app.modules.media.webgpu_render import Renderer
 
-        monkeypatch.setattr(GeometryPacker, "canary", lambda self: None)
-        monkeypatch.setattr(NormalPipeline, "canary", lambda self, **kwargs: None)
         memory = Residency(1024**2)
-        owner = Renderer(device, memory, packing_min_faces=1)
+        owner = Renderer(device, memory)
         owner.upload(deferred, "geometry:pending")
-        assert owner.geometry_gpu_normal_uploads == 1
         assert owner.unverified_normals == {"geometry:pending"}
+        assert memory.entries["geometry:pending"].pins == 1
 
         owner.close()
 
@@ -461,63 +457,61 @@ class TestDeferredGeometry:
         assert owner.geometry == {}
         assert memory.used == 0
 
-    def test_renderer_materializes_cpu_normals_without_gpu_packing(
-        self, device, deferred
-    ):
+    def test_renderer_keeps_deferred_geometry_compact(self, device, deferred):
         from app.modules.media.webgpu_render import Renderer
 
         memory = Residency(1024**2)
-        owner = Renderer(device, memory, packing_min_faces=None)
-        result = owner.upload(deferred, "geometry:cpu")
+        owner = Renderer(device, memory)
+        result = owner.upload(deferred, "geometry:deferred")
 
-        assert result.data == next(packed_chunks(canonical(deferred))).tobytes()
-        assert owner.geometry_cpu_normal_fallbacks == 1
-        assert owner.geometry_gpu_normal_uploads == 0
-        assert owner.packer is None
-        memory.remove("geometry:cpu")
+        assert len(result.positions.data) == 36
+        assert len(result.faces.data) == 24
+        assert len(result.identities.data) == 12
+        assert len(result.smoothed.data) == 36
+        assert len(result.bounds.data) == 32
+        assert owner.geometry_cpu_normal_fallbacks == 0
+        assert owner.packer is not None
+        assert owner.packer.pending[0].plan is not None
+        owner.close()
         assert memory.used == 0
 
 
 class TestRendererUpload:
-    def test_small_models_skip_gpu_packing_setup(self, device, prepared):
+    def test_small_models_share_the_compact_path(self, device, prepared):
         from app.modules.media.webgpu_render import Renderer
 
         memory = Residency(1024**2)
         renderer = Renderer(device, memory, packing_min_faces=3)
         result = renderer.upload(prepared, "geometry:small")
 
-        assert result.data == next(packed_chunks(prepared)).tobytes()
-        assert renderer.cpu_geometry_uploads == 1
-        assert renderer.gpu_geometry_uploads == 0
-        assert renderer.packer is None
-        assert not renderer.packing_attempted
-        assert memory.used == 192
-        memory.remove("geometry:small")
+        assert len(result.positions.data) == 36
+        assert len(result.faces.data) == 24
+        assert renderer.gpu_geometry_uploads == 1
+        assert renderer.cpu_geometry_uploads == 0
+        assert renderer.packer is not None
+        assert memory.entries["geometry:small"].size == 140
+        renderer.close()
+        assert memory.used == 0
 
-    def test_uses_cpu_after_packing_canary_refusal(self, device, prepared):
+    def test_reuses_the_same_compact_allocation(self, device, prepared):
         from app.modules.media.webgpu_render import Renderer
 
         memory = Residency(1024**2)
-        renderer = Renderer(device, memory, packing_min_faces=1)
+        renderer = Renderer(device, memory)
+        first = renderer.upload(prepared, "geometry:one")
+        second = renderer.upload(prepared, "geometry:one")
 
-        result = renderer.upload(prepared, "geometry:one")
+        assert first is second
+        assert renderer.uploads == renderer.cache_hits == 1
+        assert len(renderer.packer.pending) == 1
+        renderer.close()
+        assert memory.used == 0
 
-        assert result.data == next(packed_chunks(prepared)).tobytes()
-        assert renderer.cpu_geometry_uploads == 1
-        assert renderer.gpu_geometry_uploads == 0
-        assert renderer.packing_min_faces is None
-        assert memory.used == 192
-        assert memory.entries["geometry:one"].pins == 0
-        memory.remove("geometry:one")
-
-    def test_reopens_packer_after_renderer_workspace_eviction(
-        self, device, prepared, monkeypatch
-    ):
+    def test_reopens_owner_after_renderer_workspace_eviction(self, device, prepared):
         from app.modules.media.webgpu_render import Renderer
 
-        monkeypatch.setattr(GeometryPacker, "canary", lambda self: None)
         memory = Residency(1024**2)
-        renderer = Renderer(device, memory, packing_min_faces=1)
+        renderer = Renderer(device, memory)
         renderer.upload(prepared, "geometry:first")
         first = renderer.packer
         assert first is not None
@@ -525,7 +519,6 @@ class TestRendererUpload:
         renderer.close()
         assert first.fence.closed
         assert renderer.packer is None
-        assert not renderer.packing_attempted
         renderer.upload(prepared, "geometry:second")
 
         assert renderer.gpu_geometry_uploads == 2
@@ -533,7 +526,5 @@ class TestRendererUpload:
         assert renderer.packer is not first
         assert not renderer.packer.fence.closed
         renderer.close()
-        for key in list(memory.entries):
-            memory.remove(key)
         assert memory.used == 0
         assert device.queue.fences == 2

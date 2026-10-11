@@ -54,6 +54,7 @@ from app.modules.media.mesh_telemetry import (
     encode_phase_stats,
 )
 from app.modules.media.mesh_wire_values import pack_value, unpack_value
+from app.modules.media.thumbnail_staging import StagedRender
 
 FRAME_MAGIC = b"MSH2"
 MAX_STREAM_BYTES = 32 * 1024 * 1024
@@ -73,6 +74,7 @@ class FrameKind(IntEnum):
     GEOMETRY = 1
     THUMBNAIL = 2
     FINAL = 3
+    PREPARED_THUMBNAIL = 4
 
 
 class MeshProtocolError(ValueError):
@@ -192,6 +194,27 @@ class ThumbnailOutput:
 
 
 @dataclass(frozen=True)
+class PreparedThumbnailOutput:
+    """A visual packet exists; no image or successful preview is claimed yet."""
+
+    render: StagedRender
+    coverage: MeshCoverage
+    duration_ms: int
+    peak_rss_bytes: int | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.render, StagedRender):
+            raise MeshProtocolError("invalid_prepared_thumbnail")
+        if (
+            not isinstance(self.coverage, MeshCoverage)
+            or self.coverage.preview is not PreviewCoverage.NOT_PRODUCED
+        ):
+            raise MeshProtocolError("prepared_thumbnail_has_preview")
+        _counter(self.duration_ms)
+        _optional_counter(self.peak_rss_bytes)
+
+
+@dataclass(frozen=True)
 class FingerprintFinal:
     fingerprint: FingerprintResult | None
     phase_stats: tuple[PhaseStats, ...]
@@ -225,8 +248,10 @@ class FingerprintFinal:
 
 
 BasicOutput: TypeAlias = GeometryOutput | ThumbnailOutput
-OutputFrame: TypeAlias = BasicOutput | FingerprintFinal
+WorkerOutput: TypeAlias = BasicOutput | PreparedThumbnailOutput
+OutputFrame: TypeAlias = WorkerOutput | FingerprintFinal
 OutputSink: TypeAlias = Callable[[BasicOutput], None]
+WorkerOutputSink: TypeAlias = Callable[[WorkerOutput], None]
 
 
 def _fields(raw: object, names: set[str]) -> dict[str, Any]:
@@ -328,6 +353,15 @@ def encode_frame(frame: OutputFrame, *, sequence: int) -> bytes:
             "duration_ms": frame.duration_ms,
             "peak_rss_bytes": frame.peak_rss_bytes,
         }
+    elif isinstance(frame, PreparedThumbnailOutput):
+        kind = FrameKind.PREPARED_THUMBNAIL
+        header = {
+            "size": frame.render.size,
+            "sha256": frame.render.sha256,
+            "coverage": encode_coverage(frame.coverage),
+            "duration_ms": frame.duration_ms,
+            "peak_rss_bytes": frame.peak_rss_bytes,
+        }
     elif isinstance(frame, FingerprintFinal):
         kind = FrameKind.FINAL
         header = {
@@ -416,6 +450,16 @@ def _decode(kind: FrameKind, payload: bytes, image: bytes) -> OutputFrame:
             raw["duration_ms"],
             raw["peak_rss_bytes"],
         )
+    if kind is FrameKind.PREPARED_THUMBNAIL:
+        raw = _fields(
+            raw, {"size", "sha256", "coverage", "duration_ms", "peak_rss_bytes"}
+        )
+        return PreparedThumbnailOutput(
+            StagedRender(raw["size"], raw["sha256"]),
+            decode_coverage(raw["coverage"]),
+            raw["duration_ms"],
+            raw["peak_rss_bytes"],
+        )
     raw = _fields(
         raw, {"fingerprint", "phase_stats", "duration_ms", "peak_rss_bytes", "coverage"}
     )
@@ -431,7 +475,9 @@ def _decode(kind: FrameKind, payload: bytes, image: bytes) -> OutputFrame:
 class FrameDecoder:
     """Incrementally decode only the requested sequence, under one byte ceiling."""
 
-    def __init__(self, request: ThumbnailRequest) -> None:
+    def __init__(
+        self, request: ThumbnailRequest, *, allow_prepared: bool = False
+    ) -> None:
         _boolean(request.include_geometry)
         _boolean(request.include_thumbnail)
         _boolean(request.include_fingerprint)
@@ -441,6 +487,11 @@ class FrameDecoder:
             FrameKind.FINAL,
         )
         self._fingerprint_requested = request.include_fingerprint
+        self._allow_prepared = _boolean(allow_prepared)
+        if allow_prepared and (
+            request.include_fingerprint or not request.include_thumbnail
+        ):
+            raise MeshProtocolError("prepared_thumbnail_request")
         self._buffer = bytearray()
         self._received = 0
         self._sequence = 0
@@ -463,7 +514,12 @@ class FrameDecoder:
                     magic != FRAME_MAGIC
                     or sequence != self._sequence
                     or self._sequence >= len(self._expected)
-                    or kind is not self._expected[self._sequence]
+                    or not (
+                        kind is self._expected[self._sequence]
+                        or self._allow_prepared
+                        and kind is FrameKind.PREPARED_THUMBNAIL
+                        and self._expected[self._sequence] is FrameKind.THUMBNAIL
+                    )
                 ):
                     raise MeshProtocolError("invalid_output_order")
                 limit = (

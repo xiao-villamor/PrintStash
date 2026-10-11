@@ -77,3 +77,63 @@ class TestWarmRender:
 
         monkeypatch.setattr(client, "status", forbidden)
         assert client.warm_render() is None
+
+
+class TestRenderResponseBudget:
+    @pytest.mark.parametrize("stage", ["admission", "geometry", "pixels"], ids=str)
+    def test_rejects_oversized_responses_before_reading_body(
+        self, monkeypatch, tmp_path, stage
+    ):
+        import struct
+        import time
+        from contextlib import contextmanager
+
+        from app.runtime.compute.contracts import ComputeUnavailable, Reason
+        from app.runtime.compute.protocol import BinaryRenderRequest, Priority
+
+        def frame(payload):
+            return struct.pack("!I", len(payload)) + payload
+
+        preceding = {
+            "admission": b"",
+            "geometry": frame(b'{"ready":true}'),
+            "pixels": frame(b'{"ready":true}') + frame(b'{"geometry":"cached"}'),
+        }[stage]
+        payload = bytearray(preceding + struct.pack("!I", 4097))
+
+        class Connection:
+            def settimeout(self, seconds):
+                pass
+
+            def sendall(self, data):
+                pass
+
+            def send(self, data):
+                return len(data)
+
+            def recv(self, size):
+                assert payload, "oversized body must not be read"
+                result = bytes(payload[:size])
+                del payload[:size]
+                return result
+
+        @contextmanager
+        def connect(*args, **kwargs):
+            yield Connection()
+
+        monkeypatch.setattr(client, "directory", lambda: tmp_path)
+        monkeypatch.setattr(client, "_connect", connect)
+        request = BinaryRenderRequest(
+            deadline=time.monotonic() + 5,
+            priority=Priority.BACKGROUND,
+            request_id="bounded",
+            geometry_key="a" * 64,
+            geometry_bytes=1,
+            header="{}",
+            recipe="test",
+            units=1,
+        )
+        with pytest.raises(ComputeUnavailable) as error:
+            client.exchange_render(request, b"x", response_limit=30)
+        assert error.value.reason is Reason.INVALID_INPUT
+        assert not payload

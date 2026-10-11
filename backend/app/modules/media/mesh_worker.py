@@ -14,8 +14,9 @@ from pathlib import Path
 from app.modules.media.compute_render import background_render_scope
 from app.modules.media.mesh_contracts import ThumbnailRequest
 from app.modules.media.mesh_isolation import read_spec
-from app.modules.media.mesh_protocol import BasicOutput, FingerprintFinal, encode_frame
+from app.modules.media.mesh_protocol import FingerprintFinal, WorkerOutput, encode_frame
 from app.modules.media.thumbnail_engine import ThumbnailEngine
+from app.modules.media.thumbnail_staging import StagedThumbnailResult, ThumbnailStaging
 
 
 def main(argv: list[str]) -> int:
@@ -37,7 +38,7 @@ def main(argv: list[str]) -> int:
     )
     sequence = 0
 
-    def emit(basic: BasicOutput) -> None:
+    def emit(basic: WorkerOutput) -> None:
         nonlocal sequence
         output.write(encode_frame(basic, sequence=sequence))
         sequence += 1
@@ -46,7 +47,21 @@ def main(argv: list[str]) -> int:
         # This worker produces asynchronous Artifact outputs. Its Job priority
         # is retained for admission, but renders can share one GPU submission.
         with background_render_scope():
-            result = ThumbnailEngine().generate(request, on_output=emit)
+            if spec["staging"] is None:
+                generated = ThumbnailEngine().generate(request, on_output=emit)
+            else:
+                generated = ThumbnailEngine().prepare(
+                    request,
+                    ThumbnailStaging(
+                        Path(spec["staging"]), spec["width"], spec["height"]
+                    ),
+                    on_output=emit,
+                )
+            result = (
+                generated.analysis
+                if isinstance(generated, StagedThumbnailResult)
+                else generated
+            )
         output.write(
             encode_frame(
                 FingerprintFinal(

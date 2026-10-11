@@ -1498,6 +1498,32 @@ class TestEncodeRenderedPixels:
             assert decoded.size == (3, 1)
             assert decoded.convert("RGBA").tobytes() == rgba
 
+    def test_preserves_rgba_across_compression_effort_change(self):
+        width, height = 96, 64
+        rgba = bytes(
+            component
+            for y in range(height)
+            for x in range(width)
+            for component in (
+                (7 * x + y) % 256,
+                (3 * y + x) % 256,
+                (x * y) % 256,
+                (x + 4 * y) % 256,
+            )
+        )
+        frame = RenderedPixels(width, height, rgba)
+        historical = io.BytesIO()
+        Image.frombytes("RGBA", (width, height), rgba).save(
+            historical, format="WEBP", lossless=True, exact=True, method=6, quality=80
+        )
+
+        current = rasterizer.encode_rendered_pixels(frame, output_format="WEBP")
+
+        for encoded in (historical.getvalue(), current):
+            with Image.open(io.BytesIO(encoded)) as decoded:
+                assert decoded.size == (width, height)
+                assert decoded.convert("RGBA").tobytes() == rgba
+
     def test_refuses_unknown_encoder_format(self):
         frame = RenderedPixels(1, 1, bytes([10, 20, 30, 255]))
 

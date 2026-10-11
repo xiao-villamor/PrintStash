@@ -63,6 +63,10 @@ class TestComputeStatus:
 
         assert response.status_code == 200, response.text
         assert response.json()["mode"] == "cpu"
+        assert response.json()["render_submissions"] == 0
+        assert response.json()["render_upload_calls"] == 0
+        assert response.json()["render_bounds_vertices"] == 0
+        assert response.json()["geometry_local_normal_fallback_vertices"] == 0
         assert response.json()["geometry_gpu_uploads"] == 0
         assert response.json()["geometry_cpu_uploads"] == 0
         assert response.json()["geometry_gpu_normal_uploads"] == 0

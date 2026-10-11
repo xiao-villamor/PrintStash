@@ -26,6 +26,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from app.modules.media import mesh_render
 
@@ -339,7 +340,7 @@ class TestDeferredPreparation:
     def test_selects_gpu_before_cpu_normals_at_profitable_threshold(self, monkeypatch):
         from printstash_core.mesh import render_geometry
 
-        from app.modules.media.gpu_normals import DeferredRender
+        from app.modules.media.gpu_normals import VisualRender
         from app.runtime.compute import client
 
         monkeypatch.setattr(client, "available", lambda **_: True)
@@ -351,8 +352,9 @@ class TestDeferredPreparation:
             ),
         )
         prepared = mesh_render.prepare_mesh_render(self.mesh(20_000))
-        assert isinstance(prepared, DeferredRender)
+        assert isinstance(prepared, VisualRender)
         assert not hasattr(prepared, "smooth_normals")
+        assert not hasattr(prepared, "position_ids")
         assert prepared._canonical is None
 
     def test_keeps_unprofitable_preparation_canonical(self, monkeypatch):
@@ -369,12 +371,14 @@ class TestDeferredPreparation:
             mesh_render.prepare_mesh_render(self.mesh(20_000)), PreparedRender
         )
 
-    def test_preserves_parser_fallback_custody(self, monkeypatch):
+    @pytest.mark.parametrize("mode", ["visual", "deferred"], ids=str)
+    def test_preserves_parser_fallback_custody(self, monkeypatch, mode):
         from printstash_core.mesh.render_geometry import PreparedRender, prepare_mesh
 
-        from app.modules.media.gpu_normals import defer
+        from app.modules.media.gpu_normals import VisualRender, defer
 
-        prepared = defer(prepare_mesh(self.mesh(2)))
+        geometry = prepare_mesh(self.mesh(2))
+        prepared = VisualRender(geometry) if mode == "visual" else defer(geometry)
         seen = []
 
         def render(canonical, *_args, **_kwargs):

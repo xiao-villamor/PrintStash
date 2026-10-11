@@ -11,9 +11,10 @@ The **gpu-render** extra adds only wgpu for rendering. The optional **gpu** extr
 | Downloads, extraction, validation, STEP tessellation, mesh parsing, viewer conversion | Existing CPU/storage and disposable workers |
 | Dimensions, volume, topology, exact fingerprints | Existing authoritative CPU algorithms |
 | Projection, face culling, shading, triangle rasterization | Qualified WebGPU renderer, otherwise canonical CPU |
-| Eligible smooth-normal preparation and indexed packing | Portable WGSL with bounded canonical CPU recovery |
+| Eligible visual position welding and smooth normals | Portable WGSL with bounded local flat-normal recovery |
 | Resampling, premultiplied-alpha rounding and vignette | Canary-checked portable WGSL, otherwise canonical CPU |
-| Camera framing, position welding and lossless image encoding | Canonical CPU |
+| Bounds and camera framing | Portable WGSL reductions over cached geometry |
+| Lossless image encoding | Bounded isolated CPU finalizer |
 | Image, text, point and sparse ONNX inference | Qualified native WebGPU graph, otherwise CPU worker |
 | Caption generation | Existing remote API |
 
@@ -27,7 +28,7 @@ Scheduling priority is explicitly propagated across disposable-worker exec. Thum
 
 Members are revalidated individually before execution. An expired or cancelled member receives its own result without invalidating live members; the shared watchdog accommodates the remaining live deadlines. Each output keeps its original deadline, cancellation and publication fences. Retired decoded geometry is released before its handler can return queue credits. Final admission can split an over-budget batch into individually admitted requests. See the [ready-model batching diagnosis and coverage matrix](testing/compute-model-batching.md) for the preparation corrections and pending 1000-model comparison.
 
-A 32 MiB host cache retains final RGBA frames by full validated input and recipe, avoiding repeated projection/shading/postprocessing. The shared GPU ledger pins active geometries and can keep several models resident; readback slots, projected buffers and attachments are pooled. Shaders are compiled once per renderer lifetime. Canonical postprocessing is shared with CPU, without allocating the CPU rasterizer's screen/depth/shading arrays in the GPU path. Only visual work warms the owner before entering a disposable parser; metadata-only work avoids that startup. Persistent ownership amortizes startup across a 40-model import even when the durable derivative lane is sequential. Shader pipelines, projected buffers and framebuffers stay warm. Submissions complete at bounded frame readback without per-face-chunk synchronization. Idle geometry is evicted before weights and expires after 60 seconds. Model sessions expire after 300 seconds. Active allocations are pinned in one shared device ledger. Separate host reservations use the existing inference RAM partition; parser credits remain held until their processes and buffers die.
+A 32 MiB host cache retains final RGBA frames by full validated input and recipe, avoiding repeated projection/shading/postprocessing. The shared GPU ledger pins active geometries and can keep several models resident; readback slots and attachments are pooled; vertex shaders fetch compact indexed geometry directly. Shaders are compiled once per renderer lifetime. Canary-checked GPU postprocessing preserves the shared pixel processing semantics without allocating the CPU rasterizer's screen/depth/shading arrays. Only visual work warms the owner before entering a disposable parser; metadata-only work avoids that startup. Persistent ownership amortizes startup across a 40-model import even when the durable derivative lane is sequential. Shader pipelines, compact geometry buffers and framebuffers stay warm. Submissions complete at bounded frame readback without per-face-chunk synchronization. Idle geometry is evicted before weights and expires after 60 seconds. Model sessions expire after 300 seconds. Active allocations are pinned in one shared device ledger. Separate host reservations use the existing inference RAM partition; parser credits remain held until their processes and buffers die.
 
 Inference batches contain at most eight compatible inputs. Dynamic exports receive tensor batches and batch canaries; fixed exports retain singleton execution. Text batches use length buckets and masks. Interactive tickets have no intentional accumulation delay; background tickets coalesce already-ready work for at most 10 ms. Aged background work receives service under sustained query traffic.
 
@@ -46,7 +47,7 @@ Allocation recovery evicts idle entries and makes one bounded inference split. V
 | VAULT_COMPUTE_MEMORY_MB | 1024 | Shared estimated device ceiling, 256–65536 MiB |
 | VAULT_COMPUTE_BATCH_WAIT_MS | 10 | Background accumulation ceiling, 0–10 ms |
 
-Portable runtimes do not expose dependable free-device-memory information on every deployment. The conservative fallback is 1 GiB; the memory setting is an operator override. Accounting covers a runtime reserve, model/workspace estimates, geometry and framebuffer/projection bounds. It is admission control, not protection against allocations by other applications.
+Portable runtimes do not expose dependable free-device-memory information on every deployment. The conservative fallback is 1 GiB; the memory setting is an operator override. Accounting covers a runtime reserve, model/workspace estimates, compact geometry, preparation scratch, upload staging and framebuffer bounds. It is admission control, not protection against allocations by other applications.
 
 A staging handshake reserves aggregate queue bytes before clients upload request bodies. Capacity refusal preserves the healthy owner and routes that item back to CPU; it does not start the infrastructure cooldown. Host staging is charged separately from GPU bytes and broker RSS is monitored. Stop all deployment processes before changing native memory policies, as for existing native quotas.
 
@@ -129,12 +130,12 @@ uv run pytest packages/printstash-core/tests/mesh -q
 Explicit runtime diagnostic (requires the GPU extra and an exposed adapter; missing prerequisites fail):
 
 ~~~sh
-uv run --extra gpu-render pytest tests/integration/modules/media/webgpu_render_diagnostic.py -q
+uv run --extra gpu-render pytest tests/integration/modules/media/webgpu_render_diagnostic.py tests/integration/modules/media/gpu_visual_normals_diagnostic.py -q
 ~~~
 
 The diagnostic allows software adapters for development and must never generate an automatic-selection receipt. Physical qualification must separately cover Linux, Docker and WSL configurations on representative NVIDIA, AMD and Intel systems. Keep injected allocation errors, killed processes and actual hardware OOM/device-loss evidence separate.
 
-Thumbnail recipe 13 and canonical raster recipe qualified-portable-v4 version output behavior independently of device. Device choice never changes embedding-space identity; changed models, preprocessing or precision still require the existing generation workflow.
+Thumbnail recipe 14 and canonical raster recipe qualified-portable-v5 version output behavior independently of device. Device choice never changes embedding-space identity; changed models, preprocessing or precision still require the existing generation workflow.
 
 
 ## Render transfer and postprocessing lifecycle
@@ -171,43 +172,100 @@ semantics; the later preparation and encoding changes are versioned below.
 See [correction evidence and coverage](testing/compute-render-performance.md).
 
 
-## Indexed packing and deferred normals
+## Compact geometry and visual preparation
 
-The render adapter keeps source parsing, exact measurements and canonical
-position welding on CPU. For eligible geometry with at least 20,000 faces, it
-sends relative positions, triangle indices and weld identities without first
-computing CPU smooth normals. The private descriptor explicitly tags this
-representation; it cannot alias a prepared-normal cache entry. Both encoded and
-old-equivalent input size must fit the existing 48 MiB geometry ceiling.
+The native-triangle recipe keeps positions, indices, normal identities and smooth
+normals in VRAM: `12V + 12F + 4V + 12K + 32` bytes per cached geometry. It avoids
+the previous 96-byte-per-face object array and 96-byte-per-face projected buffer.
+Vertex shaders fetch the three indexed vertices, transform them and shade native
+triangles with hardware depth/coverage. A GPU reduction computes bounds once per
+upload; camera framing then operates on those bounds. Default framing uses the
+rotated AABB corners and may differ from the previous exact projected-vertex fit.
+Source coordinates remain centered before float32 conversion to retain precision
+for models far from the world origin.
 
-Inside the admitted owner, bounded stable CSR adjacency feeds portable WGSL
-normal accumulation and indexed packing. The buffers are shared with rendering;
-normal arrays are not downloaded. Per-geometry status words share the final
-frame completion fence. Excessive valence, unsupported numerical ranges, failed
-canaries and ill-conditioned arithmetic use canonical CPU normals for that
-model. Healthy batch members retain their completed outputs. Unverified GPU
-geometry is never retained for later reuse. Small models retain CPU preparation.
+Eligible models with at least 20,000 faces send only relative float32 positions
+and uint32 triangle indices, tagged `gpu-visual-v2`. The GPU welds exact float32
+positions through a hash table with 64 bounded probes. Three passes weld,
+accumulate angle-weighted normals and normalize them without CPU sorting or a
+normal readback. Core integer atomics use a 2**16 visual accumulation scale and
+at most 4096 contributions per welded position, bounding integer overflow without
+optional vendor features. Congested, overfull, cancelling or degenerate local
+neighborhoods use flat normals. They do not trigger a whole-model CPU retry.
+Both encoded and equivalent canonical input sizes remain below 48 MiB.
 
-Host CSR/fallback scratch is reserved separately from GPU inputs, face terms,
-normal outputs and status buffers. Active allocations remain pinned through
-completion, including exceptional cleanup. Numerical retries run one geometry
-at a time so their host peak matches the admitted scratch bound. GPU contexts,
-shaders and reusable geometry remain resident across independently admitted Jobs;
-source parsers remain disposable.
+Small inputs retain CPU smooth-normal preparation. The older `gpu-angle-csr-v1`
+wire representation remains accepted, with its bounded canonical retry behavior.
+Invalid indices and nonfinite or unsafe coordinates remain input errors. Device
+failure, unsupported work and failed startup canaries preserve CPU fallback.
+None of these visual approximations change topology, volume, exact fingerprints,
+source bytes or STEP tessellation.
 
-Administrator counters distinguish `geometry_gpu_uploads`,
-`geometry_cpu_uploads`, `geometry_gpu_normal_uploads` and
-`geometry_cpu_normal_fallbacks`. GPU normal uploads count submissions, including
-later numerical refusals. `geometry_packing_seconds` and
-`geometry_normal_seconds` include host submission/preparation time; they are
-not GPU timestamp measurements. Completed-readback histograms can include a
-numerically refused attempt followed by its bounded retry.
+Already-admitted compatible models share mapped upload slabs bounded to 64 MiB
+per slab, a uniform arena, command encoder, submission and completion readback.
+Normal scratch and upload slabs stay pinned through completion or a failure
+fence. The shared ledger charges all slabs together; the slab ceiling alone is
+not a batch memory limit. Mapping the upload buffers avoids allocating another
+implicit queue-write staging copy for each slab. Host arena/conversion copies
+are admitted separately. These estimates still cannot bound other applications'
+GPU memory or opaque driver allocations.
 
-Accelerated images now use the same canonical lossless WebP encoder as CPU
-images. Thumbnail recipe 13, raster recipe `qualified-portable-v4`, visual recipe
-`canonical-views-media-thumbnail-v4` and compute recipe
-`webgpu-canonical-raster-v3` invalidate affected old outputs and evidence. Exact
-geometry recipe 12, fingerprints, point inputs and paired model identity remain
-unchanged. No optional inference feature is enabled by discovery or rendering.
-The [measurement and coverage record](testing/compute-model-batching.md) keeps
-preparation microbenchmarks separate from full ingestion and operator review.
+A one-time real shader canary covers visual welding and a degenerate face before
+the persistent pipeline accepts production work. Renderer statistics distinguish
+uploaded geometries, GPU normals, legacy CPU-normal retries, local fallback
+vertices, reduced vertices, upload calls and command submissions. Transfer and
+normal-preparation seconds are host intervals, not GPU hardware busy time.
+The legacy `geometry_packing_min_faces` field is `null`: compact rendering has
+no packing threshold. The 20,000-face threshold above applies only to smooth-normal
+preparation; smaller models still use compact native-triangle rendering.
+
+Thumbnail recipe 14, raster recipe `qualified-portable-v5`, visual recipe
+`canonical-views-media-thumbnail-v5` and compute recipe `webgpu-native-raster-v4`
+version the changed framing, shading and encoding behavior. Exact geometry
+recipe 12 and fingerprint/point semantics remain unchanged. Changed visual-input
+semantics use the existing generation workflow; choosing a device alone never
+changes embedding identity. No AI feature or model download is enabled.
+
+## Parser handoff and finalization
+
+Eligible thumbnail-only derivative requests reserve an owned geometry packet
+before parsing. The child writes a bounded descriptor and packet, then exits.
+The supervisor accepts it only after a clean exit, process-tree cleanup and
+reap. It then releases the parser's native RAM permit before waiting for GPU
+execution. The packet remains charged to the existing prepared-byte capacity
+and a stricter four-slot/192 MiB visual staging sublimit. At 640×480 the conservative
+packet-plus-three-RGBA reservation permits three maximal staged requests under
+that byte ceiling; four is a slot ceiling, not promised parallelism.
+
+The supervisor uses stdlib framing and bounded binary responses. Finalized pixels
+are encoded in a fresh resource-limited CPU worker; a missing/failed GPU or raw
+postprocess response renders the same owned geometry packet in an isolated CPU
+worker instead. It does not reopen or reparse the source. The original absolute
+deadline, cancellation checkpoint, Job attempt and publication fence survive the
+handoff. Fingerprint-producing work retains its existing combined-worker path.
+Encoding workers introduce their own startup cost; the handoff event records
+parser/finalizer execution identities, staging read, dispatch, finalizer wait and
+supervision intervals so complete-pipeline measurements include that cost.
+
+Derivative FIFO, configured Job concurrency and single-backfill ownership stay
+unchanged. This handoff releases parser capacity earlier; it does not manufacture
+eight simultaneously ready models or parse extra models to fill a GPU batch.
+See [visual preparation validation](testing/compute-visual-preparation.md) and
+[the encoding measurements](testing/compute-encoding.md).
+
+
+## Lossless thumbnail encoding
+
+The shared mesh renderer encodes WebP with `lossless=True`, `exact=True`,
+`method=2` and explicit `quality=80`. For lossless WebP, quality controls
+compression effort; all decoded RGBA values, including RGB under fully
+transparent pixels, are retained. The CPU and GPU rendering paths share this
+encoder. The separate embedded-preview normalization path is unchanged.
+
+A compression-only profile of 200 existing cached thumbnails measured a 2.53×
+ratio of summed monotonic encoding durations for method 6 versus method 2,
+with 2.65% more encoded bytes. All 400 encodes in those two arms decoded exactly
+to their source RGBA. This is not an ingestion-throughput measurement. UTC and
+monotonic clocks diverged during the profile, so the raw clock domains remain
+separate; no external elapsed-time calibration is claimed.
+See the [encoding evidence and coverage](testing/compute-encoding.md).

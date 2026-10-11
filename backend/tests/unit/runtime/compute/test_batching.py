@@ -170,7 +170,12 @@ class TestRenderBatchFits:
 
         assert render_batch_fits([legacy, legacy], device_bytes=1024**3)
 
-    def test_reserves_gpu_packing_staging_once_per_geometry(self, render_request):
+    @pytest.mark.parametrize(
+        "packing_min_faces", [None, 1, 2], ids=["default", "old-gpu", "old-cpu"]
+    )
+    def test_reserves_shared_geometry_once_with_per_view_staging(
+        self, render_request, packing_min_faces
+    ):
         from app.runtime.compute.batching import render_batch_fits
         from app.runtime.compute.render_policy import admission_decoded
 
@@ -182,56 +187,39 @@ class TestRenderBatchFits:
             [request.units for request in requests],
             gpu_finalize=True,
         ).device_bytes
-        # One resident triangle is 96 bytes. Its compact positions, indices,
-        # weld IDs and three normals need another 96 bytes until the fence.
-        assert render_batch_fits(requests, device_bytes=workspace + 96)
+        # Three vertices/one face:128 persistent bytes (including bounds),
+        # 96 input staging, eight256-byte view configs and a4-byte failure fence.
+        bound = workspace + 128 + 96 + 2048 + 4
         assert not render_batch_fits(
-            requests, device_bytes=workspace + 96, packing_min_faces=1
+            requests, device_bytes=bound - 1, packing_min_faces=packing_min_faces
         )
         assert render_batch_fits(
-            requests, device_bytes=workspace + 192, packing_min_faces=1
+            requests, device_bytes=bound, packing_min_faces=packing_min_faces
         )
 
-    def test_small_cpu_packing_needs_no_gpu_staging(self, render_request):
-        from app.runtime.compute.batching import render_batch_fits
-        from app.runtime.compute.render_policy import admission_decoded
-
-        requests = [render_request] * 2
-        workspace = admission_decoded(
-            [request._decoded for request in requests],
-            [request.geometry_bytes for request in requests],
-            [request.recipe for request in requests],
-            [request.units for request in requests],
-            gpu_finalize=True,
-        ).device_bytes
-
-        assert render_batch_fits(
-            requests, device_bytes=workspace + 96, packing_min_faces=2
-        )
-
-    def test_reserves_deferred_normal_buffers_once_for_reused_geometry(
-        self, render_request
+    @pytest.mark.parametrize(
+        "mode,normal_staging",
+        [("deferred", 152), ("visual", 212)],
+        ids=["legacy-csr", "device-weld"],
+    )
+    def test_reserves_normal_scratch_once_for_reused_geometry(
+        self, render_request, mode, normal_staging
     ):
         from printstash_core.mesh.render_geometry import PreparedRenderGeometry
 
-        from app.modules.media.gpu_normals import defer, device_input_bytes
+        from app.modules.media.gpu_normals import VisualRender, defer
         from app.runtime.compute.batching import render_batch_fits
         from app.runtime.compute.render_policy import admission_decoded
 
         prepared, width, height, views, matte = render_request._decoded
-        deferred = defer(
-            PreparedRenderGeometry(
-                prepared.vertices, prepared.face_count, prepared.face_chunks
-            )
+        geometry = PreparedRenderGeometry(
+            prepared.vertices, prepared.face_count, prepared.face_chunks
         )
-        payload = encode(deferred, width, height, views, matte)
+        pending = defer(geometry) if mode == "deferred" else VisualRender(geometry)
+        payload = encode(pending, width, height, views, matte)
         key, header, body = split(payload)
         request = render_request.model_copy(
-            update={
-                "geometry_key": key,
-                "header": header,
-                "geometry_bytes": len(body),
-            }
+            update={"geometry_key": key, "header": header, "geometry_bytes": len(body)}
         )
         request._decoded = decode(payload)
         workspace = admission_decoded(
@@ -241,7 +229,7 @@ class TestRenderBatchFits:
             [request.units] * 2,
             gpu_finalize=True,
         ).device_bytes
-        bound = workspace + 96 + device_input_bytes(deferred)
-
+        # Shared128-byte geometry; CSR92+upload60 or hash164+upload48.
+        bound = workspace + 128 + normal_staging + 2048 + 4
         assert not render_batch_fits([request] * 2, device_bytes=bound - 1)
         assert render_batch_fits([request] * 2, device_bytes=bound)

@@ -18,7 +18,13 @@ from printstash_core.mesh.render_geometry import PreparedRender
 from app.modules.media.compute_geometry import encode, split
 from app.modules.media.compute_render import RECIPE
 from app.runtime.compute import client
-from app.runtime.compute.contracts import ComputeMode, DeviceInfo, Operation
+from app.runtime.compute.contracts import (
+    ComputeMode,
+    ComputeUnavailable,
+    DeviceInfo,
+    Operation,
+    Reason,
+)
 from app.runtime.compute.dispatcher import Dispatcher
 from app.runtime.compute.protocol import BinaryRenderRequest, Priority
 from app.runtime.compute.qualification import Qualification
@@ -32,6 +38,7 @@ class QualifiedBatchRenderer:
         self.release_batch = threading.Event()
         self.stop = threading.Event()
         self.batches = []
+        self.failure: Reason | None = None
         self.colors = [(180, 60, 30, 255), (30, 150, 210, 255)]
 
     def dispatcher(self, root, **kwargs):
@@ -112,6 +119,8 @@ class QualifiedBatchRenderer:
                 controls.batch_started.set()
                 if not controls.release_batch.wait(15):
                     raise RuntimeError("test_executor_batch_timeout")
+                if controls.failure is not None:
+                    raise ComputeUnavailable(controls.failure)
                 return outputs
 
         return QualifiedExecutor()

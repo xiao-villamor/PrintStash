@@ -1,8 +1,8 @@
-"""Guarded portable smooth-normal preparation, with CPU-owned source custody.
+"""Visual render inputs, lazy CPU recovery and the legacy guarded CSR provider.
 
-Only relative indexed geometry and canonical welding cross the IPC boundary.
-The admitted renderer constructs stable CSR; no floating atomics or optional
-shader features are used. A numerical status requires canonical per-item retry.
+The current visual representation defers welding and normals to the device.
+Older CSR-tagged inputs retain their canonical per-item numerical recovery.
+Neither representation changes authoritative source geometry or measurements.
 """
 
 from __future__ import annotations
@@ -62,7 +62,37 @@ class DeferredRender:
         return self.geometry.face_chunks
 
 
-RenderInput = PreparedRender | DeferredRender
+VISUAL_NORMAL_MODE: Final = "gpu-visual-v2"
+
+
+@dataclass(frozen=True)
+class VisualRender:
+    """Unwelded visual geometry; the device computes adjacency and smooth normals."""
+
+    geometry: PreparedRenderGeometry
+    normal_mode: ClassVar[Literal["gpu-visual-v2"]] = VISUAL_NORMAL_MODE
+    _canonical: PreparedRender | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    @property
+    def vertices(self):
+        return self.geometry.vertices
+
+    @property
+    def face_count(self):
+        return self.geometry.face_count
+
+    @property
+    def face_chunks(self):
+        return self.geometry.face_chunks
+
+    @property
+    def position_count(self):
+        return len(self.vertices)
+
+
+RenderInput = PreparedRender | DeferredRender | VisualRender
 
 
 def defer(geometry: PreparedRenderGeometry) -> DeferredRender:
@@ -70,7 +100,7 @@ def defer(geometry: PreparedRenderGeometry) -> DeferredRender:
     return DeferredRender(geometry, identities, int(identities.max()) + 1)
 
 
-def eligible(prepared: DeferredRender) -> bool:
+def eligible(prepared: DeferredRender | VisualRender) -> bool:
     n, f, k = len(prepared.vertices), prepared.face_count, prepared.position_count
     return (
         GPU_NORMALS_MIN_FACES <= f <= MAX_FACES
@@ -97,7 +127,11 @@ def canonical(
         return prepared._canonical
     result = prepare_normals(
         prepared.geometry,
-        position_ids=np.asarray(prepared.position_ids, dtype=np.int64),
+        position_ids=(
+            np.asarray(prepared.position_ids, dtype=np.int64)
+            if isinstance(prepared, DeferredRender)
+            else None
+        ),
         face_chunk_size=face_chunk_size,
     )
     if cache:

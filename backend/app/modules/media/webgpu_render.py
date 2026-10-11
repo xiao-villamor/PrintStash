@@ -1,7 +1,7 @@
 """Persistent portable geometry, projection, culling, shading and rasterization.
 
-Core owns framing, silhouette policy and final CPU image processing. Only bounded
-validated arrays enter this owner. Qualification must pass on the exact runtime,
+The GPU owns visual framing, shading and rasterization. Only bounded validated
+arrays enter this owner; authoritative geometry remains unchanged. Qualification must pass on the exact runtime,
 recipe and physical adapter before the broker can select it.
 """
 
@@ -17,109 +17,76 @@ from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_REC
 from app.runtime.compute.budget import Residency
 
 from .compute_geometry import decode, identity, layout_for
-from .gpu_geometry import GPU_PACK_MIN_FACES, GeometryPacker, packed_chunks
+from .gpu_compact import CompactGeometry
 from .gpu_normals import DeferredRender, canonical
+from .gpu_render_layout import (
+    FRAME_BYTES,
+    FRAME_STRIDE,
+    MAX_FRAMES,
+    VIEW_WORKSPACE_BYTES,
+)
+from .gpu_views import FRAME_STRUCT, ViewPipeline, frame_config
 
 OUTPUT_CACHE_BYTES = 32 * 1024**2
 
-SHADER = """
-struct Triangle { a: vec4<f32>, b: vec4<f32>, c: vec4<f32>,
-                  na: vec4<f32>, nb: vec4<f32>, nc: vec4<f32> };
-struct Frame {
-    r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>,
-    projection: vec4<f32>, extent: vec4<f32>, style: vec4<f32>,
-    albedo: vec4<f32>
-};
-@group(0) @binding(0) var<storage, read> objects: array<Triangle>;
-@group(0) @binding(1) var<storage, read_write> projected: array<Triangle>;
-@group(0) @binding(2) var<storage, read_write> visible: atomic<u32>;
-@group(0) @binding(3) var<uniform> frame: Frame;
-
-fn rotate(p: vec3<f32>) -> vec3<f32> {
-    return vec3(dot(p, frame.r0.xyz), dot(p, frame.r1.xyz), dot(p, frame.r2.xyz));
+SHADER = (
+    FRAME_STRUCT
+    + """
+@group(0) @binding(0) var<storage, read> positions: array<f32>;
+@group(0) @binding(1) var<storage, read> faces: array<u32>;
+@group(0) @binding(2) var<storage, read> identities: array<u32>;
+@group(0) @binding(3) var<storage, read> smoothed: array<f32>;
+@group(0) @binding(4) var<uniform> frame: Frame;
+fn point(index: u32) -> vec3<f32> {
+    let p = index * 3u;
+    return vec3(positions[p], positions[p+1u], positions[p+2u]);
 }
-fn project(p: vec3<f32>) -> vec3<f32> {
-    return vec3((p.x-frame.projection.x)*frame.projection.z+frame.extent.x*0.5,
-                frame.extent.y*0.5-(p.y-frame.projection.y)*frame.projection.z, p.z);
+fn unit(value: vec3<f32>) -> vec3<f32> {
+    let scale = max(abs(value.x), max(abs(value.y), abs(value.z)));
+    if scale == 0. { return vec3(0.); }
+    let scaled = value / scale;
+    return scaled / max(length(scaled), 1e-30);
 }
-fn normal(n: vec3<f32>) -> vec4<f32> {
-    let v = rotate(n);
-    return vec4(select(-v, v, v.z >= 0.0), 0.);
+fn rotate(value: vec3<f32>) -> vec3<f32> {
+    return vec3(dot(value,frame.r0.xyz), dot(value,frame.r1.xyz), dot(value,frame.r2.xyz));
 }
-@compute @workgroup_size(64)
-fn prepare(@builtin(global_invocation_id) id: vec3<u32>) {
-    if id.x >= arrayLength(&objects) { return; }
-    let t = objects[id.x];
-    let a = rotate(t.a.xyz); let b = rotate(t.b.xyz); let c = rotate(t.c.xyz);
-    let n = cross(b-a,c-a);
-    let front = n.z * frame.projection.w < 0.0 && length(n) > 1e-8;
-    if front { atomicAdd(&visible, 1u); }
-    var result: Triangle;
-    result.a = vec4(project(a), select(0., 1., front));
-    result.b = vec4(project(b), 0.);
-    result.c = vec4(project(c), 0.);
-    result.na = normal(t.na.xyz); result.nb = normal(t.nb.xyz); result.nc = normal(t.nc.xyz);
-    projected[id.x] = result;
-}
-
-struct Vertex { @builtin(position) pos: vec4<f32>,
-                @location(0) @interpolate(flat) triangle: u32 };
-@vertex fn vs(@builtin(vertex_index) vertex: u32, @builtin(instance_index) index: u32) -> Vertex {
-    let t = projected[index];
+struct Vertex { @builtin(position) pos: vec4<f32>, @location(0) normal: vec3<f32> };
+@vertex fn vs(@builtin(vertex_index) corner: u32, @builtin(instance_index) face: u32) -> Vertex {
+    let offset = face * 3u;
+    let a = point(faces[offset]); let b = point(faces[offset+1u]); let c = point(faces[offset+2u]);
+    // Rescale edges before their cross product: rendering supports finite source
+    // coordinates without overflowing/underflowing squared normal lengths.
+    let flat = unit(cross(unit(b-a),unit(c-a)));
+    let index = faces[offset+corner];
+    let p = identities[index] * 3u;
+    let blended = vec3(smoothed[p],smoothed[p+1u],smoothed[p+2u]);
+    var weight = clamp((dot(blended,flat)-0.75)/0.17,0.,1.);
+    weight = weight*weight*(3.-2.*weight);
+    let normal = rotate(unit(weight*blended+(1.-weight)*flat));
+    let position = rotate(point(index));
+    let xy = (position.xy-frame.projection.xy)*frame.projection.z;
     var out: Vertex;
-    out.triangle = index;
-    if atomicLoad(&visible) > 0u && t.a.w == 0.0 {
-        out.pos = vec4(2., 2., 0., 1.);
-        return out;
-    }
-    let low = floor(min(t.a.xy, min(t.b.xy, t.c.xy)));
-    let high = ceil(max(t.a.xy, max(t.b.xy, t.c.xy))) + vec2<f32>(1.0);
-    let corners = array<vec2<f32>, 6>(vec2(0.,0.), vec2(1.,0.), vec2(0.,1.),
-                                    vec2(0.,1.), vec2(1.,0.), vec2(1.,1.));
-    let pixel = mix(low, high, corners[vertex]);
-    out.pos = vec4(2.0 * pixel.x / frame.extent.x - 1.0, 1.0 - 2.0 * pixel.y / frame.extent.y, 0.0, 1.0);
+    out.pos = vec4(2.*xy.x/frame.extent.x, 2.*xy.y/frame.extent.y,
+                  clamp((position.z-frame.extent.z)/frame.extent.w,0.,1.)*0.999999,1.);
+    out.normal = select(-normal,normal,normal.z>=0.);
     return out;
 }
 fn shade(value: vec3<f32>) -> vec3<f32> {
-    if atomicLoad(&visible) == 0u { return frame.albedo.xyz * 0.6; }
-    let n = value / max(length(value), 1e-30);
-    let key = normalize(vec3(-0.5, 0.65, 1.));
-    let fill = normalize(vec3(0.55, -0.25, 0.55));
-    let half_vector = normalize(key+vec3(0., 0., 1.));
-    let diffuse = (0.3 + 1.05*clamp(dot(n,key),0.,1.)*vec3(1.,0.98,0.95)
-                       + 0.3*clamp(dot(n,fill),0.,1.)*vec3(0.55,0.62,0.78)) * frame.albedo.xyz;
-    let fresnel = pow(1.-clamp(n.z,0.,1.), 3.);
-    let specular = frame.style.x * pow(clamp(dot(n,half_vector),0.,1.),32.);
+    let n = unit(value);
+    let key = normalize(vec3(-0.5,0.65,1.));
+    let fill = normalize(vec3(0.55,-0.25,0.55));
+    let half_vector = normalize(key+vec3(0.,0.,1.));
+    let diffuse = (0.3+1.05*clamp(dot(n,key),0.,1.)*vec3(1.,0.98,0.95)
+                       +0.3*clamp(dot(n,fill),0.,1.)*vec3(0.55,0.62,0.78))*frame.albedo.xyz;
+    let fresnel = pow(1.-clamp(n.z,0.,1.),3.);
+    let specular = frame.style.x*pow(clamp(dot(n,half_vector),0.,1.),32.);
     return clamp(diffuse+0.22*fresnel*vec3(0.85,0.92,1.)+specular,vec3(0.),vec3(1.));
 }
-// Shared edges use one arithmetic order in both incident triangles. This
-// preserves opposite signs even when the driver contracts multiply/add.
-fn edge(start: vec2<f32>, end: vec2<f32>, p: vec2<f32>) -> f32 {
-    let reverse = start.x > end.x || (start.x == end.x && start.y > end.y);
-    let low = select(start, end, reverse);
-    let high = select(end, start, reverse);
-    let value = (high.y-low.y)*(p.x-low.x)+(low.x-high.x)*(p.y-low.y);
-    return select(value, -value, reverse);
-}
-struct Fragment { @location(0) color: vec4<f32>, @builtin(frag_depth) depth: f32 };
-@fragment fn fs(in: Vertex) -> Fragment {
-    let t = projected[in.triangle];
-    let p = in.pos.xy;
-    let d = (t.b.y-t.c.y)*(t.a.x-t.c.x)+(t.c.x-t.b.x)*(t.a.y-t.c.y);
-    if abs(d) <= 1e-9 { discard; }
-    let a = edge(t.c.xy,t.b.xy,p)/d;
-    let b = edge(t.a.xy,t.c.xy,p)/d;
-    // Evaluate the third edge directly. Subtracting the first two weights
-    // loses opacity along shared edges through single-precision cancellation.
-    let c = edge(t.b.xy,t.a.xy,p)/d;
-    if a < 0.0 || b < 0.0 || c < 0.0 { discard; }
-    let z = a*t.a.z+b*t.b.z+c*t.c.z;
-    var out: Fragment;
-    out.depth = clamp((z-frame.extent.z)/frame.extent.w,0.,1.)*0.999999;
-    out.color = vec4(floor(255.*shade(a*t.na.xyz+b*t.nb.xyz+c*t.nc.xyz))/255.,1.);
-    return out;
+@fragment fn fs(in: Vertex) -> @location(0) vec4<f32> {
+    return vec4(floor(255.*shade(in.normal))/255.,1.);
 }
 """
+)
 
 
 class Renderer:
@@ -128,7 +95,7 @@ class Renderer:
         device,
         memory: Residency | None = None,
         *,
-        packing_min_faces: int | None = GPU_PACK_MIN_FACES,
+        packing_min_faces: int | None = None,
     ):
         self.device = device
         self.memory = memory if memory is not None else Residency(1024**3)
@@ -143,7 +110,10 @@ class Renderer:
         self.readback_frames = 1
         self.frame_offset = 0
         self.transfer_seconds = 0.0
-        self.packing_min_faces = packing_min_faces
+        # Retain the old constructor argument for callers of the previous
+        # packer. Compact geometry applies to every model, so no packing
+        # threshold is advertised; normal preparation has its own eligibility.
+        self.packing_min_faces = None
         self.packer = None
         self.packing_attempted = False
         self.gpu_geometry_uploads = self.cpu_geometry_uploads = 0
@@ -152,22 +122,10 @@ class Renderer:
         # reports the subset retried with canonical CPU preparation.
         self.geometry_gpu_normal_uploads = self.geometry_cpu_normal_fallbacks = 0
         self.geometry_normal_seconds = 0.0
-        compute_source, vertex_source = SHADER.split("struct Vertex", 1)
-        compute_shader = device.create_shader_module(code=compute_source)
-        render_source = (
-            compute_source.split("@group(0)")[0]
-            + """
-@group(0) @binding(1) var<storage, read> projected: array<Triangle>;
-@group(0) @binding(2) var<storage, read> visible: u32;
-@group(0) @binding(3) var<uniform> frame: Frame;
-"""
-            + "struct Vertex"
-            + vertex_source.replace("atomicLoad(&visible)", "visible")
-        )
-        shader = device.create_shader_module(code=render_source)
-        self.compute = device.create_compute_pipeline(
-            layout="auto", compute={"module": compute_shader, "entry_point": "prepare"}
-        )
+        self.upload_calls = self.bounds_vertices = 0
+        self.geometry_local_normal_repairs = 0
+        self.views = ViewPipeline(device)
+        shader = device.create_shader_module(code=SHADER)
         self.pipeline = device.create_render_pipeline(
             layout="auto",
             vertex={"module": shader, "entry_point": "vs", "buffers": []},
@@ -198,100 +156,18 @@ class Renderer:
         self.readback_status_bytes = 0
 
     def upload(self, prepared, key):
-        import wgpu
-
         if key in self.geometry:
             self.cache_hits += 1
             return self.geometry[key]
-        size = prepared.face_count * 96
-        if size > self.device.limits["max-storage-buffer-binding-size"]:
-            from app.runtime.compute.contracts import ComputeUnavailable, Reason
-
-            raise ComputeUnavailable(Reason.CAPACITY)
-        self.memory.make_room(size)
-
-        buffer = None
-
-        def release():
-            if buffer is not None:
-                self.geometry.pop(key).destroy()
-
-        self.memory.reserve(key, size, release, time.monotonic())
-        self.memory.pin(key, time.monotonic())
-        try:
-            buffer = self.device.create_buffer(
-                size=size, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST
-            )
-            self.geometry[key] = buffer
-            started = time.monotonic()
-            use_gpu = (
-                self.packing_min_faces is not None
-                and prepared.face_count >= self.packing_min_faces
-            )
-            if use_gpu and not self.packing_attempted:
-                self.packing_attempted = True
-                candidate = None
-                try:
-                    candidate = GeometryPacker(self.device, self.memory)
-                    candidate.canary()
-                    self.packer = candidate
-                except Exception as exc:
-                    # Shader/runtime failures decline this optional preparation
-                    # path. Validated geometry can still use canonical CPU packing.
-                    if candidate is not None:
-                        candidate.close()
-                    from app.core.logging import get_logger
-
-                    get_logger(__name__).warning(
-                        "GPU geometry packing unavailable: %s", exc
-                    )
-                    self.packing_min_faces = None
-            if use_gpu and self.packer is not None:
-                transferred = self.packer.transferred_bytes
-                transfer_seconds = self.packer.transfer_seconds
-                gpu_normals = self.packer.gpu_normal_uploads
-                cpu_normals = self.packer.cpu_normal_fallbacks
-                normal_seconds = self.packer.normal_seconds
-                self.packer.submit(prepared, buffer, key)
-                self.geometry_gpu_normal_uploads += (
-                    self.packer.gpu_normal_uploads - gpu_normals
-                )
-                self.geometry_cpu_normal_fallbacks += (
-                    self.packer.cpu_normal_fallbacks - cpu_normals
-                )
-                self.geometry_normal_seconds += (
-                    self.packer.normal_seconds - normal_seconds
-                )
-                if key in self.packer.normal_statuses():
-                    self.unverified_normals.add(key)
-                self.transfers += self.packer.transferred_bytes - transferred
-                self.transfer_seconds += self.packer.transfer_seconds - transfer_seconds
-                self.gpu_geometry_uploads += 1
-            else:
-                if isinstance(prepared, DeferredRender):
-                    normal_started = time.monotonic()
-                    prepared = canonical(prepared)
-                    self.geometry_normal_seconds += time.monotonic() - normal_started
-                    self.geometry_cpu_normal_fallbacks += 1
-                offset = 0
-                for values in packed_chunks(prepared):
-                    transfer_started = time.monotonic()
-                    self.device.queue.write_buffer(buffer, offset, values)
-                    self.transfer_seconds += time.monotonic() - transfer_started
-                    offset += values.nbytes
-                self.transfers += size
-                self.cpu_geometry_uploads += 1
-            self.geometry_packing_seconds += time.monotonic() - started
-            self.uploads += 1
-        except BaseException:
-            try:
-                if self.packer is not None:
-                    self.packer.release_completed(fence_complete=False)
-            finally:
-                self.memory.unpin(key)
-                self.memory.remove(key)
-            raise
-        self.memory.unpin(key)
+        if self.packer is None:
+            self.packer = CompactGeometry(self.device, self.memory, self.views)
+            self.packer.geometry = self.geometry
+        self.unverified_normals.add(key)
+        started = time.monotonic()
+        buffer = self.packer.acquire(prepared, key)
+        self.geometry_packing_seconds += time.monotonic() - started
+        self.uploads += 1
+        self.gpu_geometry_uploads += 1
         return buffer
 
     def attachments(self, width, height, size):
@@ -301,14 +177,13 @@ class Renderer:
         if frame_bytes is None:
             frame_bytes = ((width * 4 + 255) // 256) * 256 * height
         if (
-            max(size, self.projected_size)
-            + width * height * 8
+            width * height * 8
             + max(
                 self.readback_size,
                 frame_bytes * self.readback_frames + self.readback_status_bytes,
             )
             + self.postprocess_size
-            + 116
+            + VIEW_WORKSPACE_BYTES
             > self.workspace_limit
         ):
             from app.runtime.compute.contracts import ComputeUnavailable, Reason
@@ -331,13 +206,6 @@ class Renderer:
                 usage=wgpu.TextureUsage.RENDER_ATTACHMENT,
             )
             self.size = width, height
-        if size > self.projected_size:
-            if self.projected is not None:
-                self.projected.destroy()
-            self.projected = self.device.create_buffer(
-                size=size, usage=wgpu.BufferUsage.STORAGE
-            )
-            self.projected_size = size
         readback_size = frame_bytes * self.readback_frames + self.readback_status_bytes
         if readback_size > self.readback_size:
             if self.readback is not None:
@@ -349,57 +217,43 @@ class Renderer:
             self.readback_size = readback_size
         if self.uniform is None:
             self.uniform = self.device.create_buffer(
-                size=112, usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST
+                size=FRAME_STRIDE * MAX_FRAMES,
+                usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.STORAGE,
             )
             self.visible = self.device.create_buffer(
-                size=4, usage=wgpu.BufferUsage.STORAGE | wgpu.BufferUsage.COPY_DST
+                size=FRAME_STRIDE * MAX_FRAMES,
+                usage=wgpu.BufferUsage.UNIFORM | wgpu.BufferUsage.COPY_DST,
             )
 
-    def draw(self, prepared, key, rotation, width, height, matte):
-        objects = self.geometry[key]
-        size = prepared.face_count * 96
-        self.attachments(width, height, size)
-        view = prepared.vertices @ rotation.T.astype(np.float32)
-        low, high = view.min(axis=0), view.max(axis=0)
-        scale = min(
-            width
-            * (1 - 2 * PREVIEW_PROFILE.margin_fraction)
-            / max(float(high[0] - low[0]), 1e-6),
-            height
-            * (1 - 2 * PREVIEW_PROFILE.margin_fraction)
-            / max(float(high[1] - low[1]), 1e-6),
+    def draw(self, encoder, prepared, key, frame_index, width, height):
+        geometry = self.geometry[key]
+        self.views.encode_camera(
+            encoder, geometry.bounds, self.visible, self.uniform, frame_index
         )
-        rows = np.zeros((7, 4), dtype="<f4")
-        rows[:3, :3] = rotation
-        rows[3] = (
-            (float(low[0]) + float(high[0])) * 0.5,
-            (float(low[1]) + float(high[1])) * 0.5,
-            scale,
-            np.linalg.det(rotation),
-        )
-        rows[4] = (width, height, low[2], max(float(high[2] - low[2]), 1e-12))
-        rows[5, 0] = 0.0 if matte else 0.22
-        rows[6, :3] = PREVIEW_PROFILE.material_albedo
-        self.device.queue.write_buffer(self.uniform, 0, rows)
-        self.device.queue.write_buffer(self.visible, 0, bytes(4))
         entries = [
-            {"binding": 0, "resource": {"buffer": objects}},
-            {"binding": 1, "resource": {"buffer": self.projected, "size": size}},
-            {"binding": 2, "resource": {"buffer": self.visible}},
-            {"binding": 3, "resource": {"buffer": self.uniform}},
+            {"binding": index, "resource": {"buffer": buffer}}
+            for index, buffer in enumerate(
+                (
+                    geometry.positions,
+                    geometry.faces,
+                    geometry.identities,
+                    geometry.smoothed,
+                )
+            )
         ]
-        group = self.device.create_bind_group(
-            layout=self.compute.get_bind_group_layout(0), entries=entries
+        entries.append(
+            {
+                "binding": 4,
+                "resource": {
+                    "buffer": self.uniform,
+                    "offset": frame_index * FRAME_STRIDE,
+                    "size": FRAME_BYTES,
+                },
+            }
         )
         draw_group = self.device.create_bind_group(
-            layout=self.pipeline.get_bind_group_layout(0), entries=entries[1:]
+            layout=self.pipeline.get_bind_group_layout(0), entries=entries
         )
-        encoder = self.device.create_command_encoder()
-        compute = encoder.begin_compute_pass()
-        compute.set_pipeline(self.compute)
-        compute.set_bind_group(0, group)
-        compute.dispatch_workgroups((prepared.face_count + 63) // 64)
-        compute.end()
         assert self.color is not None and self.depth is not None
         frame = encoder.begin_render_pass(
             color_attachments=[
@@ -420,7 +274,7 @@ class Renderer:
         )
         frame.set_pipeline(self.pipeline)
         frame.set_bind_group(0, draw_group)
-        frame.draw(6, prepared.face_count)
+        frame.draw(3, prepared.face_count)
         frame.end()
         if self.gpu_finalize_active:
             assert self.postprocessor is not None
@@ -438,8 +292,6 @@ class Renderer:
                 },
                 (width, height, 1),
             )
-        self.device.queue.submit([encoder.finish()])
-        self.submissions += 1
 
     def geometry_key(self, payload, prepared):
         header_size = struct.unpack("!I", payload[:4])[0]
@@ -451,9 +303,8 @@ class Renderer:
     def execute_many(self, payloads: list[bytes]) -> list[bytes]:
         """Upload admitted models once; submit all cameras before one map fence.
 
-        All frames in a submission group share dimensions. Sequential queue
-        writes/submissions retain each camera's uniforms while pooled textures
-        and projected geometry are reused. Readbacks occupy disjoint slots.
+        All frames share dimensions, one staging upload and one submission.
+        Cameras and readbacks occupy distinct slots; attachments are reused.
         """
         decoded = [decode(payload) for payload in payloads]
         dimensions = {(width, height) for _, width, height, _, _ in decoded}
@@ -503,7 +354,7 @@ class Renderer:
 
     def _discard_unverified_geometry(self):
         for key in list(self.unverified_normals):
-            if key in self.geometry:
+            if key in self.memory.entries:
                 self.memory.remove(key)
             self.unverified_normals.discard(key)
 
@@ -560,7 +411,11 @@ class Renderer:
                 for index in missing
                 if geometry_keys[index] in self.unverified_normals
                 or (
-                    isinstance(decoded[index][0], DeferredRender)
+                    (
+                        isinstance(decoded[index][0], DeferredRender)
+                        or getattr(decoded[index][0], "normal_mode", "")
+                        == "gpu-visual-v2"
+                    )
                     and geometry_keys[index] not in self.geometry
                 )
             )
@@ -582,12 +437,24 @@ class Renderer:
             # Allocate the largest workspace first so later models cannot replace
             # the shared buffers while earlier commands are still pending.
             if missing:
-                self.attachments(
-                    w, h, max(decoded[i][0].face_count for i in missing) * 96
-                )
+                self.attachments(w, h, 0)
+                if self.packer is None:
+                    self.packer = CompactGeometry(self.device, self.memory, self.views)
+                    self.packer.geometry = self.geometry
             if missing and self.gpu_finalize_active:
                 assert self.postprocessor is not None
                 self.postprocessor.prepare(width, height, factor)
+            if missing:
+                assert self.packer is not None
+                before = (
+                    self.packer.transferred_bytes,
+                    self.packer.transfer_seconds,
+                    self.packer.gpu_normal_uploads,
+                    self.packer.cpu_normal_fallbacks,
+                    self.packer.normal_seconds,
+                    self.packer.upload_calls,
+                    self.packer.bounds_vertices,
+                )
             for i in missing:
                 prepared = decoded[i][0]
                 key = geometry_keys[i]
@@ -596,42 +463,54 @@ class Renderer:
                 pinned.append(key)
             frame_index = 0
             spans = {}
-            for i, key in zip(missing, pinned, strict=True):
-                prepared, _, _, views, matte = decoded[i]
-                spans[i] = (frame_index, len(views))
-                for view in views:
-                    rotation = (
-                        core._select_view_rotation(prepared.vertices)
-                        if view is None
-                        else view
-                    )
-                    self.frame_offset = frame_index * frame_bytes
-                    self.draw(prepared, key, rotation, w, h, matte)
-                    frame_index += 1
             if missing:
-                assert self.readback is not None
-                statuses = (
-                    self.packer.normal_statuses() if self.packer is not None else {}
+                assert self.packer is not None and self.readback is not None
+                configs = b"".join(
+                    frame_config(view, w, h, decoded[i][4])
+                    for i in missing
+                    for view in decoded[i][3]
                 )
-                if any(key in statuses for key in status_keys):
-                    encoder = self.device.create_command_encoder()
-                    for index, key in enumerate(status_keys):
-                        if key in statuses:
-                            encoder.copy_buffer_to_buffer(
-                                statuses[key],
-                                0,
-                                self.readback,
-                                frame_count * frame_bytes + index * 4,
-                                4,
-                            )
-                    self.device.queue.submit([encoder.finish()])
+                encoder = self.device.create_command_encoder()
+                self.packer.encode(encoder, self.visible, configs)
+                self.transfers += self.packer.transferred_bytes - before[0]
+                self.transfer_seconds += self.packer.transfer_seconds - before[1]
+                self.geometry_gpu_normal_uploads += (
+                    self.packer.gpu_normal_uploads - before[2]
+                )
+                self.geometry_cpu_normal_fallbacks += (
+                    self.packer.cpu_normal_fallbacks - before[3]
+                )
+                self.geometry_normal_seconds += self.packer.normal_seconds - before[4]
+                self.upload_calls += self.packer.upload_calls - before[5]
+                self.bounds_vertices += self.packer.bounds_vertices - before[6]
+                for i, key in zip(missing, pinned, strict=True):
+                    prepared, _, _, views, _ = decoded[i]
+                    spans[i] = (frame_index, len(views))
+                    for _ in views:
+                        self.frame_offset = frame_index * frame_bytes
+                        self.draw(encoder, prepared, key, frame_index, w, h)
+                        frame_index += 1
+                statuses = self.packer.normal_statuses()
+                telemetry_keys = self.packer.telemetry_keys()
+                for index, key in enumerate(status_keys):
+                    if key in statuses:
+                        encoder.copy_buffer_to_buffer(
+                            statuses[key],
+                            0,
+                            self.readback,
+                            frame_count * frame_bytes + index * 4,
+                            4,
+                        )
+                self.device.queue.submit([encoder.finish()])
+                self.submissions += 1
                 started = time.monotonic()
                 self.readback.map_sync(wgpu.MapMode.READ)
                 fence_complete = True
                 try:
                     pixels = bytes(
                         self.readback.read_mapped(
-                            size=frame_count * frame_bytes + self.readback_status_bytes
+                            size=frame_count * frame_bytes + self.readback_status_bytes,
+                            copy=False,
                         )
                     )
                 finally:
@@ -643,10 +522,13 @@ class Renderer:
                         status = struct.unpack_from(
                             "<I", pixels, frame_count * frame_bytes + index * 4
                         )[0]
-                        if status:
+                        if key in telemetry_keys:
+                            self.geometry_local_normal_repairs += status
+                        elif status:
                             rejected_keys.add(key)
-                        else:
-                            self.unverified_normals.discard(key)
+                self.unverified_normals.difference_update(
+                    set(geometry_keys[i] for i in missing) - rejected_keys
+                )
                 refused = [
                     index for index in missing if geometry_keys[index] in rejected_keys
                 ]

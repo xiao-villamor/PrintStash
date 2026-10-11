@@ -33,6 +33,11 @@ def runtime_identity() -> str:
         "modules/media/gpu_postprocess.py",
         "modules/media/gpu_geometry.py",
         "modules/media/gpu_normals.py",
+        "modules/media/gpu_visual_normals.py",
+        "modules/media/gpu_compact.py",
+        "modules/media/gpu_render_layout.py",
+        "modules/media/gpu_views.py",
+        "modules/media/compute_geometry_wire.py",
         "modules/media/compute_geometry.py",
     ):
         path = root / name

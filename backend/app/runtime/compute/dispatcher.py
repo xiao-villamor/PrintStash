@@ -5,6 +5,7 @@ import gc
 import hashlib
 import threading
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from app.core.config import settings
@@ -163,7 +164,24 @@ class Dispatcher:
             render_batches=self.renderer.readback_batches
             if self.renderer is not None
             else 0,
-            render_frames=self.renderer.submissions if self.renderer is not None else 0,
+            render_frames=sum(
+                (i + 1) * count
+                for i, count in enumerate(self.renderer.batch_frame_counts)
+            )
+            if self.renderer is not None
+            else 0,
+            render_submissions=self.renderer.submissions
+            if self.renderer is not None
+            else 0,
+            render_upload_calls=self.renderer.upload_calls
+            if self.renderer is not None
+            else 0,
+            render_bounds_vertices=self.renderer.bounds_vertices
+            if self.renderer is not None
+            else 0,
+            geometry_local_normal_fallback_vertices=self.renderer.geometry_local_normal_repairs
+            if self.renderer is not None
+            else 0,
             render_batch_model_counts=tuple(self.renderer.batch_model_counts)
             if self.renderer is not None
             else (0,) * 8,
@@ -401,7 +419,9 @@ class Dispatcher:
         finally:
             self.memory.unpin(key)
 
-    def execute_render_batch(self, requests: list[RenderRequest]) -> list[bytes]:
+    def execute_render_batch(
+        self, requests: Sequence[RenderRequest | BinaryRenderRequest]
+    ) -> list[bytes]:
         # Shared execution stays bounded while an admitted member is still live.
         # The broker fences each original deadline independently at delivery.
         deadline = max(request.deadline for request in requests)
@@ -423,24 +443,30 @@ class Dispatcher:
             self.execution_seconds += time.monotonic() - started
             self.active_deadline = None
 
-    def render(self, request: RenderRequest) -> bytes:
+    def render(self, request: RenderRequest | BinaryRenderRequest) -> bytes:
         return self.render_many([request])[0]
 
-    def render_many(self, requests: list[RenderRequest]) -> list[bytes]:
+    def render_many(
+        self, requests: Sequence[RenderRequest | BinaryRenderRequest]
+    ) -> list[bytes]:
+        from app.modules.media.gpu_render_layout import VIEW_WORKSPACE_BYTES
         from app.modules.media.webgpu_render import Renderer
 
         from .render_policy import admission_decoded, admission_many
 
         if self.device is None:
             raise ComputeUnavailable(self.reason)
-        binary = all(isinstance(r, BinaryRenderRequest) for r in requests)
+        binary_requests = [r for r in requests if isinstance(r, BinaryRenderRequest)]
+        binary = bool(binary_requests)
+        if binary and len(binary_requests) != len(requests):
+            raise ValueError("compute_batch_protocol")
         if binary:
-            if any(r._decoded is None for r in requests):
+            if any(r._decoded is None for r in binary_requests):
                 raise ValueError("compute_geometry_not_admitted")
-            decoded = [r._decoded for r in requests]
+            decoded = [r._decoded for r in binary_requests]
             requirement = admission_decoded(
                 decoded,
-                [r.geometry_bytes for r in requests],
+                [r.geometry_bytes for r in binary_requests],
                 [r.recipe for r in requests],
                 [r.units for r in requests],
                 gpu_finalize=True,
@@ -450,7 +476,11 @@ class Dispatcher:
             if requirement.readback_bytes + 13 > MAX_FRAME:
                 raise ComputeUnavailable(Reason.CAPACITY)
         else:
-            payloads = [base64.b64decode(r.payload, validate=True) for r in requests]
+            payloads = [
+                base64.b64decode(r.payload, validate=True)
+                for r in requests
+                if isinstance(r, RenderRequest)
+            ]
             requirement = admission_many(
                 payloads, [r.recipe for r in requests], [r.units for r in requests]
             )
@@ -467,7 +497,7 @@ class Dispatcher:
                 + requirement.attachment_bytes
                 + (self.renderer.postprocess_size if not binary else 0)
                 + max(requirement.readback_bytes, self.renderer.readback_size)
-                + 116
+                + VIEW_WORKSPACE_BYTES
             )
         if settings.compute_render_policy == "qualified":
             # Every member needs evidence for this batch size. Old receipts
@@ -506,23 +536,25 @@ class Dispatcher:
             self.renderer.workspace_limit = self.memory.entries[key].size
             from .recovery import allocation_failure
 
+            renderer = self.renderer
+
             def execute_render():
                 if binary:
-                    outputs = self.renderer.execute_prepared_many(
+                    outputs = renderer.execute_prepared_many(
                         decoded,
-                        ["geometry:" + r.geometry_key for r in requests],
+                        ["geometry:" + r.geometry_key for r in binary_requests],
                         [
                             hashlib.sha256(
                                 (r.geometry_key + r.header).encode()
                             ).hexdigest()
-                            for r in requests
+                            for r in binary_requests
                         ],
                         raw=True,
                         gpu_finalize=True,
                     )
-                    tag = bytes([int(self.renderer.postprocessor is not None)])
+                    tag = bytes([int(renderer.postprocessor is not None)])
                     return [tag + output for output in outputs]
-                return self.renderer.execute_many(payloads)
+                return renderer.execute_many(payloads)
 
             try:
                 return execute_render()

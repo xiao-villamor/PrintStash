@@ -80,6 +80,47 @@ class TestPending:
 
         assert _subjects(db_session) == [subject_key(artifact.id)]
 
+    @pytest.mark.parametrize(
+        "state",
+        [DerivativeState.READY, DerivativeState.FAILED],
+        ids=["ready", "failed"],
+    )
+    def test_rederives_thumbnails_from_the_previous_gpu_recipe(
+        self, db_session, mesh, make_derivative, state
+    ):
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL,
+            recipe_version=13,
+            state=state,
+            exhausted=state is DerivativeState.FAILED,
+            failure_reason="render_failed" if state is DerivativeState.FAILED else None,
+        )
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    def test_keeps_previous_thumbnail_visible_during_recipe_backfill(
+        self, db_session, mesh, make_derivative
+    ):
+        artifact = mesh(thumbnail_path="thumbs/previous-recipe.webp")
+        metadata = make_derivative(artifact, DerivativeKind.METADATA)
+        thumbnail = make_derivative(
+            artifact, DerivativeKind.THUMBNAIL, recipe_version=13
+        )
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+        db_session.refresh(artifact)
+        db_session.refresh(metadata)
+        db_session.refresh(thumbnail)
+        assert artifact.thumbnail_path == "thumbs/previous-recipe.webp"
+        assert metadata.state is DerivativeState.READY
+        assert metadata.recipe_version == 12
+        assert thumbnail.state is DerivativeState.READY
+        assert thumbnail.recipe_version == 13
+
     def test_rederives_previews_with_ambiguous_completeness(
         self, db_session, mesh, make_derivative
     ):

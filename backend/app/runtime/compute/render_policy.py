@@ -4,8 +4,13 @@ from dataclasses import dataclass
 
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_RECIPE
 
-from app.modules.media.compute_geometry import decode
+from app.modules.media.compute_geometry import decode, layout_for
 from app.modules.media.compute_render import RECIPE
+from app.modules.media.gpu_render_layout import (
+    FRAME_STRIDE,
+    VIEW_WORKSPACE_BYTES,
+    upload_bytes,
+)
 
 from .contracts import ComputeUnavailable, Reason
 
@@ -19,7 +24,12 @@ class RenderAdmission:
 
     @property
     def device_bytes(self) -> int:
-        return self.projected_bytes + self.attachment_bytes + self.readback_bytes + 116
+        return (
+            self.projected_bytes
+            + self.attachment_bytes
+            + self.readback_bytes
+            + VIEW_WORKSPACE_BYTES
+        )
 
 
 def admission(payload: bytes, recipe: str, units: int) -> RenderAdmission:
@@ -52,9 +62,9 @@ def admission_decoded(
     factor = PREVIEW_PROFILE.supersample_for(width)
     w, h = width * factor, height * factor
     readback = ((w * 4 + 255) // 256) * 256 * h * frames
-    # Projected triangles/textures are reused; camera readbacks occupy distinct
-    # slots until one completion fence. Input geometry is separately charged.
-    projected_bytes = max(p.face_count for p, *_ in decoded) * 96
+    # Native vertices read compact indexed buffers directly; camera readbacks
+    # occupy distinct slots until one fence. Geometry is separately charged.
+    projected_bytes = 0
     # Staging/validation copies, canonical postprocess arrays, one normal-prep
     # chunk, joined outputs and a bounded 32 MiB shaded-image cache.
     host_bytes = (
@@ -74,13 +84,27 @@ def admission_decoded(
         # this owner. Retain normal-preparation scratch, shaded output cache,
         # readback and joined frame copies in the renderer reservation.
         host_bytes = readback + width * height * 8 * frames + 96 * 1024**2
-    from app.modules.media.gpu_normals import DeferredRender, host_scratch_bytes
+    from app.modules.media.gpu_normals import (
+        DeferredRender,
+        VisualRender,
+        host_scratch_bytes,
+    )
 
     # CSR construction and any canonical numerical fallback happen sequentially
     # under this owner's reservation; upload buffers remain in the device ledger.
     host_bytes += max(host_scratch_bytes(prepared) for prepared, *_ in decoded)
+    # Grouped uploads own one host arena plus converted index/normal arrays.
+    # Include every model conservatively, even if its device geometry is cached.
+    host_bytes += (
+        2
+        * sum(
+            upload_bytes(*layout_for(p).counts, layout_for(p).normal_mode)
+            for p, *_ in decoded
+        )
+        + frames * FRAME_STRIDE
+    )
     status_bytes = 4 * sum(
-        isinstance(prepared, DeferredRender) for prepared, *_ in decoded
+        isinstance(prepared, (DeferredRender, VisualRender)) for prepared, *_ in decoded
     )
     readback += status_bytes
     host_bytes += status_bytes

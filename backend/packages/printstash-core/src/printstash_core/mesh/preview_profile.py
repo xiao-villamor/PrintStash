@@ -10,7 +10,7 @@ from typing import Mapping
 
 # Renderer arithmetic participates in derived visual identities independently
 # of camera/material settings and immutable encoder asset manifests.
-RASTERIZER_RECIPE = "qualified-portable-v4"
+RASTERIZER_RECIPE = "qualified-portable-v5"
 
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:
@@ -47,6 +47,7 @@ class PreviewProfile:
     supersample_small_factor: int
     supersample_large_factor: int
     encoding_method: int
+    encoding_quality: int
     recipe_fingerprint: str
 
     def supersample_for(self, output_width: int) -> int:
@@ -87,6 +88,12 @@ def _load_profile() -> PreviewProfile:
     margin = _number(root, "marginFraction")
     if not 0 < margin < 0.5:
         raise ValueError("preview_profile_invalid_margin")
+    method = _integer(encoding, "method")
+    quality = _integer(encoding, "quality")
+    if not 0 <= method <= 6:
+        raise ValueError("preview_profile_invalid_method")
+    if not 0 <= quality <= 100:
+        raise ValueError("preview_profile_invalid_quality")
     return PreviewProfile(
         version=_integer(root, "version"),
         aspect_ratio=(int(aspect[0]), int(aspect[1])),
@@ -99,7 +106,8 @@ def _load_profile() -> PreviewProfile:
         supersample_max_output_width=_integer(supersampling, "maxOutputWidth"),
         supersample_small_factor=_integer(supersampling, "smallFactor"),
         supersample_large_factor=_integer(supersampling, "largeFactor"),
-        encoding_method=_integer(encoding, "method"),
+        encoding_method=method,
+        encoding_quality=quality,
         recipe_fingerprint=hashlib.sha256(payload).hexdigest()[:16],
     )
 

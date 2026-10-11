@@ -13,12 +13,16 @@ from app.runtime.native_runtime import current_permit as current_native_permit
 
 PERMIT_ENV = "PRINTSTASH_PREPARATION_PERMIT_FD"
 PERMIT_PATH_ENV = "PRINTSTASH_PREPARATION_PERMIT_PATH"
+VISUAL_PERMIT_ENV = "PRINTSTASH_VISUAL_PERMIT_FD"
+VISUAL_PERMIT_PATH_ENV = "PRINTSTASH_VISUAL_PERMIT_PATH"
+VISUAL_CAPACITY = Resources(4, 192 * 1024**2)
 
 
 @dataclass(frozen=True)
 class PreparationPools:
     prepared: LocalResourcePool
     io: LocalResourcePool
+    visual: LocalResourcePool
 
 
 def make_pools(directory: Path, io_directory: Path) -> PreparationPools:
@@ -33,7 +37,9 @@ def make_pools(directory: Path, io_directory: Path) -> PreparationPools:
                 raise
 
     return PreparationPools(
-        LocalResourcePool(directory, reclaim=reclaim), LocalResourcePool(io_directory)
+        LocalResourcePool(directory, reclaim=reclaim),
+        LocalResourcePool(io_directory),
+        LocalResourcePool(directory.parent / "visual-staging"),
     )
 
 
@@ -95,3 +101,36 @@ def io_slot(slots: int, *, checkpoint: Callable[[], None]) -> Iterator[None]:
         priority=current_priority(),
     ):
         yield
+
+
+def current_visual_permit() -> NativePermit | None:
+    return getattr(_local, "visual_permit", None)
+
+
+@contextmanager
+def visual_slot(
+    amount: int, *, checkpoint: Callable[[], None]
+) -> Iterator[NativePermit]:
+    """Bound visual buffers inside an already charged prepared-source lifetime."""
+    prepared = current_permit()
+    if (
+        prepared is None
+        or current_native_permit() is not None
+        or current_visual_permit() is not None
+    ):
+        raise RuntimeError(
+            "visual staging requires preparation before native admission"
+        )
+    if amount > prepared.resources.bytes:
+        raise RuntimeError("visual staging exceeds prepared source allowance")
+    with _bound().visual.reserve(
+        Resources(1, amount),
+        VISUAL_CAPACITY,
+        checkpoint=checkpoint,
+        priority=current_priority(),
+    ) as permit:
+        _local.visual_permit = permit
+        try:
+            yield permit
+        finally:
+            del _local.visual_permit

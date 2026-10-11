@@ -47,7 +47,8 @@ def render_typescript(profile: dict[str, object]) -> str:
         f"format: {json.dumps(encoding['format'])}, "
         f"lossless: {str(encoding['lossless']).lower()}, "
         f"exact: {str(encoding['exact']).lower()}, "
-        f"method: {encoding['method']} }},\n"
+        f"method: {encoding['method']}, "
+        f"quality: {encoding['quality']} }},\n"
         "} as const;\n"
     )
 

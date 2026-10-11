@@ -19,7 +19,13 @@ from printstash_core.mesh.similarity.components import ExpandedScene
 from app.core.config import settings
 from app.core.logging import get_logger
 
-from .gpu_normals import GPU_NORMALS_MIN_FACES, RenderInput, canonical, defer, eligible
+from .gpu_normals import (
+    GPU_NORMALS_MIN_FACES,
+    RenderInput,
+    VisualRender,
+    canonical,
+    eligible,
+)
 
 if TYPE_CHECKING:
     import numpy as np
@@ -88,7 +94,7 @@ def _prepare_geometry(geometry: PreparedRenderGeometry) -> RenderInput:
     from app.runtime.compute.client import available
 
     if geometry.face_count >= GPU_NORMALS_MIN_FACES and available(render=True):
-        candidate = defer(geometry)
+        candidate = VisualRender(geometry)
         if eligible(candidate):
             return candidate
         return canonical(

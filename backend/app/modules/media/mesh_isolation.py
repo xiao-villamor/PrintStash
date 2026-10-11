@@ -65,6 +65,7 @@ from app.modules.media.mesh_protocol import (
     GeometryOutput,
     MeshProtocolError,
     OutputSink,
+    PreparedThumbnailOutput,
     ThumbnailOutput,
 )
 from app.modules.media.mesh_telemetry import (
@@ -84,6 +85,7 @@ from app.modules.media.native_budget import (
     estimate_sources,
 )
 from app.modules.media.native_execution import admission
+from app.modules.media.thumbnail_staging import ThumbnailStaging
 from app.modules.media.worker_bootstrap import (
     PRIORITY_ENV,
     RESOURCE_EXIT,
@@ -671,6 +673,7 @@ def _run_worker(
     sources: tuple[MeshSource, ...],
     work: WorkProfile,
     on_chunk: Callable[[bytes], None] | None = None,
+    deadline: float | None = None,
 ) -> SupervisedReply:
     """Plan a weighted native allowance, then run one supervised worker."""
     from app.runtime.compute.client import warm_render
@@ -686,7 +689,14 @@ def _run_worker(
         if existing is not None
         else estimate_sources(capacity, sources, work=work)
     )
-    with admission(amount, capacity, checkpoint=checkpoint) as permit:
+
+    def check_deadline() -> None:
+        checkpoint()
+        if deadline is not None and time.monotonic() >= deadline:
+            raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
+
+    with admission(amount, capacity, checkpoint=check_deadline) as permit:
+        check_deadline()
         command = worker_command(
             module,
             [json.dumps({"overrides": runtime_overrides(), **spec})],
@@ -695,7 +705,9 @@ def _run_worker(
         return supervise_result(
             command,
             memory_budget=permit.resources.bytes,
-            timeout_seconds=float(settings.mesh_worker_timeout_seconds),
+            timeout_seconds=float(settings.mesh_worker_timeout_seconds)
+            if deadline is None
+            else deadline - time.monotonic(),
             permit=permit,
             lifecycle=WorkerLifecycle.GUARDED,
             on_chunk=on_chunk,
@@ -807,14 +819,22 @@ def generate(
     request: ThumbnailRequest,
     *,
     on_output: OutputSink | None = None,
+    staging: ThumbnailStaging | None = None,
 ) -> ThumbnailResult:
-    """`ThumbnailEngine.generate` for *request*, run in a supervised child."""
-    decoder = FrameDecoder(request)
+    """Run one parser, optionally handing visuals off after its clean exit."""
+    if staging is not None:
+        width = int(request.width or settings.model_thumbnail_width)
+        height = int(request.height or round(width * 3 / 4))
+        if (width, height) != (staging.width, staging.height):
+            raise ValueError("staged_thumbnail_dimensions")
+    decoder = FrameDecoder(request, allow_prepared=staging is not None)
+    deadline = time.monotonic() + float(settings.mesh_worker_timeout_seconds)
     geometry_output: GeometryOutput | None = None
     thumbnail_output: ThumbnailOutput | None = None
+    prepared_output: PreparedThumbnailOutput | None = None
 
     def receive(chunk: bytes) -> None:
-        nonlocal geometry_output, thumbnail_output
+        nonlocal geometry_output, thumbnail_output, prepared_output
         outputs = iter(decoder.feed(chunk))
         while True:
             try:
@@ -827,6 +847,9 @@ def generate(
                 geometry_output = output
             elif isinstance(output, ThumbnailOutput):
                 thumbnail_output = output
+            elif isinstance(output, PreparedThumbnailOutput):
+                prepared_output = output
+                continue
             else:
                 continue
             if on_output is not None:
@@ -835,8 +858,9 @@ def generate(
     spec = {
         "path": absolute(request.path),
         "file_type": request.file_type,
-        "width": request.width,
-        "height": request.height,
+        "width": staging.width if staging is not None else request.width,
+        "height": staging.height if staging is not None else request.height,
+        "staging": str(staging.directory) if staging is not None else None,
         "include_geometry": request.include_geometry,
         "include_thumbnail": request.include_thumbnail,
         "include_fingerprint": request.include_fingerprint,
@@ -887,9 +911,25 @@ def generate(
             ),
             work=work,
             on_chunk=receive,
+            deadline=deadline if staging is not None else None,
         )
         try:
             final = decoder.finish()
+            if prepared_output is not None:
+                from app.modules.media.thumbnail_finalization import finish
+
+                if staging is None or final.coverage != prepared_output.coverage:
+                    raise ValueError("staged_thumbnail_final_coverage")
+                thumbnail_output = finish(
+                    staging,
+                    prepared_output,
+                    output_format=request.output_format,
+                    deadline=deadline,
+                    parser_execution_id=reply.stats.execution_id,
+                )
+                checkpoint()
+                if on_output is not None:
+                    on_output(thumbnail_output)
             if geometry_output is None:
                 from printstash_core.mesh.measurements import (
                     VolumeNotCalculated,
@@ -911,20 +951,30 @@ def generate(
                 strategy=thumbnail_output.strategy
                 if thumbnail_output is not None
                 else ThumbnailStrategy.NONE,
-                coverage=final.coverage,
+                coverage=thumbnail_output.coverage
+                if prepared_output is not None and thumbnail_output is not None
+                else final.coverage,
                 failure_reason=thumbnail_output.failure_reason
                 if thumbnail_output is not None
                 else None,
-                duration_ms=final.duration_ms,
-                peak_rss_bytes=final.peak_rss_bytes,
+                duration_ms=max(final.duration_ms, thumbnail_output.duration_ms)
+                if thumbnail_output is not None
+                else final.duration_ms,
+                peak_rss_bytes=max(
+                    final.peak_rss_bytes or 0, thumbnail_output.peak_rss_bytes or 0
+                )
+                or None
+                if thumbnail_output is not None
+                else final.peak_rss_bytes,
                 fingerprint_result=final.fingerprint,
                 phase_stats=final.phase_stats,
                 supervision=reply.stats,
             )
         except MeshWorkerError as exc:
-            exc.supervision = reply.stats
+            if exc.supervision is None:
+                exc.supervision = reply.stats
             raise
-        except (ValueError, TypeError, AttributeError) as exc:
+        except (ValueError, TypeError, AttributeError, OSError) as exc:
             error = MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
             error.supervision = reply.stats
             raise error from exc

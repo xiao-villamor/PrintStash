@@ -76,6 +76,13 @@ class ComputeStatus(BaseModel):
     inference_batches: int = Field(ge=0)
     render_batches: int = Field(default=0, ge=0)
     render_frames: int = Field(default=0, ge=0)
+    render_submissions: int = Field(default=0, ge=0)
+    # Host copies into upload staging; separate from queue command submissions.
+    render_upload_calls: int = Field(default=0, ge=0)
+    render_bounds_vertices: int = Field(default=0, ge=0)
+    # Zero smooth normals repaired locally by flat shading, including unused
+    # vertices. This is neither a count of models nor a whole-model CPU retry.
+    geometry_local_normal_fallback_vertices: int = Field(default=0, ge=0)
     # Exact bins for 1..8 inputs/frames per completed readback fence.
     render_batch_model_counts: tuple[NonNegativeInt, ...] = Field(
         default=(0,) * 8, min_length=8, max_length=8

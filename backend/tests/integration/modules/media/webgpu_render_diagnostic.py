@@ -4,21 +4,26 @@ import struct
 
 import numpy as np
 import pytest
-from printstash_core.mesh.rasterizer import render_prepared_pixels
 from printstash_core.mesh.render_geometry import prepare_mesh_render
 
 from app.modules.media.compute_geometry import encode
+from app.modules.media.compute_geometry_wire import CANONICAL_MODE
+from app.modules.media.gpu_render_layout import upload_bytes
 from app.modules.media.webgpu_render import Renderer
 from app.runtime.compute.contracts import ComputeUnavailable, Reason
 
+_BACKEND_CONFIGURED = pytest.StashKey[bool]()
+
 
 @pytest.fixture(scope="session")
-def gpu_device():
+def gpu_device(request):
     import wgpu
 
     from app.runtime.compute.discovery import configure_backend
 
-    configure_backend()
+    if not request.config.stash.get(_BACKEND_CONFIGURED, False):
+        configure_backend()
+        request.config.stash[_BACKEND_CONFIGURED] = True
     adapters = wgpu.gpu.enumerate_adapters_sync()
     assert adapters, "Install the optional GPU extra and expose a WebGPU adapter"
     device = adapters[0].request_device_sync()
@@ -49,7 +54,6 @@ class TestWebGpuRender:
         )
         prepared = prepare_mesh_render(mesh)
         payload = encode(prepared, 64, 64, [None, None], False)
-        expected = render_prepared_pixels(prepared, "", 64, 64)
 
         first = renderer.execute(payload)
         transferred = renderer.transfers
@@ -59,16 +63,33 @@ class TestWebGpuRender:
         assert struct.unpack("!III", first[:12]) == (64, 64, 2)
         assert first[12 : 12 + size] == first[12 + size :]
         assert second == first
-        assert renderer.transfers == transferred == prepared.face_count * 96
+        assert (
+            renderer.transfers
+            == transferred
+            == upload_bytes(
+                len(prepared.vertices),
+                prepared.face_count,
+                len(prepared.smooth_normals),
+                CANONICAL_MODE,
+            )
+            + 2 * 256
+        )
         assert renderer.output_hits == 1
         assert renderer.readback_batches == 1
         assert renderer.batch_model_counts == [1, 0, 0, 0, 0, 0, 0, 0]
         assert renderer.batch_frame_counts == [0, 1, 0, 0, 0, 0, 0, 0]
-        assert renderer.submissions == 2
+        assert renderer.submissions == 1
         actual = np.frombuffer(first[12 : 12 + size], dtype=np.uint8).reshape(-1, 4)
-        baseline = np.frombuffer(expected.rgba, dtype=np.uint8).reshape(-1, 4)
-        assert np.array_equal(actual[:, 3] >= 128, baseline[:, 3] >= 128)
-        assert np.abs(actual.astype(int) - baseline.astype(int)).max() <= 8
+        assert np.count_nonzero(actual[:, 3] >= 128) > 100
+        assert np.count_nonzero(actual[:, 3] == 0) > 100
+        # GPU bounds retain every canonical coordinate extremum exactly; the
+        # new framing/raster recipe intentionally need not match CPU pixels.
+        geometry = next(iter(renderer.geometry.values()))
+        bounds = np.frombuffer(
+            renderer.device.queue.read_buffer(geometry.bounds), dtype="<f4"
+        ).reshape(2, 4)
+        np.testing.assert_array_equal(bounds[0, :3], prepared.vertices.min(axis=0))
+        np.testing.assert_array_equal(bounds[1, :3], prepared.vertices.max(axis=0))
 
     def test_preserves_shared_edges_in_orthographic_views(self, renderer):
         import trimesh
@@ -81,16 +102,18 @@ class TestWebGpuRender:
         actual = renderer.execute(payload)
         size = 224 * 224 * 4
 
-        for index, view in enumerate(views):
-            expected = render_prepared_pixels(
-                prepared, "", 224, 224, view_rotation=view, matte=True
-            )
-            candidate = np.frombuffer(
+        for index, _ in enumerate(views):
+            rgba = np.frombuffer(
                 actual[12 + index * size : 12 + (index + 1) * size], dtype=np.uint8
-            ).reshape(-1, 4)
-            baseline = np.frombuffer(expected.rgba, dtype=np.uint8).reshape(-1, 4)
-            assert np.array_equal(candidate[:, 3] >= 128, baseline[:, 3] >= 128)
-            assert np.abs(candidate.astype(int) - baseline.astype(int)).max() <= 8
+            ).reshape(224, 224, 4)
+            mask = rgba[:, :, 3] >= 128
+            assert mask.sum() > 1000
+            # Every orthographic box silhouette is convex. A shared-edge crack
+            # would create a gap inside at least one occupied scanline.
+            for row in mask:
+                occupied = np.flatnonzero(row)
+                if len(occupied):
+                    assert row[occupied[0] : occupied[-1] + 1].all()
 
     def test_refuses_workspace_growth_over_budget(self, renderer):
         renderer.workspace_limit = 1
@@ -113,7 +136,7 @@ class TestWebGpuRender:
         assert renderer.readback_batches == 1
         assert renderer.batch_model_counts == [0, 1, 0, 0, 0, 0, 0, 0]
         assert renderer.batch_frame_counts == [0, 1, 0, 0, 0, 0, 0, 0]
-        assert renderer.submissions == 2
+        assert renderer.submissions == 1
         assert renderer.uploads == 2
         assert len(renderer.geometry) == 2
         renderer.outputs.clear()
@@ -294,7 +317,7 @@ class TestWebGpuRender:
 
             output = owner.execute(encode(prepared, 64, 64, [None], False))
             assert len(output) == 12 + 64 * 64 * 4
-            assert owner.geometry_gpu_normal_uploads == 2
+            assert owner.geometry_gpu_normal_uploads == 1
             assert owner.geometry_cpu_normal_fallbacks == 0
             assert owner.readback_batches == 1
             assert owner.unverified_normals == set()
@@ -303,6 +326,47 @@ class TestWebGpuRender:
             for key in list(owner.memory.entries):
                 owner.memory.remove(key)
         assert owner.memory.used == 0
+
+    def test_visual_normals_repair_degenerates_without_retrying_models(self, renderer):
+        import trimesh
+        from printstash_core.mesh.render_geometry import prepare_mesh
+
+        from app.modules.media.gpu_normals import VisualRender
+
+        box = trimesh.creation.box()
+        soup = trimesh.Trimesh(
+            vertices=box.vertices[box.faces].reshape(-1, 3),
+            faces=np.arange(len(box.faces) * 3).reshape(-1, 3),
+            process=False,
+        )
+        degenerate = trimesh.Trimesh(
+            vertices=[[0, 0, 0]] * 3, faces=[[0, 1, 2]], process=False
+        )
+        geometries = [
+            prepare_mesh(soup),
+            prepare_mesh(trimesh.util.concatenate([soup, degenerate])),
+        ]
+        originals = [geometry.vertices.tobytes() for geometry in geometries]
+        inputs = [VisualRender(geometry) for geometry in geometries]
+        payloads = [encode(item, 64, 64, [None], False) for item in inputs]
+        outputs = renderer.execute_many(payloads)
+
+        assert renderer.submissions == renderer.readback_batches == 1
+        assert renderer.geometry_gpu_normal_uploads == 2
+        assert renderer.geometry_cpu_normal_fallbacks == 0
+        assert renderer.geometry_local_normal_repairs > 0
+        assert renderer.packer.pending == []
+        assert renderer.packer.staging is None
+        assert not renderer.unverified_normals
+        assert [geometry.vertices.tobytes() for geometry in geometries] == originals
+        for output in outputs:
+            pixels = np.frombuffer(output[12:], dtype=np.uint8).reshape(-1, 4)
+            assert (pixels[:, 3] >= 128).sum() > 100
+        renderer.outputs.clear()
+        renderer.output_bytes = 0
+        assert [renderer.execute(payload) for payload in payloads] == outputs
+        assert renderer.uploads == 2
+        assert renderer.geometry_cpu_normal_fallbacks == 0
 
     def test_rejects_oversized_camera_batch(self, renderer):
         import trimesh
@@ -360,7 +424,7 @@ class TestWarmPoolAdmission:
             backend="OpenGL",
         )
         monkeypatch.setattr(dispatcher, "discover", lambda _: (info, device))
-        _overlay["compute_render_policy"] = "preview"
+        monkeypatch.setitem(_overlay, "compute_render_policy", "preview")
         owner = dispatcher.Dispatcher(
             tmp_path, mode=ComputeMode.AUTO, selector=None, budget_bytes=1024**3
         )
@@ -392,7 +456,7 @@ class TestWarmPoolAdmission:
             assert outputs[0] != outputs[1]
             assert owner.renderer is renderer
             assert renderer.readback_batches == 2
-            assert renderer.submissions == 3
+            assert renderer.submissions == 2
             assert renderer.uploads == uploads + 2
             assert owner.memory.used <= owner.memory.capacity
         finally:

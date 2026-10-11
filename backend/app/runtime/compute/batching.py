@@ -172,22 +172,23 @@ def render_batch_fits(
         )
     except ValueError, ComputeUnavailable:
         return False
-    geometry = {
-        request.geometry_key: request._decoded[0].face_count * 96
-        for request in requests
-    }
-    from app.modules.media.gpu_geometry import input_sizes
-    from app.modules.media.gpu_normals import DeferredRender, device_input_bytes
+    from app.modules.media.compute_geometry import layout_for
+    from app.modules.media.gpu_render_layout import FRAME_STRIDE, device_geometry_bytes
 
-    staging = {}
+    geometry = {}
+    frames = 0
     for request in requests:
-        prepared = request._decoded[0]
-        if isinstance(prepared, DeferredRender):
-            staging[request.geometry_key] = device_input_bytes(prepared)
-        elif packing_min_faces is not None and prepared.face_count >= packing_min_faces:
-            staging[request.geometry_key] = sum(input_sizes(prepared))
+        prepared, _, _, views, _ = request._decoded
+        layout = layout_for(prepared)
+        geometry[request.geometry_key] = device_geometry_bytes(
+            *layout.counts, layout.normal_mode
+        )
+        frames += len(views)
     return (
         requirement.readback_bytes + 13 <= MAX_FRAME
-        and requirement.device_bytes + sum(geometry.values()) + sum(staging.values())
+        and requirement.device_bytes
+        + sum(geometry.values())
+        + frames * FRAME_STRIDE
+        + 4
         <= device_bytes
     )

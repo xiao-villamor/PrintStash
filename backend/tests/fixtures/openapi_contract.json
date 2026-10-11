@@ -4312,6 +4312,12 @@
             "title": "Geometry Input Cache Hits",
             "type": "integer"
           },
+          "geometry_local_normal_fallback_vertices": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Geometry Local Normal Fallback Vertices",
+            "type": "integer"
+          },
           "geometry_normal_seconds": {
             "default": 0.0,
             "minimum": 0.0,
@@ -4432,6 +4438,12 @@
             "title": "Render Batches",
             "type": "integer"
           },
+          "render_bounds_vertices": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Render Bounds Vertices",
+            "type": "integer"
+          },
           "render_cache_hits": {
             "default": 0,
             "minimum": 0.0,
@@ -4454,6 +4466,18 @@
             "default": false,
             "title": "Render Postprocess Gpu",
             "type": "boolean"
+          },
+          "render_submissions": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Render Submissions",
+            "type": "integer"
+          },
+          "render_upload_calls": {
+            "default": 0,
+            "minimum": 0.0,
+            "title": "Render Upload Calls",
+            "type": "integer"
           },
           "rendering_transfer_seconds": {
             "minimum": 0.0,

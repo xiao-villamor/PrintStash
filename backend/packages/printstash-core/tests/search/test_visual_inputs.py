@@ -13,6 +13,15 @@ def paired_space():
 
 
 class TestVisualRecipe:
+    @pytest.mark.parametrize(
+        "profile", ["thumbnail", "multiview"], ids=["thumbnail", "multiview"]
+    )
+    def test_refuses_views_from_before_native_triangle_rendering(self, profile):
+        with pytest.raises(EmbeddingError, match="search_visual_recipe_invalid"):
+            VisualRecipe(
+                "a" * 64, 64, profile, version="canonical-views-media-thumbnail-v4"
+            )
+
     @pytest.mark.parametrize("profile", ["thumbnail", "multiview"])
     def test_refuses_views_from_before_gpu_normal_preparation(self, profile):
         with pytest.raises(EmbeddingError, match="search_visual_recipe_invalid"):

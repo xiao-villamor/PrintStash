@@ -186,9 +186,9 @@ preview, but is not zero-copy instancing.
 | Current output identity | Version |
 | --- | --- |
 | Mesh metadata recipe | 12 |
-| Mesh thumbnail recipe | 11 |
+| Mesh thumbnail recipe | 14 |
 | Fingerprint interpretation | `geometry-v7-sh5f4577c4` |
-| Viewer STL recipe | 2 (unchanged) |
+| Viewer STL recipe | 3 |
 
 The mesh recipes refresh prior measurements/previews under the retained-scene
 eligibility and budget policy. The fingerprint version invalidates earlier
@@ -197,6 +197,12 @@ are unchanged. Historical measured evidence and human review decisions are not
 relabelled. Viewer conversion continues to require a materialized STL output.
 The [retained-scene contract](retained-3mf-scenes.md) records the behavior and
 verification evidence.
+
+Mesh thumbnail recipe 14 versions the portable native-triangle renderer and
+shared lossless WebP method 2 encoding. Metadata recipe 12 remains authoritative
+for exact geometry. Existing thumbnail pointers stay visible while the normal
+recipe anti-join schedules their replacements. Visual recipe and encoder
+evidence are recorded in [compute](compute.md).
 
 ## Bounded STL measurements
 

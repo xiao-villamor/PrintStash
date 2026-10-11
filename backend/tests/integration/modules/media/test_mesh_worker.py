@@ -24,6 +24,7 @@ def run_worker(tmp_path, monkeypatch):
         spec = {
             "overrides": {},
             "path": str(source),
+            "staging": None,
             "file_type": "stl",
             "width": None,
             "height": None,

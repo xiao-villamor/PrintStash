@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter
 from .contracts import ComputeUnavailable, Reason
 
 MAX_FRAME = 96 * 1024**2
+MAX_CONTROL_RESPONSE = 4096
 
 
 class Priority(StrEnum):
@@ -102,6 +103,11 @@ def send(connection: socket.socket, payload: bytes) -> None:
     connection.sendall(struct.pack("!I", len(payload)) + payload)
 
 
+def admit_control_response(length: int) -> None:
+    if length > MAX_CONTROL_RESPONSE:
+        raise ComputeUnavailable(Reason.INVALID_INPUT)
+
+
 def send_admitted(
     connection: socket.socket,
     payload: bytes,
@@ -117,7 +123,13 @@ def send_admitted(
     if len(payload) > MAX_FRAME:
         raise ComputeUnavailable(Reason.INVALID_INPUT)
     connection.sendall(struct.pack("!I", len(payload)))
-    acknowledgement = json.loads(receive(connection, deadline, checkpoint=checkpoint))
+    acknowledgement = json.loads(
+        receive(
+            connection, deadline, checkpoint=checkpoint, admit=admit_control_response
+        )
+    )
+    if not isinstance(acknowledgement, dict):
+        raise ComputeUnavailable(Reason.INVALID_INPUT)
     if "error" in acknowledgement:
         raise ComputeUnavailable(Reason(acknowledgement["error"]))
     if acknowledgement != {"ready": True}:
@@ -126,7 +138,7 @@ def send_admitted(
 
 
 def send_body(
-    connection, payload: bytes, deadline: float, *, checkpoint=lambda: None
+    connection, payload: bytes | memoryview, deadline: float, *, checkpoint=lambda: None
 ) -> None:
     remaining = memoryview(payload)
     while remaining:

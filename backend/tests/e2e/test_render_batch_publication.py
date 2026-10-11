@@ -193,7 +193,7 @@ class TestRenderBatchPublication:
                 assert [priority for _key, priority, _mode in batch] == [
                     Priority.BACKGROUND
                 ] * 2
-                expected_mode = "gpu-angle-csr-v1" if subdivisions else "canonical"
+                expected_mode = "gpu-visual-v2" if subdivisions else "canonical"
                 assert [mode for _key, _priority, mode in batch] == [expected_mode] * 2
                 cancelled = await api.post(
                     f"/api/v1/jobs/{cancelled_job.id}/cancel", headers=headers
@@ -272,3 +272,101 @@ class TestRenderBatchPublication:
             }
             assert persisted[files[0]].storage_key is None
             assert persisted[files[1]].storage_key is not None
+
+
+class TestStagedThumbnailPublication:
+    @pytest.mark.asyncio
+    async def test_publishes_from_owned_geometry_after_device_failure(
+        self, api, superuser_headers, e2e_db, work_engine, qualified_renderer, caplog
+    ):
+        import json
+        import logging
+
+        from app.modules.media.native_process import native_capacity
+        from app.modules.media.source_preparation import capacity as prepared_capacity
+        from app.runtime import native_runtime, preparation_runtime
+        from app.runtime.compute.contracts import Reason
+
+        controls = qualified_renderer
+        controls.failure = Reason.DEVICE_FAILED
+        controls.release_batch.set()
+        headers = superuser_headers
+        payload = trimesh.creation.box(extents=(10, 20, 30)).export(file_type="stl")
+        work_engine.launch(listen_lanes=[LaneName.INGEST, LaneName.RECONCILE])
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            headers=headers,
+            files={"file": ("owned.stl", payload, "application/sla")},
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        ingest_id = uploaded.json()["job_id"]
+        for _ in range(40):
+            if jobs.get(ingest_id).state.value == "completed":
+                break
+            assert work_engine.run_one() is not None
+        else:
+            raise AssertionError("ingest did not settle")
+        file_id = jobs.get(ingest_id).file_id
+        run_pass(JobKind.DERIVATIVES_MESH)
+        derivative = _derivative_job(file_id)
+        work_engine.launch(listen_lanes=[LaneName.DERIVE_NATIVE])
+        with caplog.at_level(
+            logging.INFO, logger="app.modules.media.mesh_observability"
+        ):
+            for _ in range(20):
+                if jobs.get(derivative.id).state.value == "completed":
+                    break
+                outcome = work_engine.run_one()
+                assert outcome is not None
+                assert outcome.error is None
+            else:
+                raise AssertionError("staged derivative did not settle")
+        assert len(controls.batches) == 1
+        events = [
+            json.loads(record.getMessage().split(" ", 1)[1])
+            for record in caplog.records
+            if record.getMessage().startswith("mesh_thumbnail_handoff ")
+        ]
+        assert len(events) == 1
+        assert events[0]["mode"] == "render"
+        assert events[0]["parser_execution_id"] != events[0]["finalizer_execution_id"]
+        assert events[0]["finalizer_supervision_ns"] > 0
+        rows = (
+            await api.get(f"/api/v1/files/{file_id}/derivatives", headers=headers)
+        ).json()
+        assert (
+            next(row for row in rows if row["kind"] == "thumbnail")["state"] == "ready"
+        )
+        assert (
+            next(row for row in rows if row["kind"] == "metadata")["state"] == "ready"
+        )
+        preview = await api.get(f"/api/v1/files/{file_id}/thumbnail", headers=headers)
+        assert preview.status_code == 200
+        with Image.open(io.BytesIO(preview.content)) as image:
+            assert image.size == (640, 480)
+            assert image.getbbox() is not None
+        original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        assert original.content == payload
+        with get_session_factory().scoped_session() as session:
+            meta = session.exec(
+                select(Metadata).where(Metadata.file_id == file_id)
+            ).one()
+            assert (meta.bbox_x_mm, meta.bbox_y_mm, meta.bbox_z_mm) == (10, 20, 30)
+            assert meta.volume_mm3 == pytest.approx(6000)
+            assert meta.triangle_count == 12
+        deadline = time.monotonic() + 5
+
+        def check():
+            assert time.monotonic() < deadline, (
+                "completed Job retained resource credits"
+            )
+
+        native = native_capacity()
+        with native_runtime.admit(native, native, checkpoint=check):
+            pass
+        prepared = prepared_capacity()
+        with preparation_runtime.reserve(prepared, prepared, checkpoint=check):
+            with preparation_runtime.visual_slot(
+                preparation_runtime.VISUAL_CAPACITY.bytes, checkpoint=check
+            ):
+                pass

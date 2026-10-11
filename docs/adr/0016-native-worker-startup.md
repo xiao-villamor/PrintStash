@@ -91,3 +91,22 @@ persistent owner and its separate reservations. Fresh workers defer optional
 format, fingerprint and inference imports, but still import their necessary
 numerical/parser dependencies. These changes do not introduce preloaded forks or
 persistent untrusted source parsers.
+
+
+## Release parser capacity before GPU waits (2026-10-11)
+
+Thumbnail-only work can hand off an owned, bounded geometry packet after its
+source parser exits cleanly and the supervisor reaps its process tree. Only then
+is the native parser claim released. Staging retains the existing prepared-byte
+reservation and a four-slot/192MiB sublimit, with custody descriptors inherited by
+the guardian. The lightweight supervisor dispatches validated framing to the
+broker and reacquires native admission for a disposable encoder or CPU fallback
+using that same packet. Existing Job authority and the absolute deadline remain
+unchanged. Fingerprint work retains the combined worker path.
+
+This extends neither untrusted parser lifetime nor configured Job concurrency.
+The encoder adds a process startup, so per-handoff telemetry records its queue
+and complete supervision cost separately; only a matched source-to-publication
+benchmark can establish whether the change improves ingestion. Numerical imports
+are not preloaded into a fork server. The earlier startup measurements and their
+limits remain historical evidence rather than qualification of this new handoff.
