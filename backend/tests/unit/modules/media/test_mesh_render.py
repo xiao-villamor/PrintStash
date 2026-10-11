@@ -395,6 +395,28 @@ class TestDeferredPreparation:
 
 
 class TestAcceleratedEncoding:
+    def test_renders_cpu_fallback_without_retrying_compute(self, monkeypatch):
+        from PIL import Image
+        from printstash_core.mesh.render_geometry import prepare_mesh_render
+
+        from app.modules.media import compute_render
+
+        prepared = prepare_mesh_render(TestDeferredPreparation.mesh(1))
+
+        def unexpected(*args, **kwargs):
+            pytest.fail("CPU fallback retried the unavailable GPU")
+
+        monkeypatch.setattr(compute_render, "render", unexpected)
+
+        encoded = mesh_render.render_prepared_thumbnail(
+            prepared, "fallback", 64, 48, output_format="WEBP", compute=False
+        )
+
+        assert encoded is not None
+        with Image.open(io.BytesIO(encoded)) as image:
+            assert image.size == (64, 48)
+            assert image.getchannel("A").getbbox() is not None
+
     def test_preserves_accelerated_encoding_policy(self, monkeypatch):
         from PIL import Image
         from printstash_core.mesh.render_geometry import prepare_mesh_render

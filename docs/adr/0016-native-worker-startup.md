@@ -110,3 +110,19 @@ and complete supervision cost separately; only a matched source-to-publication
 benchmark can establish whether the change improves ingestion. Numerical imports
 are not preloaded into a fork server. The earlier startup measurements and their
 limits remain historical evidence rather than qualification of this new handoff.
+
+
+### Measured scope of the handoff
+
+The initial 200-model implementation staged every eligible request. It halved
+broker execution but increased total source-to-publication time by about 28.5%,
+with 399 native admissions for 200 sources. The final policy therefore uses the
+separate stage only when the existing native estimate claims the entire memory
+pool; smaller requests keep their combined disposable process. The exact same
+preflight plan is consumed at native admission rather than recomputed. This does
+not lower unknown-complexity reservations or relax process limits.
+
+The RGBA encoder has a minimal import boundary verified in a fresh interpreter:
+no configuration, Pydantic, NumPy or source parser libraries. CPU fallback remains
+behind the existing media rendering facade in a guarded worker. See the
+[measurement and regression record](../testing/compute-native-pipeline-200.md).

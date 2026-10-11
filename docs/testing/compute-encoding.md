@@ -38,8 +38,12 @@ work; its duration cannot be attributed entirely to WebP compression.
 
 Paths prefixed `core/` refer to `backend/packages/printstash-core/tests/`. The focused serial run passed 224 core tests and 83 backend tests on 2026-10-11.
 Repository test hygiene passed 5,200 cases; Ruff and generated-profile checks passed.
-Historical rendering
-fixtures remain historical evidence and were not regenerated.
+Historical rendering pixel hashes remain unchanged. The frozen visual-input
+fixture `media/visual-prepared-v1.json` changes only its `view_identity` for
+`canonical-views-media-thumbnail-v5` and the explicit quality-80 profile. Its
+source digest, thumbnail RGB digest and six view RGB digests are retained; the
+identity assertion and those original pixel assertions passed together in the
+409-test serial recheck on 2026-10-11; none of the seven RGB hashes changed.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -55,3 +59,4 @@ fixtures remain historical evidence and were not regenerated.
 | E10 | `backend/tests/unit/modules/inference/test_manifest.py::TestLocalModelManifest::test_invalidates_vectors_from_the_previous_portable_renderer` | Happy | Identical model, old raster recipe | Changed render produces a distinct derived vector identity | Unit | ✅ passed |
 | E11 | `backend/tests/unit/modules/inference/test_manifest.py::TestEncoderAlignment::test_renderer_changes_only_derived_identity` | Happy | Existing pinned paired encoder assets | Rendering revisions preserve native alignment | Unit | ✅ passed |
 | E12 | Compression profile, `compute-encoding-200.json` | Happy | Same 200 cached frames, three methods | 600/600 exact RGBA encodes; sizes and clock domains recorded | Diagnostic | ✅ measured |
+| E13 | `backend/tests/integration/modules/media/geometry_analysis/test_geometry_analysis.py::TestEmbeddingViews::test_preserves_frozen_visual_input_hashes` | Happy | Existing frozen source and pixel digests with explicit v5 identity | Current recipe identity changes while all seven canonical RGB hashes remain unchanged | Integration | ✅ passed |

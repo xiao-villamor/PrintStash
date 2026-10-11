@@ -111,7 +111,11 @@ class QualifiedBatchRenderer:
                             getattr(prepared, "normal_mode", "canonical"),
                         )
                     )
-                    pixels = bytes(controls.colors[index]) * width * height
+                    frame = np.zeros((height, width, 4), dtype=np.uint8)
+                    frame[
+                        height // 4 : 3 * height // 4, width // 4 : 3 * width // 4
+                    ] = controls.colors[index]
+                    pixels = frame.tobytes()
                     outputs.append(
                         b"\x01" + struct.pack("!III", width, height, 1) + pixels
                     )

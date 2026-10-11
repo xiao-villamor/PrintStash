@@ -25,7 +25,13 @@ class ThumbnailValidationError(ValueError):
     """A decodable candidate failed the canonical thumbnail contract."""
 
 
-def to_webp(data: bytes, *, normalize: bool = True, width: int | None = None) -> bytes:
+def to_webp(
+    data: bytes,
+    *,
+    normalize: bool = True,
+    width: int | None = None,
+    preserve_frame: bool = False,
+) -> bytes:
     """Re-encode image bytes (PNG from slicers/rasteriser) as lossless WebP.
 
     Single conversion seam for every thumbnail write. Lossless keeps the
@@ -34,11 +40,16 @@ def to_webp(data: bytes, *, normalize: bool = True, width: int | None = None) ->
     renders below the original PNG. ``exact=True`` preserves the RGB of fully
     transparent pixels so the encoder can't recolour hidden areas.
 
+    ``preserve_frame`` accepts only a complete renderer's canonical-sized,
+    nonempty alpha frame with a transparent border; it never repositions pixels.
+    An already encoded WebP is retained after the same decode validation.
+
     Raises a stable error when validation or encoding fails. Callers treat the
     thumbnail as a retryable derivative; hostile input is never stored raw.
     """
     try:
         from PIL import Image
+        from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -57,9 +68,21 @@ def to_webp(data: bytes, *, normalize: bool = True, width: int | None = None) ->
                 if alpha_bounds is None:
                     raise ThumbnailValidationError("thumbnail_empty")
 
-                if normalize:
-                    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
-
+                if preserve_frame:
+                    # Only the complete renderer owns this frame. Embedded
+                    # previews still take the normalization path below.
+                    if (
+                        not source_had_alpha
+                        or rgba.size != (width, height)
+                        or alpha_bounds[0] <= 0
+                        or alpha_bounds[1] <= 0
+                        or alpha_bounds[2] >= width
+                        or alpha_bounds[3] >= height
+                    ):
+                        raise ThumbnailValidationError("thumbnail_frame_invalid")
+                    if source_is_webp:
+                        return data
+                elif normalize:
                     canonical_with_safe_border = (
                         source_had_alpha
                         and rgba.size == (width, height)
@@ -109,7 +132,14 @@ def to_webp(data: bytes, *, normalize: bool = True, width: int | None = None) ->
                     rgba.thumbnail((width, height), Image.Resampling.LANCZOS)
 
                 buf = io.BytesIO()
-                rgba.save(buf, format="WEBP", lossless=True, exact=True, method=6)
+                rgba.save(
+                    buf,
+                    format="WEBP",
+                    lossless=True,
+                    exact=True,
+                    method=PREVIEW_PROFILE.encoding_method,
+                    quality=PREVIEW_PROFILE.encoding_quality,
+                )
                 return buf.getvalue()
     except ThumbnailValidationError:
         raise

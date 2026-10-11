@@ -15,7 +15,7 @@ from app.core.cancellation import checkpoint
 from app.core.config import settings
 from app.core.work_priority import WorkPriority, current_priority
 from app.runtime.compute import client
-from app.runtime.compute.contracts import ComputeUnavailable
+from app.runtime.compute.contracts import ComputeUnavailable, Reason
 from app.runtime.compute.protocol import BinaryRenderRequest, Priority
 
 if TYPE_CHECKING:
@@ -46,6 +46,15 @@ def render_priority() -> Priority:
         if _background_render.get() or current_priority() is WorkPriority.BACKFILL
         else Priority.INTERACTIVE
     )
+
+
+def _require_visible_frame(frame: RenderedPixels) -> RenderedPixels:
+    # Inspect alpha without allocating a channel or importing an image runtime.
+    # A blank accelerator reply is a rendering failure, not invalid source data.
+    # Any nonzero alpha counts, including a single translucent pixel.
+    if not any(memoryview(frame.rgba)[3::4]):
+        raise ComputeUnavailable(Reason.DEVICE_FAILED)
+    return frame
 
 
 def render(prepared, width, height, views, matte):
@@ -92,9 +101,11 @@ def render(prepared, width, height, views, matte):
             checkpoint()
             pixels = data[12 + i * size : 12 + (i + 1) * size]
             frames.append(
-                RenderedPixels(width, height, pixels)
-                if finalized
-                else postprocess_rgba(pixels, width, height)
+                _require_visible_frame(
+                    RenderedPixels(width, height, pixels)
+                    if finalized
+                    else postprocess_rgba(pixels, width, height)
+                )
             )
         checkpoint()
         return tuple(frames)
@@ -139,7 +150,9 @@ def render_staged(wire: "ThumbnailWire", *, deadline: float) -> RenderedPixels |
         ):
             raise ValueError("compute_staged_output")
         checkpoint()
-        return RenderedPixels(wire.width, wire.height, response[13:])
+        return _require_visible_frame(
+            RenderedPixels(wire.width, wire.height, response[13:])
+        )
     except ComputeUnavailable, ValueError:
         checkpoint()
         return None

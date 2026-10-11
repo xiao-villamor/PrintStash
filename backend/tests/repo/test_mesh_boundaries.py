@@ -32,6 +32,8 @@ OWNERS = {
     "modules/media/step_geometry.py",
     "modules/media/stl_fallback.py",
     "modules/media/mesh_worker.py",
+    # Disposable finalizer retains the same guarded permit/descendant custody.
+    "modules/media/thumbnail_finalize_worker.py",
     "modules/media/step_worker.py",
     "modules/media/stl_worker.py",
     "modules/media/visual_worker.py",

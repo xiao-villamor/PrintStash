@@ -30,6 +30,7 @@ from app.modules.work.jobs import jobs
 from app.modules.work.reconciler import run_pass
 from app.runtime.compute import client
 from app.runtime.compute.broker import serve
+from app.runtime.compute.contracts import Reason
 from app.runtime.compute.protocol import Priority
 from tests.fakes.qualified_batch_renderer import QualifiedBatchRenderer
 
@@ -276,8 +277,23 @@ class TestRenderBatchPublication:
 
 class TestStagedThumbnailPublication:
     @pytest.mark.asyncio
-    async def test_publishes_from_owned_geometry_after_device_failure(
-        self, api, superuser_headers, e2e_db, work_engine, qualified_renderer, caplog
+    @pytest.mark.parametrize(
+        "failure,color",
+        [
+            pytest.param(Reason.DEVICE_FAILED, (180, 60, 30, 255), id="device-failure"),
+            pytest.param(None, (180, 60, 30, 0), id="empty-frame"),
+        ],
+    )
+    async def test_publishes_from_owned_geometry_after_gpu_failure(
+        self,
+        api,
+        superuser_headers,
+        e2e_db,
+        work_engine,
+        qualified_renderer,
+        caplog,
+        failure,
+        color,
     ):
         import json
         import logging
@@ -285,18 +301,18 @@ class TestStagedThumbnailPublication:
         from app.modules.media.native_process import native_capacity
         from app.modules.media.source_preparation import capacity as prepared_capacity
         from app.runtime import native_runtime, preparation_runtime
-        from app.runtime.compute.contracts import Reason
 
         controls = qualified_renderer
-        controls.failure = Reason.DEVICE_FAILED
+        controls.failure = failure
+        controls.colors = [color]
         controls.release_batch.set()
         headers = superuser_headers
-        payload = trimesh.creation.box(extents=(10, 20, 30)).export(file_type="stl")
+        payload = trimesh.creation.box(extents=(10, 20, 30)).export(file_type="3mf")
         work_engine.launch(listen_lanes=[LaneName.INGEST, LaneName.RECONCILE])
         uploaded = await api.post(
             "/api/v1/ingest/model",
             headers=headers,
-            files={"file": ("owned.stl", payload, "application/sla")},
+            files={"file": ("owned.3mf", payload, "model/3mf")},
         )
         assert uploaded.status_code == 202, uploaded.text
         ingest_id = uploaded.json()["job_id"]

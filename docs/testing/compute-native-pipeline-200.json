@@ -1,0 +1,932 @@
+{
+  "schema_version": 1,
+  "scope": "Matched GPU source-to-publication measurements; historical CPU retained without rerun.",
+  "base": {
+    "schema_version": 1,
+    "arm": "base",
+    "revision": "26b8f4b4f5964a16fd879285648f334bf4a72e84",
+    "image_id": "sha256:98e09e88c68078cef0b1e1d6d54250eb825e69646278daa522b44414cac3694c",
+    "selection_sha256": "077e93816fab660a38764f72a356bcda906bb5fea45118567b77af31ef7672a8",
+    "count": 200,
+    "formats": {
+      ".obj": {
+        "models": 83,
+        "metadata_ready": 83,
+        "thumbnail_ready": 83,
+        "thumbnail_failed": 0,
+        "both_ready": 83,
+        "outcomes": {
+          "metadata:ready": 83,
+          "thumbnail:ready": 83
+        },
+        "artifact_latency": {
+          "clock": "database_utc",
+          "monotonic_qualification": false,
+          "count": 83,
+          "p50_seconds": 94.173461,
+          "p95_seconds": 104.49933599999999,
+          "unavailable": 0,
+          "unavailable_reasons": {},
+          "timestamp_sources": {
+            "frozen_ingestion_job": 83
+          }
+        },
+        "worker_reported_duration_ms": {
+          "metadata": {
+            "count": 83,
+            "sum_seconds": 105.69,
+            "p50_seconds": 1.241,
+            "p95_seconds": 1.4605999999999997
+          },
+          "thumbnail": {
+            "count": 83,
+            "sum_seconds": 139.123,
+            "p50_seconds": 1.673,
+            "p95_seconds": 1.9184999999999997
+          }
+        },
+        "worker_duration_note": "Statistics above convert stored duration_ms to seconds; per-artifact engine durations overlap and exclude some startup/admission. They are not format wall times."
+      },
+      ".step": {
+        "models": 33,
+        "metadata_ready": 33,
+        "thumbnail_ready": 33,
+        "thumbnail_failed": 0,
+        "both_ready": 33,
+        "outcomes": {
+          "metadata:ready": 33,
+          "thumbnail:ready": 33
+        },
+        "artifact_latency": {
+          "clock": "database_utc",
+          "monotonic_qualification": false,
+          "count": 33,
+          "p50_seconds": 31.236405,
+          "p95_seconds": 60.5260888,
+          "unavailable": 0,
+          "unavailable_reasons": {},
+          "timestamp_sources": {
+            "frozen_ingestion_job": 33
+          }
+        },
+        "worker_reported_duration_ms": {
+          "metadata": {
+            "count": 33,
+            "sum_seconds": 37.958,
+            "p50_seconds": 1.104,
+            "p95_seconds": 1.4267999999999998
+          },
+          "thumbnail": {
+            "count": 33,
+            "sum_seconds": 51.057,
+            "p50_seconds": 1.462,
+            "p95_seconds": 2.146199999999999
+          }
+        },
+        "worker_duration_note": "Statistics above convert stored duration_ms to seconds; per-artifact engine durations overlap and exclude some startup/admission. They are not format wall times."
+      },
+      ".stl": {
+        "models": 84,
+        "metadata_ready": 84,
+        "thumbnail_ready": 84,
+        "thumbnail_failed": 0,
+        "both_ready": 84,
+        "outcomes": {
+          "metadata:ready": 84,
+          "thumbnail:ready": 84
+        },
+        "artifact_latency": {
+          "clock": "database_utc",
+          "monotonic_qualification": false,
+          "count": 84,
+          "p50_seconds": 70.9984305,
+          "p95_seconds": 94.33126389999998,
+          "unavailable": 0,
+          "unavailable_reasons": {},
+          "timestamp_sources": {
+            "frozen_ingestion_job": 84
+          }
+        },
+        "worker_reported_duration_ms": {
+          "metadata": {
+            "count": 84,
+            "sum_seconds": 153.855,
+            "p50_seconds": 1.3915,
+            "p95_seconds": 4.530599999999992
+          },
+          "thumbnail": {
+            "count": 84,
+            "sum_seconds": 209.862,
+            "p50_seconds": 1.862,
+            "p95_seconds": 5.748699999999999
+          }
+        },
+        "worker_duration_note": "Statistics above convert stored duration_ms to seconds; per-artifact engine durations overlap and exclude some startup/admission. They are not format wall times."
+      }
+    },
+    "outcomes": {
+      "metadata:ready": 200,
+      "thumbnail:ready": 200
+    },
+    "source_integrity": {
+      "originals_verified": 200,
+      "thumbnails_verified": 200,
+      "request_ledger_unchanged": true,
+      "r2_requests": 0
+    },
+    "timings": {
+      "publication_monotonic_seconds": 447.573587935,
+      "publication_realtime_seconds": 471.945471887,
+      "windows_qpc": {
+        "seconds": 472.4155156,
+        "clock": "Windows Stopwatch / QPC",
+        "scope": "Two independent Windows host counter observations enclosing source upload through durable publication. Includes boundary placement/process invocation gaps; wrapper intervals recorded in WSL clocks independently. Not corrected or substituted for WSL timings."
+      },
+      "qpc_boundary_wrappers": [
+        {
+          "available": true,
+          "ticks": 289467818584,
+          "frequency": 10000000,
+          "wrapper_before": {
+            "monotonic_ns": 27652336391591,
+            "realtime_ns": 1791742887006955497
+          },
+          "wrapper_after": {
+            "monotonic_ns": 27653176694249,
+            "realtime_ns": 1791742887847258819
+          },
+          "wrapper_monotonic_seconds": 0.840302658,
+          "wrapper_realtime_seconds": 0.840303322
+        },
+        {
+          "available": true,
+          "ticks": 294191973740,
+          "frequency": 10000000,
+          "wrapper_before": {
+            "monotonic_ns": 28100754531175,
+            "realtime_ns": 1791743359796978273
+          },
+          "wrapper_after": {
+            "monotonic_ns": 28101346013833,
+            "realtime_ns": 1791743360388460930
+          },
+          "wrapper_monotonic_seconds": 0.591482658,
+          "wrapper_realtime_seconds": 0.591482657
+        }
+      ],
+      "cold_first_wave": {
+        "count": 4,
+        "seconds_monotonic": 18.007152502,
+        "seconds_realtime": 19.694520021,
+        "outputs": {
+          "metadata:ready": 4,
+          "thumbnail:ready": 4
+        },
+        "scope": "First four fresh source uploads through durable requested outputs, includes broker startup when lazily started; excludes deployment/API boot."
+      },
+      "warm_remaining": {
+        "count": 196,
+        "seconds_monotonic": 429.537265287,
+        "seconds_realtime": 452.22178172,
+        "scope": "Remaining196 source files through durable outputs after cold first wave; descriptive subcohort, not a200-model claim."
+      },
+      "note": "Different clocks are retained independently; no correction applied. QPC interval encloses publication with process-invocation gaps; UTC and monotonic disagree."
+    },
+    "compute": {
+      "budget_bytes": 1073741824,
+      "reserved_bytes": 254948040,
+      "resident_entries": 18,
+      "queue_depth": 0,
+      "completed": 199,
+      "fallbacks": 0,
+      "cold_start_seconds": 2.2382497279977542,
+      "queue_seconds": 1.178531532004854,
+      "execution_seconds": 14.552097790998232,
+      "input_bytes": 219092820,
+      "output_bytes": 244533787,
+      "batch_inputs": 0,
+      "residency_hits": 4,
+      "residency_misses": 221,
+      "host_reserved_bytes": 1073741824,
+      "queued_bytes": 66,
+      "rendering_transfer_seconds": 2.5948956650390755,
+      "inference_batches": 0,
+      "render_batches": 217,
+      "render_frames": 221,
+      "render_batch_model_counts": [
+        213,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "render_batch_frame_counts": [
+        213,
+        4,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "render_interactive_requests": 0,
+      "render_background_requests": 199,
+      "render_cache_hits": 4,
+      "geometry_upload_bytes": 466853080,
+      "geometry_gpu_uploads": 59,
+      "geometry_cpu_uploads": 162,
+      "geometry_gpu_normal_uploads": 33,
+      "geometry_cpu_normal_fallbacks": 26,
+      "geometry_normal_seconds": 3.6682016150043637,
+      "geometry_packing_min_faces": 20000,
+      "geometry_packing_seconds": 3.6553993740271835,
+      "render_postprocess_gpu": true,
+      "geometry_input_bytes": 219065652,
+      "geometry_input_cache_hits": 4,
+      "geometry_input_cache_bytes": 17717296
+    },
+    "compute_snapshot_note": "Final cumulative counters on fresh deployment; reserved_bytes is a final snapshot, not a peak. One ready Artifact did not complete a broker render; CPU placement remains part of end-to-end scope.",
+    "events": {
+      "available": true,
+      "malformed_events": 0,
+      "phases": {
+        "admission": {
+          "count": 200,
+          "sum_seconds": 0.489333419,
+          "p50_seconds": 0.0001355565,
+          "p95_seconds": 0.0060142277499999714
+        },
+        "load": {
+          "count": 200,
+          "sum_seconds": 276.795299869,
+          "p50_seconds": 1.233644563,
+          "p95_seconds": 1.6792189631999999
+        },
+        "measurements": {
+          "count": 200,
+          "sum_seconds": 20.082879171,
+          "p50_seconds": 0.007289889,
+          "p95_seconds": 0.46290149724999935
+        },
+        "render": {
+          "count": 200,
+          "sum_seconds": 102.47853173,
+          "p50_seconds": 0.4317994505,
+          "p95_seconds": 1.1609600453499997
+        }
+      },
+      "native_waits": {
+        "count": 200,
+        "sum_seconds": 571.27200289,
+        "p50_seconds": 0.0543486,
+        "p95_seconds": 9.410787762749997
+      },
+      "supervision": {
+        "count": 200,
+        "sum_seconds": 800.255654448,
+        "p50_seconds": 3.6623687460000003,
+        "p95_seconds": 5.856712018299996
+      },
+      "native_admissions": 200,
+      "whole_pool_claims": 55,
+      "capacity_bytes": [
+        4146845696
+      ],
+      "admission_outcomes": {
+        "admitted": 200
+      },
+      "peak_worker_tree_rss_bytes": 566788096
+    },
+    "hardware": {
+      "available": true,
+      "scope": "One-second samples during publication, whole physical adapter including unrelated Windows work; not per-process allocation or qualification.",
+      "malformed_samples": 0,
+      "metrics": {
+        "gpu_utilization_percent": {
+          "count": 448,
+          "median": 1.0,
+          "p95": 2.0,
+          "maximum": 15.0
+        },
+        "memory_utilization_percent": {
+          "count": 448,
+          "median": 3.0,
+          "p95": 11.0,
+          "maximum": 17.0
+        },
+        "device_memory_used_mib": {
+          "count": 448,
+          "median": 1316.5,
+          "p95": 1515.8999999999999,
+          "maximum": 1665.0
+        }
+      }
+    },
+    "authoritative_geometry": {
+      "historical_cpu": {
+        "same_source_count": 200,
+        "exact_geometry_count": 200,
+        "cohort_count": 200,
+        "by_format": {
+          "STEP": {
+            "count": 33,
+            "exact_geometry_count": 33
+          },
+          "STL": {
+            "count": 84,
+            "exact_geometry_count": 84
+          },
+          "OBJ": {
+            "count": 83,
+            "exact_geometry_count": 83
+          }
+        },
+        "throughput_comparison": "Unavailable: historical run has1000sources; do not divide its total by current200duration."
+      },
+      "historical_gpu": {
+        "same_source_count": 200,
+        "exact_geometry_count": 200,
+        "cohort_count": 200,
+        "by_format": {
+          "STEP": {
+            "count": 33,
+            "exact_geometry_count": 33
+          },
+          "STL": {
+            "count": 84,
+            "exact_geometry_count": 84
+          },
+          "OBJ": {
+            "count": 83,
+            "exact_geometry_count": 83
+          }
+        },
+        "throughput_comparison": "Unavailable: historical run has1000sources; do not divide its total by current200duration."
+      }
+    },
+    "visual_approval": "pending_user",
+    "performance_claim": "No candidate comparison until same200-source candidate run completes; no CPU ingestion rerun.",
+    "ingestion_intervals": {
+      "clock": "database_utc",
+      "qualification": "diagnostic_only_not_monotonic",
+      "unavailable_reasons": {},
+      "by_format": {
+        "all": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 200,
+            "p50_seconds": 3.5513385,
+            "p95_seconds": 9.110983849999998
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 200,
+            "p50_seconds": 70.6924355,
+            "p95_seconds": 99.13531664999998
+          }
+        },
+        ".step": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 33,
+            "p50_seconds": 2.699864,
+            "p95_seconds": 5.3986456
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 33,
+            "p50_seconds": 27.277832,
+            "p95_seconds": 56.107445399999996
+          }
+        },
+        ".stl": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 84,
+            "p50_seconds": 3.8438995,
+            "p95_seconds": 8.395973549999999
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 84,
+            "p50_seconds": 66.75252850000001,
+            "p95_seconds": 89.29564179999998
+          }
+        },
+        ".obj": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 83,
+            "p50_seconds": 3.630184,
+            "p95_seconds": 9.548291199999998
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 83,
+            "p50_seconds": 90.868063,
+            "p95_seconds": 100.3209782
+          }
+        }
+      },
+      "note": "Exact retained ingestion Job ID maps creation/terminal to the frozen requested derivative terminal timestamps. Publication may overlap ingestion; these are observed intervals, not serial CPU costs or attributable residuals."
+    }
+  },
+  "unconditional_handoff_candidate": {
+    "schema_version": 1,
+    "arm": "candidate",
+    "revision": "3988d6977ed5dc6cab11d6e25ba0fe83bc872537",
+    "image_id": "sha256:4c742e7d5091511907d8f82471e8ea4ea5236eb2dd53da361086875725512a74",
+    "selection_sha256": "077e93816fab660a38764f72a356bcda906bb5fea45118567b77af31ef7672a8",
+    "report_sha256": "5307adbad392dc484cd45a5dc3a835d78cdb6b172cd3022a84ef613ee9246351",
+    "count": 200,
+    "formats": {
+      ".obj": {
+        "models": 83,
+        "metadata_ready": 83,
+        "thumbnail_ready": 83,
+        "thumbnail_failed": 0,
+        "both_ready": 83,
+        "outcomes": {
+          "metadata:ready": 83,
+          "thumbnail:ready": 83
+        },
+        "artifact_latency": {
+          "clock": "database_utc",
+          "monotonic_qualification": false,
+          "count": 83,
+          "p50_seconds": 199.815507,
+          "p95_seconds": 216.1673007,
+          "unavailable": 0,
+          "unavailable_reasons": {},
+          "timestamp_sources": {
+            "frozen_ingestion_job": 83
+          }
+        },
+        "worker_reported_duration_ms": {
+          "metadata": {
+            "count": 83,
+            "sum_seconds": 106.59,
+            "p50_seconds": 1.208,
+            "p95_seconds": 1.7132999999999992
+          },
+          "thumbnail": {
+            "count": 83,
+            "sum_seconds": 294.975,
+            "p50_seconds": 3.07,
+            "p95_seconds": 6.523399999999993
+          }
+        },
+        "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+      },
+      ".step": {
+        "models": 33,
+        "metadata_ready": 33,
+        "thumbnail_ready": 33,
+        "thumbnail_failed": 0,
+        "both_ready": 33,
+        "outcomes": {
+          "metadata:ready": 33,
+          "thumbnail:ready": 33
+        },
+        "artifact_latency": {
+          "clock": "database_utc",
+          "monotonic_qualification": false,
+          "count": 33,
+          "p50_seconds": 46.403312,
+          "p95_seconds": 78.702224,
+          "unavailable": 0,
+          "unavailable_reasons": {},
+          "timestamp_sources": {
+            "frozen_ingestion_job": 33
+          }
+        },
+        "worker_reported_duration_ms": {
+          "metadata": {
+            "count": 33,
+            "sum_seconds": 39.113,
+            "p50_seconds": 1.11,
+            "p95_seconds": 1.379
+          },
+          "thumbnail": {
+            "count": 33,
+            "sum_seconds": 197.876,
+            "p50_seconds": 6.018,
+            "p95_seconds": 9.706199999999999
+          }
+        },
+        "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+      },
+      ".stl": {
+        "models": 84,
+        "metadata_ready": 84,
+        "thumbnail_ready": 84,
+        "thumbnail_failed": 0,
+        "both_ready": 84,
+        "outcomes": {
+          "metadata:ready": 84,
+          "thumbnail:ready": 84
+        },
+        "artifact_latency": {
+          "clock": "database_utc",
+          "monotonic_qualification": false,
+          "count": 84,
+          "p50_seconds": 136.64097049999998,
+          "p95_seconds": 188.17905285,
+          "unavailable": 0,
+          "unavailable_reasons": {},
+          "timestamp_sources": {
+            "frozen_ingestion_job": 84
+          }
+        },
+        "worker_reported_duration_ms": {
+          "metadata": {
+            "count": 84,
+            "sum_seconds": 152.641,
+            "p50_seconds": 1.3925,
+            "p95_seconds": 4.45789999999999
+          },
+          "thumbnail": {
+            "count": 84,
+            "sum_seconds": 437.414,
+            "p50_seconds": 4.023,
+            "p95_seconds": 12.309249999999997
+          }
+        },
+        "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+      }
+    },
+    "outcomes": {
+      "metadata:ready": 200,
+      "thumbnail:ready": 200
+    },
+    "source_integrity": {
+      "originals_verified": 200,
+      "thumbnails_verified": 200,
+      "r2_requests": 0,
+      "request_ledger_unchanged": true
+    },
+    "timings": {
+      "publication_monotonic_seconds": 575.164441902,
+      "publication_realtime_seconds": 606.926935456,
+      "windows_qpc": {
+        "seconds": 607.0397781,
+        "clock": "Windows Stopwatch / QPC",
+        "scope": "Two independent Windows host counter observations enclosing source upload through durable publication. Includes boundary placement/process invocation gaps; wrapper intervals recorded in WSL clocks independently. Not corrected or substituted for WSL timings."
+      },
+      "qpc_boundary_wrappers": [
+        {
+          "available": true,
+          "ticks": 301648272849,
+          "frequency": 10000000,
+          "wrapper_before": {
+            "monotonic_ns": 28809305584925,
+            "realtime_ns": 1791744105831347070
+          },
+          "wrapper_after": {
+            "monotonic_ns": 28809613952390,
+            "realtime_ns": 1791744106139714905
+          },
+          "wrapper_monotonic_seconds": 0.308367465,
+          "wrapper_realtime_seconds": 0.308367835
+        },
+        {
+          "available": true,
+          "ticks": 307718670630,
+          "frequency": 10000000,
+          "wrapper_before": {
+            "monotonic_ns": 29384782492951,
+            "realtime_ns": 1791744713070748388
+          },
+          "wrapper_after": {
+            "monotonic_ns": 29385074129841,
+            "realtime_ns": 1791744713362384993
+          },
+          "wrapper_monotonic_seconds": 0.29163689,
+          "wrapper_realtime_seconds": 0.291636605
+        }
+      ],
+      "cold_first_wave": {
+        "count": 4,
+        "seconds_monotonic": 19.283030986,
+        "seconds_realtime": 20.978288506,
+        "outputs": {
+          "metadata:ready": 4,
+          "thumbnail:ready": 4
+        },
+        "scope": "First four fresh source uploads through durable requested outputs, includes broker startup when lazily started; excludes deployment/API boot."
+      },
+      "warm_remaining": {
+        "count": 196,
+        "seconds_monotonic": 555.816829447,
+        "seconds_realtime": 585.884065481,
+        "scope": "Remaining196 source files through durable outputs after cold first wave; descriptive subcohort, not a200-model claim."
+      },
+      "note": "Clocks retained independently. QPC includes process invocation boundary gaps; UTC artifact latencies remain diagnostic. No global clock calibration or format walltime claimed."
+    },
+    "comparison": {
+      "baseline_revision": "26b8f4b4f5964a16fd879285648f334bf4a72e84",
+      "same_sources": 200,
+      "duration_candidate_over_base": {
+        "wsl_monotonic": 1.285072348785536,
+        "wsl_realtime": 1.2860107186308998,
+        "windows_qpc": 1.2849700275593574
+      },
+      "interpretation": "Same200 source order, closed waves4. Candidate includes rendering, preparation, staging and encoding changes, not device-only isolation. Cold4 and warm196 are descriptive subsets, not independent200-model experiments."
+    },
+    "authoritative_geometry": {
+      "same_source_count": 200,
+      "exact_geometry_count": 200,
+      "by_format": {
+        ".obj": {
+          "count": 83,
+          "exact_geometry_count": 83
+        },
+        ".step": {
+          "count": 33,
+          "exact_geometry_count": 33
+        },
+        ".stl": {
+          "count": 84,
+          "exact_geometry_count": 84
+        }
+      }
+    },
+    "compute": {
+      "budget_bytes": 1073741824,
+      "reserved_bytes": 170795952,
+      "resident_entries": 16,
+      "queue_depth": 0,
+      "completed": 199,
+      "fallbacks": 0,
+      "cold_start_seconds": 1.7514727799971297,
+      "queue_seconds": 0.027730602971132612,
+      "execution_seconds": 7.282731759994931,
+      "input_bytes": 218697592,
+      "output_bytes": 244533787,
+      "batch_inputs": 0,
+      "residency_hits": 4,
+      "residency_misses": 195,
+      "host_reserved_bytes": 1073741824,
+      "queued_bytes": 66,
+      "rendering_transfer_seconds": 1.6485251220074133,
+      "inference_batches": 0,
+      "render_batches": 195,
+      "render_frames": 195,
+      "render_submissions": 195,
+      "render_upload_calls": 195,
+      "render_bounds_vertices": 9923854,
+      "geometry_local_normal_fallback_vertices": 4013,
+      "render_batch_model_counts": [
+        195,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "render_batch_frame_counts": [
+        195,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "render_interactive_requests": 0,
+      "render_background_requests": 199,
+      "render_cache_hits": 4,
+      "geometry_upload_bytes": 185103188,
+      "geometry_gpu_uploads": 195,
+      "geometry_cpu_uploads": 0,
+      "geometry_gpu_normal_uploads": 31,
+      "geometry_cpu_normal_fallbacks": 0,
+      "geometry_normal_seconds": 0.19692699097868172,
+      "geometry_packing_seconds": 1.8939775509934407,
+      "render_postprocess_gpu": true,
+      "geometry_input_bytes": 218670424,
+      "geometry_input_cache_hits": 4,
+      "geometry_input_cache_bytes": 15553108
+    },
+    "compute_snapshot_note": "Final counters in fresh deployment. Reserved values are final snapshots, not peaks. Histograms count render batches, not necessarily native queue.submit calls. CPU placement is included in whole-pipeline outcomes.",
+    "events": {
+      "available": true,
+      "malformed_events": 0,
+      "phases": {
+        "admission": {
+          "count": 200,
+          "sum_seconds": 0.528925376,
+          "p50_seconds": 0.000156788,
+          "p95_seconds": 0.00755927854999999
+        },
+        "load": {
+          "count": 200,
+          "sum_seconds": 278.598525319,
+          "p50_seconds": 1.222004368,
+          "p95_seconds": 1.7216931374499997
+        },
+        "measurements": {
+          "count": 200,
+          "sum_seconds": 19.085888464,
+          "p50_seconds": 0.0076777635,
+          "p95_seconds": 0.4752714864999995
+        },
+        "render": {
+          "count": 200,
+          "sum_seconds": 8.107306148,
+          "p50_seconds": 0.012295730500000001,
+          "p95_seconds": 0.05036716529999983
+        }
+      },
+      "native_waits": {
+        "count": 399,
+        "sum_seconds": 362.5979984,
+        "p50_seconds": 0.022142614,
+        "p95_seconds": 5.303885926899998
+      },
+      "supervision": {
+        "count": 399,
+        "sum_seconds": 1064.715781972,
+        "p50_seconds": 2.509572566,
+        "p95_seconds": 3.9589224529
+      },
+      "native_admissions": 399,
+      "whole_pool_claims": 54,
+      "capacity_bytes": [
+        4146845696
+      ],
+      "admission_outcomes": {
+        "admitted": 399
+      },
+      "peak_worker_tree_rss_bytes": 598556672
+    },
+    "handoff": {
+      "count": 199,
+      "modes": {
+        "encode": 199
+      },
+      "exit_causes": {
+        "exited_zero": 199
+      },
+      "durations": {
+        "prepared_read_ns": {
+          "count": 199,
+          "sum_seconds": 1.078604859,
+          "p50_seconds": 0.002928345,
+          "p95_seconds": 0.016839350499999996
+        },
+        "dispatch_ns": {
+          "count": 199,
+          "sum_seconds": 56.348796969,
+          "p50_seconds": 0.25678888,
+          "p95_seconds": 0.6374352164999999
+        },
+        "finalizer_queue_ns": {
+          "count": 199,
+          "sum_seconds": 193.34604587,
+          "p50_seconds": 0.022132606,
+          "p95_seconds": 5.7987437245999995
+        },
+        "finalizer_supervision_ns": {
+          "count": 199,
+          "sum_seconds": 368.097007158,
+          "p50_seconds": 1.83982027,
+          "p95_seconds": 2.2338536679
+        }
+      },
+      "prepared_bytes": {
+        "sum": 218718735,
+        "maximum": 39262046
+      },
+      "supervision_by_stage": {
+        "parser": {
+          "count": 200,
+          "sum_seconds": 696.618774814,
+          "p50_seconds": 3.2360374795,
+          "p95_seconds": 4.71391552055
+        },
+        "finalizer": {
+          "count": 199,
+          "sum_seconds": 368.097007158,
+          "p50_seconds": 1.83982027,
+          "p95_seconds": 2.2338536679
+        }
+      },
+      "note": "Accumulated per-request durations may overlap; finalizer supervision includes process startup/imports/encoding/cleanup and is not encoder-only CPU time."
+    },
+    "hardware": {
+      "available": true,
+      "scope": "One-second samples during publication, whole physical adapter including unrelated Windows work; not per-process allocation or qualification.",
+      "malformed_samples": 0,
+      "metrics": {
+        "gpu_utilization_percent": {
+          "count": 574,
+          "median": 1.0,
+          "p95": 2.0,
+          "maximum": 5.0
+        },
+        "memory_utilization_percent": {
+          "count": 574,
+          "median": 4.0,
+          "p95": 12.0,
+          "maximum": 30.0
+        },
+        "device_memory_used_mib": {
+          "count": 574,
+          "median": 1283.0,
+          "p95": 1447.35,
+          "maximum": 1507.0
+        }
+      }
+    },
+    "ingestion_intervals": {
+      "clock": "database_utc",
+      "qualification": "diagnostic_only_not_monotonic",
+      "unavailable_reasons": {},
+      "by_format": {
+        "all": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 200,
+            "p50_seconds": 3.822399,
+            "p95_seconds": 7.522714899999997
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 200,
+            "p50_seconds": 158.45613,
+            "p95_seconds": 204.45934225
+          }
+        },
+        ".step": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 33,
+            "p50_seconds": 2.587386,
+            "p95_seconds": 6.1850102
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 33,
+            "p50_seconds": 43.024757,
+            "p95_seconds": 75.5927504
+          }
+        },
+        ".stl": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 84,
+            "p50_seconds": 4.1130195,
+            "p95_seconds": 8.408051999999996
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 84,
+            "p50_seconds": 134.05483550000002,
+            "p95_seconds": 182.43594355
+          }
+        },
+        ".obj": {
+          "job_creation_to_terminal": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 83,
+            "p50_seconds": 4.087338,
+            "p95_seconds": 7.2315391999999985
+          },
+          "ingestion_terminal_to_derivative_publication": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 83,
+            "p50_seconds": 195.123763,
+            "p95_seconds": 211.54189169999998
+          }
+        }
+      },
+      "note": "Exact retained ingestion Job ID maps creation/terminal to the frozen requested derivative terminal timestamps. Publication may overlap ingestion; these are observed intervals, not serial CPU costs or attributable residuals."
+    },
+    "visual_approval": "pending_user"
+  },
+  "corrected_candidate": null
+}

@@ -2166,7 +2166,10 @@ def staged_mesh_outputs():
         peak_rss_bytes=None,
     )
     thumbnail = ThumbnailOutput(
-        image=content.png(),
+        image=content.rendered_thumbnail(
+            width=settings.model_thumbnail_width,
+            height=round(settings.model_thumbnail_width * 3 / 4),
+        ),
         strategy=ThumbnailStrategy.FULL,
         coverage=MeshCoverage(
             SourceScanState.COMPLETE, GeometryNotLoaded(), PreviewCoverage.COMPLETE
@@ -2179,6 +2182,56 @@ def staged_mesh_outputs():
 
 
 class TestStagedMeshPublication:
+    def test_retains_one_worker_for_bounded_geometry(
+        self, db_session, stored, monkeypatch
+    ):
+        from app.modules.media import native_process, thumbnail_staging
+        from app.runtime.compute import client
+        from app.runtime.native_admission import Resources
+
+        artifact = stored("small.stl", content.binary_stl())
+        monkeypatch.setattr(client, "available", lambda **kwargs: True)
+        monkeypatch.setattr(client, "warm_render", lambda: None)
+        monkeypatch.setattr(
+            native_process, "native_capacity", lambda: Resources(4, 2 * 1024**3)
+        )
+
+        def unexpected(*args, **kwargs):
+            pytest.fail("small mesh acquired a separate visual stage")
+
+        monkeypatch.setattr(thumbnail_staging, "reserve", unexpected)
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds == {
+            DerivativeKind.METADATA: DerivativeState.READY,
+            DerivativeKind.THUMBNAIL: DerivativeState.READY,
+        }
+        db_session.expire_all()
+        assert get_backend().exists(
+            _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL].storage_key
+        )
+
+    def test_publishes_the_renderer_frame(
+        self, db_session, stored, monkeypatch, staged_mesh_outputs
+    ):
+        artifact = stored("framed.stl", content.binary_stl())
+        geometry, thumbnail = staged_mesh_outputs
+
+        def worker(_request, *, on_output):
+            on_output(geometry)
+            on_output(thumbnail)
+            raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
+
+        monkeypatch.setattr(mesh_isolation, "generate", worker)
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert outcome.kinds[DerivativeKind.THUMBNAIL] is DerivativeState.READY
+        db_session.expire_all()
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert get_backend().read_bytes(row.storage_key) == thumbnail.image
+
     @pytest.mark.parametrize(
         "later_failure",
         [

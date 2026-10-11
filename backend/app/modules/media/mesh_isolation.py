@@ -59,6 +59,7 @@ from app.modules.media.mesh_contracts import (
     encode_coverage,
     encode_geometry,
 )
+from app.modules.media.mesh_errors import MeshWorkerCancelled, MeshWorkerError
 from app.modules.media.mesh_facts import FingerprintFailureCode
 from app.modules.media.mesh_protocol import (
     FrameDecoder,
@@ -75,10 +76,12 @@ from app.modules.media.mesh_telemetry import (
     decode_phase_stats,
     encode_phase_stats,
 )
+from app.modules.media.mesh_worker_limits import MAX_REPLY_BYTES
 from app.modules.media.native_budget import (
     AnalysisWork,
     GeometryWork,
     MeshSource,
+    NativePlan,
     RasterCodec,
     RasterWork,
     WorkProfile,
@@ -99,25 +102,7 @@ from app.runtime.native_admission import NativePermit, Resources
 from app.runtime.native_runtime import current_permit
 
 REPLY_MAGIC = b"MSH1"
-MAX_REPLY_BYTES = 32 * 1024 * 1024
 _POLL_SECONDS = 0.025
-
-
-class MeshWorkerError(Exception):
-    """The child could not produce a result; `reason` says why."""
-
-    def __init__(self, reason: ThumbnailFailureReason) -> None:
-        super().__init__(reason.value)
-        self.reason = reason
-        self.supervision: SupervisionStats | None = None
-
-
-class MeshWorkerCancelled(OperationCancelled):
-    """Withdrawal preserves observed parent costs without becoming job failure."""
-
-    def __init__(self, supervision: SupervisionStats) -> None:
-        super().__init__()
-        self.supervision = supervision
 
 
 def memory_budget_bytes() -> int:
@@ -674,6 +659,7 @@ def _run_worker(
     work: WorkProfile,
     on_chunk: Callable[[bytes], None] | None = None,
     deadline: float | None = None,
+    native_plan: NativePlan | None = None,
 ) -> SupervisedReply:
     """Plan a weighted native allowance, then run one supervised worker."""
     from app.runtime.compute.client import warm_render
@@ -684,9 +670,13 @@ def _run_worker(
         checkpoint()
     existing = current_permit()
     capacity = Resources(native_process.native_capacity().slots, memory_budget_bytes())
+    if native_plan is not None:
+        native_plan.validate(capacity, sources, work)
     amount = (
         existing.resources
         if existing is not None
+        else native_plan.amount
+        if native_plan is not None
         else estimate_sources(capacity, sources, work=work)
     )
 
@@ -815,11 +805,49 @@ def read_spec(argv: list[str]) -> dict[str, Any]:
     return spec
 
 
+def _run_finalizer(
+    command: list[str], permit: NativePermit, timeout: float
+) -> SupervisedReply:
+    return supervise_result(
+        command,
+        memory_budget=permit.resources.bytes,
+        timeout_seconds=timeout,
+        permit=permit,
+        lifecycle=WorkerLifecycle.GUARDED,
+    )
+
+
+def _thumbnail_work(request: ThumbnailRequest) -> WorkProfile:
+    raster: RasterWork | None = None
+    if request.include_thumbnail:
+        width = int(request.width or settings.model_thumbnail_width)
+        height = int(request.height or round(width * 3 / 4))
+        raster = RasterWork(
+            width, height, 1, RasterCodec(request.output_format.lower())
+        )
+    return (
+        AnalysisWork(raster)
+        if request.include_fingerprint
+        else raster
+        if raster is not None
+        else GeometryWork()
+    )
+
+
+def plan_native(request: ThumbnailRequest) -> NativePlan:
+    """Preflight once after source custody, before optional visual admission."""
+    pool = Resources(native_process.native_capacity().slots, memory_budget_bytes())
+    sources = (MeshSource(request.path, request.file_type or request.path.suffix),)
+    work = _thumbnail_work(request)
+    return NativePlan(pool, estimate_sources(pool, sources, work=work), sources, work)
+
+
 def generate(
     request: ThumbnailRequest,
     *,
     on_output: OutputSink | None = None,
     staging: ThumbnailStaging | None = None,
+    native_plan: NativePlan | None = None,
 ) -> ThumbnailResult:
     """Run one parser, optionally handing visuals off after its clean exit."""
     if staging is not None:
@@ -868,20 +896,7 @@ def generate(
         "output_format": request.output_format,
         "reason": request.reason,
     }
-    raster: RasterWork | None = None
-    if request.include_thumbnail:
-        width = int(request.width or settings.model_thumbnail_width)
-        height = int(request.height or round(width * 3 / 4))
-        raster = RasterWork(
-            width, height, 1, RasterCodec(request.output_format.lower())
-        )
-    work: WorkProfile = (
-        AnalysisWork(raster)
-        if request.include_fingerprint
-        else raster
-        if raster is not None
-        else GeometryWork()
-    )
+    work = _thumbnail_work(request)
     with ExitStack() as resources:
         if request.include_fingerprint and mesh_policy.canonical_suffix(
             request.path, request.file_type
@@ -912,6 +927,7 @@ def generate(
             work=work,
             on_chunk=receive,
             deadline=deadline if staging is not None else None,
+            native_plan=native_plan,
         )
         try:
             final = decoder.finish()
@@ -926,6 +942,10 @@ def generate(
                     output_format=request.output_format,
                     deadline=deadline,
                     parser_execution_id=reply.stats.execution_id,
+                    pool=Resources(
+                        native_process.native_capacity().slots, memory_budget_bytes()
+                    ),
+                    run=_run_finalizer,
                 )
                 checkpoint()
                 if on_output is not None:

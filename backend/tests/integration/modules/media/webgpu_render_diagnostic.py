@@ -398,9 +398,42 @@ class TestWebGpuRender:
 
 
 class TestWarmPoolAdmission:
-    def test_batches_small_models_after_a_large_singleton(
-        self, monkeypatch, tmp_path, gpu_device
-    ):
+    def test_batches_small_models_after_a_large_singleton(self, tmp_path):
+        import os
+        import subprocess
+        import sys
+
+        # The broker owns one device per process. Creating and destroying a
+        # second device alongside the session fixture can contaminate the GLES
+        # context; exercise this independent broker with the same ownership.
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import runpy,sys; from pathlib import Path; "
+                "namespace=runpy.run_path(sys.argv[1]); "
+                "namespace['TestWarmPoolAdmission']._verify_admission(Path(sys.argv[2]))",
+                __file__,
+                str(tmp_path),
+            ],
+            env={**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @staticmethod
+    def _verify_admission(tmp_path):
+        from app.runtime.compute.discovery import configure_backend
+
+        configure_backend()
+        with pytest.MonkeyPatch.context() as monkeypatch:
+            TestWarmPoolAdmission._exercise_admission(tmp_path, monkeypatch)
+
+    @staticmethod
+    def _exercise_admission(tmp_path, monkeypatch):
         import base64
         import time
 

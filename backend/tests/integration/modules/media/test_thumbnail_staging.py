@@ -243,6 +243,38 @@ class TestStagedPacketOwnership:
 
 
 class TestStagingBootstrap:
+    def test_encoder_avoids_application_configuration(self, tmp_path):
+        import json
+
+        expected = bytes([18, 37, 51, 255]) * (64 * 48)
+        (tmp_path / thumbnail_staging.PIXELS_NAME).write_bytes(expected)
+        spec = {
+            "mode": "encode",
+            "directory": str(tmp_path),
+            "width": 64,
+            "height": 48,
+            "output_format": "WEBP",
+            "face_chunk_size": 64000,
+        }
+        script = (
+            "import sys; from app.modules.media.thumbnail_finalize_worker import main; "
+            "main(sys.argv[1:]); "
+            "assert not {'app.core.config', 'app.modules.media.mesh_isolation', "
+            "'pydantic', 'numpy', 'trimesh'} & sys.modules.keys()"
+        )
+
+        reply = subprocess.run(
+            [sys.executable, "-c", script, json.dumps(spec)],
+            cwd=BACKEND_DIR,
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        )
+
+        assert reply.returncode == 0, reply.stderr.decode()
+        with Image.open(io.BytesIO(reply.stdout)) as image:
+            assert image.convert("RGBA").tobytes() == expected
+
     def test_transports_visual_credit_to_the_guarded_worker(self):
         from app.modules.media.native_execution import admission
         from app.modules.media.worker_bootstrap import WorkerLifecycle, command
@@ -263,3 +295,23 @@ class TestStagingBootstrap:
                         lifecycle=WorkerLifecycle.GUARDED,
                     )
         assert int(reply.payload) == 100
+
+
+class TestNativePlan:
+    def test_reuses_preflight_for_guarded_execution(self, staged_request, monkeypatch):
+        request, staging = staged_request
+        plan = mesh_isolation.plan_native(request)
+
+        def repeated(*args, **kwargs):
+            pytest.fail("source preflight ran twice")
+
+        monkeypatch.setattr(mesh_isolation, "estimate_sources", repeated)
+        monkeypatch.setattr(
+            thumbnail_finalization, "render_staged", lambda *args, **kwargs: None
+        )
+
+        result = mesh_isolation.generate(request, staging=staging, native_plan=plan)
+
+        assert result.geometry["triangle_count"] == 12
+        assert result.coverage.preview is PreviewCoverage.COMPLETE
+        assert native_runtime.current_permit() is None

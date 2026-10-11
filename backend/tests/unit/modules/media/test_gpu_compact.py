@@ -36,9 +36,7 @@ def prepared():
 
 
 class TestCompactGeometry:
-    def test_groups_uploads_and_releases_only_transients_after_fence(
-        self, device, prepared
-    ):
+    def test_retains_grouped_uploads_until_completion(self, device, prepared):
         memory = Residency(1024**2)
         owner = CompactGeometry(device, memory, ViewPipeline(device))
         first = owner.acquire(prepared, "geometry:first")
@@ -107,7 +105,7 @@ class TestCompactGeometry:
         memory.evict_idle()
         assert memory.used == 0
 
-    def test_partial_allocation_is_fenced_and_released(self, device, prepared):
+    def test_retires_partial_allocations_after_completion(self, device, prepared):
         memory = Residency(1024**2)
         renderer = Renderer(device, memory)
         # The completion fence succeeds, then a partial geometry allocation fails.
@@ -121,9 +119,7 @@ class TestCompactGeometry:
 
 
 class TestNativeBatch:
-    def test_two_models_two_cameras_share_one_submission_and_map(
-        self, device, prepared
-    ):
+    def test_coalesces_multiple_models_into_one_native_batch(self, device, prepared):
         renderer = Renderer(device)
         decoded = [
             (prepared, 24, 24, [None, np.eye(3)], False),
@@ -188,9 +184,7 @@ class TestNativeBatch:
         assert renderer.bounds_vertices == len(vertices)
         renderer.close()
 
-    def test_cached_geometry_skips_upload_and_bounds_on_next_camera(
-        self, device, prepared
-    ):
+    def test_reuses_prepared_geometry_for_another_camera(self, device, prepared):
         renderer = Renderer(device)
         args = [(prepared, 24, 24, [None], False)]
         renderer.execute_prepared_many(args, ["geometry:a"], ["first"], raw=True)

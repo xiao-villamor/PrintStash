@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from typing import Literal
 
 from app.core.cancellation import checkpoint
-from app.modules.media import native_process
+from app.core.config import settings
 from app.modules.media.compute_geometry_wire import split_thumbnail
 from app.modules.media.compute_render import render_staged
 from app.modules.media.mesh_contracts import (
@@ -16,14 +17,15 @@ from app.modules.media.mesh_contracts import (
     ThumbnailFailureReason,
     ThumbnailStrategy,
 )
+from app.modules.media.mesh_errors import MeshWorkerCancelled, MeshWorkerError
 from app.modules.media.mesh_protocol import PreparedThumbnailOutput, ThumbnailOutput
+from app.modules.media.mesh_telemetry import SupervisedReply
 from app.modules.media.native_budget import RasterCodec, RasterWork
 from app.modules.media.native_budget import request as native_request
 from app.modules.media.native_execution import admission
 from app.modules.media.thumbnail_staging import FinalizationMode, ThumbnailStaging
-from app.modules.media.worker_bootstrap import WorkerLifecycle
 from app.modules.media.worker_bootstrap import command as worker_command
-from app.runtime.native_admission import Resources
+from app.runtime.native_admission import NativePermit, Resources
 from app.runtime.native_runtime import current_permit
 
 
@@ -34,16 +36,10 @@ def finish(
     output_format: Literal["PNG", "WEBP"],
     deadline: float,
     parser_execution_id: str,
+    pool: Resources,
+    run: Callable[[list[str], NativePermit, float], SupervisedReply],
 ) -> ThumbnailOutput:
     """GPU wait owns prepared bytes only; the finalizer reacquires native RAM."""
-    from app.modules.media.mesh_isolation import (
-        MeshWorkerCancelled,
-        MeshWorkerError,
-        memory_budget_bytes,
-        runtime_overrides,
-        supervise_result,
-    )
-
     if current_permit() is not None:
         raise RuntimeError("staged rendering requires the parser permit to be released")
     started = time.monotonic()
@@ -71,7 +67,6 @@ def finish(
         mode = FinalizationMode.ENCODE
     # No packet, view, or RPC response survives into native encoder admission.
     del wire, payload, pixels
-    pool = Resources(native_process.native_capacity().slots, memory_budget_bytes())
     work = RasterWork(
         staging.width, staging.height, 1, RasterCodec(output_format.lower())
     )
@@ -83,7 +78,7 @@ def finish(
         queue_ns = time.monotonic_ns() - queued
         remaining()
         spec = {
-            "overrides": runtime_overrides(),
+            "face_chunk_size": settings.mesh_render_face_chunk_size,
             "mode": mode.value,
             "directory": str(staging.directory),
             "width": staging.width,
@@ -93,16 +88,14 @@ def finish(
             "sha256": prepared.render.sha256,
         }
         try:
-            reply = supervise_result(
+            reply = run(
                 worker_command(
                     "app.modules.media.thumbnail_finalize_worker",
                     [json.dumps(spec)],
                     permit.resources.bytes,
                 ),
-                memory_budget=permit.resources.bytes,
-                timeout_seconds=deadline - time.monotonic(),
-                permit=permit,
-                lifecycle=WorkerLifecycle.GUARDED,
+                permit,
+                deadline - time.monotonic(),
             )
         except (MeshWorkerError, MeshWorkerCancelled) as exc:
             if exc.supervision is not None:

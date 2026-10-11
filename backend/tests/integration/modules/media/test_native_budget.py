@@ -460,8 +460,17 @@ class TestCallerProfiles:
         path.write_bytes(binary_stl(triangles=12))
         captured = []
 
-        def observe(module, spec, *, sources, work, on_chunk=None):
-            captured.append((sources, work))
+        def observe(
+            module,
+            spec,
+            *,
+            sources,
+            work,
+            on_chunk=None,
+            deadline=None,
+            native_plan=None,
+        ):
+            captured.append((sources, work, deadline, native_plan))
             raise _CapturedWork
 
         monkeypatch.setattr(mesh_isolation, "_run_worker", observe)
@@ -475,7 +484,9 @@ class TestCallerProfiles:
         )
         with pytest.raises(_CapturedWork):
             mesh_isolation.generate(request)
-        ((sources, work),) = captured
+        ((sources, work, deadline, native_plan),) = captured
+        assert deadline is None
+        assert native_plan is None
         assert sources == (native_budget.MeshSource(path, ".stl"),)
         if expected == "geometry":
             assert work == native_budget.GeometryWork()

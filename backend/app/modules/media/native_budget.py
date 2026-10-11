@@ -130,6 +130,28 @@ class MeshSource:
     file_type: str
 
 
+@dataclass(frozen=True)
+class NativePlan:
+    """One conservative estimate, bound to its source, work and pool snapshot."""
+
+    capacity: Resources
+    amount: Resources
+    sources: tuple[MeshSource, ...]
+    work: WorkProfile
+
+    @property
+    def owns_whole_pool(self) -> bool:
+        return self.amount.bytes == self.capacity.bytes
+
+    def validate(
+        self, capacity: Resources, sources: tuple[MeshSource, ...], work: WorkProfile
+    ) -> None:
+        if (capacity, sources, work) != (self.capacity, self.sources, self.work):
+            raise ValueError("native_plan_changed")
+        if not self.amount.fits(capacity):
+            raise ValueError("native_plan_exceeds_capacity")
+
+
 def capacity(memory_limit: int | None, fraction: float, slots: int) -> Resources:
     if type(slots) is not int or slots < 0:
         raise ValueError("native slots must be a nonnegative integer")

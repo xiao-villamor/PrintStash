@@ -114,7 +114,10 @@ def warm_render() -> None:
             cooldown()
 
 
-def _connect(root: Path, deadline: float, *, start: bool = True) -> socket.socket:
+def _connect(
+    root: Path, deadline: float, *, start: bool = True, checkpoint=lambda: None
+) -> socket.socket:
+    checkpoint()
     address = root / "broker.sock"
     if len(os.fsencode(address)) >= 104:
         raise ComputeUnavailable(Reason.BROKER_UNAVAILABLE)
@@ -139,13 +142,20 @@ def _connect(root: Path, deadline: float, *, start: bool = True) -> socket.socke
     connection.settimeout(0.2)
     try:
         connection.connect(str(address))
+        checkpoint()
         return checked(connection)
     except OSError:
         connection.close()
+    except BaseException:
+        connection.close()
+        raise
     if not start:
         raise ComputeUnavailable(Reason.BROKER_UNAVAILABLE)
     with (root / "launch.lock").open("a+b") as launch:
         while True:
+            checkpoint()
+            if time.monotonic() >= deadline:
+                raise ComputeUnavailable(Reason.DEADLINE)
             try:
                 fcntl.flock(launch, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
@@ -155,13 +165,18 @@ def _connect(root: Path, deadline: float, *, start: bool = True) -> socket.socke
                 time.sleep(0.025)
         child = None
         while time.monotonic() < deadline:
+            checkpoint()
             connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             connection.settimeout(0.2)
             try:
                 connection.connect(str(address))
+                checkpoint()
                 return checked(connection)
             except OSError:
                 connection.close()
+            except BaseException:
+                connection.close()
+                raise
             if child is None:
                 env = os.environ.copy()
                 env.update(
@@ -221,7 +236,10 @@ def exchange(request, *, checkpoint=lambda: None) -> bytes:
             or request.priority == Priority.BACKGROUND
         )
         with _connect(
-            root, min(deadline, time.monotonic() + 30), start=start
+            root,
+            min(deadline, time.monotonic() + 30),
+            start=start,
+            checkpoint=checkpoint,
         ) as connection:
             checkpoint()
             connection.settimeout(max(0.001, min(1, deadline - time.monotonic())))
@@ -320,6 +338,7 @@ def exchange_render(
             root,
             min(request.deadline, time.monotonic() + 30),
             start=request.priority == Priority.BACKGROUND,
+            checkpoint=checkpoint,
         ) as connection:
             connection.settimeout(0.05)
             send_admitted(

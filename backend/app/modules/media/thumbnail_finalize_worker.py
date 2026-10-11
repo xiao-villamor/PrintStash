@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 import sys
 from pathlib import Path
 from typing import Literal, cast
 
-from app.core.config import settings
-from app.modules.media.mesh_isolation import MAX_REPLY_BYTES, read_spec
+from app.modules.media.mesh_worker_limits import MAX_REPLY_BYTES
 from app.modules.media.thumbnail_staging import (
     PIXELS_NAME,
     FinalizationMode,
@@ -22,7 +22,8 @@ def main(argv: list[str]) -> int:
     output = os.fdopen(os.dup(sys.stdout.fileno()), "wb", buffering=0)
     with open(os.devnull, "wb") as sink:
         os.dup2(sink.fileno(), sys.stdout.fileno())
-    spec = read_spec(argv)
+    (raw,) = argv
+    spec = json.loads(raw)
     mode = FinalizationMode(spec["mode"])
     staging = ThumbnailStaging(Path(spec["directory"]), spec["width"], spec["height"])
     if spec["output_format"] not in ("PNG", "WEBP"):
@@ -48,8 +49,14 @@ def main(argv: list[str]) -> int:
                 output_format=output_format,
             )
         else:
+            face_chunk_size = spec["face_chunk_size"]
+            if type(face_chunk_size) is not int or face_chunk_size <= 0:
+                raise ValueError("staged_thumbnail_face_chunk_size")
+            from app.core.config import _overlay
+            from app.modules.media import mesh_render
             from app.modules.media.compute_geometry import decode
-            from app.modules.media.gpu_normals import canonical
+
+            _overlay["mesh_render_face_chunk_size"] = face_chunk_size
 
             payload = staging.read(StagedRender(spec["size"], spec["sha256"]))
             prepared, width, height, views, matte = decode(payload)
@@ -59,15 +66,13 @@ def main(argv: list[str]) -> int:
                 or matte
             ):
                 raise ValueError("staged_thumbnail_camera")
-            image = rasterizer.render_prepared_thumbnail(
-                canonical(
-                    prepared, face_chunk_size=settings.mesh_render_face_chunk_size
-                ),
+            image = mesh_render.render_prepared_thumbnail(
+                prepared,
                 "staged-thumbnail",
                 width,
                 height,
                 output_format=output_format,
-                face_chunk_size=settings.mesh_render_face_chunk_size,
+                compute=False,
             )
         if image is None or not 0 < len(image) <= MAX_REPLY_BYTES:
             raise ValueError("staged_thumbnail_output")

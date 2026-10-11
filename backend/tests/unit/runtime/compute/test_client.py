@@ -9,6 +9,108 @@ from printstash_core.inference import EmbeddingError, InferenceContext
 from app.runtime.compute import client
 
 
+@pytest.fixture
+def broker_startup(monkeypatch):
+    from types import SimpleNamespace
+
+    state = SimpleNamespace(now=10.0, sockets=[], launched=False, terminated=False)
+
+    class Connection:
+        closed = False
+
+        def settimeout(self, seconds):
+            pass
+
+        def connect(self, address):
+            raise ConnectionRefusedError()
+
+        def close(self):
+            self.closed = True
+
+    class Child:
+        def poll(self):
+            return None
+
+        def terminate(self):
+            state.terminated = True
+
+        def wait(self, timeout=None):
+            pass
+
+    def connection(*args):
+        value = Connection()
+        state.sockets.append(value)
+        return value
+
+    def launch(*args, **kwargs):
+        state.launched = True
+        return Child()
+
+    def advance(seconds):
+        state.now += seconds
+
+    monkeypatch.setattr(client.socket, "socket", connection)
+    monkeypatch.setattr(client.subprocess, "Popen", launch)
+    monkeypatch.setattr(client.time, "monotonic", lambda: state.now)
+    monkeypatch.setattr(client.time, "sleep", advance)
+    return state
+
+
+class TestConnect:
+    def test_withdraws_during_launch_lock_contention(
+        self, broker_startup, tmp_path, monkeypatch
+    ):
+        from app.core.cancellation import OperationCancelled
+
+        def locked(*args):
+            raise BlockingIOError()
+
+        def checkpoint():
+            if broker_startup.now > 10:
+                raise OperationCancelled()
+
+        monkeypatch.setattr(client.fcntl, "flock", locked)
+
+        with pytest.raises(OperationCancelled):
+            client._connect(tmp_path, 40, checkpoint=checkpoint)
+
+        assert broker_startup.now < 10.1
+        assert all(connection.closed for connection in broker_startup.sockets)
+        assert not broker_startup.launched
+
+    def test_withdraws_without_terminating_shared_owner(self, broker_startup, tmp_path):
+        from app.core.cancellation import OperationCancelled
+
+        def checkpoint():
+            if broker_startup.launched:
+                raise OperationCancelled()
+
+        with pytest.raises(OperationCancelled):
+            client._connect(tmp_path, 40, checkpoint=checkpoint)
+
+        assert broker_startup.launched
+        assert not broker_startup.terminated
+        assert all(connection.closed for connection in broker_startup.sockets)
+        assert broker_startup.now < 10.1
+
+    def test_retains_original_bootstrap_deadline(
+        self, broker_startup, tmp_path, monkeypatch
+    ):
+        from app.runtime.compute.contracts import ComputeUnavailable, Reason
+
+        def locked(*args):
+            raise BlockingIOError()
+
+        monkeypatch.setattr(client.fcntl, "flock", locked)
+
+        with pytest.raises(ComputeUnavailable) as error:
+            client._connect(tmp_path, 10.01)
+
+        assert error.value.reason is Reason.DEADLINE
+        assert broker_startup.now < 10.1
+        assert not broker_startup.launched
+
+
 class TestFallback:
     @pytest.mark.parametrize("reason", ["capacity", "unqualified", "device_failed"])
     def test_returns_valid_work_to_cpu(self, monkeypatch, reason):

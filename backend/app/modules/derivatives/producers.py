@@ -53,6 +53,7 @@ from app.modules.media.mesh_contracts import (
     PreviewCoverage,
     ThumbnailFailureReason,
     ThumbnailRequest,
+    ThumbnailStrategy,
 )
 from app.modules.media.mesh_isolation import MeshWorkerError
 from app.modules.media.source_preparation import capacity as prepared_capacity
@@ -209,10 +210,13 @@ def _publish_thumbnail(
     duration_ms: int | None = None,
     peak_rss_bytes: int | None = None,
     abort_on_failure: bool = False,
+    preserve_frame: bool = False,
 ) -> DerivativeState:
     assert file_row.id is not None
     try:
-        encoded = thumbnail.to_webp(image, normalize=normalize)
+        encoded = thumbnail.to_webp(
+            image, normalize=normalize, preserve_frame=preserve_frame
+        )
     except ValueError:
         _fail(
             attempt,
@@ -385,6 +389,7 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                     frame.image,
                     attempt=attempts[kind],
                     normalize=True,
+                    preserve_frame=frame.strategy is ThumbnailStrategy.FULL,
                     strategy=frame.strategy.value,
                     complete=frame.coverage.preview
                     in (PreviewCoverage.COMPLETE, PreviewCoverage.DOCUMENT_SUPPLIED),
@@ -440,13 +445,6 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                 ],
             )
             stack.callback(claim.release)
-            staging = (
-                stack.enter_context(
-                    thumbnail_staging.reserve(prepared.directory, width, height)
-                )
-                if stage_visual
-                else None
-            )
             (source,) = stack.enter_context(prepared.materialize(capacity_claimed=True))
             request = ThumbnailRequest(
                 path=source,
@@ -461,9 +459,19 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                 if plan is not None
                 else MAX_ANALYSIS_FACES,
             )
+            native_plan = mesh_isolation.plan_native(request) if stage_visual else None
+            staging = (
+                stack.enter_context(
+                    thumbnail_staging.reserve(prepared.directory, width, height)
+                )
+                if native_plan is not None and native_plan.owns_whole_pool
+                else None
+            )
             result = (
-                mesh_isolation.generate(request, on_output=publish, staging=staging)
-                if staging is not None
+                mesh_isolation.generate(
+                    request, on_output=publish, staging=staging, native_plan=native_plan
+                )
+                if native_plan is not None
                 else mesh_isolation.generate(request, on_output=publish)
             )
             if result.fingerprint_result is not None:

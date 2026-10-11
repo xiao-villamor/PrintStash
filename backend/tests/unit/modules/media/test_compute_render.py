@@ -37,6 +37,49 @@ class TestOptionalRender:
 
         assert tuple(frame.rgba for frame in frames) == (red, blue)
 
+    @pytest.mark.parametrize("finalized,size", [(False, 4), (True, 2)])
+    def test_refuses_empty_gpu_frames(self, prepared, monkeypatch, finalized, size):
+        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
+        pixels = bytes([190, 80, 40, 0]) * (size * size)
+        response = bytes([finalized]) + struct.pack("!III", size, size, 1) + pixels
+        monkeypatch.setattr(
+            compute_render.client,
+            "exchange_render",
+            lambda *args, **kwargs: response,
+        )
+
+        assert compute_render.render(prepared, 2, 2, [None], False) is None
+
+    @pytest.mark.parametrize("alpha", [1, 128, 255])
+    def test_preserves_nonzero_alpha(self, prepared, monkeypatch, alpha):
+        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
+        # The last pixel alone proves visibility, even at minimum alpha.
+        pixels = bytes(12) + bytes([190, 80, 40, alpha])
+        response = b"\x01" + struct.pack("!III", 2, 2, 1) + pixels
+        monkeypatch.setattr(
+            compute_render.client,
+            "exchange_render",
+            lambda *args, **kwargs: response,
+        )
+
+        result = compute_render.render(prepared, 2, 2, [None], False)
+
+        assert result[0].rgba == pixels
+
+    @pytest.mark.parametrize("alphas", [(0, 255), (255, 0)])
+    def test_requires_visibility_in_each_view(self, prepared, monkeypatch, alphas):
+        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
+        first = bytes([190, 80, 40, alphas[0]]) * 4
+        second = bytes([40, 80, 190, alphas[1]]) * 4
+        response = b"\x01" + struct.pack("!III", 2, 2, 2) + first + second
+        monkeypatch.setattr(
+            compute_render.client,
+            "exchange_render",
+            lambda *args, **kwargs: response,
+        )
+
+        assert compute_render.render(prepared, 2, 2, [None, None], False) is None
+
     def test_refuses_incomplete_native_output(self, prepared, monkeypatch):
         monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
         payload = struct.pack("!III", 2, 2, 1) + b"short"
@@ -117,7 +160,8 @@ class TestRenderPriority:
 
 
 class TestStagedRender:
-    def test_keeps_owned_geometry_through_dispatch(self, monkeypatch):
+    @pytest.mark.parametrize("alpha", [1, 128, 255])
+    def test_keeps_owned_geometry_through_dispatch(self, monkeypatch, alpha):
         import time
 
         from app.modules.media.compute_geometry_wire import ThumbnailWire
@@ -126,7 +170,7 @@ class TestStagedRender:
         body = memoryview(b"owned geometry")
         wire = ThumbnailWire("a" * 64, "{}", body, 2, 2, 7)
         deadline = time.monotonic() + 5
-        pixels = bytes([12, 24, 36, 255]) * 4
+        pixels = bytes(12) + bytes([12, 24, 36, alpha])
         monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
 
         def exchange(request, data, **kwargs):
@@ -144,8 +188,9 @@ class TestStagedRender:
         [
             b"\x00" + struct.pack("!III", 4, 4, 1) + bytes(64),
             b"\x01" + struct.pack("!III", 2, 2, 1) + b"short",
+            b"\x01" + struct.pack("!III", 2, 2, 1) + bytes([12, 24, 36, 0]) * 4,
         ],
-        ids=["unprocessed", "truncated"],
+        ids=["unprocessed", "truncated", "empty"],
     )
     def test_leaves_rejected_pixels_for_isolated_fallback(self, monkeypatch, payload):
         import time

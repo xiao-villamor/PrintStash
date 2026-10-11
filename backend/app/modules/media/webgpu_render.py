@@ -539,7 +539,19 @@ class Renderer:
                     if i in refused:
                         continue
                     first, count = spans[i]
-                    frames = []
+                    header = struct.pack(
+                        "!III", w if raw else width, h if raw else height, count
+                    )
+                    if (raw or self.gpu_finalize_active) and pitch == result_width * 4:
+                        # pixels owns immutable bytes copied before unmap. Copy
+                        # this model's contiguous span directly into its reply;
+                        # never retain the mapped buffer or its normal trailer.
+                        span = memoryview(pixels)[
+                            first * frame_bytes : (first + count) * frame_bytes
+                        ]
+                        new_outputs[i] = b"".join((header, span))
+                        continue
+                    frames = [header]
                     for index in range(first, first + count):
                         rgba = (
                             np.frombuffer(
@@ -549,18 +561,14 @@ class Renderer:
                                 offset=index * frame_bytes,
                             )
                             .reshape(result_height, pitch)[:, : result_width * 4]
-                            .copy()
+                            .tobytes()
                         )
                         frames.append(
-                            rgba.tobytes()
+                            rgba
                             if raw or self.gpu_finalize_active
-                            else core.postprocess_rgba(
-                                rgba.tobytes(), width, height
-                            ).rgba
+                            else core.postprocess_rgba(rgba, width, height).rgba
                         )
-                    new_outputs[i] = struct.pack(
-                        "!III", w if raw else width, h if raw else height, count
-                    ) + b"".join(frames)
+                    new_outputs[i] = b"".join(frames)
             results = {}
             for i, key in enumerate(keys):
                 if i in refused:

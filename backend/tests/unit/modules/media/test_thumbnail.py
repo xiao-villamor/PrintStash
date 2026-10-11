@@ -93,6 +93,11 @@ class TestWebpNormalization:
             assert bounds[1] > 0
             assert bounds[2] < result.width
             assert bounds[3] < result.height
+            assert (
+                0.79
+                <= max((bounds[2] - bounds[0]) / 320, (bounds[3] - bounds[1]) / 240)
+                <= 0.81
+            )
 
     def test_empty_transparent_preview_is_rejected(self) -> None:
         from PIL import Image
@@ -131,3 +136,82 @@ class TestInvalidThumbnailInput:
         path = tmp_path / "truncated.gcode"
         path.write_text("; thumbnail begin 16x16 4")
         assert extract(path) is None
+
+
+@pytest.fixture
+def generated_candidate():
+    from PIL import Image, ImageDraw
+
+    def candidate(size, mode, box):
+        source = io.BytesIO()
+        image = Image.new(mode, size, 0)
+        if box is not None:
+            ImageDraw.Draw(image).rectangle(box, fill="white")
+        image.save(source, format="PNG")
+        return source.getvalue()
+
+    return candidate
+
+
+class TestGeneratedFrame:
+    def test_preserves_generated_framing(self):
+        from tests.factories import content
+
+        encoded = content.rendered_thumbnail(width=320, height=240)
+
+        assert to_webp(encoded, width=320, preserve_frame=True) == encoded
+
+    def test_encodes_generated_png_without_reframing(self):
+        from PIL import Image
+        from printstash_core.mesh.rasterizer import (
+            RenderedPixels,
+            encode_rendered_pixels,
+        )
+
+        from tests.factories import content
+
+        source = content.rendered_thumbnail(width=320, height=240, output_format="PNG")
+        with Image.open(io.BytesIO(source)) as image:
+            rgba = image.convert("RGBA").tobytes()
+        expected = encode_rendered_pixels(
+            RenderedPixels(320, 240, rgba), output_format="WEBP"
+        )
+
+        encoded = to_webp(source, width=320, preserve_frame=True)
+
+        assert encoded == expected
+        with Image.open(io.BytesIO(encoded)) as image:
+            assert image.convert("RGBA").tobytes() == rgba
+
+    @pytest.mark.parametrize(
+        ("size", "mode", "box", "reason"),
+        [
+            ((320, 240), "RGBA", None, "thumbnail_empty"),
+            ((319, 240), "RGBA", (30, 30, 100, 100), "thumbnail_frame_invalid"),
+            ((320, 240), "RGB", (30, 30, 100, 100), "thumbnail_frame_invalid"),
+            ((320, 240), "RGBA", (0, 30, 100, 100), "thumbnail_frame_invalid"),
+            ((320, 240), "RGBA", (30, 0, 100, 100), "thumbnail_frame_invalid"),
+            ((320, 240), "RGBA", (30, 30, 319, 100), "thumbnail_frame_invalid"),
+            ((320, 240), "RGBA", (30, 30, 100, 239), "thumbnail_frame_invalid"),
+        ],
+        ids=["empty", "dimensions", "no-alpha", "left", "top", "right", "bottom"],
+    )
+    def test_rejects_invalid_generated_frames(
+        self, generated_candidate, size, mode, box, reason
+    ):
+        source = generated_candidate(size, mode, box)
+
+        with pytest.raises(ValueError, match=reason):
+            to_webp(source, width=320, preserve_frame=True)
+
+    def test_rejects_malformed_generated_bytes(self):
+        with pytest.raises(ValueError):
+            to_webp(b"untrusted bytes", width=320, preserve_frame=True)
+
+    def test_rejects_oversized_generated_declarations(self):
+        from tests.factories import content
+
+        source = content.png_declaring(5001, 5000)
+
+        with pytest.raises(ValueError, match="thumbnail_too_large"):
+            to_webp(source, width=320, preserve_frame=True)

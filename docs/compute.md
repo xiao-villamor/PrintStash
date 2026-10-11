@@ -228,8 +228,12 @@ changes embedding identity. No AI feature or model download is enabled.
 
 ## Parser handoff and finalization
 
-Eligible thumbnail-only derivative requests reserve an owned geometry packet
-before parsing. The child writes a bounded descriptor and packet, then exits.
+Thumbnail requests without fingerprint work may reserve an owned geometry packet
+before parsing. After source materialization, the existing conservative native
+estimate is computed once and retained as the supervisor admission plan. Only
+requests that claim the entire native memory pool use the separate handoff; small
+models retain one combined parser/render/encoder process. The staged child writes
+a bounded descriptor and packet, then exits.
 The supervisor accepts it only after a clean exit, process-tree cleanup and
 reap. It then releases the parser's native RAM permit before waiting for GPU
 execution. The packet remains charged to the existing prepared-byte capacity
@@ -245,13 +249,18 @@ deadline, cancellation checkpoint, Job attempt and publication fence survive the
 handoff. Fingerprint-producing work retains its existing combined-worker path.
 Encoding workers introduce their own startup cost; the handoff event records
 parser/finalizer execution identities, staging read, dispatch, finalizer wait and
-supervision intervals so complete-pipeline measurements include that cost.
+supervision intervals so complete-pipeline measurements include that cost. The
+encoder loads neither application configuration nor numerical/parser libraries
+for an RGBA-only request. Broker launch waits also honor cancellation checkpoints.
 
 Derivative FIFO, configured Job concurrency and single-backfill ownership stay
 unchanged. This handoff releases parser capacity earlier; it does not manufacture
 eight simultaneously ready models or parse extra models to fill a GPU batch.
-See [visual preparation validation](testing/compute-visual-preparation.md) and
-[the encoding measurements](testing/compute-encoding.md).
+The first unconditional handoff made the 200-model pipeline 28.5% slower despite
+halving broker execution; that evidence motivated selective staging. See the
+[matched pipeline audit](testing/compute-native-pipeline-200.md),
+[visual preparation validation](testing/compute-visual-preparation.md) and
+[encoding measurements](testing/compute-encoding.md).
 
 
 ## Lossless thumbnail encoding
@@ -260,7 +269,11 @@ The shared mesh renderer encodes WebP with `lossless=True`, `exact=True`,
 `method=2` and explicit `quality=80`. For lossless WebP, quality controls
 compression effort; all decoded RGBA values, including RGB under fully
 transparent pixels, are retained. The CPU and GPU rendering paths share this
-encoder. The separate embedded-preview normalization path is unchanged.
+encoder. Publication validates complete-render dimensions, decoded alpha,
+nonempty content and a transparent border, then preserves that generated frame
+and already encoded WebP. This avoids cropping and encoding it a second time.
+Embedded previews retain their normalization; required encoding uses the same
+profile method and quality.
 
 A compression-only profile of 200 existing cached thumbnails measured a 2.53×
 ratio of summed monotonic encoding durations for method 6 versus method 2,

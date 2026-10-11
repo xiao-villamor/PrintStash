@@ -181,6 +181,12 @@ class Device:
         self.buffers.append(buffer)
         return buffer
 
+    def create_buffer_with_data(self, *, data, usage):
+        incoming = memoryview(data).cast("B")
+        buffer = self.create_buffer(size=incoming.nbytes, usage=usage)
+        buffer.data[:] = incoming
+        return buffer
+
     def create_texture(self, **kwargs):
         return Texture()
 

@@ -124,6 +124,27 @@ def png(*, width: int = 8, height: int = 8) -> bytes:
     return buffer.getvalue()
 
 
+def rendered_thumbnail(
+    *,
+    width: int = 640,
+    height: int = 480,
+    color: tuple[int, int, int, int] = (90, 140, 210, 255),
+    output_format: str = "WEBP",
+) -> bytes:
+    """Generated frame with intentional 50% extent and a transparent border."""
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    ImageDraw.Draw(image).rectangle(
+        (width // 4, height // 4, 3 * width // 4 - 1, 3 * height // 4 - 1), fill=color
+    )
+    buffer = io.BytesIO()
+    image.save(
+        buffer, format=output_format, lossless=True, exact=True, method=2, quality=80
+    )
+    return buffer.getvalue()
+
+
 def png_declaring(width: int, height: int) -> bytes:
     """A structurally valid PNG whose header *claims* width x height pixels.
 

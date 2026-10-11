@@ -125,11 +125,14 @@ def render_prepared_thumbnail(
     output_format: Literal["PNG", "WEBP"] = "PNG",
     view_rotation: NDArray[np.float64] | None = None,
     matte: bool = False,
+    compute: bool = True,
 ) -> bytes | None:
     """Render encoded output from shared preparation with application policy."""
     from .compute_render import render
 
-    accelerated = render(prepared, width, height, (view_rotation,), matte)
+    accelerated = (
+        render(prepared, width, height, (view_rotation,), matte) if compute else None
+    )
     if accelerated is not None:
         return _core.encode_rendered_pixels(accelerated[0], output_format=output_format)
     return _core.render_prepared_thumbnail(

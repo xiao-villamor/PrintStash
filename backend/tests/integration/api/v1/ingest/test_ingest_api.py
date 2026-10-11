@@ -678,9 +678,9 @@ class TestIngestModel:
         )
         file_id = payload["file_id"]
         model_id = payload["model_id"]
-        replacement_buffer = io.BytesIO()
-        Image.new("RGB", (12, 10), (220, 30, 20)).save(replacement_buffer, format="PNG")
-        replacement = replacement_buffer.getvalue()
+        from tests.factories import content
+
+        replacement = content.rendered_thumbnail(color=(220, 30, 20, 255))
 
         from printstash_core.mesh.measurements import (
             VolumeNotCalculated,

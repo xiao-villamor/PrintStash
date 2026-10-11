@@ -1,12 +1,12 @@
 # Thumbnail preparation handoff
 
-A visual-only derivative can release its parser's native CPU/RAM permit before waiting for the compute broker and image encoding. The parser writes a bounded geometry packet and emits a distinct `PreparedThumbnailOutput`; it does not claim an image or completed preview. After a clean parser exit and descendant reap, the supervisor validates directory identity, regular-file ownership, size, digest, and the lightweight wire envelope. Array validation remains in the compute owner or isolated CPU fallback.
+A visual-only derivative whose conservative native estimate claims the whole memory pool can release its parser's native CPU/RAM permit before waiting for the compute broker and image encoding. The parser writes a bounded geometry packet and emits a distinct `PreparedThumbnailOutput`; it does not claim an image or completed preview. After a clean parser exit and descendant reap, the supervisor validates directory identity, regular-file ownership, size, digest, and the lightweight wire envelope. Array validation remains in the compute owner or isolated CPU fallback.
 
-The same Job, scheduling priority, source identity, derivative attempt, recipe and publication fences remain authoritative. Fingerprint requests retain the existing path. A deployment without optional rendering, insufficient configured prepared-byte capacity, or geometry outside the transport ceiling retains the admitted CPU path. Transport refusal reuses already prepared geometry.
+The same Job, scheduling priority, source identity, derivative attempt, recipe and publication fences remain authoritative. Fingerprint requests and bounded smaller estimates retain the existing single-worker path. Preflight runs once after materialization; an immutable plan binds the amount to the source, work profile and pool snapshot before optional visual-slot admission. A deployment without optional rendering, insufficient configured prepared-byte capacity, or geometry outside the transport ceiling retains the admitted CPU path. Transport refusal reuses already prepared geometry.
 
 Staging has a four-slot, 192 MiB sublimit, and its packet plus three RGBA buffers are also charged to the existing prepared-source allowance. At 640×480 this is about 62.07 MiB per reservation, so the byte ceiling permits three concurrent staged packets. This does not increase the configured durable Job concurrency. Descriptor-held prepared and visual credits follow both guarded processes; disk capacity remains held until staged files are removed.
 
-The GPU response is bounded before reading its body: acknowledgements are limited to 4 KiB and the image response to its exact final RGBA envelope. The supervisor imports neither NumPy nor Pillow image operations. Successful GPU pixels go to a second isolated encoder; an unavailable or failed device sends the same geometry packet to isolated CPU rendering, without reloading the source. Both use the original deadline and the existing weighted native admission pool. Cancellation cannot become fallback or publication.
+The GPU response is bounded before reading its body: acknowledgements are limited to 4 KiB and the image response to its exact final RGBA envelope. The handoff itself imports neither NumPy nor Pillow image operations; the existing publisher still decodes the completed thumbnail for validation. Successful GPU pixels go to a second isolated encoder; an unavailable or failed device sends the same geometry packet to isolated CPU rendering, without reloading the source. Both use the original deadline and the existing weighted native admission pool. Cancellation cannot become fallback or publication.
 
 ## Observability and costs
 
@@ -71,5 +71,109 @@ The publication tests use the real API, Job, broker transport, parser, fallback 
 | `backend/tests/integration/runtime/test_preparation_runtime.py::TestVisualStaging::test_inherited_visual_descriptor_retains_credits` | custody | Owner scope exits while duplicated FD survives | Credits stay locked until inherited descriptor closes | integration | Verified |
 | `backend/tests/integration/modules/media/test_thumbnail_engine.py::TestVisualPreparation::test_emits_owned_geometry_before_rendering` | positive | Real STL parser, image renderer forbidden | Measurements plus bounded packet emitted; no completed preview claimed | integration | Verified |
 | `backend/tests/integration/modules/media/test_thumbnail_engine.py::TestVisualPreparation::test_preserves_rendering_when_transport_declines_geometry` | fallback | Optional geometry transport budget refusal | Existing isolated render still produces thumbnail | integration | Verified |
-| `backend/tests/e2e/test_render_batch_publication.py::TestStagedThumbnailPublication::test_publishes_from_owned_geometry_after_device_failure` | headline E2E | API ingest + real Job/parser/broker, controlled external device failure | Same-packet CPU fallback publishes fenced metadata/image; original bytes/measurements preserved; all resource capacity recoverable | E2E | Verified |
+| `backend/tests/e2e/test_render_batch_publication.py::TestStagedThumbnailPublication::test_publishes_from_owned_geometry_after_gpu_failure` | headline E2E | API ingest + real Job/parser/broker, controlled external device failure | Same-packet CPU fallback publishes fenced metadata/image; original bytes/measurements preserved; all resource capacity recoverable | E2E | Verified |
 | `backend/tests/integration/modules/media/test_thumbnail_staging.py::TestThumbnailHandoff::test_preserves_failing_finalizer_supervision` | failure attribution | Inject finalizer memory refusal after real parser exits | Error retains failing finalizer execution/RSS, not successful parser statistics | integration | Verified |
+
+
+## Publication and encoder follow-up
+
+The first candidate retained a publication seam that could crop and encode an already
+rendered thumbnail again. The follow-up preserves the complete renderer's frame
+while retaining decode, pixel-budget, dimensions, alpha and border validation.
+Embedded previews retain normalization. Necessary encoding uses the shared visual
+profile. The disposable encoder reads its explicit request without importing the
+application configuration or supervisor; process custody and reply limits remain
+unchanged. Broker launch waits also honor cooperative cancellation. Selective staging avoids a second process for known geometry that fits a weighted share; no native-memory coefficient is reduced.
+
+The serialized follow-up passed **409 tests in 134.28 seconds**, with two cases
+excluded by the established resource-lane marker selection and only the existing
+Starlette/AnyIO warning. This includes both architecture guards, the preserved
+visual-input recipe fixture, complete producer coverage and publication E2E.
+Scoped Pyright passed for ten production modules with zero errors or warnings;
+Ruff passed on 22 affected files and `git diff --check` was clean. The original
+296-test evidence above predates these changes.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+|---|---|---|---|---|---|---|
+| 26 | preserves generated framing | Happy | Valid rendered WebP with less than 76% alpha extent | Original encoded bytes returned | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail.py::TestGeneratedFrame::test_preserves_generated_framing` |
+| 27 | encodes generated PNG without reframing | Edge | Valid generated PNG with transparent border | Decoded RGBA unchanged; shared codec bytes | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail.py::TestGeneratedFrame::test_encodes_generated_png_without_reframing` |
+| 28 | rejects invalid generated frames | Error | Empty, wrong-size, alpha-free or border-touching image | Stable validation failure | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail.py::TestGeneratedFrame::test_rejects_invalid_generated_frames` |
+| 29 | rejects oversized generated declarations | Error | PNG declaring more than pixel limit | Refusal before decoded image allocation | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail.py::TestGeneratedFrame::test_rejects_oversized_generated_declarations` |
+| 30 | retains embedded normalization | Edge | Small embedded preview | Canonical dimensions and normalized alpha extent | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail.py::TestWebpNormalization::test_embedded_preview_is_centered_on_the_canonical_canvas` |
+| 31 | publishes the renderer's frame | Happy | Full-render output delivered through derivative producer | Stored bytes equal validated renderer output | Integration | ✅ `backend/tests/integration/modules/derivatives/test_producers.py::TestStagedMeshPublication::test_publishes_the_renderer_frame` |
+| 32 | isolates encoder dependencies | Edge | Fresh disposable encoder interpreter | Exact image with no configuration, Pydantic or numerical imports | Integration | ✅ `backend/tests/integration/modules/media/test_thumbnail_staging.py::TestStagingBootstrap::test_encoder_avoids_application_configuration` |
+| 33 | withdraws during launch-lock contention | Error | Existing launch lock unavailable | Cancellation escapes promptly; socket closed | Unit | ✅ `backend/tests/unit/runtime/compute/test_client.py::TestConnect::test_withdraws_during_launch_lock_contention` |
+| 34 | withdraws without terminating a shared owner | Error | Broker starting when requesting Job withdraws | Request cancelled; shared child not terminated | Unit | ✅ `backend/tests/unit/runtime/compute/test_client.py::TestConnect::test_withdraws_without_terminating_shared_owner` |
+| 35 | retains original bootstrap deadline | Edge | Caller deadline expires during lock wait | Explicit deadline refusal without extending the deadline | Unit | ✅ `backend/tests/unit/runtime/compute/test_client.py::TestConnect::test_retains_original_bootstrap_deadline` |
+| 36 | rejects malformed generated bytes | Error | Non-image payload marked generated | Decode validation fails | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail.py::TestGeneratedFrame::test_rejects_malformed_generated_bytes` |
+| 37 | avoids retrying compute during CPU fallback | Error | GPU forbidden after staging refusal | CPU facade returns a nonempty image | Unit | ✅ `backend/tests/unit/modules/media/test_mesh_render.py::TestAcceleratedEncoding::test_renders_cpu_fallback_without_retrying_compute` |
+| 38 | identifies whole-pool custody | Edge | Known small, unknown, saturated large complexity | Staging eligibility follows the unchanged conservative allowance | Unit | ✅ `backend/tests/unit/modules/media/test_native_budget.py::TestNativePlan::test_identifies_whole_pool_custody` |
+| 39 | rejects changed execution contracts | Error | Pool, source or profile differs after preflight | Stale plan cannot authorize execution | Unit | ✅ `backend/tests/unit/modules/media/test_native_budget.py::TestNativePlan::test_rejects_changed_execution_contract` |
+| 40 | reuses one preflight | Happy | Prepared source with immutable admission plan | Real guarded parser/finalizer succeed while any second preflight is forbidden | Integration | ✅ `backend/tests/integration/modules/media/test_thumbnail_staging.py::TestNativePlan::test_reuses_preflight_for_guarded_execution` |
+| 41 | retains one worker for bounded geometry | Happy | Known small STL with optional compute enabled | Metadata and thumbnail published without visual-slot acquisition | Integration | ✅ `backend/tests/integration/modules/derivatives/test_producers.py::TestStagedMeshPublication::test_retains_one_worker_for_bounded_geometry` |
+
+The staged fallback headline uses a small 3MF whose preflight remains unknown, so
+it exercises whole-pool handoff without enlarging the fixture or lowering native
+budgets. The controlled renderer now produces a transparent border, matching the
+frame contract instead of relying on publication to correct a fully opaque canvas.
+
+
+Follow-up command from `backend`:
+
+```bash
+PRINTSTASH_TEST_NO_EXTERNAL=1 .venv/bin/python -m pytest \
+  tests/unit/modules/media/test_thumbnail.py \
+  tests/unit/modules/media/test_native_budget.py \
+  tests/unit/modules/media/test_mesh_render.py \
+  tests/unit/runtime/compute/test_client.py \
+  tests/integration/modules/media/test_thumbnail_staging.py \
+  tests/integration/modules/media/test_native_budget.py \
+  tests/integration/modules/derivatives/test_producers.py \
+  tests/integration/api/v1/ingest/test_ingest_api.py::TestIngestModel::test_force_rebuild_refreshes_existing_mesh_thumbnail \
+  tests/integration/modules/media/geometry_analysis/test_geometry_analysis.py::TestEmbeddingViews::test_preserves_frozen_visual_input_hashes \
+  tests/repo/test_architecture.py tests/repo/test_mesh_boundaries.py \
+  tests/e2e/test_render_batch_publication.py \
+  -q -n 0 --tb=short \
+  -m 'not slow and not coverage_gate and not scale and not postgres and not s3 and not remote_storage and not bgcode and not native_host'
+```
+
+The CI architecture failure was resolved by injecting the finalizer runner and
+pool instead of importing the supervisor back into its continuation. Shared error
+types and reply limits have independent owners. The disposable fallback worker
+uses the application's renderer facade with compute explicitly disabled; it is
+covered by the same guardian/permit tests and is the only new raw-consumer owner.
+The work-profile observer now also checks the explicit deadline/plan arguments.
+
+
+## Empty accelerated frames
+
+A response with zero alpha in every pixel now leaves rendering to the existing
+CPU fallback. It does not reach source-validation failure or classify the Artifact
+as invalid. Every requested view must contain nonzero alpha; one translucent pixel
+is sufficient. The check uses a strided memory view and stops at the first visible
+pixel without allocating another image or alpha channel. Publication retains its
+independent final image validation.
+
+| Behaviour / test | Category | Precondition / input | Observable outcome | Tier | Status |
+|---|---|---|---|---|---|
+| `backend/tests/unit/modules/media/test_compute_render.py::TestOptionalRender::test_refuses_empty_gpu_frames` | failure | Raw or finalized GPU response has nonzero RGB but zero alpha | Caller selects CPU fallback | unit | Verified |
+| `backend/tests/unit/modules/media/test_compute_render.py::TestOptionalRender::test_preserves_nonzero_alpha` | boundary | Only the final pixel has alpha 1, 128 or 255 | Accelerated pixels retained exactly | unit | Verified |
+| `backend/tests/unit/modules/media/test_compute_render.py::TestOptionalRender::test_requires_visibility_in_each_view` | multiview | First or second view is empty | Complete model request falls back without reassigning views | unit | Verified |
+| `backend/tests/unit/modules/media/test_compute_render.py::TestStagedRender::test_keeps_owned_geometry_through_dispatch` | custody | Owned packet and one nonzero-alpha pixel | Same immutable geometry and exact visible response retained | unit | Verified |
+| `backend/tests/unit/modules/media/test_compute_render.py::TestStagedRender::test_leaves_rejected_pixels_for_isolated_fallback` | failure | Empty, truncated or unprocessed staged response | Isolated finalizer receives fallback responsibility | unit | Verified |
+| `backend/tests/e2e/test_render_batch_publication.py::TestStagedThumbnailPublication::test_publishes_from_owned_geometry_after_gpu_failure` | publication | Real Job/parser/broker with external device error or transparent GPU response | Same-packet CPU fallback publishes thumbnail and metadata; original retained and all resource credits recoverable | E2E | Verified |
+
+The final guard selection passed **63 tests in 41.21 seconds**, including both
+publication outcomes above, with only the existing Starlette/AnyIO warning.
+Ruff and `git diff --check` passed. The configured full Pyright gate passed with
+zero errors and warnings after this patch.
+
+```bash
+PRINTSTASH_TEST_NO_EXTERNAL=1 .venv/bin/python -m pytest \
+  tests/unit/modules/media/test_compute_render.py \
+  tests/unit/modules/media/test_mesh_render.py \
+  tests/integration/modules/media/test_thumbnail_staging.py \
+  tests/e2e/test_render_batch_publication.py \
+  -q -n 0 --tb=short \
+  -m 'not slow and not coverage_gate and not scale and not postgres and not s3 and not remote_storage and not bgcode and not native_host'
+```

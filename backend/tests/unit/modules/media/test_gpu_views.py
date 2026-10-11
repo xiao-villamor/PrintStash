@@ -21,7 +21,7 @@ class TestViewPreparation:
     def test_bounds_reduction_charges_every_intermediate_level(self, count, expected):
         assert bounds_scratch_sizes(count) == expected
 
-    def test_config_does_not_need_vertices_and_keeps_camera_slots_aligned(self):
+    def test_aligns_camera_configuration_slots(self):
         automatic = frame_config(None, 400, 300, False)
         explicit = frame_config(np.eye(3), 400, 300, True)
         assert len(automatic) == len(explicit) == 256
