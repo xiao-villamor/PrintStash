@@ -12,8 +12,10 @@ if TYPE_CHECKING:
     from printstash_core.mesh.rasterizer import RenderedPixels
 
 
-def check_deadline(deadline: float) -> None:
-    checkpoint(force=True)
+def check_deadline(deadline: float, *, force: bool = False) -> None:
+    # Transport and admission polls retain the Job probe's 200ms throttle.
+    # The absolute monotonic deadline is always checked, even between probes.
+    checkpoint(force=force)
     if not math.isfinite(deadline) or time.monotonic() >= deadline:
         raise TimeoutError("thumbnail_deadline")
 
@@ -25,7 +27,7 @@ def encode_pixels(pixels: RenderedPixels, *, deadline: float) -> bytes:
     reservation early. Check withdrawal and the original deadline again after
     the call, before returning bytes that the producer can publish.
     """
-    check_deadline(deadline)
+    check_deadline(deadline, force=True)
     width, height, rgba = pixels.width, pixels.height, pixels.rgba
     if (
         type(width) is not int
@@ -48,7 +50,7 @@ def encode_pixels(pixels: RenderedPixels, *, deadline: float) -> bytes:
         raise ValueError("thumbnail_frame_invalid")
     from printstash_core.mesh.rasterizer import encode_rendered_pixels
 
-    check_deadline(deadline)
+    check_deadline(deadline, force=True)
     encoded = encode_rendered_pixels(pixels, output_format="WEBP")
-    check_deadline(deadline)
+    check_deadline(deadline, force=True)
     return encoded

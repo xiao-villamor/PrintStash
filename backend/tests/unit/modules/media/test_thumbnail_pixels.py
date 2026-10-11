@@ -9,7 +9,7 @@ from PIL import Image
 from printstash_core.mesh.rasterizer import RenderedPixels
 
 from app.core.cancellation import OperationCancelled, cancellation_scope
-from app.modules.media.thumbnail_pixels import encode_pixels
+from app.modules.media.thumbnail_pixels import check_deadline, encode_pixels
 
 
 def pixels(width=320, height=None, *, alpha=1, border=None):
@@ -131,3 +131,44 @@ class TestEncodingWithdrawal:
         monkeypatch.setattr(Image.Image, "save", encode)
         with pytest.raises(TimeoutError, match="thumbnail_deadline"):
             encode_pixels(pixels(), deadline=15.0)
+
+
+class TestDeadlinePolling:
+    def test_limits_withdrawal_reads_during_repeated_polls(self, monkeypatch):
+        clock = [10.0]
+        monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+        withdrawn = Mock(return_value=False)
+        with cancellation_scope(withdrawn):
+            for _ in range(100):
+                check_deadline(11.0)
+            assert withdrawn.call_count == 1
+            clock[0] = 10.1
+            for _ in range(100):
+                check_deadline(11.0)
+            assert withdrawn.call_count == 1
+            clock[0] = 10.21
+            check_deadline(11.0)
+            assert withdrawn.call_count == 2
+
+    def test_deadline_expires_between_cancellation_probes(self, monkeypatch):
+        clock = [10.0]
+        monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+        withdrawn = Mock(return_value=False)
+        with cancellation_scope(withdrawn):
+            check_deadline(10.05)
+            clock[0] = 10.06
+            with pytest.raises(TimeoutError, match="thumbnail_deadline"):
+                check_deadline(10.05)
+        assert withdrawn.call_count == 1
+
+    def test_boundary_observes_cancellation_inside_the_poll_interval(self, monkeypatch):
+        monkeypatch.setattr(time, "monotonic", lambda: 10.0)
+        withdrawn = Mock(return_value=False)
+        with cancellation_scope(withdrawn):
+            check_deadline(11.0)
+            withdrawn.return_value = True
+            check_deadline(11.0)
+            assert withdrawn.call_count == 1
+            with pytest.raises(OperationCancelled):
+                check_deadline(11.0, force=True)
+        assert withdrawn.call_count == 2

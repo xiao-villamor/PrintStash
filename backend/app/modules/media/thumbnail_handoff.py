@@ -103,9 +103,8 @@ class ThumbnailHandoff:
     deadline: float
     identity: str = field(default_factory=lambda: secrets.token_hex(12))
 
-    def check(self) -> None:
-        checkpoint()
-        check_deadline(self.deadline)
+    def check(self, *, force: bool = False) -> None:
+        check_deadline(self.deadline, force=force)
 
     def complete(
         self,
@@ -120,7 +119,7 @@ class ThumbnailHandoff:
         payload = pixels = result = None
         try:
             started = time.monotonic()
-            self.check()
+            self.check(force=True)
             payload = read_packet(
                 directory,
                 packet,
@@ -139,7 +138,7 @@ class ThumbnailHandoff:
                 )
             dispatch_seconds = time.monotonic() - dispatch_started
             payload = None
-            self.check()
+            self.check(force=True)
             if pixels is None:
                 fallback_started = time.monotonic()
                 result = fallback()
@@ -158,6 +157,7 @@ class ThumbnailHandoff:
                         }
                     ),
                 )
+                self.check(force=True)
                 return result
             # RAM is already charged to the retained host window. The generic
             # ledger requires one byte; this additional byte claims only its CPU
@@ -166,12 +166,12 @@ class ThumbnailHandoff:
             with admission(
                 Resources(1, 1), native_process.native_capacity(), checkpoint=self.check
             ):
-                self.check()
+                self.check(force=True)
                 codec_started = time.monotonic()
                 queue_seconds = codec_started - queue_started
                 result = encode_pixels(pixels, deadline=self.deadline)
                 codec_seconds = time.monotonic() - codec_started
-                self.check()
+                self.check(force=True)
             logger.info(
                 "thumbnail_handoff_complete %s",
                 json.dumps(
@@ -187,6 +187,7 @@ class ThumbnailHandoff:
                     }
                 ),
             )
+            self.check(force=True)
             return result
         finally:
             del payload, pixels, result
@@ -200,6 +201,7 @@ def reserve(plan: HandoffPlan, workspace: Path) -> Iterator[ThumbnailHandoff]:
         plan.request, plan.capacity, checkpoint=handoff.check
     ):
         try:
+            handoff.check(force=True)
             yield handoff
         except BaseException as exc:
             # Failed helper frames may retain the immutable packet or readback.

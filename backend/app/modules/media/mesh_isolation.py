@@ -1069,7 +1069,7 @@ def _render_packet_cpu(
     """Recover one valid GPU refusal under the original deadline, without parsing."""
     from app.modules.media.native_budget import request as request_resources
 
-    handoff.check()
+    handoff.check(force=True)
     capacity = native_process.native_capacity()
     amount = request_resources(
         capacity,
@@ -1077,7 +1077,7 @@ def _render_packet_cpu(
         work=RasterWork(handoff.plan.width, handoff.plan.height, 1, RasterCodec.WEBP),
     )
     with admission(amount, capacity, checkpoint=handoff.check) as permit:
-        handoff.check()
+        handoff.check(force=True)
         spec = {
             "overrides": {**runtime_overrides(), "compute_mode": "cpu"},
             "directory": str(directory),
@@ -1097,7 +1097,7 @@ def _render_packet_cpu(
             permit=permit,
             lifecycle=WorkerLifecycle.GUARDED,
         )
-        handoff.check()
+        handoff.check(force=True)
         if not reply.payload:
             raise MeshWorkerError(ThumbnailFailureReason.RENDERER_NO_OUTPUT)
         return reply

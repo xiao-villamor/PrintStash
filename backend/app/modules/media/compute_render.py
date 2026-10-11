@@ -153,7 +153,7 @@ def render_packet(
     def remaining() -> None:
         check_deadline(deadline)
 
-    remaining()
+    check_deadline(deadline, force=True)
     if type(payload) is not bytes:
         raise ValueError("compute_geometry_mutable")
     if not 4 <= len(payload) <= MAX_GEOMETRY_BYTES + 4100:
@@ -175,7 +175,7 @@ def render_packet(
     if len(body) != body_size(layout):
         raise ValueError("compute_geometry_size")
     if not client.available(render=True):
-        remaining()
+        check_deadline(deadline, force=True)
         return None
     request = BinaryRenderRequest(
         deadline=min(deadline, time.monotonic() + 300),
@@ -187,7 +187,7 @@ def render_packet(
         recipe=render_recipe(width, height),
         units=layout.counts[1],
     )
-    remaining()
+    check_deadline(deadline, force=True)
     try:
         response = client.exchange_render(
             request,
@@ -205,7 +205,7 @@ def render_packet(
             response, width, height, 1, finalized_only=True, check=remaining
         )[0]
     except ComputeUnavailable as exc:
-        remaining()
+        check_deadline(deadline, force=True)
         if exc.reason is Reason.DEADLINE:
             raise TimeoutError("thumbnail_deadline") from exc
         if exc.reason is Reason.CANCELLED:
@@ -216,7 +216,7 @@ def render_packet(
             raise ValueError("compute_geometry_invalid") from exc
         return None
     except ValueError, KeyError:
-        remaining()
+        check_deadline(deadline, force=True)
         return None
-    remaining()
+    check_deadline(deadline, force=True)
     return result

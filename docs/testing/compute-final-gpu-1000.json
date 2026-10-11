@@ -1,0 +1,106 @@
+{
+  "status": "corrected_run_pending",
+  "cohort": {
+    "count": 1000,
+    "formats": {
+      "stl": 481,
+      "obj": 486,
+      "step": 33
+    },
+    "selection_sha256": "9cc1871cb4b085a0dd54bda6eb5c6f7503c3caed9039d1aa5ff44edfbe7add6e",
+    "historical_valid": 973,
+    "historical_invalid": 27
+  },
+  "policy": {
+    "cold_initial_inputs": 4,
+    "max_pending_outputs": 40,
+    "max_uploads_plus_nonterminal_ingestions": 4,
+    "cache_only": true,
+    "r2_requests_permitted": 0,
+    "cpu_reference_repeated": false,
+    "historical_gpu_reference_repeated": false,
+    "historical_gpu_policy_matches": false
+  },
+  "interrupted_diagnostic": {
+    "status": "interrupted_incomplete_diagnostic",
+    "is_final1000_result": false,
+    "is_performance_comparison": false,
+    "reason": "Confirmed repeated forced database cancellation checks for64KiB transport chunks and codec admission polling defeated200ms throttle. Parent requested stop and corrected1000 restart.",
+    "image_id": "sha256:f61299f8fcdf594f24845553f44b327a9205fa729067a851bd870d236a968963",
+    "revision": "81e65ca400423902dd0b74c16c70a3021186f720",
+    "accepted_count": 367,
+    "ingestion_terminal_count": 365,
+    "selection_sha256": "9cc1871cb4b085a0dd54bda6eb5c6f7503c3caed9039d1aa5ff44edfbe7add6e",
+    "harness_sha256": "b957e736ca1147fa95152c40e79e8ba85f0535e6a8aced60a0dc411084ff8b79",
+    "interrupt_clock": {
+      "monotonic_ns": 37503893422478,
+      "realtime_ns": 1791753300388118985,
+      "windows_qpc": {
+        "available": true,
+        "ticks": 393587921973,
+        "frequency": 10000000,
+        "wrapper_before": {
+          "monotonic_ns": 37503898306690,
+          "realtime_ns": 1791753300393002249
+        },
+        "wrapper_after": {
+          "monotonic_ns": 37504336812192,
+          "realtime_ns": 1791753300831508202
+        },
+        "wrapper_monotonic_seconds": 0.438505502,
+        "wrapper_realtime_seconds": 0.438505953
+      }
+    },
+    "last_progress": {
+      "observed_at": "2026-10-11T21:14:59.788956+00:00",
+      "started_at": "2026-10-11T20:59:47.312585+00:00",
+      "elapsed_monotonic_seconds": 860.690152794,
+      "accepted": 367,
+      "ingestion_terminal": 365,
+      "external_r2_requests": 0,
+      "outputs": {
+        "metadata:failed": 7,
+        "metadata:ready": 321,
+        "metadata:running": 3,
+        "thumbnail:failed": 7,
+        "thumbnail:ready": 320,
+        "thumbnail:running": 4
+      },
+      "terminal_artifacts": 327,
+      "known_failed_artifacts": 7,
+      "unexpected_failed_artifacts": 0,
+      "broker": {
+        "completed": 310,
+        "fallbacks": 0,
+        "render_batches": 308,
+        "render_frames": 310,
+        "render_submissions": 308,
+        "render_batch_model_counts": [
+          306,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "execution_seconds": 11.38704054705886,
+        "rendering_transfer_seconds": 2.843257577937038,
+        "queue_depth": 0,
+        "reserved_bytes": 198940976,
+        "host_reserved_bytes": 1073741824,
+        "queued_bytes": 69,
+        "resident_entries": 26,
+        "geometry_gpu_normal_uploads": 55,
+        "geometry_cpu_normal_fallbacks": 0
+      },
+      "broker_probe_seconds": 0.0019411950052017346
+    },
+    "r2_requests": 0,
+    "container_running": false,
+    "owned_processes_remaining": [],
+    "all_timing_activity_stopped": true
+  },
+  "corrected_run": null
+}

@@ -128,6 +128,33 @@ All 64 new cases passed together with 20 existing render cases and the single-be
 
 `pytest tests/unit/runtime/compute/test_client.py tests/unit/runtime/compute/client/test_readiness.py tests/unit/modules/media/test_compute_render.py tests/unit/modules/media/compute_render/test_packet.py -q --tb=short` — **131 passed**. This includes shared render-recipe identity and legacy dispatch behavior. No GPU work was performed.
 
+## Cancellation polling regression
+
+Transport callbacks and admission polls now reuse the existing 200 ms Job cancellation probe. Every callback still checks the original absolute monotonic deadline. Forced cancellation checks remain at GPU entry/completion/refusal, after host or native admission, before and after the synchronous codec, and before guarded fallback launch and after clean reap. They also run before handing a completed result back to publication. The transactional publication fences are unchanged.
+
+The previous helper forced a withdrawal query for every transport chunk and admission poll. The correction removes that repeated-query amplification; it does not establish an end-to-end speedup. Cancellation during the native codec still retains host and CPU credit until the codec actually returns. A fresh final GPU run of all 1,000 cached models remains pending.
+
+| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | limits withdrawal reads during repeated polls | Regression | Real cancellation scope; 200 callbacks before 200 ms elapse | One withdrawal read; a second read occurs at 210 ms | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail_pixels.py::TestDeadlinePolling::test_limits_withdrawal_reads_during_repeated_polls` |
+| 2 | deadline expires between cancellation probes | Deadline | 50 ms deadline checked 60 ms after the first probe | Timeout propagates without waiting for another withdrawal query | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail_pixels.py::TestDeadlinePolling::test_deadline_expires_between_cancellation_probes` |
+| 3 | boundary observes cancellation inside the poll interval | Withdrawal | Cancellation arrives before the next scheduled probe | Forced phase boundary raises immediately | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail_pixels.py::TestDeadlinePolling::test_boundary_observes_cancellation_inside_the_poll_interval` |
+| 4 | fragmented transport reuses the cancellation probe | Regression | Real transport framing with an in-memory connection and more than 500 fragments | Fragment callbacks make no additional withdrawal reads; the result boundary forces one read | Unit | ✅ `backend/tests/unit/modules/media/compute_render/test_packet.py::TestPacketPolling::test_fragmented_transport_reuses_the_cancellation_probe` |
+| 5 | codec admission polls reuse the cancellation probe | Withdrawal | 100 admission polls; cancellation absent or arriving on acquisition | Polls make no additional withdrawal reads; cancelled acquisition never calls codec; credit released | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail_handoff.py::TestHandoffCompletion::test_codec_admission_polls_reuse_the_cancellation_probe`, 2 cases |
+| 6 | host acquisition forces cancellation before yield | Withdrawal | 100 host polls; cancellation arrives as credit is acquired | One poll query, then forced cancellation before yielding; credit released | Unit | ✅ `backend/tests/unit/modules/media/test_thumbnail_handoff.py::TestHostAdmissionPolling::test_host_acquisition_forces_cancellation_before_yield` |
+| 7 | withholds withdrawn fallback at phase boundary | Withdrawal | Cancellation after native admission or after guarded fallback clean reap | No cancelled launch or returned image; original deadline and credit custody retained | Unit | ✅ `backend/tests/unit/modules/media/mesh_isolation/test_fallback_cancellation.py::TestFallbackCancellation::test_withholds_withdrawn_fallback_at_phase_boundary`, 2 cases |
+
+The focused selection passed **112 tests in 17.58 seconds**, including the existing GPU reply/refusal cancellation checks and the blocked-codec custody check now using a real cancellation scope. Scoped Ruff was clean and Pyright reported **0 errors** for the four changed production files. These counts overlap earlier selections; no GPU workload or performance measurement was run for this regression gate.
+
+```bash
+PRINTSTASH_TEST_NO_EXTERNAL=1 .venv/bin/python -m pytest \
+  tests/unit/modules/media/test_thumbnail_pixels.py \
+  tests/unit/modules/media/compute_render/test_packet.py \
+  tests/unit/modules/media/test_thumbnail_handoff.py \
+  tests/unit/modules/media/mesh_isolation/test_fallback_cancellation.py \
+  tests/integration/modules/media/test_thumbnail_handoff.py -q -n0 --tb=short
+```
+
 ## Reproduction commands
 
 Run pytest selections serially from `backend`; do not overlap a throughput measurement.

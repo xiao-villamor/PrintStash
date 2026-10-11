@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from printstash_core.mesh.rasterizer import RenderedPixels
 
-from app.core.cancellation import OperationCancelled
+from app.core.cancellation import OperationCancelled, cancellation_scope
 from app.modules.media import compute_render
 from app.modules.media import thumbnail_handoff as handoff
 from app.modules.media.thumbnail_packet import (
@@ -168,10 +168,6 @@ class TestHandoffCompletion:
             finally:
                 active.pop()
 
-        def check():
-            if cancelled.is_set():
-                raise OperationCancelled()
-
         def encode(*a, **k):
             entered.set()
             assert returned.wait(5)
@@ -179,19 +175,19 @@ class TestHandoffCompletion:
 
         def complete():
             try:
-                owner.complete(
-                    PacketDescriptor(100, "a" * 64, 1),
-                    Path("workspace"),
-                    (1, 2),
-                    fallback=lambda: pytest.fail("cancelled codec recovered"),
-                )
+                with cancellation_scope(cancelled.is_set):
+                    owner.complete(
+                        PacketDescriptor(100, "a" * 64, 1),
+                        Path("workspace"),
+                        (1, 2),
+                        fallback=lambda: pytest.fail("cancelled codec recovered"),
+                    )
             except OperationCancelled as exc:
                 errors.append(exc)
             finally:
                 finished.set()
 
         monkeypatch.setattr(handoff, "admission", admission)
-        monkeypatch.setattr(handoff, "checkpoint", check)
         monkeypatch.setattr(handoff, "encode_pixels", encode)
         worker = threading.Thread(target=complete)
         worker.start()
@@ -229,6 +225,98 @@ class TestHandoffCompletion:
                 (1, 2),
                 fallback=lambda: pytest.fail("terminal error fell back"),
             )
+
+    @pytest.mark.parametrize("cancel_on_acquire", [False, True])
+    def test_codec_admission_polls_reuse_the_cancellation_probe(
+        self, monkeypatch, owner, cancel_on_acquire
+    ):
+        from unittest.mock import Mock
+
+        monkeypatch.setattr(time, "monotonic", lambda: 10.0)
+        reads = []
+        stopped = [False]
+        active = []
+
+        def withdrawn():
+            reads.append(True)
+            return stopped[0]
+
+        @contextmanager
+        def admission(*args, checkpoint, **kwargs):
+            before = len(reads)
+            for _ in range(100):
+                checkpoint()
+            assert len(reads) == before
+            stopped[0] = cancel_on_acquire
+            active.append(True)
+            try:
+                yield
+            finally:
+                active.pop()
+
+        encode = Mock(return_value=b"encoded")
+        monkeypatch.setattr(handoff, "admission", admission)
+        monkeypatch.setattr(handoff, "read_packet", lambda *a, **k: b"packet")
+        monkeypatch.setattr(
+            compute_render,
+            "render_packet",
+            lambda *a, **k: RenderedPixels(640, 480, bytes(640 * 480 * 4)),
+        )
+        monkeypatch.setattr(handoff, "encode_pixels", encode)
+        with cancellation_scope(withdrawn):
+            if cancel_on_acquire:
+                with pytest.raises(OperationCancelled):
+                    owner.complete(
+                        PacketDescriptor(100, "a" * 64, 1),
+                        Path("workspace"),
+                        (1, 2),
+                        fallback=lambda: pytest.fail("cancelled codec recovered"),
+                    )
+                encode.assert_not_called()
+            else:
+                assert (
+                    owner.complete(
+                        PacketDescriptor(100, "a" * 64, 1),
+                        Path("workspace"),
+                        (1, 2),
+                        fallback=lambda: pytest.fail("unexpected recovery"),
+                    )
+                    == b"encoded"
+                )
+                encode.assert_called_once()
+        assert active == []
+
+
+class TestHostAdmissionPolling:
+    def test_host_acquisition_forces_cancellation_before_yield(self, monkeypatch):
+        monkeypatch.setattr(time, "monotonic", lambda: 10.0)
+        reads = []
+        stopped = [False]
+        active = []
+
+        def withdrawn():
+            reads.append(True)
+            return stopped[0]
+
+        @contextmanager
+        def reserve_host(*args, checkpoint, **kwargs):
+            for _ in range(100):
+                checkpoint()
+            assert len(reads) == 1
+            stopped[0] = True
+            active.append(True)
+            try:
+                yield
+            finally:
+                active.pop()
+
+        monkeypatch.setattr(handoff.preparation_runtime, "reserve_host", reserve_host)
+        plan = handoff.HandoffPlan(640, 480, Resources(1, 100), Resources(4, 400))
+        with cancellation_scope(withdrawn), pytest.raises(OperationCancelled):
+            with handoff.reserve(plan, Path("workspace")):
+                pytest.fail("cancelled host admission yielded")
+        assert len(reads) == 2
+        assert active == []
 
 
 class TestExceptionalCustody:

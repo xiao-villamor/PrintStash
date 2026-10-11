@@ -269,3 +269,64 @@ class TestPacketWithdrawal:
         with cancellation_scope(lambda: withdrawn[0]):
             with pytest.raises(OperationCancelled):
                 render()
+
+
+class TestPacketPolling:
+    def test_fragmented_transport_reuses_the_cancellation_probe(
+        self, monkeypatch, tmp_path
+    ):
+        from contextlib import contextmanager
+
+        from app.runtime.compute import client
+
+        monkeypatch.setattr(time, "monotonic", lambda: 10.0)
+        monkeypatch.setattr(client, "available", lambda **kwargs: True)
+        monkeypatch.setattr(client, "directory", lambda: tmp_path)
+        probes = []
+        io_probes = []
+
+        def withdrawn():
+            probes.append(True)
+            return False
+
+        def frame(data):
+            return struct.pack("!I", len(data)) + data
+
+        incoming = bytearray(
+            frame(b'{"ready":true}')
+            + frame(b'{"geometry":"upload"}')
+            + frame(b"\x00" + reply())
+        )
+
+        class Connection:
+            def settimeout(self, seconds):
+                pass
+
+            def sendall(self, data):
+                pass
+
+            def send(self, data):
+                io_probes.append(len(probes))
+                return min(len(data), 1024)
+
+            def recv(self, size):
+                io_probes.append(len(probes))
+                data = bytes(incoming[: min(size, 1024)])
+                del incoming[: len(data)]
+                return data
+
+        @contextmanager
+        def connect(*args, **kwargs):
+            kwargs["checkpoint"]()
+            yield Connection()
+
+        monkeypatch.setattr(client, "_connect", connect)
+        payload = packet("gpu-visual-v2", faces=20_000)[:-12] + bytes(20_000 * 12)
+        with cancellation_scope(withdrawn):
+            result = render(payload, deadline=11.0)
+
+        assert result.rgba == reply()[13:]
+        assert len(io_probes) > 500
+        assert len(set(io_probes)) == 1
+        assert len(probes) == io_probes[-1] + 1  # Forced result boundary.
+        assert not incoming
