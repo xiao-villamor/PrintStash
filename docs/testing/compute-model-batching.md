@@ -236,9 +236,9 @@ exclude parsing, centering, IPC and image rendering. They are not ingestion rati
 The largest candidate ranged from 59.00 to 61.78 ms. No corpus fallback occurred
 in these 25 timed prototype executions; that sample does not estimate a complete
 corpus fallback rate. Opposing-face cancellation canaries exercised CPU fallback.
-The final integrated normal path passed seven physical diagnostic cases; final
-combined focused/resource gates and the complete cached-corpus comparison remain
-pending. The production guard is stricter than this prototype, so its fallback
+The final integrated normal path passed seven physical diagnostic cases, and the
+combined focused recheck passed 130 tests. CI for the correction commit and the
+complete cached-corpus comparison remain pending. The production guard is stricter than this prototype, so its fallback
 frequency must be measured again on the final corpus run.
 
 
@@ -308,7 +308,7 @@ Numerically refused models retry sequentially per geometry so the maximum-scratc
 | 21 | Canonical preparation outside GPU eligibility (`test_keeps_unprofitable_preparation_canonical`) | Edge | 19,999 faces with accelerator available, or 20,000 faces with accelerator unavailable | Returns canonical PreparedRender | Unit | ✅ `backend/tests/unit/modules/media/test_mesh_render.py::TestDeferredPreparation::test_keeps_unprofitable_preparation_canonical` |
 | 22 | Parser fallback custody (`test_preserves_parser_fallback_custody`) | Edge | Two CPU-only render requests reuse one deferred parser snapshot | Both renders receive the same canonical snapshot with expected smooth normals | Unit | ✅ `backend/tests/unit/modules/media/test_mesh_render.py::TestDeferredPreparation::test_preserves_parser_fallback_custody` |
 | 23 | Canonical accelerated image encoding (`test_preserves_accelerated_encoding_policy`) | Happy | Accelerator returns RGBA pixels including transparent RGB; PNG and WEBP requested | Encoded bytes equal canonical encoder output and decoded RGBA is exact | Unit | ✅ `backend/tests/unit/modules/media/test_mesh_render.py::TestAcceleratedEncoding::test_preserves_accelerated_encoding_policy` |
-| 24 | Parent numerical import boundary (`test_module_import_keeps_numpy_out_of_parent`) | Edge | Fresh Python process imports the render facade | Process succeeds with numpy absent from sys.modules | Integration | ✅ `backend/tests/integration/modules/media/test_gpu_normals.py::test_module_import_keeps_numpy_out_of_parent` |
+| 24 | Parent numerical import boundary (`test_module_import_keeps_numpy_out_of_parent`) | Edge | Fresh Python process imports the render facade | Process succeeds with numpy absent from sys.modules | Integration | ✅ `backend/tests/integration/modules/media/test_gpu_normals.py::TestRenderImport::test_module_import_keeps_numpy_out_of_parent` |
 
 The five cached-corpus prototype cases established feasibility, but the final production numerical guard is stricter, so prototype timings do not establish final corpus performance or fallback frequency.
 Focused verification passed 56 application tests and 32 core tests; scoped Pyright, Ruff checks, formatting checks, and the diff whitespace check also passed.
@@ -352,10 +352,32 @@ checks, and the complete core suite passed 677 tests; these scopes overlap and
 must not be summed into an independent-case total. Scoped Ruff, formatting,
 Pyright and diff whitespace checks passed.
 
-The final combined focused gate and resource gate remain pending. The requested
-comparison of the same 1000 cached models, final normal fallback frequency,
-complete-pipeline speedup and operator visual acceptance also remain pending.
-Earlier focused checks and prototype timings do not qualify those outcomes.
+The ordinary backend gate reported 20,696 passes, one stale in-process OpenAPI
+snapshot failure and three WebDAV executable-discovery errors. All four passed
+in a fresh run with the virtualenv executable directory on PATH. The final
+focused gate reported 2,236 passes and ten failures: the versioned visual-recipe
+fixture needed its identity updated, and nine storage cases shared a test root
+with the concurrently running resource suite. That resource suite reported 685
+passes and one PostgreSQL generation failure. A single subsequent sequential
+run passed all 130 cases across the affected producers, geometry, normal and
+batch-association files plus the exact PostgreSQL case. Storage, generation and
+pixel assertions remained intact. The sequential recheck does not relabel the
+original full runs as successful. Final Ruff and format checks passed; CI is
+rerun after correcting CPU-only fake dependencies and the required test class.
+
+A 12-model Docker/WSL smoke test completed all originals and requested outputs,
+with exact geometry matching the previous evidence. It observed three two-input
+readback batches, two GPU normal submissions and one isolated numerical CPU
+retry. This was deployment validation while other tests were running, not a
+performance measurement or visual approval.
+
+The requested performance run uses the same 1,000 cached models (481 STL,
+486 OBJ and 33 STEP), without further storage requests. Per operator instruction,
+only the new GPU arm is rerun; the existing CPU and GPU arms remain references.
+Their comparison measures the combined pipeline change, since CPU preparation
+also changed. Final normal fallback frequency, complete-pipeline timing and
+operator visual acceptance remain pending. Earlier focused checks and prototype
+timings do not qualify those outcomes.
 
 The contract probe uses real socket framing, scheduling and response handling
 with an injected executor seam. It proves lifecycle/packing decisions, not GPU

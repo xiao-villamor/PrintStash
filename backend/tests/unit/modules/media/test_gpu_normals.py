@@ -1,5 +1,6 @@
 """Deferred normals retain canonical fallback and bounded deterministic topology."""
 
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -191,6 +192,17 @@ class Encoder:
 
 
 class TestNormalPipeline:
+    @pytest.fixture(autouse=True)
+    def native_api(self, monkeypatch):
+        # CPU-only installations need no GPU package for native-boundary fakes.
+        monkeypatch.setitem(
+            sys.modules,
+            "wgpu",
+            SimpleNamespace(
+                BufferUsage=SimpleNamespace(STORAGE=128, COPY_DST=8, COPY_SRC=4)
+            ),
+        )
+
     def test_accounts_for_all_normal_allocations(self):
         plan = build_csr(deferred())
         device = Device()

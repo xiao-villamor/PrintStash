@@ -11,7 +11,9 @@ The **gpu-render** extra adds only wgpu for rendering. The optional **gpu** extr
 | Downloads, extraction, validation, STEP tessellation, mesh parsing, viewer conversion | Existing CPU/storage and disposable workers |
 | Dimensions, volume, topology, exact fingerprints | Existing authoritative CPU algorithms |
 | Projection, face culling, shading, triangle rasterization | Qualified WebGPU renderer, otherwise canonical CPU |
-| Camera framing, smooth-normal preparation, postprocessing, encoding | Canonical CPU |
+| Eligible smooth-normal preparation and indexed packing | Portable WGSL with bounded canonical CPU recovery |
+| Resampling, premultiplied-alpha rounding and vignette | Canary-checked portable WGSL, otherwise canonical CPU |
+| Camera framing, position welding and lossless image encoding | Canonical CPU |
 | Image, text, point and sparse ONNX inference | Qualified native WebGPU graph, otherwise CPU worker |
 | Caption generation | Existing remote API |
 
