@@ -20,7 +20,6 @@ from app.runtime.compute import client
 from app.runtime.native_admission import Resources
 
 from . import native_process
-from .native_execution import admission
 from .source_preparation import capacity as source_capacity
 from .thumbnail_packet import MAX_PACKET_BYTES, PacketDescriptor, read_packet
 from .thumbnail_pixels import check_deadline, encode_pixels
@@ -159,13 +158,11 @@ class ThumbnailHandoff:
                 )
                 self.check(force=True)
                 return result
-            # RAM is already charged to the retained host window. The generic
-            # ledger requires one byte; this additional byte claims only its CPU
-            # slot, preventing an independent unbounded encoder pool.
+            # Retained host custody already covers codec RAM. One shared codec
+            # slot lets completed frames drain even while a parser holds the
+            # whole native memory pool, without an unbounded encoder executor.
             queue_started = time.monotonic()
-            with admission(
-                Resources(1, 1), native_process.native_capacity(), checkpoint=self.check
-            ):
+            with preparation_runtime.reserve_codec(checkpoint=self.check):
                 self.check(force=True)
                 codec_started = time.monotonic()
                 queue_seconds = codec_started - queue_started

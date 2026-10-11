@@ -188,3 +188,52 @@ class TestPreparedEligibility:
                 deadline=time.monotonic() + 30,
             )
         assert not (output / PACKET_NAME).exists()
+
+
+class TestCodecProgress:
+    def test_encodes_while_a_parser_owns_the_native_pool(self, tmp_path, monkeypatch):
+        from concurrent.futures import ThreadPoolExecutor
+        from io import BytesIO
+
+        from PIL import Image
+        from printstash_core.mesh.rasterizer import RenderedPixels
+
+        from app.modules.media import compute_render, native_process, thumbnail_handoff
+        from app.runtime import native_runtime, preparation_runtime
+        from app.runtime.native_admission import LocalResourcePool, Resources
+
+        payload = packet_bytes()
+        directory = tmp_path / "packet"
+        directory.mkdir()
+        (directory / PACKET_NAME).write_bytes(payload)
+        owned = directory.stat()
+        packet = PacketDescriptor(len(payload), hashlib.sha256(payload).hexdigest(), 1)
+        frame = Image.new("RGBA", (640, 480))
+        frame.paste((70, 100, 130, 255), (100, 100, 400, 300))
+        pixels = RenderedPixels(640, 480, frame.tobytes())
+        monkeypatch.setattr(compute_render, "render_packet", lambda *a, **k: pixels)
+        pool = LocalResourcePool(tmp_path / "native")
+        capacity = native_process.native_capacity()
+        previous = native_runtime.bind_pool(pool)
+        amount = Resources(1, thumbnail_handoff.resident_bytes(640, 480))
+        plan = thumbnail_handoff.HandoffPlan(640, 480, amount, amount)
+
+        def encode():
+            with preparation_runtime.reserve(amount, amount, checkpoint=lambda: None):
+                with thumbnail_handoff.reserve(plan, directory) as owner:
+                    return owner.complete(
+                        packet,
+                        directory,
+                        (owned.st_dev, owned.st_ino),
+                        fallback=lambda: pytest.fail("GPU success fell back"),
+                    )
+
+        try:
+            with ThreadPoolExecutor(1) as executor:
+                with pool.reserve(capacity, capacity, checkpoint=lambda: None):
+                    encoded = executor.submit(encode).result(timeout=2)
+            with Image.open(BytesIO(encoded)) as image:
+                assert image.size == (640, 480)
+                assert image.getpixel((200, 200))[3] == 255
+        finally:
+            native_runtime.bind_pool(previous)

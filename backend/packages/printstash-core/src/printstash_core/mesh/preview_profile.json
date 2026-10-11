@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "aspectRatio": [4, 3],
   "background": "transparent",
   "upAxis": "z",
@@ -22,9 +22,9 @@
   },
   "encoding": {
     "format": "webp",
-    "lossless": true,
-    "exact": true,
+    "lossless": false,
+    "exact": false,
     "method": 2,
-    "quality": 80
+    "quality": 85
   }
 }

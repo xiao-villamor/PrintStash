@@ -30,7 +30,7 @@ def pixels(width=320, height=None, *, alpha=1, border=None):
 
 class TestEncodePixels:
     @pytest.mark.parametrize("width", [320, 1280])
-    def test_preserves_all_rgba_bytes(self, width):
+    def test_preserves_decoded_alpha(self, width):
         frame = pixels(width)
 
         encoded = encode_pixels(frame, deadline=time.monotonic() + 30)
@@ -38,10 +38,10 @@ class TestEncodePixels:
         with Image.open(io.BytesIO(encoded)) as image:
             assert image.format == "WEBP"
             assert image.size == (frame.width, frame.height)
-            assert image.convert("RGBA").tobytes() == frame.rgba
+            assert image.convert("RGBA").getchannel("A").tobytes() == frame.rgba[3::4]
         assert type(encoded) is bytes
 
-    def test_uses_the_existing_lossless_encoding_recipe(self, monkeypatch):
+    def test_uses_the_shared_lossy_encoding_recipe(self, monkeypatch):
         save = Image.Image.save
         settings = []
 
@@ -54,7 +54,16 @@ class TestEncodePixels:
         encode_pixels(pixels(), deadline=time.monotonic() + 30)
 
         assert settings == [
-            ("WEBP", {"lossless": True, "exact": True, "method": 2, "quality": 80})
+            (
+                "WEBP",
+                {
+                    "lossless": False,
+                    "exact": False,
+                    "alpha_quality": 100,
+                    "method": 2,
+                    "quality": 85,
+                },
+            )
         ]
 
     @pytest.mark.parametrize("border", ["top", "bottom", "left", "right"])

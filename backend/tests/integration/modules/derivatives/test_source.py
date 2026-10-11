@@ -93,7 +93,7 @@ class TestPending:
         make_derivative(
             artifact,
             DerivativeKind.THUMBNAIL,
-            recipe_version=13,
+            recipe_version=14,
             state=state,
             exhausted=state is DerivativeState.FAILED,
             failure_reason="render_failed" if state is DerivativeState.FAILED else None,
@@ -101,13 +101,25 @@ class TestPending:
 
         assert _subjects(db_session) == [subject_key(artifact.id)]
 
+    def test_rederives_gcode_thumbnails_from_the_lossless_recipe(
+        self, db_session, make_model, make_file, make_derivative
+    ):
+        artifact = make_file(
+            make_model(), filename="part.gcode", file_type=FileType.GCODE
+        )
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL, recipe_version=1)
+        source = DerivativeSource(group(JobKind.DERIVATIVES_GCODE))
+
+        assert _subjects(db_session, source=source) == [subject_key(artifact.id)]
+
     def test_keeps_previous_thumbnail_visible_during_recipe_backfill(
         self, db_session, mesh, make_derivative
     ):
         artifact = mesh(thumbnail_path="thumbs/previous-recipe.webp")
         metadata = make_derivative(artifact, DerivativeKind.METADATA)
         thumbnail = make_derivative(
-            artifact, DerivativeKind.THUMBNAIL, recipe_version=13
+            artifact, DerivativeKind.THUMBNAIL, recipe_version=14
         )
 
         assert _subjects(db_session) == [subject_key(artifact.id)]
@@ -119,7 +131,7 @@ class TestPending:
         assert metadata.state is DerivativeState.READY
         assert metadata.recipe_version == 12
         assert thumbnail.state is DerivativeState.READY
-        assert thumbnail.recipe_version == 13
+        assert thumbnail.recipe_version == 14
 
     def test_rederives_previews_with_ambiguous_completeness(
         self, db_session, mesh, make_derivative

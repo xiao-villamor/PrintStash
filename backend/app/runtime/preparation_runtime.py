@@ -22,6 +22,7 @@ class PreparationPools:
     prepared: LocalResourcePool
     io: LocalResourcePool
     host: LocalResourcePool
+    codec: LocalResourcePool
 
 
 def make_pools(directory: Path, io_directory: Path) -> PreparationPools:
@@ -39,6 +40,7 @@ def make_pools(directory: Path, io_directory: Path) -> PreparationPools:
         LocalResourcePool(directory, reclaim=reclaim),
         LocalResourcePool(io_directory),
         LocalResourcePool(directory.parent / "thumbnail-host"),
+        LocalResourcePool(directory.parent / "thumbnail-codec"),
     )
 
 
@@ -123,3 +125,27 @@ def reserve_host(
             yield permit
         finally:
             del _local.host_permit
+
+
+@contextmanager
+def reserve_codec(*, checkpoint: Callable[[], None]) -> Iterator[None]:
+    """Finish one retained frame without queueing behind parser memory claims.
+
+    This single process-shared CPU slot is additional to the parser slots. All
+    codec RAM is already charged to the host permit, which survives encoding.
+    No parser credit may be held: the bounded completion lane cannot admit source
+    parsing or recursively wait for itself.
+    """
+    if current_host_permit() is None or current_native_permit() is not None:
+        raise RuntimeError("codec requires host custody after parser release")
+    if getattr(_local, "codec_active", False):
+        raise RuntimeError("codec admission cannot be nested")
+    amount = Resources(1, 1)
+    with _bound().codec.reserve(
+        amount, amount, checkpoint=checkpoint, priority=current_priority()
+    ):
+        _local.codec_active = True
+        try:
+            yield
+        finally:
+            del _local.codec_active

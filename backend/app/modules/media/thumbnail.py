@@ -32,13 +32,10 @@ def to_webp(
     width: int | None = None,
     preserve_frame: bool = False,
 ) -> bytes:
-    """Re-encode image bytes (PNG from slicers/rasteriser) as lossless WebP.
+    """Normalize preview bytes using the shared lossy WebP policy.
 
-    Single conversion seam for every thumbnail write. Lossless keeps the
-    output pixel-identical to the source — no colour shift, no edge bleed on
-    the transparent background — while still shrinking these flat-shaded
-    renders below the original PNG. ``exact=True`` preserves the RGB of fully
-    transparent pixels so the encoder can't recolour hidden areas.
+    Visible RGB may change within the compression recipe. Alpha stays lossless,
+    including antialiased edges; invisible RGB does not need to be preserved.
 
     ``preserve_frame`` accepts only a complete renderer's canonical-sized,
     nonempty alpha frame with a transparent border; it never repositions pixels.
@@ -125,7 +122,7 @@ def to_webp(
                         rgba = canvas
                     elif source_is_webp:
                         # The full renderer already encoded the canonical,
-                        # lossless recipe. Validation above is still shared;
+                        # compression recipe. Validation above is still shared;
                         # only the redundant second WebP encode is skipped.
                         return data
                 else:
@@ -135,8 +132,9 @@ def to_webp(
                 rgba.save(
                     buf,
                     format="WEBP",
-                    lossless=True,
-                    exact=True,
+                    lossless=PREVIEW_PROFILE.encoding_lossless,
+                    exact=PREVIEW_PROFILE.encoding_exact,
+                    alpha_quality=100,
                     method=PREVIEW_PROFILE.encoding_method,
                     quality=PREVIEW_PROFILE.encoding_quality,
                 )

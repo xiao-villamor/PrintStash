@@ -181,7 +181,7 @@ class TestGeneratedFrame:
 
         assert encoded == expected
         with Image.open(io.BytesIO(encoded)) as image:
-            assert image.convert("RGBA").tobytes() == rgba
+            assert image.convert("RGBA").getchannel("A").tobytes() == rgba[3::4]
 
     @pytest.mark.parametrize(
         ("size", "mode", "box", "reason"),

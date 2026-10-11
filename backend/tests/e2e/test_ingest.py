@@ -364,6 +364,53 @@ class TestMetadata:
         assert len(benchies) == 1, f"dedup failed, got {benchies}"
 
     @pytest.mark.asyncio
+    async def test_retains_full_geometry_with_smaller_previews(
+        self, api, tmp_path, e2e_db, monkeypatch
+    ):
+        from tests.factories.geometry import tetrahedron
+
+        monkeypatch.setitem(_overlay, "model_thumbnail_width", 512)
+        source = tetrahedron().export(file_type="stl")
+        headers = await _setup_and_login(api, tmp_path)
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("small-preview.stl", source, "application/sla")},
+            data={"model_name": "Small preview"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        assert job["state"] == "completed", job
+        file_id = job["file_id"]
+        assert (await _thumbnail_derivative(api, headers, file_id))["state"] == "ready"
+        assert _thumbnail_output(e2e_db, file_id)["complete"] is True
+        from app.db.models import Metadata
+
+        metadata = e2e_db.exec(
+            select(Metadata).where(Metadata.file_id == file_id)
+        ).one()
+        assert metadata.triangle_count == 4
+        original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        assert original.status_code == 200
+        assert original.content == source
+        thumbnail = await api.get(f"/api/v1/files/{file_id}/thumbnail", headers=headers)
+        assert thumbnail.status_code == 200
+        chunks = []
+        offset = 12
+        while offset < len(thumbnail.content):
+            chunks.append(thumbnail.content[offset : offset + 4])
+            size = int.from_bytes(thumbnail.content[offset + 4 : offset + 8], "little")
+            offset += 8 + size + size % 2
+        assert b"VP8 " in chunks  # The color payload uses the lossy bitstream.
+        with Image.open(io.BytesIO(thumbnail.content)) as image:
+            assert image.size == (512, 384)
+            alpha = image.convert("RGBA").getchannel("A")
+            assert alpha.getextrema() == (0, 255)
+            left, top, right, bottom = alpha.getbbox()
+            assert 0 < left < right < 512
+            assert 0 < top < bottom < 384
+
+    @pytest.mark.asyncio
     async def test_over_cap_mesh_upload_has_a_visible_thumbnail(
         self, api, tmp_path, e2e_db, monkeypatch
     ):
@@ -434,8 +481,10 @@ class TestMetadata:
             pixels = np.asarray(image.convert("RGBA"))
         width = int(settings.model_thumbnail_width)
         assert image.size == (width, round(width * 3 / 4))
-        assert tuple(pixels[0, 0]) == (0, 0, 0, 0)
-        assert tuple(pixels[image.height // 2, image.width // 2, :3]) == color
+        assert pixels[0, 0, 3] == 0
+        np.testing.assert_allclose(
+            pixels[image.height // 2, image.width // 2, :3], color, atol=3
+        )
         assert pixels[:, :, 3].mean() > 100
 
     @pytest.mark.asyncio
@@ -580,11 +629,10 @@ class TestThreeMFCapabilities:
         )
         assert image_response.status_code == 200, image_response.text
         with Image.open(io.BytesIO(image_response.content)) as image:
-            assert (
-                tuple(
-                    image.convert("RGB").getpixel((image.width // 2, image.height // 2))
-                )
-                == color
+            np.testing.assert_allclose(
+                image.convert("RGB").getpixel((image.width // 2, image.height // 2)),
+                color,
+                atol=3,
             )
         accepted = await api.get(f"/api/v1/files/{file_id}/stl", headers=headers)
         assert accepted.status_code == 202, accepted.text

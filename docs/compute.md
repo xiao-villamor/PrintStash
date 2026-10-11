@@ -135,7 +135,7 @@ uv run --extra gpu-render pytest tests/integration/modules/media/webgpu_render_d
 
 The diagnostic allows software adapters for development and must never generate an automatic-selection receipt. Physical qualification must separately cover Linux, Docker and WSL configurations on representative NVIDIA, AMD and Intel systems. Keep injected allocation errors, killed processes and actual hardware OOM/device-loss evidence separate.
 
-Thumbnail recipe 14 and canonical raster recipe qualified-portable-v5 version output behavior independently of device. Device choice never changes embedding-space identity; changed models, preprocessing or precision still require the existing generation workflow.
+Thumbnail recipe 15 and canonical raster recipe qualified-portable-v6 version output behavior independently of device. Device choice never changes embedding-space identity; changed models, preprocessing or precision still require the existing generation workflow.
 
 
 ## Render transfer and postprocessing lifecycle
@@ -219,8 +219,8 @@ The legacy `geometry_packing_min_faces` field is `null`: compact rendering has
 no packing threshold. The 20,000-face threshold above applies only to smooth-normal
 preparation; smaller models still use compact native-triangle rendering.
 
-Thumbnail recipe 14, raster recipe `qualified-portable-v5`, visual recipe
-`canonical-views-media-thumbnail-v5` and compute recipe `webgpu-native-raster-v4`
+Thumbnail recipe 15, raster recipe `qualified-portable-v6`, visual recipe
+`canonical-views-media-thumbnail-v6` and compute recipe `webgpu-native-raster-v4`
 version the changed framing, shading and encoding behavior. Exact geometry
 recipe 12 and fingerprint/point semantics remain unchanged. Changed visual-input
 semantics use the existing generation workflow; choosing a device alone never
@@ -230,8 +230,11 @@ changes embedding identity. No AI feature or model download is enabled.
 
 A ready, authorized GPU renderer can receive a bounded geometry packet after the
 isolated parser exits cleanly. The Job retains source and publication authority;
-its synchronous lossless codec runs under an existing native CPU slot and an
-explicit host-memory reservation. A successful handoff uses one parser and no
+its synchronous codec runs under a dedicated process-shared completion slot and
+an explicit host-memory reservation. This permits one encoder in addition to the
+configured parser slots, so an already rendered frame cannot queue behind a
+parser that requests all native RAM. Codec entry requires retained host custody
+and released parser credit; no additional executor or child process is created. A successful handoff uses one parser and no
 encoder child. Only GPU refusal invokes an isolated CPU renderer from that same
 packet, without reparsing the source. Cancellation and the original deadline do
 not trigger retries.
@@ -258,8 +261,9 @@ physical limits retain the combined path.
 
 `thumbnail_handoff_complete` reports packet read, dispatch, codec queue, codec and
 CPU recovery intervals. `thumbnail_handoff_supervision` associates the handoff
-with parser and fallback execution IDs. Native admissions also count the inline
-codec CPU-slot claim and must not be interpreted as child-process counts. These
+with parser and fallback execution IDs. Codec admissions use the separate
+`thumbnail-codec` pool; native admissions describe parser/fallback work. Neither
+admission count is a child-process count. These
 phase and supervision intervals overlap; they are not additive wall-clock costs.
 
 The older implementation that spawned a finalizer per prepared source was retired
@@ -275,22 +279,24 @@ improvement is inferred from the lifecycle change. See the
 [visual preparation validation](testing/compute-visual-preparation.md).
 
 
-## Lossless thumbnail encoding
+## Thumbnail encoding
 
-The shared mesh renderer encodes WebP with `lossless=True`, `exact=True`,
-`method=2` and explicit `quality=80`. For lossless WebP, quality controls
-compression effort; all decoded RGBA values, including RGB under fully
-transparent pixels, are retained. The CPU and GPU rendering paths share this
-encoder. Publication validates complete-render dimensions, decoded alpha,
-nonempty content and a transparent border, then preserves that generated frame
-and already encoded WebP. This avoids cropping and encoding it a second time.
-Embedded previews retain their normalization; required encoding uses the same
-profile method and quality.
+Preview profile 4 encodes WebP with `lossless=False`, `exact=False`, `method=2`,
+`quality=85` and `alpha_quality=100`. Visible RGB is compressed with loss; alpha
+remains exact. RGB under fully transparent pixels is not retained. CPU and GPU
+paths share this encoder, including normalized embedded previews. PNG and the
+six analytic view pixels retain their prior behavior. Mesh thumbnail recipe 15,
+G-code thumbnail recipe 2 and the updated visual recipe schedule replacements
+through existing derivative/index generation workflows.
 
-A compression-only profile of 200 existing cached thumbnails measured a 2.53×
-ratio of summed monotonic encoding durations for method 6 versus method 2,
-with 2.65% more encoded bytes. All 400 encodes in those two arms decoded exactly
-to their source RGBA. This is not an ingestion-throughput measurement. UTC and
-monotonic clocks diverged during the profile, so the raw clock domains remain
-separate; no external elapsed-time calibration is claimed.
-See the [encoding evidence and coverage](testing/compute-encoding.md).
+Publication validates dimensions, decoded alpha, nonempty content and a
+transparent border, then preserves already encoded generated WebP. It does not
+reframe or encode that output again. `VAULT_MODEL_THUMBNAIL_WIDTH=512` requests
+512×384 previews; the default remains 640×480. Both sizes retain 2× supersampling
+and full geometry within the existing render budget. This reduces pixel work,
+not source geometry or authoritative measurement accuracy.
+
+The [codec and 1000-source comparison](testing/compute-codec-throughput.md)
+records the codec-only pilot and complete-pipeline measurements separately.
+The [previous lossless experiment](testing/compute-encoding.md) remains historical
+evidence rather than a claim about the current encoder.

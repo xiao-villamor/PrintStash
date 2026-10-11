@@ -194,5 +194,5 @@ class TestRenderRecipe:
         assert recipes == [compute_render.render_recipe(2, 2, views, matte)]
         assert (
             recipes[0]
-            == f"webgpu-native-raster-v4:qualified-portable-v5:2x2:{views}:{int(matte)}"
+            == f"webgpu-native-raster-v4:qualified-portable-v6:2x2:{views}:{int(matte)}"
         )

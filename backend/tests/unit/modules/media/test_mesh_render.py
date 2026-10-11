@@ -442,4 +442,7 @@ class TestAcceleratedEncoding:
             )
             assert encoded == expected
             decoded = np.asarray(Image.open(io.BytesIO(encoded)).convert("RGBA"))
-            np.testing.assert_array_equal(decoded, rgba)
+            if output_format == "PNG":
+                np.testing.assert_array_equal(decoded, rgba)
+            else:
+                np.testing.assert_array_equal(decoded[:, :, 3], rgba[:, :, 3])

@@ -198,8 +198,8 @@ relabelled. Viewer conversion continues to require a materialized STL output.
 The [retained-scene contract](retained-3mf-scenes.md) records the behavior and
 verification evidence.
 
-Mesh thumbnail recipe 14 versions the portable native-triangle renderer and
-shared lossless WebP method 2 encoding. Metadata recipe 12 remains authoritative
+Mesh thumbnail recipe 15 and G-code thumbnail recipe 2 version lossy WebP
+quality 85 / method 2 encoding with exact alpha. Metadata recipe 12 remains authoritative
 for exact geometry. Existing thumbnail pointers stay visible while the normal
 recipe anti-join schedules their replacements. Visual recipe and encoder
 evidence are recorded in [compute](compute.md).

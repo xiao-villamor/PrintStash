@@ -121,15 +121,14 @@ class TestHandoffCompletion:
         )
 
         @contextmanager
-        def admission(request, capacity, *, checkpoint):
-            assert request == Resources(1, 1)
+        def admission(*, checkpoint):
             active.append(True)
             try:
                 yield
             finally:
                 active.pop()
 
-        monkeypatch.setattr(handoff, "admission", admission)
+        monkeypatch.setattr(handoff.preparation_runtime, "reserve_codec", admission)
 
         def encode(*a, **k):
             assert active == [True]
@@ -187,7 +186,7 @@ class TestHandoffCompletion:
             finally:
                 finished.set()
 
-        monkeypatch.setattr(handoff, "admission", admission)
+        monkeypatch.setattr(handoff.preparation_runtime, "reserve_codec", admission)
         monkeypatch.setattr(handoff, "encode_pixels", encode)
         worker = threading.Thread(target=complete)
         worker.start()
@@ -255,7 +254,7 @@ class TestHandoffCompletion:
                 active.pop()
 
         encode = Mock(return_value=b"encoded")
-        monkeypatch.setattr(handoff, "admission", admission)
+        monkeypatch.setattr(handoff.preparation_runtime, "reserve_codec", admission)
         monkeypatch.setattr(handoff, "read_packet", lambda *a, **k: b"packet")
         monkeypatch.setattr(
             compute_render,

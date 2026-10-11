@@ -19,7 +19,7 @@ from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 class TestPreviewProfile:
     @staticmethod
     def test_canonical_thumbnail_profile_is_stable() -> None:
-        assert PREVIEW_PROFILE.version == 3
+        assert PREVIEW_PROFILE.version == 4
         assert PREVIEW_PROFILE.aspect_ratio == (4, 3)
         assert PREVIEW_PROFILE.margin_fraction == 0.10
         assert PREVIEW_PROFILE.material_albedo == (0.70, 0.75, 0.84)
@@ -30,7 +30,9 @@ class TestPreviewProfile:
         assert PREVIEW_PROFILE.supersample_for(640) == 2
         assert PREVIEW_PROFILE.supersample_for(1280) == 1
         assert PREVIEW_PROFILE.encoding_method == 2
-        assert PREVIEW_PROFILE.encoding_quality == 80
+        assert PREVIEW_PROFILE.encoding_quality == 85
+        assert PREVIEW_PROFILE.encoding_lossless is False
+        assert PREVIEW_PROFILE.encoding_exact is False
 
     @staticmethod
     def test_generated_frontend_profile_matches_manifest() -> None:
@@ -82,6 +84,8 @@ class TestPreviewProfile:
             lambda payload: payload["encoding"].__setitem__("quality", -1),
             lambda payload: payload["encoding"].__setitem__("quality", 101),
             lambda payload: payload["encoding"].__setitem__("quality", True),
+            lambda payload: payload["encoding"].__setitem__("lossless", 1),
+            lambda payload: payload["encoding"].__setitem__("exact", "false"),
         ],
         ids=[
             "aspect",
@@ -92,6 +96,8 @@ class TestPreviewProfile:
             "negative-quality",
             "excess-quality",
             "boolean-quality",
+            "nonboolean-lossless",
+            "nonboolean-exact",
         ],
     )
     def test_profile_structure_rejects_invalid_recipe(monkeypatch, mutate) -> None:

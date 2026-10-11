@@ -10,7 +10,7 @@ from typing import Mapping
 
 # Renderer arithmetic participates in derived visual identities independently
 # of camera/material settings and immutable encoder asset manifests.
-RASTERIZER_RECIPE = "qualified-portable-v5"
+RASTERIZER_RECIPE = "qualified-portable-v6"
 
 
 def _mapping(value: object, name: str) -> Mapping[str, object]:
@@ -33,6 +33,13 @@ def _integer(values: Mapping[str, object], key: str) -> int:
     return value
 
 
+def _boolean(values: Mapping[str, object], key: str) -> bool:
+    value = values.get(key)
+    if type(value) is not bool:
+        raise ValueError(f"preview_profile_invalid_{key}")
+    return value
+
+
 @dataclass(frozen=True)
 class PreviewProfile:
     version: int
@@ -46,6 +53,8 @@ class PreviewProfile:
     supersample_max_output_width: int
     supersample_small_factor: int
     supersample_large_factor: int
+    encoding_lossless: bool
+    encoding_exact: bool
     encoding_method: int
     encoding_quality: int
     recipe_fingerprint: str
@@ -106,6 +115,8 @@ def _load_profile() -> PreviewProfile:
         supersample_max_output_width=_integer(supersampling, "maxOutputWidth"),
         supersample_small_factor=_integer(supersampling, "smallFactor"),
         supersample_large_factor=_integer(supersampling, "largeFactor"),
+        encoding_lossless=_boolean(encoding, "lossless"),
+        encoding_exact=_boolean(encoding, "exact"),
         encoding_method=method,
         encoding_quality=quality,
         recipe_fingerprint=hashlib.sha256(payload).hexdigest()[:16],
