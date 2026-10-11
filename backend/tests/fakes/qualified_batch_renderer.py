@@ -82,6 +82,15 @@ class QualifiedBatchRenderer:
                 ]
                 (root / "qualification.json").write_text(json.dumps(receipts))
 
+            def status(self, queue_depth=0, queued_bytes=0):
+                # This executor implements the finalized RGBA contract in
+                # render_many; it has no real optional-runtime GPU objects.
+                return (
+                    super()
+                    .status(queue_depth, queued_bytes)
+                    .model_copy(update={"render_postprocess_gpu": True})
+                )
+
             def admit_host(self, deadline):
                 self.host_capacity = 1024**3
 

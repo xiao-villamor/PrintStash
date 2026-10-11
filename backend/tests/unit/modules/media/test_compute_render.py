@@ -174,3 +174,25 @@ class TestRenderPriority:
             priority = compute_render.render_priority()
 
         assert priority is Priority.BACKGROUND
+
+
+class TestRenderRecipe:
+    @pytest.mark.parametrize("views,matte", [(1, False), (2, True)])
+    def test_dispatch_uses_shared_recipe_identity(
+        self, prepared, monkeypatch, views, matte
+    ):
+        monkeypatch.setattr(compute_render.client, "available", lambda **kwargs: True)
+        recipes = []
+
+        def exchange(request, body, **kwargs):
+            recipes.append(request.recipe)
+            pixels = bytes([190, 80, 40, 255]) * 4 * views
+            return b"\x01" + struct.pack("!III", 2, 2, views) + pixels
+
+        monkeypatch.setattr(compute_render.client, "exchange_render", exchange)
+        assert compute_render.render(prepared, 2, 2, [None] * views, matte) is not None
+        assert recipes == [compute_render.render_recipe(2, 2, views, matte)]
+        assert (
+            recipes[0]
+            == f"webgpu-native-raster-v4:qualified-portable-v5:2x2:{views}:{int(matte)}"
+        )

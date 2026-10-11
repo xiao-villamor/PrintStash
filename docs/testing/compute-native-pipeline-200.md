@@ -9,7 +9,7 @@ speedup comparison. Order is fixed (STEP, then STL, then OBJ); per-format latenc
 also reflect queue position. Historical CPU ingestion/rendering was not repeated.
 
 All inputs come from the immutable local cache. Docker uses an internal network;
-no new R2 request is permitted. All three completed arms verified all 200 originals,
+no new R2 request is permitted. Every completed arm verified all 200 originals,
 metadata and thumbnails, with exact authoritative geometry matching earlier output.
 The request-ledger digest is unchanged. Images are for user review; exact identity
 with the old CPU raster is no longer a requirement for this rendering recipe.
@@ -48,9 +48,9 @@ and restricted prepared work to the three maximal packets fitting the 192 MiB
 staging sublimit. Images could also be normalized and encoded a second time by the
 publisher after the GPU had completed them.
 
-The correction stages only a request whose existing conservative memory estimate
-claims the entire native pool. It reuses that exact preflight plan in the
-supervisor. Small models keep one parser/render/encoder lifecycle. The standalone
+The intermediate correction staged only a request whose existing conservative memory estimate
+claimed the entire native pool. It reused that exact preflight plan in the
+supervisor. Small models kept one parser/render/encoder lifecycle. The standalone
 encoder avoids configuration and parser imports, and validated full-render output
 retains its generated frame and existing WebP bytes. External embedded previews
 retain their normalization. RGBA assembly also removes redundant complete copies.
@@ -69,12 +69,47 @@ seconds; these are overlapping durations. Thirty-three handoffs were STEP, with 
 median prepared packet of only 2,401 bytes. A whole-pool reservation expresses
 uncertainty about parser memory, not enough GPU work to justify a second process.
 
-Automatic handoff has therefore been removed, retaining the compact GPU renderer,
-lossless codec, publication validation, CPU recovery and conservative parser
-reservations. A separate matched comparison with up to 40 pending Artifacts will
-measure the final combined-worker implementation. It uses the same 200 sources
-and order for **both** arms; it must not be compared only against the earlier
-four-upload-wave arm. No estimated savings are substituted for this measurement.
+The finalizer-based handoff was removed at `d8f64ccc`, retaining the compact GPU
+renderer, lossless codec, publication validation, CPU recovery and conservative
+parser reservations. Both arms were then measured with up to 40 pending Artifacts
+and the same 200 sources and order. This comparison is separate from the
+four-upload-wave measurements above.
+
+| Bounded continuous40 arm | Windows QPC | WSL UTC | WSL monotonic | Broker execution | Native admissions |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Previous GPU (`b898824f` equivalent source) | 473.029 s | 472.920 s | 446.924 s | 13.943 s | 200 |
+| Combined worker (`d8f64ccc`) | 496.544 s | 497.070 s | 469.685 s | 7.056 s | 200 |
+
+The combined worker still **regressed about 5%** in complete publication despite
+approximately halving broker execution. All 200 sources, exact measurements and
+requested outputs were retained; every saved 640×480 image had alpha ≥128
+foreground. No improvement claim is made from the isolated broker gain. The last input was
+accepted 22.209 seconds later, while the final drain differed by only 0.552 seconds.
+Staging refusals increased from one to three, adding two accumulated seconds of
+backoff, insufficient to assign the full difference to that cause. Load phases
+increased from 269.370 to 281.715 accumulated seconds; native waits from 559.433 to
+597.581. These overlap and do not isolate import, parser, codec or scheduling
+causality on the shared WSL host.
+
+The reference executed 221 singleton render batches: 199 requests minus four
+image-cache hits plus 26 normal-preparation retries. The combined worker executed
+191 singleton batches and two batches of two models, for 195 frames, with four
+cache hits and no normal retry. Real cross-model batching therefore occurred but
+was uncommon; a window of 40 pending Artifacts is not 40 prepared GPU inputs.
+Fifty-five reference parser admissions claimed the entire native memory pool.
+The unchanged FIFO admission and synchronous worker lifetime prevent another
+parser from running during such a claim. The coalescer only gathers compatible,
+already-ready requests for up to 10 ms.
+
+The next correction separates prepared geometry custody from parser lifetime
+without starting a second encoder process on GPU success. The existing Job will
+retain bounded packet/pixel/codec reservations, release parser resources only
+after clean reap, and encode validated final GPU pixels in its own execution
+thread. An isolated CPU fallback remains necessary for GPU refusal. This route
+has passed its correctness checks. At the operator’s request, final deployment
+validation will process all 1000 cached models instead of repeating this
+200-source candidate arm. It is not yet a measured improvement; the frozen
+200-source reference and both earlier candidates remain separate evidence.
 
 The initial continuous harness was aborted after the cold wave when it exceeded
 the existing four-active-ingestions-per-user staging limit and received HTTP 507.
@@ -94,11 +129,11 @@ application quotas are unchanged.
 
 | Behaviour | Category | Input | Observable outcome | Tier | Status |
 | --- | --- | --- | --- | --- | --- |
-| Complete same mixed cohort | Happy | Same 200 local sources | 200 metadata + 200 thumbnails READY | Deployment | ✅ All three recorded arms; final combined run pending |
-| Preserve originals and measurements | Invariant | Cached bytes and prior metadata | 200 hashes/sizes and exact geometry agree | Deployment | ✅ All three recorded arms |
+| Complete same mixed cohort | Happy | Same 200 local sources | 200 metadata + 200 thumbnails READY | Deployment | ✅ All completed arms, including combined continuous40 |
+| Preserve originals and measurements | Invariant | Cached bytes and prior metadata | 200 hashes/sizes and exact geometry agree | Deployment | ✅ All completed arms |
 | Avoid storage requests | Resource | Internal network and local cache | Zero R2; unchanged request ledger | Deployment | ✅ |
 | Retain failed optimization evidence | Error | Unconditional handoff | Regression documented rather than reported as speedup | Measurement | ✅ |
-| Reduce full pipeline duration | Performance | Matched final combined run | Source-to-publication improvement measured separately from broker speed | Deployment | Pending; selective run has no demonstrated gain |
+| Reduce full pipeline duration | Performance | Matched ready-geometry run | Source-to-publication improvement measured separately from broker speed | Deployment | ⏭️ Combined run regressed ~5%; final validation changed to 1000 cached sources |
 | Review new visual recipe | Visual | 200 paired output images | User acceptance | Manual | Pending user review |
 | Maintain interactive latency under load | Performance | Concurrent interactive queries | p95 gate established | Deployment | Not measured; no auto-qualification receipt |
 | Qualify other vendors/deployments | Portability | AMD/Intel/other driver stacks | Real work on intended adapters | Deployment | Not measured; support not claimed |

@@ -2190,10 +2190,11 @@ class TestStagedMeshPublication:
     ):
         import trimesh
 
-        from app.modules.media import native_process
+        from app.modules.media import native_process, thumbnail_handoff
         from app.runtime.compute import client
         from app.runtime.native_admission import Resources
 
+        monkeypatch.setattr(thumbnail_handoff, "plan", lambda *args: None)
         payload = trimesh.creation.box().export(file_type=file_type)
         artifact = stored(f"mesh.{file_type}", payload)
         monkeypatch.setattr(client, "available", lambda **kwargs: True)
@@ -2223,6 +2224,114 @@ class TestStagedMeshPublication:
         assert get_backend().exists(
             _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL].storage_key
         )
+
+    def test_keeps_basics_ahead_of_optional_analysis(
+        self, db_session, stored, make_system_config, monkeypatch, staged_mesh_outputs
+    ):
+        from app.modules.media import thumbnail_handoff
+
+        artifact = stored("fingerprint-order.stl", content.binary_stl())
+        make_system_config(
+            similarity_settings_json=json.dumps(
+                {"enabled": True, "fingerprint_on_ingest": True}
+            )
+        )
+        monkeypatch.setattr(extensions, "_derivatives", similarity_ingestion)
+        monkeypatch.setattr(
+            thumbnail_handoff,
+            "plan",
+            lambda *a: pytest.fail("optional analysis entered deferred thumbnail path"),
+        )
+
+        def worker(request, *, on_output):
+            assert request.include_fingerprint
+            for frame in staged_mesh_outputs:
+                on_output(frame)
+            db_session.expire_all()
+            assert all(
+                row.state is DerivativeState.READY
+                for row in _rows(db_session, artifact.id).values()
+            )
+            raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
+
+        monkeypatch.setattr(mesh_isolation, "generate", worker)
+        outcome = producers.derive_mesh(artifact.id)
+        assert outcome.kinds[DerivativeKind.THUMBNAIL] is DerivativeState.READY
+        assert get_backend().exists(
+            _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL].storage_key
+        )
+
+    def test_records_host_admission_expiry(self, db_session, stored, monkeypatch):
+        from app.modules.media import thumbnail_handoff
+        from app.runtime.native_admission import Resources
+
+        artifact = stored("host-timeout.stl", content.binary_stl())
+        plan = thumbnail_handoff.HandoffPlan(
+            640, 480, Resources(1, 100), Resources(4, 400)
+        )
+        monkeypatch.setattr(thumbnail_handoff, "plan", lambda *a: plan)
+
+        @contextmanager
+        def expire(*a, **k):
+            raise TimeoutError("thumbnail_deadline")
+            yield
+
+        monkeypatch.setattr(thumbnail_handoff, "reserve", expire)
+        monkeypatch.setattr(
+            mesh_isolation,
+            "generate",
+            lambda *a, **k: pytest.fail("expired job parsed"),
+        )
+        outcome = producers.derive_mesh(artifact.id)
+        assert outcome.kinds[DerivativeKind.THUMBNAIL] is DerivativeState.FAILED
+        assert (
+            _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL].failure_reason
+            == "timeout"
+        )
+
+    def test_drops_result_before_host_release_on_supersession(
+        self, stored, monkeypatch, staged_mesh_outputs
+    ):
+        import weakref
+
+        from app.modules.derivatives import records
+        from app.modules.media import thumbnail_handoff
+        from app.runtime.native_admission import Resources
+
+        artifact = stored("superseded-owner.stl", content.binary_stl())
+        plan = thumbnail_handoff.HandoffPlan(
+            640, 480, Resources(1, 100), Resources(4, 400)
+        )
+        monkeypatch.setattr(thumbnail_handoff, "plan", lambda *a: plan)
+        references = []
+
+        class Result:
+            def __init__(self):
+                self.image = bytes(1024 * 1024)
+
+            @property
+            def fingerprint_result(self):
+                raise records.AttemptSuperseded()
+
+        @contextmanager
+        def host(*a, **k):
+            try:
+                yield object()
+            finally:
+                assert references and references[0]() is None
+
+        monkeypatch.setattr(thumbnail_handoff.preparation_runtime, "reserve_host", host)
+
+        def worker(request, *, on_output, handoff):
+            for frame in staged_mesh_outputs:
+                on_output(frame)
+            result = Result()
+            references.append(weakref.ref(result))
+            return result
+
+        monkeypatch.setattr(mesh_isolation, "generate", worker)
+        outcome = producers.derive_mesh(artifact.id)
+        assert outcome.kinds[DerivativeKind.THUMBNAIL] is DerivativeState.READY
 
     def test_publishes_the_renderer_frame(
         self, db_session, stored, monkeypatch, staged_mesh_outputs

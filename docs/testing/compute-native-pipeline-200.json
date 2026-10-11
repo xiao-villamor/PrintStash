@@ -1527,7 +1527,1230 @@
   },
   "corrected_candidate_note": "Selective handoff experiment at 5814e6e7; no demonstrated end-to-end improvement within final polling and boundary granularity. Final combined-worker continuous40 measurements are separate and pending.",
   "continuous40": {
-    "base": null,
-    "combined_worker_candidate": null
+    "base": {
+      "schema_version": 1,
+      "arm": "base",
+      "revision": "26b8f4b4f5964a16fd879285648f334bf4a72e84",
+      "image_id": "sha256:98e09e88c68078cef0b1e1d6d54250eb825e69646278daa522b44414cac3694c",
+      "selection_sha256": "077e93816fab660a38764f72a356bcda906bb5fea45118567b77af31ef7672a8",
+      "report_sha256": "53a4f4992711e78fa6a662ff7ce15445ff43d5326ffc3e9f6dc885286d38fd19",
+      "count": 200,
+      "formats": {
+        ".obj": {
+          "models": 83,
+          "metadata_ready": 83,
+          "thumbnail_ready": 83,
+          "thumbnail_failed": 0,
+          "both_ready": 83,
+          "outcomes": {
+            "metadata:ready": 83,
+            "thumbnail:ready": 83
+          },
+          "artifact_latency": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 83,
+            "p50_seconds": 65.241261,
+            "p95_seconds": 92.4667904,
+            "unavailable": 0,
+            "unavailable_reasons": {},
+            "timestamp_sources": {
+              "frozen_ingestion_job": 83
+            }
+          },
+          "worker_reported_duration_ms": {
+            "metadata": {
+              "count": 83,
+              "sum_seconds": 100.298,
+              "p50_seconds": 1.195,
+              "p95_seconds": 1.3349999999999997
+            },
+            "thumbnail": {
+              "count": 83,
+              "sum_seconds": 133.17,
+              "p50_seconds": 1.591,
+              "p95_seconds": 1.7836
+            }
+          },
+          "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+        },
+        ".step": {
+          "models": 33,
+          "metadata_ready": 33,
+          "thumbnail_ready": 33,
+          "thumbnail_failed": 0,
+          "both_ready": 33,
+          "outcomes": {
+            "metadata:ready": 33,
+            "thumbnail:ready": 33
+          },
+          "artifact_latency": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 33,
+            "p50_seconds": 35.945744,
+            "p95_seconds": 65.76953639999999,
+            "unavailable": 0,
+            "unavailable_reasons": {},
+            "timestamp_sources": {
+              "frozen_ingestion_job": 33
+            }
+          },
+          "worker_reported_duration_ms": {
+            "metadata": {
+              "count": 33,
+              "sum_seconds": 37.984,
+              "p50_seconds": 1.091,
+              "p95_seconds": 1.3697999999999997
+            },
+            "thumbnail": {
+              "count": 33,
+              "sum_seconds": 51.118,
+              "p50_seconds": 1.45,
+              "p95_seconds": 2.230399999999999
+            }
+          },
+          "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+        },
+        ".stl": {
+          "models": 84,
+          "metadata_ready": 84,
+          "thumbnail_ready": 84,
+          "thumbnail_failed": 0,
+          "both_ready": 84,
+          "outcomes": {
+            "metadata:ready": 84,
+            "thumbnail:ready": 84
+          },
+          "artifact_latency": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 84,
+            "p50_seconds": 71.7771565,
+            "p95_seconds": 92.53309034999995,
+            "unavailable": 0,
+            "unavailable_reasons": {},
+            "timestamp_sources": {
+              "frozen_ingestion_job": 84
+            }
+          },
+          "worker_reported_duration_ms": {
+            "metadata": {
+              "count": 84,
+              "sum_seconds": 150.874,
+              "p50_seconds": 1.3305,
+              "p95_seconds": 4.489099999999992
+            },
+            "thumbnail": {
+              "count": 84,
+              "sum_seconds": 203.807,
+              "p50_seconds": 1.8090000000000002,
+              "p95_seconds": 5.5059499999999995
+            }
+          },
+          "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+        }
+      },
+      "outcomes": {
+        "metadata:ready": 200,
+        "thumbnail:ready": 200
+      },
+      "source_integrity": {
+        "originals_verified": 200,
+        "thumbnails_verified": 200,
+        "r2_requests": 0,
+        "request_ledger_unchanged": true
+      },
+      "timings": {
+        "publication_monotonic_seconds": 446.924013225,
+        "publication_realtime_seconds": 472.919876843,
+        "windows_qpc": {
+          "seconds": 473.029456,
+          "clock": "Windows Stopwatch / QPC",
+          "scope": "Two independent Windows host counter observations enclosing source upload through durable publication. Includes boundary placement/process invocation gaps; wrapper intervals recorded in WSL clocks independently. Not corrected or substituted for WSL timings."
+        },
+        "qpc_boundary_wrappers": [
+          {
+            "available": true,
+            "ticks": 343179266291,
+            "frequency": 10000000,
+            "wrapper_before": {
+              "monotonic_ns": 32739013051868,
+              "realtime_ns": 1791748259178418989
+            },
+            "wrapper_after": {
+              "monotonic_ns": 32739294566763,
+              "realtime_ns": 1791748259459933010
+            },
+            "wrapper_monotonic_seconds": 0.281514895,
+            "wrapper_realtime_seconds": 0.281514021
+          },
+          {
+            "available": true,
+            "ticks": 347909560851,
+            "frequency": 10000000,
+            "wrapper_before": {
+              "monotonic_ns": 33186222434057,
+              "realtime_ns": 1791748732383663112
+            },
+            "wrapper_after": {
+              "monotonic_ns": 33186548349452,
+              "realtime_ns": 1791748732709579739
+            },
+            "wrapper_monotonic_seconds": 0.325915395,
+            "wrapper_realtime_seconds": 0.325916627
+          }
+        ],
+        "cold_first_wave": {
+          "count": 4,
+          "seconds_monotonic": 16.612559588,
+          "seconds_realtime": 16.612560485,
+          "outputs": {
+            "metadata:ready": 4,
+            "thumbnail:ready": 4
+          },
+          "scope": "First four fresh source uploads through durable requested outputs, includes broker startup when lazily started; excludes deployment/API boot."
+        },
+        "warm_remaining": {
+          "count": 196,
+          "seconds_monotonic": 430.230067659,
+          "seconds_realtime": 456.22593038,
+          "scope": "Remaining196 source files through durable outputs after cold first wave; descriptive subcohort, not a200-model claim."
+        },
+        "note": "Clocks retained independently. QPC includes process invocation boundary gaps; UTC artifact latencies remain diagnostic. No global clock calibration or format walltime claimed."
+      },
+      "workload": {
+        "submission_policy": "cold4_then_continuous40_durable_outputs",
+        "unfinished_output_window": 40,
+        "pending_ingestion_window": 4,
+        "peak_outstanding": 40,
+        "admission_backpressure": {
+          "policy": "Only507 with exact staging_capacity_exceeded;1s backoff;30s perinput bounded by original run deadline; reopen local source each attempt.",
+          "rejected_requests": 1,
+          "affected_inputs": 1,
+          "max_rejections_per_input": 1,
+          "wait_seconds_sum": 1.0001529090004624,
+          "wait_seconds_max": 1.0001529090004624,
+          "upload_requests": 201,
+          "included_in_publication_interval": true
+        }
+      },
+      "comparison": {
+        "baseline_revision": "26b8f4b4f5964a16fd879285648f334bf4a72e84",
+        "same_workload_policy": false,
+        "baseline_workload_policy": "closed_wave4",
+        "same_sources": 200,
+        "duration_candidate_over_base": {
+          "wsl_monotonic": 0.9985486750614643,
+          "wsl_realtime": 1.0020646558003916,
+          "windows_qpc": 1.0012995771301463
+        },
+        "interpretation": "Same200 source selection/order. Workload policies are reported separately; compare production changes only between matching policies. Changes include rendering, preparation, staging and encoding, not device-only isolation. Cold4/warm196 are descriptive subsets."
+      },
+      "authoritative_geometry": {
+        "same_source_count": 200,
+        "exact_geometry_count": 200,
+        "by_format": {
+          ".obj": {
+            "count": 83,
+            "exact_geometry_count": 83
+          },
+          ".step": {
+            "count": 33,
+            "exact_geometry_count": 33
+          },
+          ".stl": {
+            "count": 84,
+            "exact_geometry_count": 84
+          }
+        }
+      },
+      "compute": {
+        "budget_bytes": 1073741824,
+        "reserved_bytes": 249918220,
+        "resident_entries": 18,
+        "queue_depth": 0,
+        "completed": 199,
+        "fallbacks": 0,
+        "cold_start_seconds": 1.850059437998425,
+        "queue_seconds": 1.2020165170615655,
+        "execution_seconds": 13.942614032966958,
+        "input_bytes": 219092820,
+        "output_bytes": 244533787,
+        "batch_inputs": 0,
+        "residency_hits": 4,
+        "residency_misses": 221,
+        "host_reserved_bytes": 1073741824,
+        "queued_bytes": 66,
+        "rendering_transfer_seconds": 2.5316576530167367,
+        "inference_batches": 0,
+        "render_batches": 221,
+        "render_frames": 221,
+        "render_batch_model_counts": [
+          221,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "render_batch_frame_counts": [
+          221,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "render_interactive_requests": 0,
+        "render_background_requests": 199,
+        "render_cache_hits": 4,
+        "geometry_upload_bytes": 466853080,
+        "geometry_gpu_uploads": 59,
+        "geometry_cpu_uploads": 162,
+        "geometry_gpu_normal_uploads": 33,
+        "geometry_cpu_normal_fallbacks": 26,
+        "geometry_normal_seconds": 3.360327594986302,
+        "geometry_packing_min_faces": 20000,
+        "geometry_packing_seconds": 3.4541838490913506,
+        "render_postprocess_gpu": true,
+        "geometry_input_bytes": 219065652,
+        "geometry_input_cache_hits": 4,
+        "geometry_input_cache_bytes": 17433072
+      },
+      "compute_snapshot_note": "Final counters in fresh deployment. Reserved values are final snapshots, not peaks. Histograms count render batches, not necessarily native queue.submit calls. CPU placement is included in whole-pipeline outcomes.",
+      "events": {
+        "available": true,
+        "malformed_events": 0,
+        "phases": {
+          "admission": {
+            "count": 200,
+            "sum_seconds": 0.572213412,
+            "p50_seconds": 0.000125227,
+            "p95_seconds": 0.007355855599999996
+          },
+          "load": {
+            "count": 200,
+            "sum_seconds": 269.369581542,
+            "p50_seconds": 1.2075807445,
+            "p95_seconds": 1.7485847178499996
+          },
+          "measurements": {
+            "count": 200,
+            "sum_seconds": 19.093058159,
+            "p50_seconds": 0.0070450675,
+            "p95_seconds": 0.45173137774999933
+          },
+          "render": {
+            "count": 200,
+            "sum_seconds": 98.873003003,
+            "p50_seconds": 0.43125867149999997,
+            "p95_seconds": 0.9092026526999981
+          }
+        },
+        "native_waits": {
+          "count": 200,
+          "sum_seconds": 559.432849031,
+          "p50_seconds": 0.0416195345,
+          "p95_seconds": 9.433801078599995
+        },
+        "supervision": {
+          "count": 200,
+          "sum_seconds": 794.931285799,
+          "p50_seconds": 3.662156071,
+          "p95_seconds": 5.860369907749999
+        },
+        "native_admissions": 200,
+        "whole_pool_claims": 55,
+        "capacity_bytes": [
+          4146845696
+        ],
+        "admission_outcomes": {
+          "admitted": 200
+        },
+        "peak_worker_tree_rss_bytes": 566108160
+      },
+      "handoff": {
+        "count": 0,
+        "modes": {},
+        "exit_causes": {},
+        "durations": {
+          "prepared_read_ns": null,
+          "dispatch_ns": null,
+          "finalizer_queue_ns": null,
+          "finalizer_supervision_ns": null
+        },
+        "prepared_bytes": {
+          "sum": 0,
+          "maximum": null
+        },
+        "supervision_by_stage": {
+          "parser": {
+            "count": 200,
+            "sum_seconds": 794.931285799,
+            "p50_seconds": 3.662156071,
+            "p95_seconds": 5.860369907749999
+          },
+          "finalizer": null
+        },
+        "note": "Accumulated per-request durations may overlap; finalizer supervision includes process startup/imports/encoding/cleanup and is not encoder-only CPU time."
+      },
+      "hardware": {
+        "available": true,
+        "scope": "One-second samples during publication, whole physical adapter including unrelated Windows work; not per-process allocation or qualification.",
+        "malformed_samples": 0,
+        "metrics": {
+          "gpu_utilization_percent": {
+            "count": 447,
+            "median": 0.0,
+            "p95": 1.0,
+            "maximum": 10.0
+          },
+          "memory_utilization_percent": {
+            "count": 447,
+            "median": 3.0,
+            "p95": 13.0,
+            "maximum": 24.0
+          },
+          "device_memory_used_mib": {
+            "count": 447,
+            "median": 1319.0,
+            "p95": 1509.5,
+            "maximum": 1622.0
+          }
+        }
+      },
+      "ingestion_intervals": {
+        "clock": "database_utc",
+        "qualification": "diagnostic_only_not_monotonic",
+        "unavailable_reasons": {},
+        "by_format": {
+          "all": {
+            "job_creation_to_terminal": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 200,
+              "p50_seconds": 5.180832,
+              "p95_seconds": 9.324612249999998
+            },
+            "ingestion_terminal_to_derivative_publication": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 200,
+              "p50_seconds": 61.7583755,
+              "p95_seconds": 85.21529865
+            }
+          },
+          ".step": {
+            "job_creation_to_terminal": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 33,
+              "p50_seconds": 3.512156,
+              "p95_seconds": 6.361687999999998
+            },
+            "ingestion_terminal_to_derivative_publication": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 33,
+              "p50_seconds": 30.233521,
+              "p95_seconds": 60.3698026
+            }
+          },
+          ".stl": {
+            "job_creation_to_terminal": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 84,
+              "p50_seconds": 5.6532374999999995,
+              "p95_seconds": 10.083252249999997
+            },
+            "ingestion_terminal_to_derivative_publication": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 84,
+              "p50_seconds": 66.499509,
+              "p95_seconds": 84.41283864999997
+            }
+          },
+          ".obj": {
+            "job_creation_to_terminal": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 83,
+              "p50_seconds": 5.553288,
+              "p95_seconds": 9.286722699999999
+            },
+            "ingestion_terminal_to_derivative_publication": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 83,
+              "p50_seconds": 59.774611,
+              "p95_seconds": 85.3276757
+            }
+          }
+        },
+        "note": "Exact retained ingestion Job ID maps creation/terminal to the frozen requested derivative terminal timestamps. Publication may overlap ingestion; these are observed intervals, not serial CPU costs or attributable residuals."
+      },
+      "visual_approval": "pending_user",
+      "saved_frame_content": {
+        "count": 200,
+        "alpha_outcomes": {
+          "foreground_present": 200
+        },
+        "dimensions": {
+          "(640, 480)": 200
+        },
+        "note": "Alpha foreground at threshold128 is present in each saved frame; visual approval remains with the user. No rerender or remote requests."
+      },
+      "baseline_source_provenance": {
+        "image_revision": "26b8f4b4f5964a16fd879285648f334bf4a72e84",
+        "source_equivalence_revision": "b898824f0439d2b605c0129b203f87125252edce",
+        "verification": "git tree object identities equal for app/core/frontend source paths; no image relabeling. Backend/core dependency manifest diff is empty.",
+        "trees": {
+          "backend/app": {
+            "image_revision_tree_oid": "cca79e680ab690619890b29a2f5e13b6f97936a3",
+            "documented_revision_tree_oid": "cca79e680ab690619890b29a2f5e13b6f97936a3"
+          },
+          "backend/packages/printstash-core/src": {
+            "image_revision_tree_oid": "9542954efb171c441ac88a803fd9c4d90b3c36c1",
+            "documented_revision_tree_oid": "9542954efb171c441ac88a803fd9c4d90b3c36c1"
+          },
+          "frontend/src": {
+            "image_revision_tree_oid": "fc4ef974c139aa31cdabe05c9dea1e7bfb7f9c5a",
+            "documented_revision_tree_oid": "fc4ef974c139aa31cdabe05c9dea1e7bfb7f9c5a"
+          }
+        }
+      },
+      "reproducibility": {
+        "shared_executed_harness_sha256": "4baa2cd0abef00e6952b90cb572aecbab09fe9bf217653630a0f4c9c92d89d94",
+        "identical_script_both_arms": true,
+        "cohort": {
+          "count": 200,
+          "formats": {
+            "STEP": 33,
+            "STL": 84,
+            "OBJ": 83
+          },
+          "order": "33 STEP,84 STL,83 OBJ; identical fixed source order in both arms",
+          "selection_sha256": "077e93816fab660a38764f72a356bcda906bb5fea45118567b77af31ef7672a8"
+        },
+        "cold_phase": {
+          "count": 4,
+          "fresh_deployment": true,
+          "wait_for_requested_outputs": true,
+          "compute_diagnostic_after_cold_phase": true
+        },
+        "warm_phase": {
+          "count": 196,
+          "max_unfinished_output_artifacts_including_uploads": 40,
+          "max_uploading_plus_unfinished_ingestion_jobs": 4,
+          "max_parallel_uploads": 4,
+          "refill": "individual credits without closed-wave barrier",
+          "job_and_output_poll_interval_seconds": 1
+        },
+        "backpressure": {
+          "retry_http_status": 507,
+          "retry_exact_detail": "staging_capacity_exceeded",
+          "backoff_seconds": 1,
+          "per_input_limit_seconds": 30,
+          "original_deadline_applies": true,
+          "reopen_local_source_each_attempt": true,
+          "other_errors": "abort without retry",
+          "retry_wait_included_in_publication_duration": true,
+          "quotas_unchanged": true
+        },
+        "timing": {
+          "start": "before first source upload",
+          "stop": "requested metadata and thumbnail outputs durably terminal for all200 sources",
+          "clocks": "WSL monotonic,WSL realtime,Windows QPC retained separately",
+          "post_timer_verification": "original SHA256 and saved thumbnail decoding",
+          "not_claimed": "No calibrated clock, per-format walltime, visual approval or device-only effect"
+        },
+        "external_storage_requests": 0,
+        "scheduling": "40 unfinished artifacts does not mean40 resident GPU models; actual GPU batch histograms are reported separately"
+      },
+      "invalid_preflights": {
+        "count": 2,
+        "included_in_comparison": false,
+        "reason": "Earlier continuous refill policies aborted on staging capacity507; neither completed200 models. Both raw partial reports and lease diagnostics remain preserved locally. Current matched arms use bounded pre-admission retries without quota changes."
+      }
+    },
+    "combined_worker_candidate": {
+      "schema_version": 1,
+      "arm": "candidate",
+      "revision": "d8f64ccc2cbed433503d4fbe3439257e64b2a8fc",
+      "image_id": "sha256:662989baac95a9fee4931b23c2b82022d71fd3039511dd6b37b2eb91aeba033a",
+      "selection_sha256": "077e93816fab660a38764f72a356bcda906bb5fea45118567b77af31ef7672a8",
+      "report_sha256": "220abd621c91ddbc413eda625f9807b6d19b1bc466455d9ffc0621fdf7d64b03",
+      "count": 200,
+      "formats": {
+        ".obj": {
+          "models": 83,
+          "metadata_ready": 83,
+          "thumbnail_ready": 83,
+          "thumbnail_failed": 0,
+          "both_ready": 83,
+          "outcomes": {
+            "metadata:ready": 83,
+            "thumbnail:ready": 83
+          },
+          "artifact_latency": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 83,
+            "p50_seconds": 68.510301,
+            "p95_seconds": 110.2483305,
+            "unavailable": 0,
+            "unavailable_reasons": {},
+            "timestamp_sources": {
+              "frozen_ingestion_job": 83
+            }
+          },
+          "worker_reported_duration_ms": {
+            "metadata": {
+              "count": 83,
+              "sum_seconds": 105.909,
+              "p50_seconds": 1.23,
+              "p95_seconds": 1.7451999999999985
+            },
+            "thumbnail": {
+              "count": 83,
+              "sum_seconds": 125.516,
+              "p50_seconds": 1.461,
+              "p95_seconds": 2.0149999999999997
+            }
+          },
+          "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+        },
+        ".step": {
+          "models": 33,
+          "metadata_ready": 33,
+          "thumbnail_ready": 33,
+          "thumbnail_failed": 0,
+          "both_ready": 33,
+          "outcomes": {
+            "metadata:ready": 33,
+            "thumbnail:ready": 33
+          },
+          "artifact_latency": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 33,
+            "p50_seconds": 35.167073,
+            "p95_seconds": 65.87049099999999,
+            "unavailable": 0,
+            "unavailable_reasons": {},
+            "timestamp_sources": {
+              "frozen_ingestion_job": 33
+            }
+          },
+          "worker_reported_duration_ms": {
+            "metadata": {
+              "count": 33,
+              "sum_seconds": 37.585,
+              "p50_seconds": 1.102,
+              "p95_seconds": 1.2815999999999999
+            },
+            "thumbnail": {
+              "count": 33,
+              "sum_seconds": 46.231,
+              "p50_seconds": 1.326,
+              "p95_seconds": 1.9481999999999984
+            }
+          },
+          "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+        },
+        ".stl": {
+          "models": 84,
+          "metadata_ready": 84,
+          "thumbnail_ready": 84,
+          "thumbnail_failed": 0,
+          "both_ready": 84,
+          "outcomes": {
+            "metadata:ready": 84,
+            "thumbnail:ready": 84
+          },
+          "artifact_latency": {
+            "clock": "database_utc",
+            "monotonic_qualification": false,
+            "count": 84,
+            "p50_seconds": 75.654945,
+            "p95_seconds": 107.37957144999999,
+            "unavailable": 0,
+            "unavailable_reasons": {},
+            "timestamp_sources": {
+              "frozen_ingestion_job": 84
+            }
+          },
+          "worker_reported_duration_ms": {
+            "metadata": {
+              "count": 84,
+              "sum_seconds": 160.184,
+              "p50_seconds": 1.427,
+              "p95_seconds": 4.955449999999991
+            },
+            "thumbnail": {
+              "count": 84,
+              "sum_seconds": 189.672,
+              "p50_seconds": 1.7145000000000001,
+              "p95_seconds": 5.444249999999997
+            }
+          },
+          "worker_duration_note": "Stored duration_ms converted to seconds; durations overlap, exclude uninstrumented startup/admission and are not per-format wall times. Stage boundaries changed in staged candidate."
+        }
+      },
+      "outcomes": {
+        "metadata:ready": 200,
+        "thumbnail:ready": 200
+      },
+      "source_integrity": {
+        "originals_verified": 200,
+        "thumbnails_verified": 200,
+        "r2_requests": 0,
+        "request_ledger_unchanged": true
+      },
+      "timings": {
+        "publication_monotonic_seconds": 469.68522035,
+        "publication_realtime_seconds": 497.069809731,
+        "windows_qpc": {
+          "seconds": 496.5439905,
+          "clock": "Windows Stopwatch / QPC",
+          "scope": "Two independent Windows host counter observations enclosing source upload through durable publication. Includes boundary placement/process invocation gaps; wrapper intervals recorded in WSL clocks independently. Not corrected or substituted for WSL timings."
+        },
+        "qpc_boundary_wrappers": [
+          {
+            "available": true,
+            "ticks": 349084510817,
+            "frequency": 10000000,
+            "wrapper_before": {
+              "monotonic_ns": 33297594129787,
+              "realtime_ns": 1791748849100704243
+            },
+            "wrapper_after": {
+              "monotonic_ns": 33297891343623,
+              "realtime_ns": 1791748849397918079
+            },
+            "wrapper_monotonic_seconds": 0.297213836,
+            "wrapper_realtime_seconds": 0.297213836
+          },
+          {
+            "available": true,
+            "ticks": 354049950722,
+            "frequency": 10000000,
+            "wrapper_before": {
+              "monotonic_ns": 33767582345992,
+              "realtime_ns": 1791749346473508324
+            },
+            "wrapper_after": {
+              "monotonic_ns": 33767866270758,
+              "realtime_ns": 1791749346757432999
+            },
+            "wrapper_monotonic_seconds": 0.283924766,
+            "wrapper_realtime_seconds": 0.283924675
+          }
+        ],
+        "cold_first_wave": {
+          "count": 4,
+          "seconds_monotonic": 16.865500839,
+          "seconds_realtime": 18.649875358,
+          "outputs": {
+            "metadata:ready": 4,
+            "thumbnail:ready": 4
+          },
+          "scope": "First four fresh source uploads through durable requested outputs, includes broker startup when lazily started; excludes deployment/API boot."
+        },
+        "warm_remaining": {
+          "count": 196,
+          "seconds_monotonic": 452.758703928,
+          "seconds_realtime": 478.358918696,
+          "scope": "Remaining196 source files through durable outputs after cold first wave; descriptive subcohort, not a200-model claim."
+        },
+        "note": "Clocks retained independently. QPC includes process invocation boundary gaps; UTC artifact latencies remain diagnostic. No global clock calibration or format walltime claimed."
+      },
+      "workload": {
+        "submission_policy": "cold4_then_continuous40_durable_outputs",
+        "unfinished_output_window": 40,
+        "pending_ingestion_window": 4,
+        "peak_outstanding": 40,
+        "admission_backpressure": {
+          "policy": "Only507 with exact staging_capacity_exceeded;1s backoff;30s perinput bounded by original run deadline; reopen local source each attempt.",
+          "rejected_requests": 3,
+          "affected_inputs": 3,
+          "max_rejections_per_input": 1,
+          "wait_seconds_sum": 3.0002482020063326,
+          "wait_seconds_max": 1.0001206939996337,
+          "upload_requests": 203,
+          "included_in_publication_interval": true
+        }
+      },
+      "comparison": {
+        "baseline_revision": "26b8f4b4f5964a16fd879285648f334bf4a72e84",
+        "same_workload_policy": true,
+        "baseline_workload_policy": "cold4_then_continuous40_durable_outputs",
+        "same_sources": 200,
+        "duration_candidate_over_base": {
+          "wsl_monotonic": 1.0509285839459717,
+          "wsl_realtime": 1.0510655907491435,
+          "windows_qpc": 1.0497105078800844
+        },
+        "interpretation": "Same200 source selection/order. Workload policies are reported separately; compare production changes only between matching policies. Changes include rendering, preparation, staging and encoding, not device-only isolation. Cold4/warm196 are descriptive subsets."
+      },
+      "authoritative_geometry": {
+        "same_source_count": 200,
+        "exact_geometry_count": 200,
+        "by_format": {
+          ".obj": {
+            "count": 83,
+            "exact_geometry_count": 83
+          },
+          ".step": {
+            "count": 33,
+            "exact_geometry_count": 33
+          },
+          ".stl": {
+            "count": 84,
+            "exact_geometry_count": 84
+          }
+        }
+      },
+      "compute": {
+        "budget_bytes": 1073741824,
+        "reserved_bytes": 176009868,
+        "resident_entries": 18,
+        "queue_depth": 0,
+        "completed": 199,
+        "fallbacks": 0,
+        "cold_start_seconds": 1.9257564889994683,
+        "queue_seconds": 0.13275264600815717,
+        "execution_seconds": 7.05616124599328,
+        "input_bytes": 218697592,
+        "output_bytes": 244533787,
+        "batch_inputs": 0,
+        "residency_hits": 4,
+        "residency_misses": 195,
+        "host_reserved_bytes": 1073741824,
+        "queued_bytes": 66,
+        "rendering_transfer_seconds": 1.676086861982185,
+        "inference_batches": 0,
+        "render_batches": 193,
+        "render_frames": 195,
+        "render_submissions": 193,
+        "render_upload_calls": 193,
+        "render_bounds_vertices": 9923854,
+        "geometry_local_normal_fallback_vertices": 4013,
+        "render_batch_model_counts": [
+          191,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "render_batch_frame_counts": [
+          191,
+          2,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "render_interactive_requests": 0,
+        "render_background_requests": 199,
+        "render_cache_hits": 4,
+        "geometry_upload_bytes": 185103188,
+        "geometry_gpu_uploads": 195,
+        "geometry_cpu_uploads": 0,
+        "geometry_gpu_normal_uploads": 31,
+        "geometry_cpu_normal_fallbacks": 0,
+        "geometry_normal_seconds": 0.16535374197701458,
+        "geometry_packing_seconds": 1.8979365670020343,
+        "render_postprocess_gpu": true,
+        "geometry_input_bytes": 218670424,
+        "geometry_input_cache_hits": 4,
+        "geometry_input_cache_bytes": 16225584
+      },
+      "compute_snapshot_note": "Final counters in fresh deployment. Reserved values are final snapshots, not peaks. Histograms count render batches, not necessarily native queue.submit calls. CPU placement is included in whole-pipeline outcomes.",
+      "events": {
+        "available": true,
+        "malformed_events": 0,
+        "phases": {
+          "admission": {
+            "count": 200,
+            "sum_seconds": 0.500623238,
+            "p50_seconds": 0.00014785999999999998,
+            "p95_seconds": 0.006113878549999974
+          },
+          "load": {
+            "count": 200,
+            "sum_seconds": 281.714980894,
+            "p50_seconds": 1.2480024730000001,
+            "p95_seconds": 1.8083130564999996
+          },
+          "measurements": {
+            "count": 200,
+            "sum_seconds": 21.325245171,
+            "p50_seconds": 0.0082599075,
+            "p95_seconds": 0.5557971312999999
+          },
+          "render": {
+            "count": 200,
+            "sum_seconds": 57.688339727,
+            "p50_seconds": 0.242870714,
+            "p95_seconds": 0.3755850397
+          }
+        },
+        "native_waits": {
+          "count": 200,
+          "sum_seconds": 597.581241089,
+          "p50_seconds": 0.042244121,
+          "p95_seconds": 9.477415680149997
+        },
+        "supervision": {
+          "count": 200,
+          "sum_seconds": 803.18203281,
+          "p50_seconds": 3.740925174,
+          "p95_seconds": 5.871980139449993
+        },
+        "native_admissions": 200,
+        "whole_pool_claims": 57,
+        "capacity_bytes": [
+          4146845696
+        ],
+        "admission_outcomes": {
+          "admitted": 200
+        },
+        "peak_worker_tree_rss_bytes": 566677504
+      },
+      "handoff": {
+        "count": 0,
+        "modes": {},
+        "exit_causes": {},
+        "durations": {
+          "prepared_read_ns": null,
+          "dispatch_ns": null,
+          "finalizer_queue_ns": null,
+          "finalizer_supervision_ns": null
+        },
+        "prepared_bytes": {
+          "sum": 0,
+          "maximum": null
+        },
+        "supervision_by_stage": {
+          "parser": {
+            "count": 200,
+            "sum_seconds": 803.18203281,
+            "p50_seconds": 3.740925174,
+            "p95_seconds": 5.871980139449993
+          },
+          "finalizer": null
+        },
+        "note": "Accumulated per-request durations may overlap; finalizer supervision includes process startup/imports/encoding/cleanup and is not encoder-only CPU time."
+      },
+      "hardware": {
+        "available": true,
+        "scope": "One-second samples during publication, whole physical adapter including unrelated Windows work; not per-process allocation or qualification.",
+        "malformed_samples": 0,
+        "metrics": {
+          "gpu_utilization_percent": {
+            "count": 470,
+            "median": 0.0,
+            "p95": 1.0,
+            "maximum": 12.0
+          },
+          "memory_utilization_percent": {
+            "count": 470,
+            "median": 4.0,
+            "p95": 13.549999999999955,
+            "maximum": 24.0
+          },
+          "device_memory_used_mib": {
+            "count": 470,
+            "median": 1281.0,
+            "p95": 1450.1,
+            "maximum": 1478.0
+          }
+        }
+      },
+      "ingestion_intervals": {
+        "clock": "database_utc",
+        "qualification": "diagnostic_only_not_monotonic",
+        "unavailable_reasons": {},
+        "by_format": {
+          "all": {
+            "job_creation_to_terminal": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 200,
+              "p50_seconds": 5.4815285,
+              "p95_seconds": 10.0699661
+            },
+            "ingestion_terminal_to_derivative_publication": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 200,
+              "p50_seconds": 67.793927,
+              "p95_seconds": 101.67759769999998
+            }
+          },
+          ".step": {
+            "job_creation_to_terminal": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 33,
+              "p50_seconds": 3.804265,
+              "p95_seconds": 6.8649626
+            },
+            "ingestion_terminal_to_derivative_publication": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 33,
+              "p50_seconds": 30.861087,
+              "p95_seconds": 62.40635339999999
+            }
+          },
+          ".stl": {
+            "job_creation_to_terminal": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 84,
+              "p50_seconds": 5.4815285,
+              "p95_seconds": 9.36705695
+            },
+            "ingestion_terminal_to_derivative_publication": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 84,
+              "p50_seconds": 70.4661675,
+              "p95_seconds": 101.1096455
+            }
+          },
+          ".obj": {
+            "job_creation_to_terminal": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 83,
+              "p50_seconds": 6.376592,
+              "p95_seconds": 11.315203799999999
+            },
+            "ingestion_terminal_to_derivative_publication": {
+              "clock": "database_utc",
+              "monotonic_qualification": false,
+              "count": 83,
+              "p50_seconds": 63.301599,
+              "p95_seconds": 103.0828595
+            }
+          }
+        },
+        "note": "Exact retained ingestion Job ID maps creation/terminal to the frozen requested derivative terminal timestamps. Publication may overlap ingestion; these are observed intervals, not serial CPU costs or attributable residuals."
+      },
+      "visual_approval": "pending_user",
+      "saved_frame_content": {
+        "count": 200,
+        "alpha_outcomes": {
+          "foreground_present": 200
+        },
+        "dimensions": {
+          "(640, 480)": 200
+        },
+        "note": "Alpha foreground at threshold128 is present in each saved frame; visual approval remains with the user. No rerender or remote requests."
+      },
+      "reproducibility": {
+        "shared_executed_harness_sha256": "4baa2cd0abef00e6952b90cb572aecbab09fe9bf217653630a0f4c9c92d89d94",
+        "identical_script_both_arms": true,
+        "cohort": {
+          "count": 200,
+          "formats": {
+            "STEP": 33,
+            "STL": 84,
+            "OBJ": 83
+          },
+          "order": "33 STEP,84 STL,83 OBJ; identical fixed source order in both arms",
+          "selection_sha256": "077e93816fab660a38764f72a356bcda906bb5fea45118567b77af31ef7672a8"
+        },
+        "cold_phase": {
+          "count": 4,
+          "fresh_deployment": true,
+          "wait_for_requested_outputs": true,
+          "compute_diagnostic_after_cold_phase": true
+        },
+        "warm_phase": {
+          "count": 196,
+          "max_unfinished_output_artifacts_including_uploads": 40,
+          "max_uploading_plus_unfinished_ingestion_jobs": 4,
+          "max_parallel_uploads": 4,
+          "refill": "individual credits without closed-wave barrier",
+          "job_and_output_poll_interval_seconds": 1
+        },
+        "backpressure": {
+          "retry_http_status": 507,
+          "retry_exact_detail": "staging_capacity_exceeded",
+          "backoff_seconds": 1,
+          "per_input_limit_seconds": 30,
+          "original_deadline_applies": true,
+          "reopen_local_source_each_attempt": true,
+          "other_errors": "abort without retry",
+          "retry_wait_included_in_publication_duration": true,
+          "quotas_unchanged": true
+        },
+        "timing": {
+          "start": "before first source upload",
+          "stop": "requested metadata and thumbnail outputs durably terminal for all200 sources",
+          "clocks": "WSL monotonic,WSL realtime,Windows QPC retained separately",
+          "post_timer_verification": "original SHA256 and saved thumbnail decoding",
+          "not_claimed": "No calibrated clock, per-format walltime, visual approval or device-only effect"
+        },
+        "external_storage_requests": 0,
+        "scheduling": "40 unfinished artifacts does not mean40 resident GPU models; actual GPU batch histograms are reported separately"
+      },
+      "baseline_source_provenance": {
+        "image_revision": "26b8f4b4f5964a16fd879285648f334bf4a72e84",
+        "source_equivalence_revision": "b898824f0439d2b605c0129b203f87125252edce",
+        "verification": "git tree object identities equal for app/core/frontend source paths; no image relabeling. Backend/core dependency manifest diff is empty.",
+        "trees": {
+          "backend/app": {
+            "image_revision_tree_oid": "cca79e680ab690619890b29a2f5e13b6f97936a3",
+            "documented_revision_tree_oid": "cca79e680ab690619890b29a2f5e13b6f97936a3"
+          },
+          "backend/packages/printstash-core/src": {
+            "image_revision_tree_oid": "9542954efb171c441ac88a803fd9c4d90b3c36c1",
+            "documented_revision_tree_oid": "9542954efb171c441ac88a803fd9c4d90b3c36c1"
+          },
+          "frontend/src": {
+            "image_revision_tree_oid": "fc4ef974c139aa31cdabe05c9dea1e7bfb7f9c5a",
+            "documented_revision_tree_oid": "fc4ef974c139aa31cdabe05c9dea1e7bfb7f9c5a"
+          }
+        }
+      },
+      "invalid_preflights": {
+        "count": 2,
+        "included_in_comparison": false,
+        "reason": "Earlier continuous refill policies aborted on staging capacity507; neither completed200 models. Both raw partial reports and lease diagnostics remain preserved locally. Current matched arms use bounded pre-admission retries without quota changes."
+      },
+      "candidate_source_provenance": {
+        "image_revision": "d8f64ccc2cbed433503d4fbe3439257e64b2a8fc",
+        "source_tree_digest": "3be25387b4b752c2565ad6096a33845a6a09be312873d3292bd2c6a0290f0977",
+        "image_id": "sha256:662989baac95a9fee4931b23c2b82022d71fd3039511dd6b37b2eb91aeba033a",
+        "repository_clean_at_post_run_check": true,
+        "repository_HEAD_at_post_run_check": "d8f64ccc2cbed433503d4fbe3439257e64b2a8fc",
+        "source_bind_mounts": false
+      }
+    },
+    "ready_geometry_candidate": null,
+    "comparison_note": "Matched bounded continuous40 policy. Combined-worker d8f64ccc regressed approximately5% in complete publication despite halving broker execution. Retained without substituting microbenchmark savings. A subsequent ready-geometry path avoiding a second success-path encoder process is not yet measured.",
+    "combined_worker_timing_analysis": {
+      "base": {
+        "acceptance_checkpoints_monotonic_seconds": {
+          "source_upload_run_start": 0.0,
+          "ingestion_wave_4": 3.537239085,
+          "cold_first_wave_complete": 16.612559588,
+          "warm_remaining_start": 16.693945566,
+          "continuous_accepted_4": 16.703210906,
+          "continuous_accepted_20": 31.102226347,
+          "continuous_accepted_40": 57.489118927,
+          "continuous_accepted_60": 83.977889722,
+          "continuous_accepted_80": 126.080932645,
+          "continuous_accepted_100": 169.61790735,
+          "continuous_accepted_120": 214.596641632,
+          "continuous_accepted_140": 252.465681855,
+          "continuous_accepted_160": 306.678942074,
+          "continuous_accepted_180": 338.165524125,
+          "continuous_accepted_200": 381.490358677,
+          "publication_complete": 446.924013225
+        },
+        "tail_after_all_accepted_monotonic_seconds": 65.43365454799999,
+        "upload_through_acceptance": {
+          "count": 200,
+          "sum_seconds": 139.16358560398658,
+          "median_seconds": 0.4099595230018167,
+          "maximum_seconds": 4.00485284000024
+        },
+        "backpressure_occurrences": [
+          {
+            "accepted_sequence": 166,
+            "rejections": 1,
+            "wait_seconds": 1.0001529090004624
+          }
+        ],
+        "phase_sums_seconds": {
+          "admission": 0.572213412,
+          "load": 269.369581542,
+          "measurements": 19.093058159,
+          "render": 98.873003003
+        },
+        "native_wait_sum_seconds": 559.432849031,
+        "supervision_sum_seconds": 794.931285799
+      },
+      "candidate": {
+        "acceptance_checkpoints_monotonic_seconds": {
+          "source_upload_run_start": 0.0,
+          "ingestion_wave_4": 2.529871488,
+          "cold_first_wave_complete": 16.865500839,
+          "warm_remaining_start": 16.926516422,
+          "continuous_accepted_4": 16.978396374,
+          "continuous_accepted_20": 34.36525464,
+          "continuous_accepted_40": 61.113310598,
+          "continuous_accepted_60": 88.280391045,
+          "continuous_accepted_80": 132.286312376,
+          "continuous_accepted_100": 175.810499073,
+          "continuous_accepted_120": 214.038328248,
+          "continuous_accepted_140": 254.120398194,
+          "continuous_accepted_160": 321.336347282,
+          "continuous_accepted_180": 362.530905723,
+          "continuous_accepted_200": 403.69962668,
+          "publication_complete": 469.68522035
+        },
+        "tail_after_all_accepted_monotonic_seconds": 65.98559367000001,
+        "upload_through_acceptance": {
+          "count": 200,
+          "sum_seconds": 133.55991988195456,
+          "median_seconds": 0.4402061209984822,
+          "maximum_seconds": 3.363831778995518
+        },
+        "backpressure_occurrences": [
+          {
+            "accepted_sequence": 61,
+            "rejections": 1,
+            "wait_seconds": 1.0000745880024624
+          },
+          {
+            "accepted_sequence": 91,
+            "rejections": 1,
+            "wait_seconds": 1.0000529200042365
+          },
+          {
+            "accepted_sequence": 116,
+            "rejections": 1,
+            "wait_seconds": 1.0001206939996337
+          }
+        ],
+        "phase_sums_seconds": {
+          "admission": 0.500623238,
+          "load": 281.714980894,
+          "measurements": 21.325245171,
+          "render": 57.688339727
+        },
+        "native_wait_sum_seconds": 597.581241089,
+        "supervision_sum_seconds": 803.18203281
+      },
+      "interpretation": {
+        "end_to_end": "Candidate d8 did not improve end-to-end completion. Both independent Windows QPC and WSL monotonic measured about5% slower in this single matched200-model run.",
+        "acceptance_and_tail": "Most observed difference is already present when the last source is accepted; subsequent drain duration is nearly unchanged. Acceptance timing includes upstream pacing and downstream completion credits, so this does not isolate upload speed.",
+        "retry": "Candidate has3 versus1 pre-admission rejections, adding2 seconds to accumulated recorded backoff; waits remain included. This does not causally account for the full22.76-second end-to-end difference; overlapping work and scheduling require caution.",
+        "gpu": "Owner execution fell13.94 to7.06 seconds and render-stage accumulated time fell98.87 to57.69 seconds. These counters do not support blaming GPU rasterization for the end-to-end regression.",
+        "unisolated": "Load, measurements and native admission/supervision became somewhat slower. Logs do not separately measure source preparation, process startup, geometry preparation, encoder CPU time and scheduler critical path sufficiently to assign the remaining difference.",
+        "pacing": "Both arms used byte-identical executed harnesses with1-second continuous polling, same4 pending ingestion jobs and40 unfinished outputs. The final5-second fallback loop did not sleep: each report has exactly one final snapshot after200 outputs terminal. No durations were subtracted.",
+        "statistical_limit": "One matched run per image; no confidence interval or claim of deterministic5%regression. Repeating CPU or baseline was not authorized."
+      }
+    },
+    "final_validation_scope": "At operator request, final GPU validation will process all 1000 cached sources instead of executing another 200-source candidate arm. No CPU or reference arm is repeated; no additional R2 requests are permitted."
   }
 }

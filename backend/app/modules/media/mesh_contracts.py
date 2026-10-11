@@ -29,6 +29,7 @@ from app.modules.media.mesh_facts import (
     SampledGeometry,
 )
 from app.modules.media.mesh_telemetry import PhaseStats, SupervisionStats
+from app.modules.media.thumbnail_packet import PacketDescriptor
 
 if TYPE_CHECKING:
     from app.modules.media.fingerprints import FingerprintResult
@@ -181,6 +182,7 @@ class ThumbnailResult:
     fingerprint_result: FingerprintResult | None = None
     phase_stats: tuple[PhaseStats, ...] = ()
     supervision: SupervisionStats | None = None
+    fallback_supervision: SupervisionStats | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.coverage, MeshCoverage):
@@ -235,6 +237,22 @@ class ThumbnailResult:
                         "partial fingerprint cause disagrees with sampled geometry"
                     )
         MeshMeasurements(self.geometry, self.volume)
+
+
+@dataclass(frozen=True)
+class PreparedThumbnailResult:
+    """A source result whose thumbnail has not been rendered or published yet."""
+
+    metadata: ThumbnailResult
+    packet: PacketDescriptor
+
+    def __post_init__(self) -> None:
+        if (
+            self.metadata.image is not None
+            or self.metadata.strategy is not ThumbnailStrategy.NONE
+            or self.metadata.failure_reason is not None
+        ):
+            raise ValueError("invalid_prepared_thumbnail_result")
 
 
 class ThumbnailMetricsSink(Protocol):

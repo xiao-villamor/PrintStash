@@ -40,9 +40,14 @@ class LaunchResources:
 def launch_resources(permit: NativePermit) -> LaunchResources:
     """Native children retain source bytes as well as their compute allowance."""
     from app.runtime.native_runtime import PERMIT_ENV, PERMIT_PATH_ENV
+    from app.runtime.preparation_runtime import (
+        HOST_PATH_ENV,
+        HOST_PERMIT_ENV,
+        current_host_permit,
+        current_permit,
+    )
     from app.runtime.preparation_runtime import PERMIT_ENV as PREPARATION_ENV
     from app.runtime.preparation_runtime import PERMIT_PATH_ENV as PREPARATION_PATH_ENV
-    from app.runtime.preparation_runtime import current_permit
 
     descriptors = [permit.fileno]
     environment = {PERMIT_ENV: str(permit.fileno), PERMIT_PATH_ENV: str(permit.path)}
@@ -51,6 +56,11 @@ def launch_resources(permit: NativePermit) -> LaunchResources:
         descriptors.append(prepared.fileno)
         environment[PREPARATION_ENV] = str(prepared.fileno)
         environment[PREPARATION_PATH_ENV] = str(prepared.path)
+    host = current_host_permit()
+    if host is not None:
+        descriptors.append(host.fileno)
+        environment[HOST_PERMIT_ENV] = str(host.fileno)
+        environment[HOST_PATH_ENV] = str(host.path)
     return LaunchResources(tuple(descriptors), environment)
 
 
@@ -367,6 +377,13 @@ def main(argv: list[str]) -> int:
                 NativePermit.inherit(
                     int(prepared), Path(os.environ[PREPARATION_PATH_ENV])
                 )
+            )
+        from app.runtime.preparation_runtime import HOST_PATH_ENV, HOST_PERMIT_ENV
+
+        host = os.environ.get(HOST_PERMIT_ENV)
+        if host is not None:
+            credits.enter_context(
+                NativePermit.inherit(int(host), Path(os.environ[HOST_PATH_ENV]))
             )
         return _run(argv)
 

@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 
 from app.modules.media.compute_render import background_render_scope
-from app.modules.media.mesh_contracts import ThumbnailRequest
+from app.modules.media.mesh_contracts import PreparedThumbnailResult, ThumbnailRequest
 from app.modules.media.mesh_isolation import read_spec
 from app.modules.media.mesh_protocol import BasicOutput, FingerprintFinal, encode_frame
 from app.modules.media.thumbnail_engine import ThumbnailEngine
@@ -46,7 +46,22 @@ def main(argv: list[str]) -> int:
         # This worker produces asynchronous Artifact outputs. Its Job priority
         # is retained for admission, but renders can share one GPU submission.
         with background_render_scope():
-            result = ThumbnailEngine().generate(request, on_output=emit)
+            directory = spec.get("prepare_directory")
+            generated = (
+                ThumbnailEngine().prepare(
+                    request,
+                    Path(directory),
+                    deadline=float(spec["prepare_deadline"]),
+                    on_output=emit,
+                )
+                if directory is not None
+                else ThumbnailEngine().generate(request, on_output=emit)
+            )
+            result = (
+                generated.metadata
+                if isinstance(generated, PreparedThumbnailResult)
+                else generated
+            )
         output.write(
             encode_frame(
                 FingerprintFinal(

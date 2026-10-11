@@ -4,15 +4,18 @@ import base64
 import fcntl
 import importlib.util
 import json
+import math
 import os
 import socket
 import struct
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from uuid import uuid4
 
+from app.core.cancellation import checkpoint as cancellation_checkpoint
 from app.core.config import settings
 
 from .contracts import (
@@ -139,7 +142,7 @@ def _connect(
         raise ComputeUnavailable(Reason.BROKER_UNAVAILABLE)
 
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    connection.settimeout(0.2)
+    connection.settimeout(max(0.001, min(0.2, deadline - time.monotonic())))
     try:
         connection.connect(str(address))
         checkpoint()
@@ -167,7 +170,7 @@ def _connect(
         while time.monotonic() < deadline:
             checkpoint()
             connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            connection.settimeout(0.2)
+            connection.settimeout(max(0.001, min(0.2, deadline - time.monotonic())))
             try:
                 connection.connect(str(address))
                 checkpoint()
@@ -224,17 +227,25 @@ def _connect(
     raise ComputeUnavailable(Reason.DEADLINE)
 
 
-def exchange(request, *, checkpoint=lambda: None) -> bytes:
+def exchange(
+    request,
+    *,
+    checkpoint=lambda: None,
+    start: bool | None = None,
+    deadline: float | None = None,
+) -> bytes:
     root = directory()
     if root is None:
         raise ComputeUnavailable(Reason.BROKER_UNAVAILABLE)
-    deadline = getattr(request, "deadline", time.monotonic() + 5)
+    request_deadline: float = getattr(request, "deadline", time.monotonic() + 5)
+    deadline = request_deadline if deadline is None else min(deadline, request_deadline)
     checkpoint()
     try:
-        start = (
-            isinstance(request, StatusRequest)
-            or request.priority == Priority.BACKGROUND
-        )
+        if start is None:
+            start = (
+                isinstance(request, StatusRequest)
+                or request.priority == Priority.BACKGROUND
+            )
         with _connect(
             root,
             min(deadline, time.monotonic() + 30),
@@ -242,8 +253,7 @@ def exchange(request, *, checkpoint=lambda: None) -> bytes:
             checkpoint=checkpoint,
         ) as connection:
             checkpoint()
-            connection.settimeout(max(0.001, min(1, deadline - time.monotonic())))
-            connection.settimeout(0.05)
+            connection.settimeout(max(0.001, min(0.05, deadline - time.monotonic())))
             send_admitted(
                 connection,
                 request.model_dump_json().encode(),
@@ -253,7 +263,9 @@ def exchange(request, *, checkpoint=lambda: None) -> bytes:
             # Poll readiness so cancellation is checked while the device executes.
             import select
 
-            while not select.select([connection], [], [], 0.05)[0]:
+            while not select.select(
+                [connection], [], [], max(0, min(0.05, deadline - time.monotonic()))
+            )[0]:
                 checkpoint()
                 if time.monotonic() >= deadline:
                     raise ComputeUnavailable(Reason.DEADLINE)
@@ -261,11 +273,25 @@ def exchange(request, *, checkpoint=lambda: None) -> bytes:
             checkpoint()
             return result
     except OSError:
+        checkpoint()
         cooldown()
         raise ComputeUnavailable(Reason.BROKER_UNAVAILABLE) from None
 
 
-def status() -> ComputeStatus:
+def status(
+    *,
+    start: bool = True,
+    deadline: float | None = None,
+    checkpoint: Callable[[], None] = cancellation_checkpoint,
+) -> ComputeStatus:
+    def remaining() -> None:
+        checkpoint()
+        if deadline is not None and (
+            not math.isfinite(deadline) or time.monotonic() >= deadline
+        ):
+            raise TimeoutError("compute_deadline")
+
+    remaining()
     if settings.compute_mode == "cpu":
         return cpu_status(Reason.DISABLED)
     if importlib.util.find_spec("wgpu") is None:
@@ -276,9 +302,76 @@ def status() -> ComputeStatus:
     if root is None:
         return cpu_status(Reason.BROKER_UNAVAILABLE)
     try:
-        return ComputeStatus.model_validate_json(exchange(StatusRequest()))
+        state = ComputeStatus.model_validate_json(
+            exchange(
+                StatusRequest(), start=start, deadline=deadline, checkpoint=remaining
+            )
+        )
     except ComputeUnavailable, ValueError:
+        remaining()
         return cpu_status(Reason.BROKER_UNAVAILABLE)
+    remaining()
+    return state
+
+
+def render_ready(
+    *,
+    recipe: str,
+    units: int | None = None,
+    deadline: float | None = None,
+    checkpoint: Callable[[], None] = cancellation_checkpoint,
+) -> bool:
+    """Only an already qualified final-pixel owner can accept parser handoff.
+
+    Unknown units are used before parsing to require a valid recipe interval;
+    the parser repeats this check with its actual face count. The broker retains
+    final authority after a restart or receipt change. A cold owner stays on the
+    combined path, which can initialize rendering outside this readiness probe.
+    """
+
+    def remaining() -> None:
+        checkpoint()
+        if deadline is not None and (
+            not math.isfinite(deadline) or time.monotonic() >= deadline
+        ):
+            raise TimeoutError("compute_deadline")
+
+    remaining()
+    if units is not None and (type(units) is not int or units < 1):
+        raise ValueError("compute_render_units")
+    if not available(render=True):
+        remaining()
+        return False
+    state = status(start=False, deadline=deadline, checkpoint=remaining)
+    if (
+        state.mode is not ComputeMode.AUTO
+        or state.device is None
+        or not state.render_postprocess_gpu
+        or not any(
+            capability.operation is Operation.RENDER and capability.available
+            for capability in state.capabilities
+        )
+    ):
+        return False
+    if settings.compute_render_policy == "preview":
+        return True
+    from .qualification import read_receipts
+
+    root = directory()
+    if root is None:
+        return False
+    accepted = any(
+        receipt.accepts(
+            state.device,
+            state.runtime_identity,
+            Operation.RENDER,
+            recipe,
+            receipt.minimum_units if units is None else units,
+        )
+        for receipt in read_receipts(root / "qualification.json")
+    )
+    remaining()
+    return accepted
 
 
 def infer(

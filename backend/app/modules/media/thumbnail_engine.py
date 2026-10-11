@@ -25,6 +25,7 @@ from printstash_core.mesh.measurements import (
 from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
+from app.core.cancellation import OperationCancelled, checkpoint
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.modules.media import (
@@ -50,6 +51,7 @@ from app.modules.media.mesh_contracts import (
     GeometryRefused,
     GeometryRepresentation,
     MeshCoverage,
+    PreparedThumbnailResult,
     PreviewCoverage,
     SourceScanState,
     ThumbnailFailureReason,
@@ -67,6 +69,7 @@ from app.modules.media.mesh_protocol import (
     BasicOutput,
     GeometryOutput,
     OutputSink,
+    PreparedThumbnailOutput,
     ThumbnailOutput,
 )
 from app.modules.media.mesh_resources import (
@@ -88,6 +91,7 @@ from app.modules.media.stl_reader import (
     scan_stl,
 )
 from app.modules.media.three_mf_scene import Unsupported3MFCapability, read_scene
+from app.modules.media.thumbnail_packet import PacketDescriptor, write_packet
 from app.modules.media.worker_bootstrap import WORKER_MARKER
 
 if TYPE_CHECKING:
@@ -167,6 +171,33 @@ class ThumbnailEngine:
     def generate(
         self, request: ThumbnailRequest, *, on_output: OutputSink | None = None
     ) -> ThumbnailResult:
+        result = self._generate(request, on_output=on_output)
+        assert isinstance(result, ThumbnailResult)
+        return result
+
+    def prepare(
+        self,
+        request: ThumbnailRequest,
+        directory: Path,
+        *,
+        deadline: float,
+        on_output: OutputSink | None = None,
+    ) -> ThumbnailResult | PreparedThumbnailResult:
+        return self._generate(
+            request,
+            on_output=on_output,
+            output_directory=directory,
+            preparation_deadline=deadline,
+        )
+
+    def _generate(
+        self,
+        request: ThumbnailRequest,
+        *,
+        on_output: OutputSink | None = None,
+        output_directory: Path | None = None,
+        preparation_deadline: float | None = None,
+    ) -> ThumbnailResult | PreparedThumbnailResult:
         started = time.monotonic()
         phases = PhaseRecorder()
         try:
@@ -193,6 +224,7 @@ class ThumbnailEngine:
         preview_coverage = PreviewCoverage.NOT_PRODUCED
         failure: ThumbnailFailureReason | None = None
         image: bytes | None = None
+        packet: PacketDescriptor | None = None
         mesh: Trimesh | None = None
         prepared: PreparedMesh | None = None
         detached_prepared: DetachedSceneMesh | None = None
@@ -244,6 +276,16 @@ class ThumbnailEngine:
             if image is not None:
                 failure = None
             thumbnail_emitted = True
+            if packet is not None:
+                deliver(
+                    PreparedThumbnailOutput(
+                        packet,
+                        coverage(),
+                        max(round((time.monotonic() - started) * 1000), 0),
+                        _peak_rss_bytes(),
+                    )
+                )
+                return
             if on_output is not None:
                 deliver(
                     ThumbnailOutput(
@@ -584,23 +626,60 @@ class ThumbnailEngine:
                                 )
                             else:
                                 try:
-                                    image = (
-                                        mesh_render.render_scene_thumbnail(
-                                            source_scene.scene,
-                                            request.path.name,
-                                            width=width,
-                                            height=height,
-                                            output_format=request.output_format,
+                                    if output_directory is not None:
+                                        render_input = (
+                                            mesh_render.prepare_scene_render(
+                                                source_scene.scene
+                                            )
+                                            if source_scene is not None
+                                            else mesh_render.prepare_mesh_render(mesh)
                                         )
-                                        if source_scene is not None
-                                        else mesh_render.render_mesh_thumbnail(
-                                            mesh,
-                                            request.path.name,
-                                            width=width,
-                                            height=height,
-                                            output_format=request.output_format,
+                                        from app.runtime.compute.client import (
+                                            render_ready,
+                                        )
+
+                                        from .compute_render import render_recipe
+
+                                        if render_input is not None and render_ready(
+                                            recipe=render_recipe(width, height),
+                                            units=render_input.face_count,
+                                            deadline=preparation_deadline,
+                                            checkpoint=checkpoint,
+                                        ):
+                                            try:
+                                                packet = write_packet(
+                                                    render_input,
+                                                    output_directory,
+                                                    width,
+                                                    height,
+                                                )
+                                            except ValueError:
+                                                # A source may fit native CPU rendering while its
+                                                # immutable packet exceeds the shared wire budget.
+                                                packet = None
+                                    image = (
+                                        None
+                                        if packet is not None
+                                        else (
+                                            mesh_render.render_scene_thumbnail(
+                                                source_scene.scene,
+                                                request.path.name,
+                                                width=width,
+                                                height=height,
+                                                output_format=request.output_format,
+                                            )
+                                            if source_scene is not None
+                                            else mesh_render.render_mesh_thumbnail(
+                                                mesh,
+                                                request.path.name,
+                                                width=width,
+                                                height=height,
+                                                output_format=request.output_format,
+                                            )
                                         )
                                     )
+                                except OperationCancelled, TimeoutError:
+                                    raise
                                 except Exception:  # noqa: BLE001 - bounded fallbacks remain
                                     logger.exception(
                                         "thumbnail_engine: full renderer failed",
@@ -611,14 +690,19 @@ class ThumbnailEngine:
                                     preview_coverage = PreviewCoverage.COMPLETE
 
                         phases.finish(
-                            output_bytes=len(image) if image is not None else None,
-                            outcome=PhaseOutcome.COMPLETED
+                            output_bytes=len(image)
                             if image is not None
+                            else packet.size_bytes
+                            if packet is not None
+                            else None,
+                            outcome=PhaseOutcome.COMPLETED
+                            if image is not None or packet is not None
                             else PhaseOutcome.FAILED,
                         )
 
                         if (
                             image is None
+                            and packet is None
                             and suffix == ".stl"
                             and (over_cap or mesh is not None)
                         ):
@@ -681,7 +765,7 @@ class ThumbnailEngine:
                                         }
                                     )
 
-                        if image is None and suffix == ".stl":
+                        if image is None and packet is None and suffix == ".stl":
                             phases.start(MeshPhase.FALLBACK, input_bytes=source_bytes)
                             fallback = stl_fallback.render_stl_thumbnail(
                                 request.path, width=width, height=height
@@ -730,7 +814,7 @@ class ThumbnailEngine:
                                         }
                                     )
 
-                        if image is None and failure is None:
+                        if image is None and packet is None and failure is None:
                             failure = (
                                 ThumbnailFailureReason.RESOURCE_LIMIT
                                 if over_cap
@@ -910,13 +994,15 @@ class ThumbnailEngine:
             raise exc.error from None
         if request.include_geometry and geometry["triangle_count"] is not None:
             geometry_outcome = GeometryReady()
-        if image is not None:
+        if image is not None or packet is not None:
             failure = None
         duration_ms = max(round((time.monotonic() - started) * 1000), 0)
         labels = {
             "format": suffix.removeprefix(".") or "unknown",
             "strategy": strategy.value,
-            "outcome": "generated" if image is not None else "failed",
+            "outcome": "generated"
+            if image is not None or packet is not None
+            else "failed",
             "reason": failure.value if failure is not None else "none",
         }
         self.metrics.increment("thumbnail_generation_total", labels=labels)
@@ -943,7 +1029,7 @@ class ThumbnailEngine:
             self.metrics.observe(
                 "thumbnail_peak_rss_bytes", float(peak_rss), labels=labels
             )
-        return ThumbnailResult(
+        result = ThumbnailResult(
             image=image,
             geometry=geometry,
             geometry_outcome=geometry_outcome,
@@ -958,6 +1044,7 @@ class ThumbnailEngine:
             fingerprint_result=fingerprint_result,
             phase_stats=phases.snapshot(),
         )
+        return PreparedThumbnailResult(result, packet) if packet is not None else result
 
 
 __all__ = [

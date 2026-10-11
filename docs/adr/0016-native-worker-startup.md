@@ -4,7 +4,7 @@ Status: accepted — defer parent-only instruments and database URL parsing at t
 
 ## Decision
 
-Keep one disposable native process per Artifact request. Import mesh observations only where the parent records admission, completed supervision or validated phases. An inherited child admission retains the same permit checks and does not construct the parent's Prometheus registry. Import SQLAlchemy's URL parser inside `_sqlite_db_path`, after its existing non-SQLite return; actual directory creation and SQLite URL semantics remain unchanged. Settings validation, worker requests, native libraries and outputs retain their existing contracts. No interpreter pool, parser loop, launcher service, schema, recipe or dependency is added.
+Keep source parsing in a fresh disposable native process per Artifact request. Import mesh observations only where the parent records admission, completed supervision or validated phases. An inherited child admission retains the same permit checks and does not construct the parent's Prometheus registry. Import SQLAlchemy's URL parser inside `_sqlite_db_path`, after its existing non-SQLite return; actual directory creation and SQLite URL semantics remain unchanged. Settings validation, worker requests, native libraries and outputs retain their existing contracts. No interpreter pool, parser loop, launcher service, schema, recipe or dependency is added.
 
 The normal mesh request already shares source preparation across metadata, thumbnail and optional fingerprint. Embedding and visual requests already share preparation across their views. Counting one process per view or one source parse per primary output would invent a batching benefit.
 
@@ -105,10 +105,10 @@ accumulated readmission waiting. The 445.15-second publication result versus
 447.57 seconds for the baseline does not demonstrate improvement at the
 five-second observation resolution. These component sums overlap.
 
-The production decision is one combined disposable mesh worker. Native memory
+At `d8f64ccc`, the production decision was one combined disposable mesh worker. Native memory
 estimates and hard process ceilings are unchanged; unknown source complexity
-continues to claim the whole pool. Automatic handoff and its exclusive packet,
-finalizer, native-plan reuse and visual-credit code are removed. There is no
+continued to claim the whole pool. That automatic handoff and its exclusive packet,
+finalizer, native-plan reuse and visual-credit code were removed. That experiment retained no
 manual feature flag or dormant implementation. Rendering, encoding, cooperative
 cancellation and validated publication improvements remain independently active.
 The original source-array custody and CPU fallback stay inside the worker.
@@ -118,3 +118,36 @@ The historical tests and measurements remain in the
 [pipeline comparison](../testing/compute-native-pipeline-200.md). Their former
 coverage is not presented as validation of a still-active handoff. A subsequent
 matched complete-pipeline comparison determines the combined route's outcome.
+
+
+## Prepared geometry without an encoder child (2026-10-11)
+
+The matched continuous-input measurement of `d8f64ccc` preserved all 200 outputs
+but regressed complete publication by about 5%, despite approximately halving
+broker execution. Its result and the earlier second-worker regressions are
+retained in the [pipeline evidence](../testing/compute-native-pipeline-200.md).
+
+The current thumbnail route may release parser admission after clean reap and
+execute the rest of the existing Job from a validated, bounded geometry packet.
+A separate host reservation precedes parser admission and retains all
+packet/pixel/codec custody. Successful GPU output is encoded synchronously in the
+Job thread under a native CPU slot, without a second encoder process. Failed GPU
+execution can use a separately guarded CPU renderer from that same packet; source
+parsing is not repeated. The original deadline and publication fences cover the
+handoff, and cancellation does not release credit before native work returns.
+
+The host pool is capped at 384 MiB and one quarter of unassigned physical
+headroom, with at most four owners. Existing native/model partitions, parser
+estimates, guardian hard limits and source/disk reservations remain authoritative.
+Insufficient or unknown headroom preserves the combined worker. An already-ready
+physical renderer and GPU postprocessor are required; qualified routing reuses
+exact recipe/device/runtime/workload receipts. The first cold request can stay
+combined. Optional fingerprint work also remains combined to preserve early
+thumbnail publication. No source parser state is pooled, and no Job is created
+merely to populate a GPU batch.
+
+[Current behavior coverage](../testing/compute-thumbnail-handoff-v2.md) covers
+real process custody, bounded packet validation, deadline/cancellation recovery,
+inline codec ownership and per-Artifact publication. Correctness checks do not
+establish throughput; the historical matched 200-source measurements and final
+1000-source validation are recorded separately.

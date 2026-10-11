@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import io
-import os
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -15,7 +13,6 @@ import trimesh
 from PIL import Image
 from sqlmodel import select
 
-from app.core.config import _overlay
 from app.db.models import (
     ArtifactDerivative,
     DerivativeKind,
@@ -29,10 +26,9 @@ from app.modules.derivatives.source import subject_key
 from app.modules.work.jobs import jobs
 from app.modules.work.reconciler import run_pass
 from app.runtime.compute import client
-from app.runtime.compute.broker import serve
 from app.runtime.compute.contracts import Reason
 from app.runtime.compute.protocol import Priority
-from tests.fakes.qualified_batch_renderer import QualifiedBatchRenderer
+from tests.fixtures.compute_renderer import qualified_renderer as qualified_renderer
 
 
 async def _wait_until(predicate, message):
@@ -52,47 +48,6 @@ def _derivative_job(file_id):
                 Job.subject_key == subject_key(file_id),
             )
         ).one()
-
-
-@pytest.fixture
-def qualified_renderer(tmp_path, monkeypatch):
-    # Fake the external optional runtime in parent and fresh parser children.
-    # Discovery may find it; importing a real GPU is forbidden by this fixture.
-    package = tmp_path / "external-runtime"
-    package.mkdir()
-    (package / "wgpu.py").write_text(
-        'raise AssertionError("the test executor owns GPU execution")\n'
-    )
-    monkeypatch.syspath_prepend(str(package))
-    monkeypatch.setenv(
-        "PYTHONPATH", os.pathsep.join((str(package), os.environ.get("PYTHONPATH", "")))
-    )
-    monkeypatch.setitem(_overlay, "compute_mode", "auto")
-    monkeypatch.setitem(_overlay, "compute_render_policy", "qualified")
-    monkeypatch.setitem(_overlay, "max_render_jobs", 2)
-    client.bind(tmp_path)
-    root = client.directory()
-    assert root is not None
-    controls = QualifiedBatchRenderer()
-    context = contextvars.copy_context()
-    owner = threading.Thread(
-        target=context.run,
-        args=(serve, root),
-        kwargs={"dispatcher_factory": controls.dispatcher},
-    )
-    owner.start()
-    try:
-        deadline = time.monotonic() + 5
-        while not (root / "broker.sock").exists():
-            assert time.monotonic() < deadline, "test broker did not start"
-            time.sleep(0.01)
-        yield controls
-    finally:
-        controls.release_owner.set()
-        controls.release_batch.set()
-        controls.stop.set()
-        owner.join(timeout=5)
-        assert not owner.is_alive(), "test broker did not stop"
 
 
 class TestRenderBatchPublication:
@@ -276,15 +231,19 @@ class TestRenderBatchPublication:
 
 
 class TestThumbnailFallbackPublication:
+    @pytest.mark.parametrize(
+        "handoff_enabled", [False, True], ids=["combined", "handoff"]
+    )
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         "failure,color",
         [
             pytest.param(Reason.DEVICE_FAILED, (180, 60, 30, 255), id="device-failure"),
             pytest.param(None, (180, 60, 30, 0), id="empty-frame"),
+            pytest.param(None, (180, 60, 30, 255), id="gpu-success"),
         ],
     )
-    async def test_publishes_after_gpu_failure(
+    async def test_preserves_publication_across_gpu_outcomes(
         self,
         api,
         superuser_headers,
@@ -294,12 +253,15 @@ class TestThumbnailFallbackPublication:
         monkeypatch,
         failure,
         color,
+        handoff_enabled,
     ):
-        from app.modules.media import mesh_isolation
+        from app.modules.media import mesh_isolation, thumbnail_handoff
         from app.modules.media.native_process import native_capacity
         from app.modules.media.source_preparation import capacity as prepared_capacity
         from app.runtime import native_runtime, preparation_runtime
 
+        if not handoff_enabled:
+            monkeypatch.setattr(thumbnail_handoff, "plan", lambda *args: None)
         controls = qualified_renderer
         controls.failure = failure
         controls.colors = [color]
@@ -339,9 +301,12 @@ class TestThumbnailFallbackPublication:
             assert outcome is not None
             assert outcome.error is None
         else:
-            raise AssertionError("combined derivative did not settle")
+            raise AssertionError("derivative did not settle")
         assert len(controls.batches) == 1
-        assert len(executions) == 1
+        needs_fallback = failure is not None or color[3] == 0
+        assert len(executions) == (2 if handoff_enabled and needs_fallback else 1)
+        if handoff_enabled and needs_fallback:
+            assert "app.modules.media.thumbnail_cpu_worker" in executions[1]
         assert "app.modules.media.mesh_worker" in executions[0]
         rows = (
             await api.get(f"/api/v1/files/{file_id}/derivatives", headers=headers)

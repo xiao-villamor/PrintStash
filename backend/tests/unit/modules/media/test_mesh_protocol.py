@@ -952,3 +952,33 @@ class TestOutputBoundaries:
             replace(
                 geometry, outcome=GeometryRefused(ThumbnailFailureReason.NO_GEOMETRY)
             )
+
+
+class TestPreparedThumbnailFrames:
+    @pytest.mark.parametrize("admitted", [False, True])
+    def test_requires_prepared_output_authority(self, admitted):
+        from app.modules.media.mesh_protocol import PreparedThumbnailOutput
+        from app.modules.media.thumbnail_packet import PacketDescriptor
+
+        request = ThumbnailRequest(Path("source.stl"), include_geometry=False)
+        frame = PreparedThumbnailOutput(
+            PacketDescriptor(100, "a" * 64, 1), _GEOMETRY_COVERAGE, 1, 1
+        )
+        decoder = FrameDecoder(request, prepared=admitted)
+        wire = encode_frame(frame, sequence=0)
+        if admitted:
+            assert list(decoder.feed(wire)) == [frame]
+            with pytest.raises(mesh_protocol.MeshProtocolError):
+                list(decoder.feed(wire))
+        else:
+            with pytest.raises(mesh_protocol.MeshProtocolError):
+                list(decoder.feed(wire))
+
+    def test_refuses_published_coverage(self):
+        from app.modules.media.mesh_protocol import PreparedThumbnailOutput
+        from app.modules.media.thumbnail_packet import PacketDescriptor
+
+        with pytest.raises(mesh_protocol.MeshProtocolError):
+            PreparedThumbnailOutput(
+                PacketDescriptor(100, "a" * 64, 1), _PREVIEW_COVERAGE, 1, 1
+            )

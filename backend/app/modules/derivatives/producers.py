@@ -402,13 +402,25 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
 
     try:
         with ExitStack() as stack:
-            prepared = stack.enter_context(reserve_sources((resolve(file_row),)))
+            from app.modules.media import thumbnail_handoff
+            from app.modules.media.thumbnail_packet import MAX_PACKET_BYTES
+
+            width = int(settings.model_thumbnail_width)
+            handoff_plan = (
+                thumbnail_handoff.plan(width, round(width * 3 / 4), file_row.size_bytes)
+                if DerivativeKind.THUMBNAIL in attempts and plan is None
+                else None
+            )
+            output_bytes = MAX_PACKET_BYTES if handoff_plan is not None else 0
+            prepared = stack.enter_context(
+                reserve_sources((resolve(file_row),), output_bytes=output_bytes)
+            )
             claim = CapacityManager(get_session_factory()).reserve(
                 f"derive:mesh:{file_id}:{time.monotonic_ns()}",
                 [
                     CapacityResource.for_path(
                         prepared.directory,
-                        file_row.size_bytes * 2,
+                        file_row.size_bytes * 2 + output_bytes,
                         role="mesh source preparation",
                     ),
                     CapacityResource.for_path(
@@ -433,32 +445,56 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                 if plan is not None
                 else MAX_ANALYSIS_FACES,
             )
-            result = mesh_isolation.generate(request, on_output=publish)
-            if result.fingerprint_result is not None:
-                if pending is None:
-                    raise RuntimeError("fingerprint_completion_without_pending_input")
-                try:
-                    with get_session_factory().scoped_session() as session:
-                        mesh_continuations.complete(
-                            session, pending, result.fingerprint_result
-                        )
-                        session.commit()
-                except records.AttemptSuperseded:
-                    raise
-                except Exception:  # noqa: BLE001 - basics are already durable
-                    logger.exception(
-                        "fingerprint publication failed", extra={"file_id": file_id}
+            result = None
+            try:
+                if handoff_plan is not None:
+                    handoff = stack.enter_context(
+                        thumbnail_handoff.reserve(handoff_plan, prepared.directory)
                     )
-                    with get_session_factory().scoped_session() as session:
-                        mesh_continuations.defer(
-                            session, pending, FingerprintFailureCode.WORKER_FAILED
+                    result = mesh_isolation.generate(
+                        request, on_output=publish, handoff=handoff
+                    )
+                else:
+                    result = mesh_isolation.generate(request, on_output=publish)
+                if result.fingerprint_result is not None:
+                    if pending is None:
+                        raise RuntimeError(
+                            "fingerprint_completion_without_pending_input"
                         )
-                        session.commit()
+                    try:
+                        with get_session_factory().scoped_session() as session:
+                            mesh_continuations.complete(
+                                session, pending, result.fingerprint_result
+                            )
+                            session.commit()
+                    except records.AttemptSuperseded:
+                        raise
+                    except Exception:  # noqa: BLE001 - basics are already durable
+                        logger.exception(
+                            "fingerprint publication failed", extra={"file_id": file_id}
+                        )
+                        with get_session_factory().scoped_session() as session:
+                            mesh_continuations.defer(
+                                session, pending, FingerprintFailureCode.WORKER_FAILED
+                            )
+                            session.commit()
+            finally:
+                # Clear active-frame ownership before the host reservation exits,
+                # including publication and continuation failures.
+                del result
+
     except records.AttemptSuperseded:
         return Outcome(outcome)
-    except (ArtifactContentError, MeshWorkerError, AdmissionTooLarge) as exc:
+    except (
+        ArtifactContentError,
+        MeshWorkerError,
+        AdmissionTooLarge,
+        TimeoutError,
+    ) as exc:
         reason = (
-            ThumbnailFailureReason.RESOURCE_LIMIT.value
+            ThumbnailFailureReason.TIMEOUT.value
+            if isinstance(exc, TimeoutError)
+            else ThumbnailFailureReason.RESOURCE_LIMIT.value
             if isinstance(exc, AdmissionTooLarge)
             else exc.reason.value
             if isinstance(exc, MeshWorkerError)

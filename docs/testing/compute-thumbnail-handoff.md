@@ -1,9 +1,10 @@
 # Combined thumbnail ownership and retired handoff evidence
 
-Automatic handoff is retired. Production now uses one guarded worker per source
-for parsing, measurement, GPU dispatch or CPU fallback, and encoding. This keeps
-the unchanged native claim through cleanup. There is no handoff flag, packet,
-finalizer, visual pool or prepared-thumbnail protocol left in the runtime.
+This page preserves the retired child-finalizer experiment and the subsequent
+combined-worker validation. The current implementation is the
+[direct-codec handoff](compute-thumbnail-handoff-v2.md): it retains combined work
+when ineligible and does not launch an encoder child on successful GPU output.
+The historical results below do not measure that new implementation.
 
 The `5814e6e7` selective experiment completed 200/200 sources with exact geometry
 and zero R2 requests, but did not establish an end-to-end gain: 445.148 seconds
@@ -11,21 +12,21 @@ monotonic versus 447.574 baseline, below five-second observation resolution. Its
 54 finalizers accumulated 76.483 seconds of supervision and 147.526 seconds of
 readmission; their GPU dispatch accumulated 15.792 seconds. These sums overlap
 and must not be subtracted from wall time. Whole-pool admission is a conservative
-memory decision, not evidence of profitable process separation. The final
-combined-worker measurement remains pending.
+memory decision, not evidence of profitable process separation. The completed combined-worker measurements are recorded in the
+[pipeline evidence](compute-native-pipeline-200.md).
 
-The active replacement retains the compact GPU renderer, binary framing limits,
+The retained combined path preserves the compact GPU renderer, binary framing limits,
 empty-frame CPU fallback, shared lossless encoder, generated-frame preservation,
 cooperative cancellation, original bytes and authoritative geometry. The E2E
 covers both a device refusal and an all-transparent response through the same
 single worker and existing publication fences.
 
-## Active replacement coverage
+## Retained combined-path coverage
 
 | Behaviour / test | Category | Precondition / input | Observable outcome | Tier | Status |
 |---|---|---|---|---|---|
 | `backend/tests/integration/modules/derivatives/test_producers.py::TestStagedMeshPublication::test_retains_one_worker_per_source` | lifecycle | Known STL or unknown-complexity 3MF | One guarded execution publishes metadata and thumbnail | integration | Verified |
-| `backend/tests/e2e/test_render_batch_publication.py::TestThumbnailFallbackPublication::test_publishes_after_gpu_failure` | fallback publication | Real ingest/Job/parser/broker; device failure or empty GPU response | One worker publishes CPU fallback; source and exact measurements retained; full native/prepared capacity recoverable | E2E | Verified |
+| `backend/tests/e2e/test_render_batch_publication.py::TestThumbnailFallbackPublication::test_preserves_publication_across_gpu_outcomes` | fallback publication | Real ingest/Job/parser/broker; device failure or empty GPU response | One worker publishes CPU fallback; source and exact measurements retained; full native/prepared capacity recoverable | E2E | Verified |
 | `backend/tests/e2e/test_render_batch_publication.py::TestRenderBatchPublication::test_publishes_the_healthy_member_when_a_batched_job_is_cancelled` | cancellation | Two model Jobs share a controlled render fence | Healthy output publishes; cancelled output has no storage pointer | E2E | Verified |
 | `backend/tests/unit/modules/media/test_compute_render.py::TestOptionalRender::test_refuses_empty_gpu_frames` | failure | Raw or finalized pixels with zero alpha | Existing CPU fallback selected | unit | Verified |
 | `backend/tests/unit/modules/media/test_compute_render.py::TestOptionalRender::test_preserves_nonzero_alpha` | boundary | Only final pixel has alpha 1, 128 or 255 | Exact GPU pixels retained | unit | Verified |

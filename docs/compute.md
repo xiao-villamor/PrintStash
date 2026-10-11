@@ -14,7 +14,7 @@ The **gpu-render** extra adds only wgpu for rendering. The optional **gpu** extr
 | Eligible visual position welding and smooth normals | Portable WGSL with bounded local flat-normal recovery |
 | Resampling, premultiplied-alpha rounding and vignette | Canary-checked portable WGSL, otherwise canonical CPU |
 | Bounds and camera framing | Portable WGSL reductions over cached geometry |
-| Lossless image encoding | CPU inside the same bounded mesh worker |
+| Lossless image encoding | CPU in the owning Job under host/CPU credit, or existing combined worker |
 | Image, text, point and sparse ONNX inference | Qualified native WebGPU graph, otherwise CPU worker |
 | Caption generation | Existing remote API |
 
@@ -226,31 +226,52 @@ recipe 12 and fingerprint/point semantics remain unchanged. Changed visual-input
 semantics use the existing generation workflow; choosing a device alone never
 changes embedding identity. No AI feature or model download is enabled.
 
-## Combined mesh-worker ownership
+## Thumbnail custody across parser and GPU
 
-Each source stays in one disposable, guarded mesh worker through parsing,
-measurement, GPU dispatch or CPU fallback, and encoding. The worker retains its
-conservative native-memory claim until process-tree cleanup and reap. Unknown
-complexity still claims the entire native pool. Prepared-source custody, durable
-Job concurrency, FIFO/backfill policy, cancellation and publication fences are
-unchanged. Broker launch waits honor cancellation checkpoints.
+A ready, authorized GPU renderer can receive a bounded geometry packet after the
+isolated parser exits cleanly. The Job retains source and publication authority;
+its synchronous lossless codec runs under an existing native CPU slot and an
+explicit host-memory reservation. A successful handoff uses one parser and no
+encoder child. Only GPU refusal invokes an isolated CPU renderer from that same
+packet, without reparsing the source. Cancellation and the original deadline do
+not trigger retries.
 
-The automatic parser handoff was removed after measurement. The first 200-model
-candidate added a finalizer to every eligible source and regressed by 28.5%.
-Restricting it to whole-pool claims produced 54 extra workers and 76.48 seconds of
-accumulated finalizer supervision; overall publication was 445.15 seconds versus
-447.57 seconds for the baseline, below the measurement's five-second polling
-resolution. Whole-pool admission indicates uncertain or large memory needs; it
-does not establish that GPU waiting will amortize another process. These summed
-supervision intervals overlap and do not predict a source-to-publication saving.
+Readiness checks the already-running physical device, initialized GPU postprocessor
+and available render capability without launching a broker from the parser.
+Qualified routing reuses the existing exact device/runtime/recipe receipt and
+checks actual face counts again before staging.
 
-The staging packet, finalizer, visual-credit pool and their private protocol are
-removed rather than retained behind a feature flag. The compact renderer,
-lossless encoding profile, validated frame preservation and empty-GPU-frame CPU
-fallback remain active. Final throughput qualification uses matched continuous
-source-to-publication measurements; no improvement is inferred from removing the
-handoff. See the [historical handoff and active coverage](testing/compute-thumbnail-handoff.md),
-[matched pipeline audit](testing/compute-native-pipeline-200.md) and
+Cold or unavailable renderers, unqualified face counts, insufficient host
+headroom and optional fingerprint requests retain the combined guarded worker.
+The first combined render can initialize the GPU postprocessor. Native parser
+estimates, durable Job concurrency, FIFO/backfill priority, exact measurements
+and publication fences remain unchanged.
+
+Host staging is capped at four slots and 384 MiB, and no more than one quarter of
+known physical headroom after existing geometry and inference partitions. Packet,
+readback and codec workspace are charged through their real lifetimes; error
+tracebacks cannot retain buffers after that credit is released. This is application
+admission, not an OS reservation. The broker keeps its separate existing budget.
+The packet also remains charged to prepared-source bytes and disk capacity.
+Source, host and native descriptors remain held through guardian cleanup; unknown
+physical limits retain the combined path.
+
+`thumbnail_handoff_complete` reports packet read, dispatch, codec queue, codec and
+CPU recovery intervals. `thumbnail_handoff_supervision` associates the handoff
+with parser and fallback execution IDs. Native admissions also count the inline
+codec CPU-slot claim and must not be interpreted as child-process counts. These
+phase and supervision intervals overlap; they are not additive wall-clock costs.
+
+The older implementation that spawned a finalizer per prepared source was retired
+after the first 200-model candidate regressed 28.5%. Its selective 54-finalizer
+variant did not establish an end-to-end gain either. The subsequent combined-worker
+version reduced broker execution but regressed by about 5% under matched
+continuous input. The new direct-codec handoff
+has a different lifecycle and requires its own matched measurement; no throughput
+improvement is inferred from the lifecycle change. See the
+[active handoff contracts and coverage](testing/compute-thumbnail-handoff-v2.md),
+[historical experiment](testing/compute-thumbnail-handoff.md),
+[matched pipeline evidence](testing/compute-native-pipeline-200.md) and
 [visual preparation validation](testing/compute-visual-preparation.md).
 
 
