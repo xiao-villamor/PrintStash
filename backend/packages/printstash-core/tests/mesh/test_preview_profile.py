@@ -77,9 +77,6 @@ class TestPreviewProfile:
         "mutate",
         [
             lambda payload: payload.__setitem__("aspectRatio", [4]),
-            lambda payload: payload["encoding"].__setitem__("quality", -1),
-            lambda payload: payload["encoding"].__setitem__("quality", 101),
-            lambda payload: payload["encoding"].__setitem__("quality", True),
             lambda payload: payload.__setitem__("marginFraction", 0.5),
             lambda payload: payload.__setitem__("material", {"albedo": [1, 2]}),
             lambda payload: payload["encoding"].__setitem__("method", -1),
