@@ -78,8 +78,8 @@ preparation reuses computed lengths. DBOS queue dispatch polls every 0.25 second
 by default through deployment configuration, independently of recovery scanning.
 
 The [batching/preparation evidence and matrix](../testing/compute-model-batching.md)
-record these corrections and the earlier 1000-model aggregate baseline. The next
-comparison of those cached models remains pending. Persistent untrusted parser
+record these corrections and the earlier 1000-model aggregate baseline. The [final comparison](../testing/compute-final-gpu-1000.md)
+retains all 1000 outcomes; throughput improvement remains unestablished. Persistent untrusted parser
 state, further GPU preparation candidates and operator visual acceptance are not
 qualified by these changes.
 
@@ -150,4 +150,9 @@ merely to populate a GPU batch.
 real process custody, bounded packet validation, deadline/cancellation recovery,
 inline codec ownership and per-Artifact publication. Correctness checks do not
 establish throughput; the historical matched 200-source measurements and final
-1000-source validation are recorded separately.
+1000-source validation are recorded separately. The [final run](../testing/compute-final-gpu-1000.md)
+completed with 973 ready output pairs and the same 27 invalid sources, 963 inline
+GPU handoffs, and no handoff CPU recovery. Its longer elapsed duration relative
+to the historical GPU observation does not justify a performance qualification;
+the historical submission and startup policy differs. Codec admission and source
+worker overhead remain measured costs, with overlapping intervals kept separate.

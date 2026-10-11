@@ -107,9 +107,11 @@ retain bounded packet/pixel/codec reservations, release parser resources only
 after clean reap, and encode validated final GPU pixels in its own execution
 thread. An isolated CPU fallback remains necessary for GPU refusal. This route
 has passed its correctness checks. At the operator’s request, final deployment
-validation will process all 1000 cached models instead of repeating this
-200-source candidate arm. It is not yet a measured improvement; the frozen
-200-source reference and both earlier candidates remain separate evidence.
+validation processed all 1000 cached models instead of repeating this
+200-source candidate arm. The [complete result](compute-final-gpu-1000.md) preserves
+973 ready outputs and the same 27 invalid sources, but does not establish a
+throughput improvement. The frozen 200-source reference and earlier candidates
+remain separate evidence.
 
 The initial continuous harness was aborted after the cold wave when it exceeded
 the existing four-active-ingestions-per-user staging limit and received HTTP 507.
@@ -133,7 +135,7 @@ application quotas are unchanged.
 | Preserve originals and measurements | Invariant | Cached bytes and prior metadata | 200 hashes/sizes and exact geometry agree | Deployment | ✅ All completed arms |
 | Avoid storage requests | Resource | Internal network and local cache | Zero R2; unchanged request ledger | Deployment | ✅ |
 | Retain failed optimization evidence | Error | Unconditional handoff | Regression documented rather than reported as speedup | Measurement | ✅ |
-| Reduce full pipeline duration | Performance | Matched ready-geometry run | Source-to-publication improvement measured separately from broker speed | Deployment | ⏭️ Combined run regressed ~5%; final validation changed to 1000 cached sources |
+| Reduce full pipeline duration | Performance | Matched ready-geometry run | Source-to-publication improvement measured separately from broker speed | Deployment | ❌ Combined run regressed ~5%; complete 1000-source follow-up did not establish improvement |
 | Review new visual recipe | Visual | 200 paired output images | User acceptance | Manual | Pending user review |
 | Maintain interactive latency under load | Performance | Concurrent interactive queries | p95 gate established | Deployment | Not measured; no auto-qualification receipt |
 | Qualify other vendors/deployments | Portability | AMD/Intel/other driver stacks | Real work on intended adapters | Deployment | Not measured; support not claimed |

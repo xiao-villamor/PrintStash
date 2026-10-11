@@ -1,6 +1,6 @@
 # Thumbnail handoff without an encoder child
 
-This is the active handoff implementation. It replaces the retired experiment that spawned a finalizer for every prepared thumbnail. Historical combined-worker and earlier experiment measurements remain in [the pipeline evidence](compute-native-pipeline-200.md); they are not throughput evidence for this implementation. The final GPU run of the same 1,000 cached models is pending. No new CPU-render benchmark or R2 request was made for these checks.
+This is the active handoff implementation. It replaces the retired experiment that spawned a finalizer for every prepared thumbnail. Historical combined-worker and earlier experiment measurements remain in [the pipeline evidence](compute-native-pipeline-200.md); they are not throughput evidence for this implementation. The [final GPU-enabled run of the same 1,000 cached models](compute-final-gpu-1000.md) completed with 973 ready output pairs, the identical 27 invalid sources and no new failures; it did not establish a throughput improvement. No new CPU-render benchmark or R2 request was made for these checks.
 
 ## Lifecycle and eligibility
 
@@ -132,7 +132,7 @@ All 64 new cases passed together with 20 existing render cases and the single-be
 
 Transport callbacks and admission polls now reuse the existing 200 ms Job cancellation probe. Every callback still checks the original absolute monotonic deadline. Forced cancellation checks remain at GPU entry/completion/refusal, after host or native admission, before and after the synchronous codec, and before guarded fallback launch and after clean reap. They also run before handing a completed result back to publication. The transactional publication fences are unchanged.
 
-The previous helper forced a withdrawal query for every transport chunk and admission poll. The correction removes that repeated-query amplification; it does not establish an end-to-end speedup. Cancellation during the native codec still retains host and CPU credit until the codec actually returns. A fresh final GPU run of all 1,000 cached models remains pending.
+The previous helper forced a withdrawal query for every transport chunk and admission poll. The correction removes that repeated-query amplification; it does not establish an end-to-end speedup. Cancellation during the native codec still retains host and CPU credit until the codec actually returns. The fresh complete 1,000-source run retained all expected outcomes; its longer historical comparison uses a different policy and does not establish a speedup.
 
 | # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -187,4 +187,4 @@ PRINTSTASH_TEST_NO_EXTERNAL=1 .venv/bin/python -m pytest \
 .venv/bin/pyright
 ```
 
-The first command shows the current paths for the expanded regression selection; the recorded 598-case run preceded the readiness-related test moves. Counts from overlapping selections are not added into one claimed test total. The final GPU run of the 1,000 cached models and latest-commit CI remain separate pending evidence.
+The first command shows the current paths for the expanded regression selection; the recorded 598-case run preceded the readiness-related test moves. Counts from overlapping selections are not added into one claimed test total. The final 1,000-source deployment evidence is recorded separately in [the complete result](compute-final-gpu-1000.md). All 17 CI checks passed for the measured code commit `fd76e2de`; documentation-only follow-up CI is tracked on the PR.

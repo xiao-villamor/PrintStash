@@ -2751,6 +2751,6 @@
         "statistical_limit": "One matched run per image; no confidence interval or claim of deterministic5%regression. Repeating CPU or baseline was not authorized."
       }
     },
-    "final_validation_scope": "At operator request, final GPU validation will process all 1000 cached sources instead of executing another 200-source candidate arm. No CPU or reference arm is repeated; no additional R2 requests are permitted."
+    "final_validation_scope": "At operator request, final GPU validation processed all 1000 cached sources instead of another 200-source candidate arm. See compute-final-gpu-1000.json: 973 ready outputs, identical 27 invalid sources, no new failure or R2 request. Historical GPU timing policy differs; no throughput improvement established. No CPU or reference arm repeated."
   }
 }
