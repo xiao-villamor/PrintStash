@@ -186,10 +186,13 @@ def apply_library_search(
             )
         )
 
+    slugs = list(
+        dict.fromkeys(value.strip().lower() for value in tag_slugs if value.strip())
+    )
+    if not slugs:
+        return stmt
     pairs = effective_tag_pairs().subquery("filtered_effective_tags")
-    for slug in dict.fromkeys(
-        value.strip().lower() for value in tag_slugs if value.strip()
-    ):
+    for slug in slugs:
         matching_ids = (
             select(pairs.c.model_id)
             .join(Tag, Tag.id == pairs.c.tag_id)

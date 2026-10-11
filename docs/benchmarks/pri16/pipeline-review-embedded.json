@@ -1,0 +1,17 @@
+[
+  {
+    "case": "real-3mf-small",
+    "validated_embedded_preview": false,
+    "bytes": 0
+  },
+  {
+    "case": "real-3mf-medium",
+    "validated_embedded_preview": true,
+    "bytes": 42029
+  },
+  {
+    "case": "real-3mf-large",
+    "validated_embedded_preview": true,
+    "bytes": 34270
+  }
+]

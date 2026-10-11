@@ -1,0 +1,11 @@
+WARNING: dzn is not a conformant Vulkan implementation, testing use only.
+Missing downlevel flags: DownlevelFlags(FULL_DRAW_INDEX_UINT32 | SURFACE_VIEW_FORMATS)
+The underlying API or device in use does not support enough features to be a fully compliant implementation of WebGPU. A subset of the features can still be used. If you are running this program on native and not in a browser and wish to limit the features you use to the supported subset, call Adapter::downlevel_properties or Device::downlevel_properties to get a listing of the features the current platform supports.
+DownlevelCapabilities {
+    flags: DownlevelFlags(
+        COMPUTE_SHADERS | FRAGMENT_WRITABLE_STORAGE | INDIRECT_EXECUTION | BASE_VERTEX | READ_ONLY_DEPTH_STENCIL | NON_POWER_OF_TWO_MIPMAPPED_TEXTURES | CUBE_ARRAY_TEXTURES | COMPARISON_SAMPLERS | INDEPENDENT_BLEND | VERTEX_STORAGE | ANISOTROPIC_FILTERING | FRAGMENT_STORAGE | MULTISAMPLED_SHADING | DEPTH_TEXTURE_AND_BUFFER_COPIES | WEBGPU_TEXTURE_FORMAT_SUPPORT | BUFFER_BINDINGS_NOT_16_BYTE_ALIGNED | UNRESTRICTED_INDEX_BUFFER | DEPTH_BIAS_CLAMP | VIEW_FORMATS | UNRESTRICTED_EXTERNAL_TEXTURE_COPIES | NONBLOCKING_QUERY_RESOLVE | SHADER_F16_IN_F32,
+    ),
+    limits: DownlevelLimits,
+    shader_model: Sm5,
+}
+{"status": "passed", "adapters": [{"vendor": "Dozen", "architecture": "", "device": "Microsoft Direct3D12 (NVIDIA GeForce RTX 5060)", "description": "Mesa 26.2.4", "stackgroup_min_size": 4, "stackgroup_max_size": 128, "vendor_id": 4318, "device_id": 11525, "adapter_type": "DiscreteGPU", "backend_type": "Vulkan"}], "selected": {"vendor": "Dozen", "architecture": "", "device": "Microsoft Direct3D12 (NVIDIA GeForce RTX 5060)", "description": "Mesa 26.2.4", "stackgroup_min_size": 4, "stackgroup_max_size": 128, "vendor_id": 4318, "device_id": 11525, "adapter_type": "DiscreteGPU", "backend_type": "Vulkan", "physical_acceleration": true}, "stats": {"requested_allocation_bytes": 9304, "retained_geometry_bytes": 144, "upload_bytes": 72, "draw_calls": 1, "readback_count": 1, "upload_ms": 0.49409, "draw_ms": 5.549565, "readback_ms": 131.41996, "cpu_resolve_ms": 2.06994}, "qualification": false}

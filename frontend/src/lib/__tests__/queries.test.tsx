@@ -28,9 +28,10 @@
 import { anEditingBase } from "@/test-support/factories";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { queryKeys } from "@/lib/query-client";
 
 import {
   QueryApiProvider,
@@ -188,10 +189,12 @@ function emptyFacets(): ModelFacetsRead {
 }
 
 /** `staleTime` mirrors production's 30s when a test depends on freshness. */
-function wrapper(options: { staleTime?: number } = {}) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, staleTime: options.staleTime ?? 0 } },
-  });
+function wrapper(options: { staleTime?: number; client?: QueryClient } = {}) {
+  const client =
+    options.client ??
+    new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: options.staleTime ?? 0 } },
+    });
   return ({ children }: { children: ReactNode }) => (
     <QueryApiProvider value={api}>
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
@@ -253,6 +256,91 @@ describe("taxonomy hooks", () => {
     const { result } = renderHook(() => useCollectionLookup(null), { wrapper: wrapper() });
     expect(result.current.fetchStatus).toBe("idle");
     expect(stubs.lookupCollection).not.toHaveBeenCalled();
+  });
+
+  it("refetches an authorized empty child level after invalidation", async () => {
+    stubs.lookupCollection.mockResolvedValue({
+      collection: aCollectionNode({ id: 41, child_count: 0 }),
+      ancestors: [],
+    });
+    const { result } = renderHook(
+      () => {
+        const client = useQueryClient();
+        const lookup = useCollectionLookup("parts");
+        const children = useCollectionChildren(lookup.data?.collection.id ?? null, {
+          enabled: lookup.data !== undefined,
+        });
+        return { children, client };
+      },
+      { wrapper: wrapper({ staleTime: 30_000 }) },
+    );
+    await waitFor(() => expect(result.current.children.isSuccess).toBe(true));
+    expect(result.current.children.data?.pages).toEqual([{ items: [], next_cursor: null }]);
+    expect(stubs.listCollectionChildren).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.client.invalidateQueries({ queryKey: queryKeys.collectionChildren(41) });
+    });
+    expect(stubs.listCollectionChildren).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(result.current.children.data?.pages[0].items).toEqual([aCollectionNode()]),
+    );
+  });
+
+  it("preserves already downloaded child pages when looking up a leaf", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+    });
+    const pages = {
+      pages: [{ items: [aCollectionNode({ id: 42 })], next_cursor: "cursor" }],
+      pageParams: [null],
+    };
+    client.setQueryData(queryKeys.collectionChildren(41), pages);
+    stubs.lookupCollection.mockResolvedValue({
+      collection: aCollectionNode({ id: 41, child_count: 0 }),
+      ancestors: [],
+    });
+    const { result } = renderHook(() => useCollectionLookup("parts"), {
+      wrapper: wrapper({ client }),
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(client.getQueryData(queryKeys.collectionChildren(41))).toEqual(pages);
+  });
+
+  it("does not seed a leaf response that completes after cancellation", async () => {
+    let finish!: (lookup: Awaited<ReturnType<QueryApi["lookupCollection"]>>) => void;
+    stubs.lookupCollection.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderHook(() => useCollectionLookup("parts"), { wrapper: wrapper({ client }) });
+    await waitFor(() => expect(stubs.lookupCollection).toHaveBeenCalled());
+    await act(async () => {
+      await client.cancelQueries({ queryKey: queryKeys.collectionLookup("parts") });
+      finish({ collection: aCollectionNode({ id: 41, child_count: 0 }), ancestors: [] });
+    });
+    expect(client.getQueryData(queryKeys.collectionChildren(41))).toBeUndefined();
+  });
+
+  it("still reads children when the selected collection is not a leaf", async () => {
+    stubs.lookupCollection.mockResolvedValue({
+      collection: aCollectionNode({ id: 41, child_count: 1 }),
+      ancestors: [],
+    });
+    const { result } = renderHook(
+      () => {
+        const lookup = useCollectionLookup("parts");
+        return useCollectionChildren(lookup.data?.collection.id ?? null, {
+          enabled: lookup.data !== undefined,
+        });
+      },
+      { wrapper: wrapper({ staleTime: 30_000 }) },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(stubs.listCollectionChildren).toHaveBeenCalledTimes(1);
+    expect(result.current.data?.pages[0].items).toEqual([aCollectionNode()]);
   });
 
   it("resolves a selected collection by path", async () => {

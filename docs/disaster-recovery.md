@@ -7,7 +7,7 @@ upgrade, disk problem, or accidental data loss.
 
 A PrintStash backup archive contains:
 
-- the database dump or SQLite database content
+- the SQLite database or a portable SQLite-format snapshot of PostgreSQL data
 - stored model/G-code files
 - thumbnails
 - a manifest with backup id, timestamp, and app version
@@ -41,11 +41,20 @@ object identity, size, and SHA-256 still agree. Google Drive is beta: restore is
 hash-verified, but automatic retention is disabled because the provider cannot
 offer the immutable delete identity PrintStash requires.
 
-The built-in create/restore flow currently requires file-backed SQLite. A
-PostgreSQL deployment must use an operator-managed `pg_dump`/restore workflow
-and back up the configured object/local storage separately. Query
-`GET /api/v1/backups/capabilities/database` to detect support before offering
-the built-in action.
+The built-in create/restore flow supports file-backed SQLite and PostgreSQL.
+For PostgreSQL, PrintStash exports the database to a portable SQLite-format
+snapshot inside the backup archive and restores that snapshot into PostgreSQL;
+`pg_dump` is optional for operator-managed snapshots, not required by the built-in
+flow. Query `GET /api/v1/backups/capabilities/database` to confirm create and
+restore support for the configured database. A database backup includes
+PrintStash-managed files and thumbnails in the same archive, but configured
+storage and its destination still determine where that archive is retained.
+Library-source originals indexed in place are not owned or included, so back up
+the source separately.
+
+Automatic backups are opt-in and off by default. When enabled, the daily
+schedule claims at most one backup attempt per UTC day and uses the same backup
+Job path for SQLite and PostgreSQL.
 
 ## Run History And Exact Replica Retry
 

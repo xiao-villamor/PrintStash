@@ -4,16 +4,14 @@
     "python": "3.12.3",
     "numpy": "2.5.2",
     "pillow": "12.3.0",
-    "source": "legacy byte rendering before shared preparation implementation",
-    "identity_update": "Preview profile v4 / qualified-portable-v6: lossy thumbnail RGB updated; six analytic RGB hashes unchanged.",
-    "previous_lossless_thumbnail_rgb_sha256": "3d3abc2899332f60a36aad70038a72b708b75fdbae613d67371626846f73cb64"
+    "source": "legacy byte rendering before shared preparation implementation"
   },
   "source_sha256": "cc09808d4d1cae28843d1c853c3bfe08943230160e5dfef6e13144f5da8180f6",
   "image_size": 32,
   "triangle_cap": 100,
   "profile": "multiview",
-  "view_identity": "f07b0f904a9778f9857dc3670f337254cd4e16db1882d69f70aef1b58257130e",
-  "thumbnail_rgb_sha256": "5bb01167756eb3db7903abc1029bbfdde2563e9436f628b9db4017c087b26b7a",
+  "view_identity": "0e7a7e6f88d978ceb2268c291db5bf3a8a829fe45b79950b164384920c23d1e0",
+  "thumbnail_rgb_sha256": "3d3abc2899332f60a36aad70038a72b708b75fdbae613d67371626846f73cb64",
   "views_rgb_sha256": [
     "94766ed0cf54b339451706ac69f5bc57b3739eefeb0b38e9c29749a79cd75eb9",
     "103e880c1655f9a261a275d6045a385d8dff08e83f76bd36fa889b3ea78b464c",

@@ -24,7 +24,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.db.models import Collection
-from tests._library_reads import LIBRARY_READS
+from tests._library_reads import LIBRARY_READS, read_library
 from tests._statements import StatementLog
 from tests.factories.library_scale import build_library_at_scale
 
@@ -40,7 +40,7 @@ def _read(
     headers: dict[str, str],
 ) -> StatementLog:
     with log.recording():
-        response = client.get(path, params=params, headers=headers)
+        response = read_library(client, path, params, headers)
     assert response.status_code == 200, response.text
     return log
 
@@ -60,7 +60,7 @@ class TestLibraryReads:
         seeded = build_library_at_scale(db_session, under=root, **SMALL)
         if path == "/api/v1/outliner/entries":
             params = params | {"collection_id": seeded.collection_ids[0]}
-        client.get(path, params=params, headers=headers)  # warm per-process caches
+        read_library(client, path, params, headers)  # warm per-process caches
         small = _read(client, sql_statements, path, params, headers).count
         build_library_at_scale(db_session, under=root, **TEN_TIMES_MORE)
 
@@ -82,7 +82,7 @@ class TestLibraryReads:
         seeded = build_library_at_scale(db_session, under=root, **SMALL)
         if path == "/api/v1/outliner/entries":
             params = params | {"collection_id": seeded.collection_ids[0]}
-        client.get(path, params=params, headers=headers)
+        read_library(client, path, params, headers)
         small = _read(client, sql_statements, path, params, headers)
         small_bound = small.max_bound_parameters
         build_library_at_scale(db_session, under=root, **TEN_TIMES_MORE)

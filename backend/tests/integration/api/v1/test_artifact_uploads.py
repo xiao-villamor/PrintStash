@@ -135,6 +135,42 @@ class _NativeUploadBackend:
 
 
 class TestArtifactUploads:
+    def test_preserves_active_upload_verification_during_recovery(
+        self, client, auth_headers, tmp_path, monkeypatch
+    ):
+        from app.modules.ingestion.artifact_uploads import reconcile_artifact_uploads
+        from app.modules.ingestion.artifact_uploads.api_chunks import (
+            ApiChunkUploadAdapter,
+        )
+
+        use_local_storage(tmp_path)
+        storage_runtime.get_backend().ensure_setup()
+        payload = content.ascii_stl()
+        created = client.post(
+            "/api/v1/artifact-uploads", json=_request(payload), headers=auth_headers
+        )
+        assert created.status_code == 201, created.text
+        upload_id = created.json()["id"]
+        assert _put_chunk(client, auth_headers, upload_id, payload).status_code == 200
+        assemble = ApiChunkUploadAdapter.assemble
+
+        def recover_during_verification(adapter, upload):
+            reconcile_artifact_uploads()
+            return assemble(adapter, upload)
+
+        monkeypatch.setattr(
+            ApiChunkUploadAdapter, "assemble", recover_during_verification
+        )
+        finalized = client.post(
+            f"/api/v1/artifact-uploads/{upload_id}/finalize", headers=auth_headers
+        )
+
+        assert finalized.status_code == 200, finalized.text
+        assert finalized.json()["job_id"] is not None
+        assert (
+            finalized.json()["verified_sha256"] == hashlib.sha256(payload).hexdigest()
+        )
+
     def test_resumable_upload_without_hardlinks(
         self, client, auth_headers, db_session, tmp_path, monkeypatch
     ):

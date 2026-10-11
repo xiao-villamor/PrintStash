@@ -209,11 +209,15 @@ def _publish_thumbnail(
     peak_rss_bytes: int | None = None,
     abort_on_failure: bool = False,
     preserve_frame: bool = False,
+    renderer_encoded: bool = False,
 ) -> DerivativeState:
     assert file_row.id is not None
     try:
         encoded = thumbnail.to_webp(
-            image, normalize=normalize, preserve_frame=preserve_frame
+            image,
+            normalize=normalize,
+            preserve_frame=preserve_frame,
+            renderer_encoded=renderer_encoded,
         )
     except ValueError:
         _fail(
@@ -389,6 +393,7 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                     normalize=True,
                     preserve_frame=frame.strategy is ThumbnailStrategy.FULL,
                     strategy=frame.strategy.value,
+                    renderer_encoded=frame.strategy is ThumbnailStrategy.FULL,
                     complete=frame.coverage.preview
                     in (PreviewCoverage.COMPLETE, PreviewCoverage.DOCUMENT_SUPPLIED),
                     duration_ms=frame.duration_ms,

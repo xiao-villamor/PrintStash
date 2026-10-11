@@ -24,6 +24,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readPreviewPreferences } from "@/lib/preview-preferences";
 import { SettingsPanel } from "@/components/settings-panel";
 import { aCollectionPermission, aPrinterPermission } from "@/test-support/permissions";
 import { aUser, aApiKey } from "@/test-support/account";
@@ -178,6 +179,7 @@ describe("SettingsPanel", () => {
       "spoolman",
       "design",
       "previews",
+      "gpu",
       "trash",
       "about",
     ])("opens the %s section from the URL", async (section) => {
@@ -2560,6 +2562,28 @@ describe("SettingsPanel", () => {
       await waitFor(() => expect(toggle).toBeEnabled());
 
       expect(toggle).toHaveAttribute("aria-checked", "true");
+    });
+  });
+
+  describe("GPU settings", () => {
+    it("opens GPU settings from section navigation", async () => {
+      const user = userEvent.setup();
+      renderSettings();
+      const nav = await screen.findByRole("navigation", { name: "Settings sections" });
+
+      await user.click(within(nav).getByRole("button", { name: /^GPU$/ }));
+
+      expect(await screen.findByRole("combobox", { name: "Mesh renderer" })).toHaveValue("webgl");
+    });
+
+    it("saves the renderer choice from the GPU section", async () => {
+      const user = userEvent.setup();
+      renderSettings({ at: "/settings?section=gpu" });
+      const choice = await screen.findByRole("combobox", { name: "Mesh renderer" });
+
+      await user.selectOptions(choice, "webgpu");
+
+      expect(readPreviewPreferences().meshRenderer).toBe("webgpu");
     });
   });
 

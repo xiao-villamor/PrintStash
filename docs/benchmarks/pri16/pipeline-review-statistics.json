@@ -1,0 +1,1578 @@
+{
+  "unbounded-native-threads": {
+    "real-3mf-large": {
+      "cpu": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 976.0284000076354,
+            "p95": 1018.2075999910012,
+            "population_stddev": 16.943415397980566,
+            "median_95_percent_bootstrap_ci": [
+              972.0383000094444,
+              982.9178499931004
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 950.8357500017155,
+            "p95": 993.1275999988429,
+            "population_stddev": 16.96540765956037,
+            "median_95_percent_bootstrap_ci": [
+              947.0261500100605,
+              957.5158000079682
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 24.268399996799417,
+            "p95": 25.310900004114956,
+            "population_stddev": 0.4258165717075277,
+            "median_95_percent_bootstrap_ci": [
+              24.17849999619648,
+              24.35700000205543
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 0.0006499903975054622,
+            "p95": 0.000900006853044033,
+            "population_stddev": 0.00010692540368353485,
+            "median_95_percent_bootstrap_ci": [
+              0.000600004568696022,
+              0.0006999907782301307
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_current": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1507.6180499891052,
+            "p95": 2035.4411999869626,
+            "population_stddev": 182.57358832333017,
+            "median_95_percent_bootstrap_ci": [
+              1495.57400001504,
+              1520.7842500094557
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 721.8585500086192,
+            "p95": 1081.0093999898527,
+            "population_stddev": 113.18481132299088,
+            "median_95_percent_bootstrap_ci": [
+              715.5479000066407,
+              727.2792000003392
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 7.466850001947023,
+            "p95": 12.511900014942512,
+            "population_stddev": 3.1132880032640844,
+            "median_95_percent_bootstrap_ci": [
+              6.532100000185892,
+              7.691899998462759
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 665.9475500055123,
+            "p95": 1176.4508000051137,
+            "population_stddev": 148.36851701012927,
+            "median_95_percent_bootstrap_ci": [
+              662.3803999973461,
+              673.9380999933928
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 25.071349999052472,
+            "p95": 36.4625999936834,
+            "population_stddev": 3.6324616110706,
+            "median_95_percent_bootstrap_ci": [
+              24.578850003308617,
+              26.05704999587033
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 80.80894999147858,
+            "p95": 88.59840000513941,
+            "population_stddev": 4.4009407482176295,
+            "median_95_percent_bootstrap_ci": [
+              79.86559999699239,
+              82.07044999289792
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_queued": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1506.259650006541,
+            "p95": 1927.6393000036478,
+            "population_stddev": 308.42461640342765,
+            "median_95_percent_bootstrap_ci": [
+              1484.2533999908483,
+              1514.1380999993999
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 721.2692000030074,
+            "p95": 1018.3537999982946,
+            "population_stddev": 303.2210924004419,
+            "median_95_percent_bootstrap_ci": [
+              709.8151000100188,
+              730.163750005886
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 3.8163499993970618,
+            "p95": 5.113299994263798,
+            "population_stddev": 1.193851017334111,
+            "median_95_percent_bootstrap_ci": [
+              2.9100999963702634,
+              4.102500010048971
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 664.8807000165107,
+            "p95": 695.0315999856684,
+            "population_stddev": 78.5588300199694,
+            "median_95_percent_bootstrap_ci": [
+              656.7959500098368,
+              671.4693499961868
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 25.289849989349023,
+            "p95": 42.884399998001754,
+            "population_stddev": 5.946178184722044,
+            "median_95_percent_bootstrap_ci": [
+              24.491249991115183,
+              27.112600015243515
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 80.59374999720603,
+            "p95": 87.3837000108324,
+            "population_stddev": 4.7108655948192775,
+            "median_95_percent_bootstrap_ci": [
+              78.30790001025889,
+              82.37465002457611
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      }
+    },
+    "real-stl-medium": {
+      "cpu": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1168.1846499850508,
+            "p95": 1275.7721999951173,
+            "population_stddev": 54.82193151127274,
+            "median_95_percent_bootstrap_ci": [
+              1159.3718500080286,
+              1185.993299994152
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 820.7783499965444,
+            "p95": 930.6336999870837,
+            "population_stddev": 37.761871641325364,
+            "median_95_percent_bootstrap_ci": [
+              810.368650010787,
+              836.8809500097996
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 348.1694500078447,
+            "p95": 357.75379999540746,
+            "population_stddev": 22.20937682581662,
+            "median_95_percent_bootstrap_ci": [
+              347.1726999996463,
+              349.49399999459274
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 0.000600004568696022,
+            "p95": 0.000800006091594696,
+            "population_stddev": 8.459421996120462e-05,
+            "median_95_percent_bootstrap_ci": [
+              0.000600004568696022,
+              0.000600004568696022
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_current": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1411.8240499810781,
+            "p95": 1492.6858999824617,
+            "population_stddev": 386.80551874562735,
+            "median_95_percent_bootstrap_ci": [
+              1395.637000008719,
+              1424.4536999904085
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 719.8281500022858,
+            "p95": 781.9732000061776,
+            "population_stddev": 272.16629423787504,
+            "median_95_percent_bootstrap_ci": [
+              711.52974999859,
+              724.6692000044277
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 7.53249999252148,
+            "p95": 9.25859998096712,
+            "population_stddev": 94.80391954672076,
+            "median_95_percent_bootstrap_ci": [
+              7.319299998925999,
+              7.646049998584203
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 251.90270000894088,
+            "p95": 277.66520000295714,
+            "population_stddev": 23.33770144128341,
+            "median_95_percent_bootstrap_ci": [
+              247.59690000792034,
+              254.89270000252873
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 350.0433000008343,
+            "p95": 361.13259999547154,
+            "population_stddev": 4.395239869017125,
+            "median_95_percent_bootstrap_ci": [
+              349.24574999604374,
+              351.78734999499284
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 79.90305000566877,
+            "p95": 87.05990001908503,
+            "population_stddev": 3.935189273485903,
+            "median_95_percent_bootstrap_ci": [
+              79.13589999952819,
+              80.65214999078307
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_queued": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1410.630950005725,
+            "p95": 1439.8245999764185,
+            "population_stddev": 22.611536366928526,
+            "median_95_percent_bootstrap_ci": [
+              1400.524349999614,
+              1414.1321499919286
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 721.726050003781,
+            "p95": 757.9085000033956,
+            "population_stddev": 18.585702052341027,
+            "median_95_percent_bootstrap_ci": [
+              714.9489999865182,
+              728.0720999988262
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 1.7209499928867444,
+            "p95": 4.129100008867681,
+            "population_stddev": 1.023421606831521,
+            "median_95_percent_bootstrap_ci": [
+              1.6627499862806872,
+              1.8355000065639615
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 245.54029999126215,
+            "p95": 270.1799999922514,
+            "population_stddev": 12.752995464009105,
+            "median_95_percent_bootstrap_ci": [
+              242.41979999351315,
+              250.16579998191446
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 351.45260000717826,
+            "p95": 362.6782999781426,
+            "population_stddev": 5.011955537236524,
+            "median_95_percent_bootstrap_ci": [
+              349.0258000092581,
+              354.7617500007618
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 81.29090000875294,
+            "p95": 88.32119998987764,
+            "population_stddev": 4.774119002692391,
+            "median_95_percent_bootstrap_ci": [
+              78.82044999860227,
+              82.58589998877142
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      }
+    }
+  },
+  "production-native-thread-limits": {
+    "real-3mf-large": {
+      "cpu": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 994.9840000044787,
+            "p95": 1018.691300007049,
+            "population_stddev": 10.549543637663685,
+            "median_95_percent_bootstrap_ci": [
+              992.1808999934001,
+              1000.1377500011586
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 969.4756499957293,
+            "p95": 993.817400012631,
+            "population_stddev": 10.911291624242072,
+            "median_95_percent_bootstrap_ci": [
+              966.9682999956422,
+              973.1903999927454
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 24.554100004024804,
+            "p95": 26.844400010304525,
+            "population_stddev": 1.02438555054972,
+            "median_95_percent_bootstrap_ci": [
+              24.255249998532236,
+              25.367050009663217
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 0.000500003807246685,
+            "p95": 0.000900006853044033,
+            "population_stddev": 0.00011455384702380316,
+            "median_95_percent_bootstrap_ci": [
+              0.000500003807246685,
+              0.000600004568696022
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_current": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1501.433099998394,
+            "p95": 1544.1684999968857,
+            "population_stddev": 25.46401408102487,
+            "median_95_percent_bootstrap_ci": [
+              1490.2609499986283,
+              1522.8825000085635
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 718.4146999934455,
+            "p95": 744.6923999814317,
+            "population_stddev": 18.839687664217486,
+            "median_95_percent_bootstrap_ci": [
+              710.0361999910092,
+              724.9902499897871
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 7.6820999966003,
+            "p95": 8.587899996200576,
+            "population_stddev": 0.3412114890077786,
+            "median_95_percent_bootstrap_ci": [
+              7.588950000354089,
+              7.8495999914593995
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 667.1850499842549,
+            "p95": 698.2109999808017,
+            "population_stddev": 15.540569311196162,
+            "median_95_percent_bootstrap_ci": [
+              658.8553500041598,
+              676.2552000000142
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 25.702750019263476,
+            "p95": 31.126599991694093,
+            "population_stddev": 2.170709152273644,
+            "median_95_percent_bootstrap_ci": [
+              24.630650004837662,
+              26.10449999338016
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 84.95205001963768,
+            "p95": 96.91039999597706,
+            "population_stddev": 4.830055188558256,
+            "median_95_percent_bootstrap_ci": [
+              83.23859999654815,
+              87.82980000250973
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_queued": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1500.1966500130948,
+            "p95": 1539.435400016373,
+            "population_stddev": 21.40636182123089,
+            "median_95_percent_bootstrap_ci": [
+              1492.3457000113558,
+              1507.597399991937
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 717.6713500084588,
+            "p95": 756.6535999940243,
+            "population_stddev": 21.51557150712883,
+            "median_95_percent_bootstrap_ci": [
+              710.6273999961559,
+              724.3355499958852
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 1.706499999272637,
+            "p95": 1.9197000074200332,
+            "population_stddev": 0.1044230646097474,
+            "median_95_percent_bootstrap_ci": [
+              1.6872000123839825,
+              1.7719000024953857
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 667.0788499905029,
+            "p95": 685.4107000108343,
+            "population_stddev": 12.549944092293432,
+            "median_95_percent_bootstrap_ci": [
+              662.6928499899805,
+              671.3175999902887
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 24.418300003162585,
+            "p95": 42.07039999892004,
+            "population_stddev": 5.903067960388196,
+            "median_95_percent_bootstrap_ci": [
+              24.152049998519942,
+              26.382550015114248
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 82.8314000100363,
+            "p95": 89.1960000153631,
+            "population_stddev": 3.5971360830361463,
+            "median_95_percent_bootstrap_ci": [
+              81.25410000502598,
+              85.09069998399355
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      }
+    },
+    "real-stl-medium": {
+      "cpu": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1166.0738000064157,
+            "p95": 1301.7590000235941,
+            "population_stddev": 56.444365636240455,
+            "median_95_percent_bootstrap_ci": [
+              1160.4704500059597,
+              1183.6577499925625
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 819.9861499888357,
+            "p95": 943.6205000092741,
+            "population_stddev": 46.400125103911314,
+            "median_95_percent_bootstrap_ci": [
+              811.0092999995686,
+              834.2516499978956
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 348.63969997968525,
+            "p95": 357.3463000066113,
+            "population_stddev": 13.691225988331528,
+            "median_95_percent_bootstrap_ci": [
+              345.71569999388885,
+              349.92809999675956
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 0.0005999900167807937,
+            "p95": 0.000700005330145359,
+            "population_stddev": 9.68965166320427e-05,
+            "median_95_percent_bootstrap_ci": [
+              0.000500003807246685,
+              0.000600004568696022
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_current": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1408.4017999994103,
+            "p95": 1452.5272999890149,
+            "population_stddev": 383.3725342277734,
+            "median_95_percent_bootstrap_ci": [
+              1400.413800001843,
+              1423.07504999917
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 721.7830000154208,
+            "p95": 758.2172000256833,
+            "population_stddev": 267.5334505327564,
+            "median_95_percent_bootstrap_ci": [
+              709.2543499893509,
+              730.1303499843925
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 6.942549996892922,
+            "p95": 8.691299997735769,
+            "population_stddev": 94.01438828223077,
+            "median_95_percent_bootstrap_ci": [
+              6.523549993289635,
+              7.3887000035028905
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 246.9796000077622,
+            "p95": 273.72749999631196,
+            "population_stddev": 23.838048306916406,
+            "median_95_percent_bootstrap_ci": [
+              242.6637500175275,
+              255.29879999521654
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 351.41574998851866,
+            "p95": 357.2703000099864,
+            "population_stddev": 4.206397398719797,
+            "median_95_percent_bootstrap_ci": [
+              347.45344999828376,
+              353.04610000457615
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 78.35935000912286,
+            "p95": 85.38520001457073,
+            "population_stddev": 3.5422601977216774,
+            "median_95_percent_bootstrap_ci": [
+              76.01660001091659,
+              79.47024999884889
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_queued": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1412.6711999851977,
+            "p95": 1435.0715999898966,
+            "population_stddev": 26.538328218112383,
+            "median_95_percent_bootstrap_ci": [
+              1404.9777000036556,
+              1416.418299995712
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 726.7092499969294,
+            "p95": 768.7682000105269,
+            "population_stddev": 26.87014267813437,
+            "median_95_percent_bootstrap_ci": [
+              720.1174000074388,
+              737.401949998457
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 3.795450014877133,
+            "p95": 4.72329999320209,
+            "population_stddev": 1.0811112997366144,
+            "median_95_percent_bootstrap_ci": [
+              3.0475000094156712,
+              3.886550010065548
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 248.45475000620354,
+            "p95": 265.07749999291264,
+            "population_stddev": 8.29267225395802,
+            "median_95_percent_bootstrap_ci": [
+              244.80585001583677,
+              251.57569997827522
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 348.95405001589097,
+            "p95": 358.7667999963742,
+            "population_stddev": 3.8251825518460314,
+            "median_95_percent_bootstrap_ci": [
+              347.8453999996418,
+              350.9578500234056
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 79.2395000171382,
+            "p95": 86.82160000898875,
+            "population_stddev": 3.7124030448853285,
+            "median_95_percent_bootstrap_ci": [
+              77.88504999189172,
+              80.53239999571815
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      }
+    }
+  },
+  "first-compatible-selection": {
+    "real-3mf-large": {
+      "cpu": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 994.820849984535,
+            "p95": 1020.7785000093281,
+            "population_stddev": 20.304848670342412,
+            "median_95_percent_bootstrap_ci": [
+              989.0854999976,
+              1000.7973500032676
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 968.8779000134673,
+            "p95": 995.8790999953635,
+            "population_stddev": 20.578245890224533,
+            "median_95_percent_bootstrap_ci": [
+              962.4098500062246,
+              975.7868999877246
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 24.31475000048522,
+            "p95": 30.161600006977096,
+            "population_stddev": 2.301703365558877,
+            "median_95_percent_bootstrap_ci": [
+              24.163549998775125,
+              24.486299997079186
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 0.000800006091594696,
+            "p95": 0.0019999861251562834,
+            "population_stddev": 0.0003972249617201481,
+            "median_95_percent_bootstrap_ci": [
+              0.000700005330145359,
+              0.000900006853044033
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_after": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1508.0337999970652,
+            "p95": 1547.0911999873351,
+            "population_stddev": 27.174205376981547,
+            "median_95_percent_bootstrap_ci": [
+              1497.8975000121864,
+              1520.9566499834182
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 719.0073000092525,
+            "p95": 750.3469999937806,
+            "population_stddev": 18.19285594532433,
+            "median_95_percent_bootstrap_ci": [
+              715.2867000113474,
+              727.1505499957129
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 7.2324000066146255,
+            "p95": 8.837500005029142,
+            "population_stddev": 0.9969667211714084,
+            "median_95_percent_bootstrap_ci": [
+              6.070600007660687,
+              7.585100014694035
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 673.5893499862868,
+            "p95": 697.174900007667,
+            "population_stddev": 19.27968088683335,
+            "median_95_percent_bootstrap_ci": [
+              668.9115499902982,
+              677.0316000038292
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 24.515350014553405,
+            "p95": 33.76619998016395,
+            "population_stddev": 2.7088264892449296,
+            "median_95_percent_bootstrap_ci": [
+              24.22254999692086,
+              25.031350014614873
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 79.46695000282489,
+            "p95": 84.67889999155886,
+            "population_stddev": 3.050027911587817,
+            "median_95_percent_bootstrap_ci": [
+              77.18534999003168,
+              81.03099999425467
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_before": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1506.8177500070306,
+            "p95": 1530.3306999849156,
+            "population_stddev": 16.601010928315414,
+            "median_95_percent_bootstrap_ci": [
+              1499.4691499887267,
+              1516.3446000078693
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 727.3144000064349,
+            "p95": 748.0661000008695,
+            "population_stddev": 14.349993290930266,
+            "median_95_percent_bootstrap_ci": [
+              717.5437000114471,
+              732.0542999950703
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 6.344850015011616,
+            "p95": 8.382700005313382,
+            "population_stddev": 1.0852156465426521,
+            "median_95_percent_bootstrap_ci": [
+              5.973449980956502,
+              7.21829998656176
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 668.0923999956576,
+            "p95": 684.0265000064392,
+            "population_stddev": 11.613021335025802,
+            "median_95_percent_bootstrap_ci": [
+              660.917650006013,
+              671.2579000013648
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 24.373600012040697,
+            "p95": 29.03669999795966,
+            "population_stddev": 2.3111819274364835,
+            "median_95_percent_bootstrap_ci": [
+              24.16645000630524,
+              24.639199997182004
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 79.94779999717139,
+            "p95": 90.03540000412613,
+            "population_stddev": 4.47131126678993,
+            "median_95_percent_bootstrap_ci": [
+              78.23174999793991,
+              82.50305001274683
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      }
+    },
+    "real-stl-medium": {
+      "cpu": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1204.6387500013225,
+            "p95": 1312.9773999971803,
+            "population_stddev": 45.74990996270609,
+            "median_95_percent_bootstrap_ci": [
+              1188.273100007791,
+              1217.5937999854796
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 844.6269000123721,
+            "p95": 961.3974000094458,
+            "population_stddev": 36.84658072755746,
+            "median_95_percent_bootstrap_ci": [
+              836.0687000094913,
+              853.574650012888
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 355.67400000581983,
+            "p95": 366.0192000097595,
+            "population_stddev": 13.467999938270196,
+            "median_95_percent_bootstrap_ci": [
+              353.00000000279397,
+              358.9073499897495
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 0.000800006091594696,
+            "p95": 0.001200009137392044,
+            "population_stddev": 0.00018208901632757517,
+            "median_95_percent_bootstrap_ci": [
+              0.000700005330145359,
+              0.0008999923011288047
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_after": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1408.8670999917667,
+            "p95": 1487.4364999996033,
+            "population_stddev": 48.39794755752807,
+            "median_95_percent_bootstrap_ci": [
+              1400.2567999996245,
+              1420.5444999970496
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 724.3224999983795,
+            "p95": 772.021799988579,
+            "population_stddev": 28.11038780094564,
+            "median_95_percent_bootstrap_ci": [
+              711.7313500057207,
+              737.8463499917416
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 7.660299990675412,
+            "p95": 8.813699998427182,
+            "population_stddev": 0.9493877634158293,
+            "median_95_percent_bootstrap_ci": [
+              7.430600002408028,
+              7.8581999987363815
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 242.1423999912804,
+            "p95": 270.30679999734275,
+            "population_stddev": 10.820203448297246,
+            "median_95_percent_bootstrap_ci": [
+              239.88889998872764,
+              245.56070000107866
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 355.2880999923218,
+            "p95": 367.2565000015311,
+            "population_stddev": 16.672860216761666,
+            "median_95_percent_bootstrap_ci": [
+              352.6373000058811,
+              357.9199000087101
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 79.65235000301618,
+            "p95": 86.54089999618009,
+            "population_stddev": 3.2657429861488816,
+            "median_95_percent_bootstrap_ci": [
+              79.13559999724384,
+              80.97969999653287
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_before": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1414.8758500086842,
+            "p95": 1479.4976999983191,
+            "population_stddev": 392.0564285101545,
+            "median_95_percent_bootstrap_ci": [
+              1402.0374499959871,
+              1423.0610000086017
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 724.2552999814507,
+            "p95": 763.6653000081424,
+            "population_stddev": 271.3386184210063,
+            "median_95_percent_bootstrap_ci": [
+              715.9275499871001,
+              732.039150010678
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 7.297899996046908,
+            "p95": 8.223599987104535,
+            "population_stddev": 94.84121402464012,
+            "median_95_percent_bootstrap_ci": [
+              6.1095000128261745,
+              7.525649998569861
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 244.84235000272747,
+            "p95": 259.8234000033699,
+            "population_stddev": 25.846737248843695,
+            "median_95_percent_bootstrap_ci": [
+              241.89790000673383,
+              247.78239997976925
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 354.7884999861708,
+            "p95": 363.8959999952931,
+            "population_stddev": 5.964973425883949,
+            "median_95_percent_bootstrap_ci": [
+              352.5973000068916,
+              357.1249499946134
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 80.01235000847373,
+            "p95": 85.02959998440929,
+            "population_stddev": 3.3094586012647937,
+            "median_95_percent_bootstrap_ci": [
+              79.13589999952819,
+              81.33484999416396
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      }
+    }
+  },
+  "preferred-selection": {
+    "real-3mf-large": {
+      "cpu": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 999.1279000096256,
+            "p95": 1027.178999996977,
+            "population_stddev": 14.993817024564223,
+            "median_95_percent_bootstrap_ci": [
+              994.1886000015074,
+              1014.0297500038287
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 974.0763000154402,
+            "p95": 999.8962999961805,
+            "population_stddev": 14.677339882809527,
+            "median_95_percent_bootstrap_ci": [
+              968.3165500027826,
+              986.0736999835353
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 24.3748500070069,
+            "p95": 30.04690000670962,
+            "population_stddev": 1.581270795953335,
+            "median_95_percent_bootstrap_ci": [
+              24.21965000394266,
+              25.09774998179637
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 0.000600004568696022,
+            "p95": 0.000900006853044033,
+            "population_stddev": 0.0001314882702569494,
+            "median_95_percent_bootstrap_ci": [
+              0.000600004568696022,
+              0.0006499903975054622
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_after": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1228.7788999965414,
+            "p95": 1259.601500001736,
+            "population_stddev": 26.46350602576279,
+            "median_95_percent_bootstrap_ci": [
+              1201.4005499950144,
+              1237.8083499934291
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 387.8206999943359,
+            "p95": 421.49439998320304,
+            "population_stddev": 20.438922468744202,
+            "median_95_percent_bootstrap_ci": [
+              380.14224999642465,
+              405.3942500031553
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 50.69220000586938,
+            "p95": 55.96920000971295,
+            "population_stddev": 2.2810254591048507,
+            "median_95_percent_bootstrap_ci": [
+              49.91555000015069,
+              51.540700005716644
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 671.0263499990106,
+            "p95": 709.6754999947734,
+            "population_stddev": 15.606379774461299,
+            "median_95_percent_bootstrap_ci": [
+              665.9832499863114,
+              678.0084999918472
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 24.453900012304075,
+            "p95": 26.932000007946044,
+            "population_stddev": 1.4007828159501108,
+            "median_95_percent_bootstrap_ci": [
+              24.30649999587331,
+              25.508499995339662
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 78.16820000880398,
+            "p95": 86.83730001212098,
+            "population_stddev": 5.5632263688052666,
+            "median_95_percent_bootstrap_ci": [
+              76.72879999154247,
+              81.69360000465531
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_before": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1521.8331499927444,
+            "p95": 1567.466999986209,
+            "population_stddev": 23.03326165535639,
+            "median_95_percent_bootstrap_ci": [
+              1510.3339499910362,
+              1530.7220499962568
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 729.0354499855312,
+            "p95": 750.030199997127,
+            "population_stddev": 13.573355187135734,
+            "median_95_percent_bootstrap_ci": [
+              723.3073999959743,
+              740.1896499941358
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 7.517100006225519,
+            "p95": 8.782299992162734,
+            "population_stddev": 1.1300176863200437,
+            "median_95_percent_bootstrap_ci": [
+              6.283299997448921,
+              7.660950010176748
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 673.3951500063995,
+            "p95": 711.9890000030864,
+            "population_stddev": 16.017500013004803,
+            "median_95_percent_bootstrap_ci": [
+              666.0503000020981,
+              680.1664999948116
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 24.61089999997057,
+            "p95": 37.39979999954812,
+            "population_stddev": 4.284272745295069,
+            "median_95_percent_bootstrap_ci": [
+              24.213450000388548,
+              25.783999997656792
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 81.15125000767875,
+            "p95": 92.9652999911923,
+            "population_stddev": 4.944919496094281,
+            "median_95_percent_bootstrap_ci": [
+              79.78240001830272,
+              84.4846500112908
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      }
+    },
+    "real-stl-medium": {
+      "cpu": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1169.2012999847066,
+            "p95": 1313.2070999999996,
+            "population_stddev": 56.31172016710009,
+            "median_95_percent_bootstrap_ci": [
+              1154.333200014662,
+              1183.9640000107465
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 817.8568500006804,
+            "p95": 966.4960000081919,
+            "population_stddev": 46.735502923258714,
+            "median_95_percent_bootstrap_ci": [
+              805.1973499968881,
+              831.9780000019819
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 348.47589999844786,
+            "p95": 362.5400000018999,
+            "population_stddev": 13.623562047783281,
+            "median_95_percent_bootstrap_ci": [
+              345.83370000473224,
+              351.15775000303984
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 0.000600004568696022,
+            "p95": 0.00100000761449337,
+            "population_stddev": 0.0001626528577441905,
+            "median_95_percent_bootstrap_ci": [
+              0.000600004568696022,
+              0.0006999907782301307
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_after": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1113.1339999992633,
+            "p95": 1230.853199987905,
+            "population_stddev": 122.70608231096492,
+            "median_95_percent_bootstrap_ci": [
+              1097.970049988362,
+              1123.596749996068
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 378.81280000146944,
+            "p95": 500.30390001484193,
+            "population_stddev": 124.48841642142003,
+            "median_95_percent_bootstrap_ci": [
+              372.35774999135174,
+              389.5114500046475
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 49.49960000521969,
+            "p95": 56.000999989919364,
+            "population_stddev": 3.4201371869639785,
+            "median_95_percent_bootstrap_ci": [
+              49.03809999814257,
+              49.99585001496598
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 245.77244999818504,
+            "p95": 276.9179999886546,
+            "population_stddev": 11.054932497826517,
+            "median_95_percent_bootstrap_ci": [
+              244.32784999953583,
+              249.79780000285245
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 348.67219999432564,
+            "p95": 364.09980000462383,
+            "population_stddev": 6.403957153488512,
+            "median_95_percent_bootstrap_ci": [
+              347.3463999980595,
+              350.4924000008032
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 75.69109999167267,
+            "p95": 81.30220000748523,
+            "population_stddev": 4.44800307471997,
+            "median_95_percent_bootstrap_ci": [
+              74.53214999986812,
+              78.71719999820925
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      },
+      "gpu_before": {
+        "attempts": 30,
+        "completed": 30,
+        "phases": {
+          "total_ms": {
+            "count": 30,
+            "median": 1429.8767000000225,
+            "p95": 1462.5087000022177,
+            "population_stddev": 378.02070714622204,
+            "median_95_percent_bootstrap_ci": [
+              1417.440950011951,
+              1437.3362000042107
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "context_ms": {
+            "count": 30,
+            "median": 740.8309000020381,
+            "p95": 765.407899976708,
+            "population_stddev": 262.5827275838826,
+            "median_95_percent_bootstrap_ci": [
+              729.4335000042338,
+              743.4402999933809
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "frame_setup_ms": {
+            "count": 30,
+            "median": 7.518049998907372,
+            "p95": 9.584100014762953,
+            "population_stddev": 94.41564228541377,
+            "median_95_percent_bootstrap_ci": [
+              6.628699993598275,
+              7.709350000368431
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "render_postprocess_ms": {
+            "count": 30,
+            "median": 248.8364000018919,
+            "p95": 286.052200011909,
+            "population_stddev": 23.88212736417884,
+            "median_95_percent_bootstrap_ci": [
+              243.33339999429882,
+              253.0158500012476
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "encode_ms": {
+            "count": 30,
+            "median": 350.0600499974098,
+            "p95": 362.9947000008542,
+            "population_stddev": 5.816490945455126,
+            "median_95_percent_bootstrap_ci": [
+              349.35530001530424,
+              353.1897500070045
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          },
+          "cleanup_ms": {
+            "count": 30,
+            "median": 79.14819999132305,
+            "p95": 86.8981999810785,
+            "population_stddev": 4.638766220897188,
+            "median_95_percent_bootstrap_ci": [
+              77.6713500090409,
+              81.07990000280552
+            ],
+            "method": "nearest-rank p95; percentile bootstrap median CI, 2000 resamples, seed 16"
+          }
+        }
+      }
+    }
+  }
+}

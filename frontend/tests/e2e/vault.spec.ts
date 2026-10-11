@@ -108,9 +108,6 @@ test.describe("vault route", () => {
   test("refreshes a changed library deliberately", async ({ page }) => {
     const browseRequests: string[] = [];
     let changed = false;
-    const thumbnailRead = page.waitForResponse(
-      (response) => new URL(response.url()).pathname === "/api/v1/models/browse/thumbnails",
-    );
     await page.route("**/api/v1/models/browse/revision", (route) =>
       route.fulfill({
         json: { browse_revision: changed ? "r2" : "r1", authorization_revision: "a1" },
@@ -141,8 +138,13 @@ test.describe("vault route", () => {
     await expect(page.getByRole("button", { name: "Load more", exact: true })).toBeVisible();
     const initialReads = browseRequests.length;
     changed = true;
-    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
-    await thumbnailRead;
+    const authorityRead = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/v1/models/browse/revision",
+    );
+    await page.evaluate(() =>
+      document.dispatchEvent(new Event("visibilitychange", { bubbles: true })),
+    );
+    await authorityRead;
     await expect(
       page.getByText("The library has changed. Refresh before loading more results."),
     ).toBeVisible();
@@ -386,19 +388,24 @@ test.describe("vault route", () => {
     ).toHaveLength(1);
   });
 
-  test("mobile vault skips the desktop outliner request", async ({ page }) => {
+  test("mobile vault prepares bounded tree roots before opening the drawer", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    const outlinerRequests: string[] = [];
-    page.on("request", (request) => {
-      if (new URL(request.url()).pathname.startsWith("/api/v1/outliner/")) {
-        outlinerRequests.push(request.url());
-      }
+    const roots: URL[] = [];
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (url.pathname === "/api/v1/outliner/collections" && response.ok()) roots.push(url);
     });
 
     await page.goto("/");
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
+    await expect.poll(() => roots.length).toBeGreaterThan(0);
+    expect(roots.every((url) => url.searchParams.get("limit") === "50")).toBe(true);
+    await expect(page.getByRole("dialog", { name: "Filters", exact: true })).toBeHidden();
+    const restoredReads = roots.length;
+    await page.getByRole("button", { name: "Filters", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Filters", exact: true })).toBeVisible();
     await page.waitForTimeout(200);
-    expect(outlinerRequests).toEqual([]);
+    expect(roots).toHaveLength(restoredReads);
   });
 });
 

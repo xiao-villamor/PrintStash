@@ -409,6 +409,23 @@ class TestRenderMeshThumbnail:
             assert decoded.format == "WEBP"
             assert decoded.size == (80, 60)
 
+    def test_compresses_native_rendered_frames(self) -> None:
+        mesh = box_mesh()
+        png = render_mesh_thumbnail(mesh, "box.stl", width=640, height=480)
+        assert png is not None
+        original = Image.open(io.BytesIO(png))
+        lossless = io.BytesIO()
+        original.save(lossless, format="WEBP", lossless=True, exact=True, method=6)
+
+        encoded = render_mesh_thumbnail(
+            mesh, "box.stl", width=640, height=480, output_format="WEBP"
+        )
+
+        assert encoded is not None
+        assert len(encoded) < len(lossless.getvalue()) * 0.6
+        decoded = Image.open(io.BytesIO(encoded)).convert("RGBA")
+        assert decoded.getchannel("A").tobytes() == original.getchannel("A").tobytes()
+
     def test_accepts_a_mesh_through_the_structural_interface(self) -> None:
         # `SimpleNamespace` with `vertices`/`faces` — not a Trimesh object.
         # Trimesh is not importable from this module by design, so callers that

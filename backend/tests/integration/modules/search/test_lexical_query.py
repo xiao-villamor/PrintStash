@@ -410,6 +410,34 @@ class TestLexicalQuery:
             bind_content_search(previous)
 
 
+    def test_composes_independent_library_search_scopes(
+        self, db_session, make_model
+    ):
+        from sqlmodel import select
+
+        from app.db.models import Model
+        from app.modules.search.lexical_query import LibrarySearch
+
+        first = make_model("Bracket left")
+        second = make_model("Bracket right")
+        content_changed(db_session, "model", [first.id, second.id])
+        drain_search(db_session)
+        lexical_index.rebuild_partition(db_session)
+        db_session.commit()
+        searcher = LibrarySearch()
+        left = searcher.model_matches(
+            db_session, "bracket", select(Model.id).where(Model.id == first.id)
+        )
+        right = searcher.model_matches(
+            db_session, "bracket", select(Model.id).where(Model.id == second.id)
+        )
+
+        rows = db_session.exec(
+            select(left.c.model_id).union_all(select(right.c.model_id))
+        ).all()
+
+        assert sorted(row[0] for row in rows) == sorted([first.id, second.id])
+
     def test_browse_falls_back_after_native_table_loss(
         self, db_session, make_user, make_model
     ):

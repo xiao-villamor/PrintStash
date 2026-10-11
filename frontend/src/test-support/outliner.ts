@@ -1,6 +1,13 @@
 /** Sidebar API fixtures: tests describe visible rows, never pass leaves as component props. */
 import type { CollectionRead, MultipartModelListItem, OutlinerModelRead } from "@/types";
-import type { OutlinerCollection, OutlinerEntry, OutlinerMatch } from "@/types/outliner";
+import type {
+  OutlinerCollection,
+  OutlinerEntry,
+  OutlinerMatch,
+  OutlinerRestoreParams,
+  OutlinerRestoreRead,
+} from "@/types/outliner";
+import { modelListSearch } from "@/lib/api/models";
 import { aCollectionNode } from "./factories";
 import { json, type RouteTable } from "./render";
 
@@ -83,44 +90,75 @@ export function outlinerRoutes(
       next_cursor: sorted.length > offset + 50 ? String(offset + 50) : null,
     };
   }
+  function collectionPage(params: URLSearchParams) {
+    const parent = params.get("parent_id");
+    const visible = collections
+      .filter((item) =>
+        parent === null
+          ? !collections.some((p) => p.id === item.parent_id)
+          : item.parent_id === Number(parent),
+      )
+      .map((item) => node(item, params));
+    const filtered =
+      params.has("tag") ||
+      params.has("printer_id") ||
+      params.has("printer_presence") ||
+      params.has("favorites");
+    return {
+      ...page(
+        visible.filter((item) => !filtered || item.subtree_entry_count > 0),
+        params,
+      ),
+      parent_direct_entry_count: leaves(params).filter(
+        (entry) => entry.collection_id === (parent === null ? null : Number(parent)),
+      ).length,
+      revealed: visible.find((item) => item.id === Number(params.get("reveal_id"))) ?? null,
+    };
+  }
+  function entryPage(params: URLSearchParams) {
+    const folder = params.get("collection_id");
+    return page(
+      leaves(params).filter(
+        (entry) => entry.collection_id === (folder === null ? null : Number(folder)),
+      ),
+      params,
+    );
+  }
   return {
-    "GET /api/v1/outliner/collections": (url) => {
-      const params = new URL(url, "http://test").searchParams;
-      const parent = params.get("parent_id");
-      const visible = collections
-        .filter((item) =>
-          parent === null
-            ? !collections.some((p) => p.id === item.parent_id)
-            : item.parent_id === Number(parent),
-        )
-        .map((item) => node(item, params));
-      const filtered =
-        params.has("tag") ||
-        params.has("printer_id") ||
-        params.has("printer_presence") ||
-        params.has("favorites");
-      return json({
-        ...page(
-          visible.filter((item) => !filtered || item.subtree_entry_count > 0),
-          params,
-        ),
-        parent_direct_entry_count: leaves(params).filter(
-          (entry) => entry.collection_id === (parent === null ? null : Number(parent)),
-        ).length,
-        revealed: visible.find((item) => item.id === Number(params.get("reveal_id"))) ?? null,
+    "POST /api/v1/outliner/restore": (_url, init) => {
+      const body: OutlinerRestoreParams = JSON.parse(String(init?.body));
+      const parents = [
+        null,
+        ...collections.filter((node) => body.expanded_paths.includes(node.path)),
+      ];
+      const levels = parents.map((parent) => {
+        const params = modelListSearch(body);
+        params.set("view", body.view);
+        if (parent) {
+          params.set("parent_id", String(parent.id));
+          params.set("collection_id", String(parent.id));
+        }
+        const reveal = collections.find(
+          (node) =>
+            node.parent_id === (parent?.id ?? null) &&
+            (node.path === body.selected_path || body.selected_path?.startsWith(`${node.path}/`)),
+        );
+        if (reveal) params.set("reveal_id", String(reveal.id));
+        return { id: parent?.id ?? null, params };
       });
+      return json({
+        collections: levels.map(({ id, params }) => ({
+          parent_id: id,
+          page: collectionPage(params),
+        })),
+        entries: levels.map(({ id, params }) => ({ collection_id: id, page: entryPage(params) })),
+      } satisfies OutlinerRestoreRead);
     },
+    "GET /api/v1/outliner/collections": (url) =>
+      json(collectionPage(new URL(url, "http://test").searchParams)),
     "GET /api/v1/outliner/entries": (url) => {
       const params = new URL(url, "http://test").searchParams;
-      const folder = params.get("collection_id");
-      return json(
-        page(
-          leaves(params).filter(
-            (entry) => entry.collection_id === (folder === null ? null : Number(folder)),
-          ),
-          params,
-        ),
-      );
+      return json(entryPage(params));
     },
     "GET /api/v1/outliner/search": (url) => {
       const params = new URL(url, "http://test").searchParams;

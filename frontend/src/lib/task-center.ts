@@ -1093,7 +1093,10 @@ export function startImportJobSync(): () => void {
     document.addEventListener("visibilitychange", onVisibilityChange);
     window.addEventListener("online", onConnectivityRestored);
     stopEvents = subscribeEvents((notice) => {
-      if (notice.type === "job" || notice.type === "resync") wakeImportJobSync();
+      // Administrators receive system maintenance on the shared socket, but
+      // /jobs omits it. Older servers omit the hint, so keep their resync behavior.
+      if (notice.type === "resync" || (notice.type === "job" && notice.task_visible !== false))
+        wakeImportJobSync();
     });
     // The server's first resync owns the first snapshot. If no socket notice
     // arrives, this bounded fallback still discovers server-owned work.

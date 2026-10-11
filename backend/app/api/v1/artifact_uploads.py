@@ -453,104 +453,120 @@ def finalize_artifact_upload(
 ) -> ArtifactUploadRead:
     with command_session(actor) as (session, current_user):
         manager = _manager(session)
+        # Authorize before creating or locking any private staging directory.
         try:
             pending = manager.get(session_id, current_user)
-            if pending.state in {
-                ArtifactUploadState.INGESTING,
-                ArtifactUploadState.COMPLETED,
-            }:
-                return _upload_read(manager, pending)
-            options = json.loads(pending.request_json)
-            pending_request = ArtifactUploadCreate(
-                purpose=cast(UploadPurpose, pending.purpose),
-                target_role=pending.target_role,
-                target_id=pending.target_id,
-                filename=pending.filename,
-                media_type=pending.media_type,
-                size_bytes=pending.declared_size,
-                sha256=pending.client_sha256,
-                **options,
-            )
-            _require_revision_target(
-                session,
-                current_user,
-                pending_request,
-            )
-            if pending.purpose != "revision":
-                _require_ingest_collection(
-                    session, current_user, options.get("collection")
-                )
-                _validate_target_library(session, options.get("target_library_id"))
-            upload, verified = manager.finalize(session_id, current_user)
-        except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
-            raise _translate_error(exc) from exc
-        assert current_user.id is not None
-        # This compare-and-set claim closes the small window between verification
-        # and job creation. A concurrent finalize loses here before it can create a
-        # second Job or lease for the same immutable staged object.
-        try:
-            manager.transition(upload, ArtifactUploadState.INGESTING)
         except ArtifactUploadError as exc:
-            current = _completed_idempotent_race(
-                exc=exc,
-                manager=manager,
-                session=session,
-                session_id=session_id,
-                current_user=current_user,
-                accepted_states={
+            raise _translate_error(exc) from exc
+        if (
+            pending.state
+            in {ArtifactUploadState.INGESTING, ArtifactUploadState.COMPLETED}
+            and pending.job_id is not None
+        ):
+            return _upload_read(manager, pending)
+        with manager.operation(session_id) as acquired:
+            if not acquired:
+                raise HTTPException(
+                    status_code=409, detail="artifact_upload_state_conflict"
+                )
+            try:
+                session.refresh(pending)
+                if pending.state in {
                     ArtifactUploadState.INGESTING,
                     ArtifactUploadState.COMPLETED,
+                }:
+                    return _upload_read(manager, pending)
+                options = json.loads(pending.request_json)
+                pending_request = ArtifactUploadCreate(
+                    purpose=cast(UploadPurpose, pending.purpose),
+                    target_role=pending.target_role,
+                    target_id=pending.target_id,
+                    filename=pending.filename,
+                    media_type=pending.media_type,
+                    size_bytes=pending.declared_size,
+                    sha256=pending.client_sha256,
+                    **options,
+                )
+                _require_revision_target(
+                    session,
+                    current_user,
+                    pending_request,
+                )
+                if pending.purpose != "revision":
+                    _require_ingest_collection(
+                        session, current_user, options.get("collection")
+                    )
+                    _validate_target_library(session, options.get("target_library_id"))
+                upload, verified = manager.finalize(session_id, current_user)
+            except (ArtifactUploadError, ApiChunkError, NativeMultipartError) as exc:
+                raise _translate_error(exc) from exc
+            assert current_user.id is not None
+            # This compare-and-set claim closes the small window between verification
+            # and job creation. A concurrent finalize loses here before it can create a
+            # second Job or lease for the same immutable staged object.
+            try:
+                manager.transition(upload, ArtifactUploadState.INGESTING)
+            except ArtifactUploadError as exc:
+                current = _completed_idempotent_race(
+                    exc=exc,
+                    manager=manager,
+                    session=session,
+                    session_id=session_id,
+                    current_user=current_user,
+                    accepted_states={
+                        ArtifactUploadState.INGESTING,
+                        ArtifactUploadState.COMPLETED,
+                    },
+                )
+                if current is not None:
+                    return _upload_read(manager, current)
+                raise _translate_error(exc) from exc
+            try:
+                job_id = uuid.uuid4().hex
+                work_service.request(
+                    session,
+                    definition=JobKind.INGESTION_ARTIFACT_UPLOAD,
+                    subject_key=upload_handoff.subject_key(upload.id),
+                    owner_user_id=current_user.id,
+                    job_id=job_id,
+                )
+                staging_leases.create_job_lease(
+                    session,
+                    job_id=job_id,
+                    owner_user_id=current_user.id,
+                    path=verified.materialize(),
+                    size_bytes=verified.size_bytes,
+                    sha256=verified.sha256,
+                )
+                # One commit records the queued Job, its lease and the session's link.
+                manager.transition(upload, ArtifactUploadState.INGESTING, job_id=job_id)
+            except Exception as exc:
+                session.rollback()
+                manager.transition(
+                    upload,
+                    ArtifactUploadState.FAILED,
+                    error_code="artifact_upload_ingestion_claim_failed",
+                    retryable=True,
+                )
+                if isinstance(exc, staging_leases.StagingCapacityExceeded):
+                    raise HTTPException(
+                        status_code=507, detail="staging_capacity_exceeded"
+                    ) from exc
+                raise
+            audit.record(
+                session,
+                action="artifact_upload.finalize",
+                resource_type="artifact_upload",
+                diff={
+                    "session_id": upload.id,
+                    "purpose": upload.purpose,
+                    "mode": upload.adapter_id,
+                    "bytes": verified.size_bytes,
+                    "job_id": job_id,
                 },
             )
-            if current is not None:
-                return _upload_read(manager, current)
-            raise _translate_error(exc) from exc
-        try:
-            job_id = uuid.uuid4().hex
-            work_service.request(
-                session,
-                definition=JobKind.INGESTION_ARTIFACT_UPLOAD,
-                subject_key=upload_handoff.subject_key(upload.id),
-                owner_user_id=current_user.id,
-                job_id=job_id,
-            )
-            staging_leases.create_job_lease(
-                session,
-                job_id=job_id,
-                owner_user_id=current_user.id,
-                path=verified.materialize(),
-                size_bytes=verified.size_bytes,
-                sha256=verified.sha256,
-            )
-            # One commit records the queued Job, its lease and the session's link.
-            manager.transition(upload, ArtifactUploadState.INGESTING, job_id=job_id)
-        except Exception as exc:
-            session.rollback()
-            manager.transition(
-                upload,
-                ArtifactUploadState.FAILED,
-                error_code="artifact_upload_ingestion_claim_failed",
-                retryable=True,
-            )
-            if isinstance(exc, staging_leases.StagingCapacityExceeded):
-                raise HTTPException(
-                    status_code=507, detail="staging_capacity_exceeded"
-                ) from exc
-            raise
-        audit.record(
-            session,
-            action="artifact_upload.finalize",
-            resource_type="artifact_upload",
-            diff={
-                "session_id": upload.id,
-                "purpose": upload.purpose,
-                "mode": upload.adapter_id,
-                "bytes": verified.size_bytes,
-                "job_id": job_id,
-            },
-        )
-        nudge(JobKind.INGESTION_ARTIFACT_UPLOAD)
-        return _upload_read(manager, upload)
+            nudge(JobKind.INGESTION_ARTIFACT_UPLOAD)
+            return _upload_read(manager, upload)
 
 
 @router.delete("/{session_id}", response_model=ArtifactUploadRead)

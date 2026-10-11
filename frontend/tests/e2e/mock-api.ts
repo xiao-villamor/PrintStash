@@ -882,6 +882,13 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
 
+  if (url.pathname === "/api/v1/pwa-old-worker.js") {
+    res.writeHead(200, { "Content-Type": "application/javascript", "Service-Worker-Allowed": "/" });
+    res.end(
+      'self.addEventListener("install", () => self.skipWaiting()); self.addEventListener("activate", event => event.waitUntil(self.clients.claim()));',
+    );
+    return;
+  }
   if (url.pathname === "/api/v1/setup/status") {
     sendJson(res, { configured: true, has_users: true });
     return;
@@ -1055,7 +1062,39 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
         next_cursor: sorted.length > offset + limit ? String(offset + limit) : null,
       };
     };
-    if (url.pathname.endsWith("/collections")) {
+    if (url.pathname.endsWith("/restore")) {
+      let body = "";
+      req.on("data", (chunk) => {
+        body += chunk.toString();
+      });
+      req.on("end", () => {
+        const request: { expanded_paths: string[] } = JSON.parse(body);
+        const rows = mockCollections().map((row) => ({
+          ...mockNode(row),
+          direct_entry_count: leaves.filter((item) => item.collection_id === row.id).length,
+          subtree_entry_count: leaves.filter((item) => item.collection_id === row.id).length,
+          visible_child_count: 0,
+        }));
+        const ids = [
+          null,
+          ...rows.filter((row) => request.expanded_paths.includes(row.path)).map((row) => row.id),
+        ];
+        sendJson(res, {
+          collections: ids.map((id) => ({
+            parent_id: id,
+            page: {
+              ...page(id === null ? rows : []),
+              parent_direct_entry_count: leaves.filter((row) => row.collection_id === id).length,
+              revealed: null,
+            },
+          })),
+          entries: ids.map((id) => ({
+            collection_id: id,
+            page: page(leaves.filter((row) => row.collection_id === id)),
+          })),
+        });
+      });
+    } else if (url.pathname.endsWith("/collections")) {
       const rows = mockCollections().map((row) => ({
         ...mockNode(row),
         direct_entry_count: leaves.filter((item) => item.collection_id === row.id).length,

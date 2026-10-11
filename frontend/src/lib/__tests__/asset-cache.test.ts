@@ -249,15 +249,15 @@ describe("assetCache", () => {
 });
 
 describe("asset leases and admission", () => {
-  it("limits simultaneous protected image downloads to four", async () => {
+  it("limits simultaneous protected image downloads to two", async () => {
     const responses = Array.from({ length: 6 }, () => Promise.withResolvers<Response>());
     let index = 0;
     vi.mocked(fetch).mockImplementation(() => responses[index++].promise);
     const leases = responses.map((_, i) => acquireAssetUrl(`/lease/limit-${i}`));
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(2);
     responses[0].resolve(new Response("png"));
     await leases[0].url;
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(5));
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(3));
     responses.slice(1).forEach((response) => response.resolve(new Response("png")));
     await Promise.all(leases.map((lease) => lease.url));
     leases.forEach((lease) => lease.release());
@@ -346,7 +346,7 @@ describe("asset leases and admission", () => {
     response.resolve(new Response("obsolete"));
     for (const outcome of await Promise.all(outcomes))
       expect(outcome).toMatchObject({ name: "AbortError" });
-    expect(fetch).toHaveBeenCalledTimes(4);
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(created).toHaveLength(0);
     leases.forEach((lease) => lease.release());
   });
@@ -355,17 +355,13 @@ describe("asset leases and admission", () => {
 describe("private asset scope", () => {
   it("starts current scope work before an old aborted response settles", async () => {
     const previous = Promise.withResolvers<Response>();
-    vi.mocked(fetch)
-      .mockReturnValueOnce(previous.promise)
-      .mockReturnValueOnce(previous.promise)
-      .mockReturnValueOnce(previous.promise)
-      .mockReturnValueOnce(previous.promise);
-    const old = Array.from({ length: 4 }, (_, i) => acquireAssetUrl(`/lease/old-${i}`));
+    vi.mocked(fetch).mockReturnValueOnce(previous.promise).mockReturnValueOnce(previous.promise);
+    const old = Array.from({ length: 2 }, (_, i) => acquireAssetUrl(`/lease/old-${i}`));
     const outcomes = old.map((lease) => lease.url.catch((error: Error) => error));
     window.dispatchEvent(new Event("printstash:auth-changed"));
     const current = acquireAssetUrl("/lease/current");
     try {
-      expect(fetch).toHaveBeenCalledTimes(5);
+      expect(fetch).toHaveBeenCalledTimes(3);
       await expect(current.url).resolves.toBeTruthy();
     } finally {
       previous.resolve(new Response("obsolete"));

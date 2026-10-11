@@ -44,6 +44,16 @@ Quality 85/method 2 was selected for the pipeline trials. Across sampled frames,
 maximum frame-mean visible RGB absolute error was 3.93/255 at 512×384. This is a
 numerical quality check, not a claim of human visual approval.
 
+## Integration with current main
+
+The measured candidate source is `08c759779a350243537587e623183f6522ae22b7`.
+The immutable images remain unchanged while current main is integrated into the
+PR. That integration preserves renderer provenance validation from main, exposes
+its alpha-quality metadata, keeps both historical visual fixtures and adds v3
+for quality 85. G-code thumbnail recipe becomes 3 because main already published
+recipe 2 at quality 90. These runs use STL/OBJ/STEP only. The numbers describe the
+recorded image commits, not a new measurement of subsequent main integration.
+
 ## Matched run environment
 
 Commands and Docker orchestration execute inside WSL2 as Linux user `local`.
@@ -89,7 +99,7 @@ Paths below are relative to `backend/`.
 | 12 | retains full geometry with smaller previews | Happy | Real STL; width 512 | Original bytes/triangle count retained; complete 512×384 lossy preview | E2E | ✅ `e2e/test_ingest.py::TestMetadata::test_retains_full_geometry_with_smaller_previews` |
 | 13 | rederives thumbnails from the previous GPU recipe | Upgrade | Old ready/failed mesh thumbnail | Normal source finds stale recipe | Integration | ✅ `integration/modules/derivatives/test_source.py::TestPending::test_rederives_thumbnails_from_the_previous_gpu_recipe` |
 | 14 | keeps previous thumbnail visible during recipe backfill | Upgrade | Old published thumbnail | Existing pointer retained until replacement | Integration | ✅ `integration/modules/derivatives/test_source.py::TestPending::test_keeps_previous_thumbnail_visible_during_recipe_backfill` |
-| 15 | rederives G-code thumbnails from the lossless recipe | Upgrade | Old G-code thumbnail | Normal source finds stale recipe | Integration | ✅ `integration/modules/derivatives/test_source.py::TestPending::test_rederives_gcode_thumbnails_from_the_lossless_recipe` |
+| 15 | rederives G-code thumbnails from previous recipes | Upgrade | Old G-code thumbnail | Normal source finds stale recipe | Integration | ✅ `integration/modules/derivatives/test_source.py::TestPending::test_rederives_gcode_thumbnails_from_previous_recipes` |
 | 16 | preserves frozen visual input hashes | Regression | Versioned tetrahedron fixture | Six analytic hashes unchanged; new thumbnail/recipe identity pinned | Integration | ✅ `integration/modules/media/geometry_analysis/test_geometry_analysis.py::TestEmbeddingViews::test_preserves_frozen_visual_input_hashes` |
 | 17 | counts partial socket transfers | Instrumentation | Short sends/receives | Actual bytes/calls measured | Integration | ✅ `integration/scripts/test_compute_pipeline_trace.py::TestTransportTrace::test_counts_partial_socket_transfers` |
 | 18 | preserves socket timeout | Instrumentation error | Socket timeout | Exception retained; timeout counted | Integration | ✅ `integration/scripts/test_compute_pipeline_trace.py::TestTransportTrace::test_preserves_socket_timeout` |

@@ -1,12 +1,11 @@
 """The backup endpoints an operator's disaster recovery depends on.
 
 Two things make this router worth its own tests rather than trusting the service's.
-First, it is the surface that tells an operator what the vault *can* do: on PostgreSQL
-there is no supported database backup, and the endpoint must say so — 501 before
-creating anything and 501 before restoring anything, so nobody is handed an archive
-that cannot be restored. Second, a restore is the most destructive operation in the
-product, so it refuses while ingestion work is in flight rather than replacing the
-database underneath it.
+First, it is the surface that tells an operator what the vault *can* do: supported
+database engines must report create/restore capability, while unsupported engines
+must fail before creating anything or replacing a database. Second, a restore is
+the most destructive operation in the product, so it refuses while ingestion work
+is in flight rather than replacing the database underneath it.
 
 Everything here is superuser-only. The archive format, the round-trip, and what a
 restore actually recovers live in `integration/modules/backups/backup/test_core.py`.

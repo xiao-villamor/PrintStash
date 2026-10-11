@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from functools import lru_cache
 from typing import Optional
 
 from printstash_core.mesh.measurements import encode_volume
@@ -181,89 +182,54 @@ def _model_tag_names(session: Session, model_ids: list[int]) -> dict[int, list[s
     return dict(tags_by_model)
 
 
-def _hydrate_list_rows(
-    session: Session, user: User, rows: list[Model]
-) -> list[ModelListItem]:
-    """Compose one already-ordered Model page with bounded batch queries."""
-    model_ids = [m.id for m in rows if m.id is not None]
-    if not model_ids:
-        return []
-    tags_by_model = _model_tag_names(session, model_ids)
-    similarity = similarity_summaries(session, user, model_ids)
-    starred_ids = set(
-        session.exec(
-            select(ModelStar.model_id).where(
-                ModelStar.user_id == user.id,
-                ModelStar.model_id.in_(model_ids),  # type: ignore[union-attr]
-            )
-        ).all()
-    )
+@lru_cache(maxsize=1)
+def _list_related_queries():
+    """Immutable statement structure; each execution binds its page and reader.
 
-    file_counts = dict(
-        session.exec(
-            select(File.model_id, func.count(File.id))
-            .where(File.model_id.in_(model_ids), live(File))  # type: ignore[union-attr]
-            .group_by(File.model_id)
-        ).all()
-    )
-
-    mesh_file_ids: dict[int, int] = {}
-    for model_id, file_id in session.exec(
+    Results, permissions and ORM instances stay within the calling request.
+    Reusing the statements also reuses SQLAlchemy's structural cache keys.
+    """
+    return (
+        select(ModelStar.model_id).where(
+            ModelStar.user_id == bindparam("user_id"),
+            ModelStar.model_id.in_(bindparam("model_ids", expanding=True)),  # type: ignore[union-attr]
+        ),
+        select(File.model_id, func.count(File.id))
+        .where(File.model_id.in_(bindparam("model_ids", expanding=True)), live(File))  # type: ignore[union-attr]
+        .group_by(File.model_id),
         select(File.model_id, File.id)
         .where(
-            File.model_id.in_(model_ids),  # type: ignore[union-attr]
+            File.model_id.in_(bindparam("model_ids", expanding=True)),  # type: ignore[union-attr]
             File.file_type.in_([FileType.STL, FileType.THREE_MF, FileType.OBJ]),  # type: ignore[attr-defined]
             live(File),
         )
-        .order_by(File.model_id.asc(), File.version.desc())  # type: ignore[attr-defined]
-    ).all():
-        mesh_file_ids.setdefault(int(model_id), int(file_id))
-
-    recommended: dict[int, tuple[FileRevisionStatus | None, str | None]] = {}
-    for model_id, rev_status, rev_label in session.exec(
+        .order_by(File.model_id.asc(), File.version.desc()),
         select(File.model_id, File.revision_status, File.revision_label).where(
-            File.model_id.in_(model_ids),  # type: ignore[union-attr]
+            File.model_id.in_(bindparam("model_ids", expanding=True)),  # type: ignore[union-attr]
             live(File),
             File.is_recommended == True,  # noqa: E712
+        ),
+        select(
+            File.model_id,
+            Printer.id,
+            Printer.name,
+            func.count(PrinterFile.id),
         )
-    ).all():
-        recommended.setdefault(int(model_id), (rev_status, rev_label))
-
-    presence_by_model: dict[int, list[ModelPrinterPresenceRead]] = defaultdict(list)
-    if user.is_superuser:
-        for model_id, p_id, printer_name, file_count in session.exec(
-            select(
-                File.model_id,
-                Printer.id,
-                Printer.name,
-                func.count(PrinterFile.id),
-            )
-            .join(PrinterFile, PrinterFile.file_id == File.id)
-            .join(Printer, Printer.id == PrinterFile.printer_id)
-            .where(
-                File.model_id.in_(model_ids),  # type: ignore[union-attr]
-                File.file_type == FileType.GCODE,
-                live(File),
-                live(Printer),
-                PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
-            )
-            .group_by(File.model_id, Printer.id, Printer.name)
-            .order_by(Printer.name.asc())  # type: ignore[attr-defined]
-        ).all():
-            presence_by_model[int(model_id)].append(
-                ModelPrinterPresenceRead(
-                    printer_id=int(p_id),
-                    printer_name=printer_name,
-                    file_count=int(file_count or 0),
-                )
-            )
-
-    summaries: dict[int, PrintSummaryRead] = {}
-    for model_id, md in session.exec(
+        .join(PrinterFile, PrinterFile.file_id == File.id)
+        .join(Printer, Printer.id == PrinterFile.printer_id)
+        .where(
+            File.model_id.in_(bindparam("model_ids", expanding=True)),  # type: ignore[union-attr]
+            File.file_type == FileType.GCODE,
+            live(File),
+            live(Printer),
+            PrinterFile.missing_since.is_(None),  # type: ignore[union-attr]
+        )
+        .group_by(File.model_id, Printer.id, Printer.name)
+        .order_by(Printer.name.asc()),
         select(File.model_id, Metadata)
         .join(File, File.id == Metadata.file_id)
         .where(
-            File.model_id.in_(model_ids),  # type: ignore[union-attr]
+            File.model_id.in_(bindparam("model_ids", expanding=True)),  # type: ignore[union-attr]
             File.file_type == FileType.GCODE,
             live(File),
         )
@@ -271,25 +237,7 @@ def _hydrate_list_rows(
             File.model_id.asc(),
             File.uploaded_at.desc(),
             File.id.desc(),  # type: ignore[attr-defined]
-        )
-    ).all():
-        if int(model_id) not in summaries:
-            summaries[int(model_id)] = PrintSummaryRead(
-                layer_height_mm=md.layer_height_mm,
-                estimated_time_s=md.estimated_time_s,
-                filament_weight_g=md.filament_weight_g,
-                material_type=md.material_type,
-                slicer_name=md.slicer_name,
-            )
-
-    for (
-        model_id,
-        completed,
-        decided,
-        last_printed,
-        average_duration,
-        total_cost,
-    ) in session.exec(
+        ),
         select(
             PrintJob.model_id,
             func.sum(case((PrintJob.state == PrintJobState.COMPLETED, 1), else_=0)),
@@ -308,9 +256,79 @@ def _hydrate_list_rows(
             func.avg(PrintJob.actual_duration_s),
             func.sum(PrintJob.cost),
         )
-        .where(PrintJob.model_id.in_(model_ids), live(PrintJob))  # type: ignore[union-attr]
-        .group_by(PrintJob.model_id)
+        .where(
+            PrintJob.model_id.in_(bindparam("model_ids", expanding=True)),
+            live(PrintJob),
+        )  # type: ignore[union-attr]
+        .group_by(PrintJob.model_id),
+    )
+
+
+def _hydrate_list_rows(
+    session: Session, user: User, rows: list[Model]
+) -> list[ModelListItem]:
+    """Compose one already-ordered Model page with bounded batch queries."""
+    model_ids = [m.id for m in rows if m.id is not None]
+    if not model_ids:
+        return []
+    (
+        stars_query,
+        counts_query,
+        mesh_query,
+        recommended_query,
+        presence_query,
+        summaries_query,
+        history_query,
+    ) = _list_related_queries()
+    parameters = {"model_ids": model_ids, "user_id": user.id}
+    tags_by_model = _model_tag_names(session, model_ids)
+    similarity = similarity_summaries(session, user, model_ids)
+    starred_ids = set(session.exec(stars_query, params=parameters).all())
+
+    file_counts = dict(session.exec(counts_query, params=parameters).all())
+
+    mesh_file_ids: dict[int, int] = {}
+    for model_id, file_id in session.exec(mesh_query, params=parameters).all():
+        mesh_file_ids.setdefault(int(model_id), int(file_id))
+
+    recommended: dict[int, tuple[FileRevisionStatus | None, str | None]] = {}
+    for model_id, rev_status, rev_label in session.exec(
+        recommended_query, params=parameters
     ).all():
+        recommended.setdefault(int(model_id), (rev_status, rev_label))
+
+    presence_by_model: dict[int, list[ModelPrinterPresenceRead]] = defaultdict(list)
+    if user.is_superuser:
+        for model_id, p_id, printer_name, file_count in session.exec(
+            presence_query, params=parameters
+        ).all():
+            presence_by_model[int(model_id)].append(
+                ModelPrinterPresenceRead(
+                    printer_id=int(p_id),
+                    printer_name=printer_name,
+                    file_count=int(file_count or 0),
+                )
+            )
+
+    summaries: dict[int, PrintSummaryRead] = {}
+    for model_id, md in session.exec(summaries_query, params=parameters).all():
+        if int(model_id) not in summaries:
+            summaries[int(model_id)] = PrintSummaryRead(
+                layer_height_mm=md.layer_height_mm,
+                estimated_time_s=md.estimated_time_s,
+                filament_weight_g=md.filament_weight_g,
+                material_type=md.material_type,
+                slicer_name=md.slicer_name,
+            )
+
+    for (
+        model_id,
+        completed,
+        decided,
+        last_printed,
+        average_duration,
+        total_cost,
+    ) in session.exec(history_query, params=parameters).all():
         summary = summaries.setdefault(int(model_id), PrintSummaryRead())
         summary.success_rate = float(completed or 0) / int(decided) if decided else None
         summary.last_printed_at = ensure_utc(last_printed) if last_printed else None

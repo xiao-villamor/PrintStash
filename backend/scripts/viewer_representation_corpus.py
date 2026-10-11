@@ -6,7 +6,14 @@ import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
-from scripts.mesh_corpus_v2_geometry import Mesh, box, combine, torus
+from scripts.mesh_corpus_v2_geometry import (
+    Mesh,
+    ascii_mesh,
+    binary,
+    box,
+    combine,
+    torus,
+)
 from scripts.mesh_corpus_v2_scenes import SceneCase, archive, mesh_xml, model_xml, scene
 
 
@@ -57,6 +64,12 @@ def source_builders() -> dict[str, Callable[[], bytes]]:
     cube = box()
     return {
         "sharp-cube": lambda: _package(cube),
+        "ascii-cube": lambda: ascii_mesh(cube),
+        "binary-cube": lambda: binary(cube),
+        "overlapping-faces": lambda: _package(combine(cube, cube)),
+        "intersecting-solids": lambda: _package(
+            combine(cube, box(offset=(10, 10, 10)))
+        ),
         "hole-torus": lambda: _package(torus()),
         "open-cube": lambda: _package(Mesh(cube.vertices, cube.faces[:-2])),
         "thin-solid": lambda: _package(box(size=(20, 20, 0.125))),
@@ -84,6 +97,12 @@ def source_builders() -> dict[str, Callable[[], bytes]]:
     }
 
 
+def source_suffix(name: str) -> str:
+    if name not in source_builders():
+        raise ValueError("unknown_viewer_case")
+    return ".stl" if name in ("real-benchy", "ascii-cube", "binary-cube") else ".3mf"
+
+
 def write_sources(root: Path, selected: tuple[str, ...] = ()) -> dict[str, Path]:
     root.mkdir(parents=True, exist_ok=True)
     builders = source_builders()
@@ -91,7 +110,7 @@ def write_sources(root: Path, selected: tuple[str, ...] = ()) -> dict[str, Path]
         raise ValueError("unknown_viewer_case")
     paths = {}
     for name in selected or tuple(builders):
-        path = root / (name + (".stl" if name == "real-benchy" else ".3mf"))
+        path = root / (name + source_suffix(name))
         with path.open("xb") as output:
             output.write(builders[name]())
         paths[name] = path

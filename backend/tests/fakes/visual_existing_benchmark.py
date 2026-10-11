@@ -46,7 +46,8 @@ def measure(directory: Path, output: Path):
         encoded = thumbnail.to_webp(
             mesh_render.render_mesh_thumbnail(
                 mesh, "", width=640, height=480, output_format="WEBP"
-            )
+            ),
+            renderer_encoded=True,
         )
         image = decode_image(encoded, "image/webp")
         render_seconds = time.monotonic() - start

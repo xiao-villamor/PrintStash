@@ -29,7 +29,7 @@ from sqlmodel import Session
 
 from app.db.models import Collection
 from app.modules.library.model_views.browse import Cursor, _encode
-from tests._library_reads import LIBRARY_READS
+from tests._library_reads import LIBRARY_READS, read_library
 from tests.factories import build_tag, tag_collection
 from tests.factories.library_scale import build_library_at_scale
 
@@ -40,6 +40,7 @@ AN_EIGHTH = {"collections": 3_125, "models": 12_500}
 THE_REST = {"collections": 21_875, "models": 87_500}
 
 BUDGET_SECONDS = {
+    "/api/v1/outliner/restore": 0.5,
     "/api/v1/outliner/collections": 0.5,
     "/api/v1/outliner/entries": 0.5,
     "/api/v1/outliner/search": 0.5,
@@ -74,14 +75,14 @@ def _median_seconds(
     expected_tag_count: int | None = None,
 ) -> float:
     """Median of three timed reads, after one that warms per-process caches."""
-    warm = client.get(path, params=params, headers=headers)
+    warm = read_library(client, path, params, headers)
     assert warm.status_code == 200, warm.text
     if expected_tag_count is not None:
         assert warm.json()[0]["model_count"] == expected_tag_count
     samples = []
     for _ in range(3):
         started = time.perf_counter()
-        response = client.get(path, params=params, headers=headers)
+        response = read_library(client, path, params, headers)
         samples.append(time.perf_counter() - started)
         assert response.status_code == 200, response.text
     return statistics.median(samples)
@@ -102,7 +103,7 @@ class TestLibraryReadsAtScale:
         )
         path = "/api/v1/models/browse"
         params = {"view": "all", "limit": 60, "sort": sort}
-        first = client.get(path, params=params, headers=headers)
+        first = read_library(client, path, params, headers)
         assert first.status_code == 200, first.text
         body = first.json()
         assert body["total"] == 110_000

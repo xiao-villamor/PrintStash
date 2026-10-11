@@ -29,10 +29,52 @@ describe("readPreviewPreferences", () => {
     expect(previewPixelRatio("balanced")).toBe(1.5);
   });
 
-  it("round-trips supported quality settings", () => {
-    writePreviewPreferences({ previewQuality: "detail", screenshotScale: 3 });
+  it.each(["webgl", "auto", "webgpu"] as const)(
+    "retains the %s mesh renderer choice",
+    (meshRenderer) => {
+      writePreviewPreferences({ ...DEFAULT_PREVIEW_PREFERENCES, meshRenderer });
+
+      expect(readPreviewPreferences().meshRenderer).toBe(meshRenderer);
+    },
+  );
+
+  it("keeps legacy preferences on the compatibility renderer", () => {
+    localStorage.setItem(
+      PREVIEW_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        previewQuality: "detail",
+        screenshotScale: 3,
+      }),
+    );
+
     expect(readPreviewPreferences()).toEqual({
       previewQuality: "detail",
+      screenshotScale: 3,
+      meshRenderer: "webgl",
+    });
+  });
+
+  it("refuses an unsupported mesh renderer preference", () => {
+    localStorage.setItem(
+      PREVIEW_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        ...DEFAULT_PREVIEW_PREFERENCES,
+        meshRenderer: "cuda",
+      }),
+    );
+
+    expect(readPreviewPreferences().meshRenderer).toBe("webgl");
+  });
+
+  it("round-trips supported quality settings", () => {
+    writePreviewPreferences({
+      previewQuality: "detail",
+      meshRenderer: "webgl",
+      screenshotScale: 3,
+    });
+    expect(readPreviewPreferences()).toEqual({
+      previewQuality: "detail",
+      meshRenderer: "webgl",
       screenshotScale: 3,
     });
   });
@@ -78,7 +120,11 @@ describe("optional preview preferences persistence", () => {
   it.each([{ failure: "property" }, { failure: "getItem" }])(
     "retains read preview preferences when storage $failure is blocked",
     ({ failure }) => {
-      const choice: PreviewPreferences = { previewQuality: "detail", screenshotScale: 3 };
+      const choice: PreviewPreferences = {
+        previewQuality: "detail",
+        meshRenderer: "webgl",
+        screenshotScale: 3,
+      };
       localStorage.setItem(PREVIEW_PREFERENCES_STORAGE_KEY, JSON.stringify(choice));
       expect(readPreviewPreferences()).toEqual(choice);
       const error = new DOMException("blocked storage", "SecurityError");
@@ -100,7 +146,11 @@ describe("optional preview preferences persistence", () => {
   it.each([{ failure: "property" }, { failure: "setItem" }])(
     "retains selected preview preferences after storage $failure fails",
     ({ failure }) => {
-      const choice: PreviewPreferences = { previewQuality: "detail", screenshotScale: 3 };
+      const choice: PreviewPreferences = {
+        previewQuality: "detail",
+        meshRenderer: "webgl",
+        screenshotScale: 3,
+      };
       writePreviewPreferences(DEFAULT_PREVIEW_PREFERENCES);
       const error = new DOMException("storage quota", "QuotaExceededError");
       const spy =
@@ -124,7 +174,11 @@ describe("optional preview preferences persistence", () => {
     },
   );
   it("snapshots unpersisted preview preferences choices", () => {
-    const choice: PreviewPreferences = { previewQuality: "detail", screenshotScale: 3 };
+    const choice: PreviewPreferences = {
+      previewQuality: "detail",
+      meshRenderer: "webgl",
+      screenshotScale: 3,
+    };
     const expected = structuredClone(choice);
     const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("storage quota", "QuotaExceededError");
@@ -141,7 +195,11 @@ describe("optional preview preferences persistence", () => {
   });
   it("preserves preview preferences serialization errors", () => {
     const error = new TypeError("invalid preference encoding");
-    const choice: PreviewPreferences = { previewQuality: "detail", screenshotScale: 3 };
+    const choice: PreviewPreferences = {
+      previewQuality: "detail",
+      meshRenderer: "webgl",
+      screenshotScale: 3,
+    };
     vi.spyOn(JSON, "stringify").mockImplementationOnce(() => {
       throw error;
     });
@@ -149,8 +207,16 @@ describe("optional preview preferences persistence", () => {
     expect(readPreviewPreferences()).toEqual(DEFAULT_PREVIEW_PREFERENCES);
   });
   it("releases pending preview preferences after persistence recovers", () => {
-    const choice: PreviewPreferences = { previewQuality: "detail", screenshotScale: 3 };
-    const external: PreviewPreferences = { previewQuality: "performance", screenshotScale: 1 };
+    const choice: PreviewPreferences = {
+      previewQuality: "detail",
+      meshRenderer: "webgl",
+      screenshotScale: 3,
+    };
+    const external: PreviewPreferences = {
+      previewQuality: "performance",
+      meshRenderer: "webgl",
+      screenshotScale: 1,
+    };
     const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new DOMException("storage quota", "QuotaExceededError");
     });
@@ -172,8 +238,18 @@ describe("preview preference consumers", () => {
       throw new DOMException("storage quota", "QuotaExceededError");
     });
     try {
-      act(() => writePreviewPreferences({ previewQuality: "detail", screenshotScale: 3 }));
-      expect(view.result.current).toEqual({ previewQuality: "detail", screenshotScale: 3 });
+      act(() =>
+        writePreviewPreferences({
+          previewQuality: "detail",
+          meshRenderer: "webgl",
+          screenshotScale: 3,
+        }),
+      );
+      expect(view.result.current).toEqual({
+        previewQuality: "detail",
+        meshRenderer: "webgl",
+        screenshotScale: 3,
+      });
     } finally {
       spy.mockRestore();
       view.unmount();

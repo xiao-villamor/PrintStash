@@ -4,9 +4,9 @@
 
 ### Performance
 
-- Render compact indexed triangles with GPU bounds/framing and visual position welding, grouping model uploads and drawing into one bounded submission per batch. Retain multiple geometries in VRAM and repair degenerate normal neighborhoods locally. Release an eligible disposable parser after clean reap, then render prepared geometry and encode final pixels in the owning Job without another encoder process. Retain explicit host/CPU credit through completion; GPU refusal uses a guarded renderer without reparsing. Unready devices, unmatched qualification, insufficient headroom and optional fingerprint work retain the combined worker. Preserve publication fences and reject empty GPU frames through the existing CPU recovery path. Assemble immutable geometry packets without repeated full-buffer copies. Avoid repeated framing/encoding of validated renderer output and use faster lossless WebP compression; thumbnail/visual recipes track the changed rendering semantics.
+- Render compact indexed triangles with GPU bounds/framing and visual position welding, grouping model uploads and drawing into one bounded submission per batch. Retain multiple geometries in VRAM and repair degenerate normal neighborhoods locally. Release an eligible disposable parser after clean reap, then render prepared geometry and encode final pixels in the owning Job without another encoder process. Retain explicit host/CPU credit through completion; GPU refusal uses a guarded renderer without reparsing. Unready devices, unmatched qualification, insufficient headroom and optional fingerprint work retain the combined worker. Preserve publication fences and reject empty GPU frames through the existing CPU recovery path. Assemble immutable geometry packets without repeated full-buffer copies. Avoid repeated framing/encoding of validated renderer output and use quality-85/method-2 lossy WebP with exact alpha and a codec completion slot independent of parser admission; thumbnail/visual recipes track the changed rendering semantics.
 
-- Prepare large render meshes with portable GPU normal accumulation and indexed packing, using guarded per-model CPU fallback and shared RAM/VRAM accounting. Keep small preparation on CPU, reuse resident GPU state, and encode accelerated WebP through the same lossless canonical encoder. Version changed thumbnail and visual recipes while preserving authoritative measurements and source bytes.
+- Prepare large render meshes with portable GPU normal accumulation and indexed packing, using guarded per-model CPU fallback and shared RAM/VRAM accounting. Keep small preparation on CPU, reuse resident GPU state, and encode accelerated WebP through the same canonical preview encoder. Version changed thumbnail and visual recipes while preserving authoritative measurements and source bytes.
 
 - Coalesce independently admitted thumbnail work across Models, preserve per-item cancellation and deadlines, and report actual model/frame batch sizes. Keep disposable worker priorities across process startup, bound OBJ/ASCII STL admission preflight, avoid redundant mesh copies, topology work and unused worker imports, and reduce durable queue dispatch latency without changing concurrency or backfill ownership.
 
@@ -19,6 +19,79 @@
 - Correct shared-edge opacity in portable GPU rendering; document physical RTX 5060 probes and the remaining WSL Dozen/ONNX compatibility blocker.
 
 - Optional portable compute broker for qualified WebGPU rendering and ONNX inference, resident geometry/model reuse, bounded tensor batching and administrator diagnostics. CPU-only installations retain normal ingestion. Physical GPU combinations remain unqualified pending quality, end-to-end performance and recovery gates.
+
+- Enable mesh preview readiness after its first rendered frame; verify overlay alignment, display-mode pixels, and repeated resource cleanup on WebGL/WebGPU.
+
+- Extend native mesh preview checks for camera movement, screenshot scales, capture failures, and disposal; retain WebGPU as experimental after baseline comparison.
+
+- Release the mesh preview GPU device when renderer construction or initialization cleanup fails.
+
+- Parse mesh previews in a cancellable worker and add an experimental WebGPU
+  preference with camera-preserving WebGL recovery and asynchronous screenshots.
+  WebGL remains the default; GPU performance qualification is still pending.
+
+- Request the platform-preferred GPU before enumerating other graphics backends in the optional research adapter. Preserve capability fallback, software exclusion and explicit adapter selection.
+
+- Retain expanded NVIDIA quality rejection, real-model browser comparisons and fresh-worker failure evidence; document an isolated experimental WSL/Docker diagnostic without changing production eligibility.
+
+- Automate fresh-worker GPU benchmark campaigns with retained failures and immutable output directories; add ASCII/binary STL and overlapping geometry controls.
+
+- Report native GPU readback separately from CPU face resolution and canonical shading in qualification measurements.
+
+- Record revised RTX 5060 control evidence: exact CPU/GPU images across 60 observations after precision and native cleanup fixes; production qualification remains gated.
+
+- PRI-16: preserve canonical interpolation precision in the optional WebGPU
+  adapter, bound retained geometry, and reject invalid face readback before publication.
+
+- Add an optional Python 3.14 WebGPU raster qualification adapter, adapter diagnostics,
+  frozen benchmark manifests and statistical reports. Production rendering remains CPU.
+
+- Avoid deep-cloning lexical search queries for each page; keep rank materialization
+  local to each query and reuse immutable current-recipe predicates. Measure tab
+  indicators after native layout instead of forcing layout during React commit.
+
+- Reuse bounded subtree count query structure with current roots and permissions.
+  Decode admitted thumbnails without a second native visibility wait.
+
+- Start selected collection reads before rendering their destination, cancel abandoned
+  reads, and keep pointer prefetch scheduling outside the grid's rendering path.
+- Optimize the restored tree's rendering with explicit locale dependencies, preserving
+  live language changes, drag-and-drop and pagination. Reuse immutable card projection
+  statements with fresh page/user parameters; avoid constructing unused tree ancestry.
+
+- Reuse immutable ancestry and similarity query structure while reading current
+  permissions on every request. Avoid rerendering an unselected departing grid
+  before starting a collection navigation.
+
+- Reuse HTTP-cached content-hashed assets during reload without weakening HTML
+  or bootstrap revalidation, offline fallback, or private-response isolation.
+
+- Keep scheduled upload recovery outside an active verification or Job handoff,
+  avoiding spurious upload conflicts while retaining recovery after interruption.
+- Reuse the current locale's card-date formatters without caching timestamps.
+
+- Preserve visible nesting at every collection-tree depth and align Model leaves
+  beneath their parent, keeping deep rows selectable on narrow screens.
+- Ignore system-only maintenance notices in Task Center instead of repeatedly
+  downloading an unchanged Jobs list.
+
+- Serialize search-preference writes before reading SQLite state, avoiding failures
+  when background processing commits concurrently.
+- Reduce thumbnail transfer size with quality-85 WebP color and lossless transparency,
+  preserving resolution and regenerating existing mesh/G-code previews through Jobs.
+- Restore remembered Library branches in bounded batches, prioritize visible thumbnails,
+  and keep deeply nested folders selectable on narrow screens. Load the multipart
+  editor separately from Library cards, reuse restoration counts and permission scopes,
+  and avoid repeated thumbnail access lookups and image decoding. Reuse immutable
+  similarity SQL construction while checking current permissions on every read.
+  Reuse authorized empty child levels and defer the initial event connection until
+  critical content is ready, retaining immediate permission checks. Opening the mobile
+  tree no longer competes with filter catalogs below the visible area.
+- Keep the first visit intact when the service worker installs, while still refreshing
+  an existing installation after a worker update.
+- Measure each Library destination through restored tree rows and decoded viewport
+  images, with a reproducible reference-host acceptance command and explicit failures.
+  Tie timings to committed history entries and actual input events.
 
 - Keep the collection tree visible when selecting folders, preserving open branches
   and downloaded sibling pages without reloading them on every click.
@@ -649,6 +722,10 @@ image. See UPGRADE.md before pulling.**
   and customization examples in a separate deployment guide.
 
 ### Changed
+
+- The library filter panel names its file-format group **File type**, matching the
+  active-filter chip ("file type: STL") and the Spanish panel ("Tipo de archivo"),
+  instead of "Artifact".
 
 - Background work settings now lead with running, waiting, and failed work and
   show each active Job's state, progress and cancel action. They also show where

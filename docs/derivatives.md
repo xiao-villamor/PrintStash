@@ -186,7 +186,7 @@ preview, but is not zero-copy instancing.
 | Current output identity | Version |
 | --- | --- |
 | Mesh metadata recipe | 12 |
-| Mesh thumbnail recipe | 14 |
+| Mesh thumbnail recipe | 15 |
 | Fingerprint interpretation | `geometry-v7-sh5f4577c4` |
 | Viewer STL recipe | 3 |
 
@@ -198,7 +198,7 @@ relabelled. Viewer conversion continues to require a materialized STL output.
 The [retained-scene contract](retained-3mf-scenes.md) records the behavior and
 verification evidence.
 
-Mesh thumbnail recipe 15 and G-code thumbnail recipe 2 version lossy WebP
+Mesh thumbnail recipe 15 and G-code thumbnail recipe 3 version lossy WebP
 quality 85 / method 2 encoding with exact alpha. Metadata recipe 12 remains authoritative
 for exact geometry. Existing thumbnail pointers stay visible while the normal
 recipe anti-join schedules their replacements. Visual recipe and encoder
@@ -494,3 +494,13 @@ fingerprints are recalculated without rewriting historical records or verifier
 calibration. Mesh measurements and thumbnail recipes are unchanged.
 
 Mesh metadata and thumbnails publish before optional fingerprints. Pending analysis remains durable after basic outputs commit; see [staged mesh outputs](staged-mesh-outputs.md) for framing, recovery and publication fences.
+
+### Compact thumbnail encoding
+
+Mesh thumbnail recipe 15 and G-code thumbnail recipe 3 encode WebP color at
+quality 85, method 2, with lossless alpha. The configured dimensions, framing and source
+Artifacts are preserved. Native rendering and imported previews share one encoder;
+only validated bytes explicitly originating from the current renderer skip a
+second encode. Existing derivatives remain visible while normal derivative Jobs
+backfill the new recipes. Visual embedding identities include the preview profile
+fingerprint, so changed encoded inputs do not reuse an older visual recipe.

@@ -8,5 +8,12 @@ export const THUMBNAIL_PROFILE = {
   flat: { tiltDegrees: 25, thicknessRatio: 0.35 },
   marginFraction: 0.1,
   supersampling: { maxOutputWidth: 640, smallFactor: 2, largeFactor: 1 },
-  encoding: { format: "webp", lossless: false, exact: false, method: 2, quality: 85 },
+  encoding: {
+    format: "webp",
+    lossless: false,
+    quality: 85,
+    alphaQuality: 100,
+    exact: false,
+    method: 2,
+  },
 } as const;

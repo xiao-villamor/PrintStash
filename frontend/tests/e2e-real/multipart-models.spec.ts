@@ -23,12 +23,24 @@ test.describe("multipart models", () => {
     await page.getByRole("button", { name: "Create multipart set" }).click();
 
     await page.getByRole("button", { name: "Add a part" }).click();
+    await page
+      .getByRole("dialog", { name: "Choose existing models" })
+      .getByRole("textbox", { name: "Search existing models" })
+      .fill(base);
     await page.getByRole("button", { name: new RegExp(base) }).click();
     await page.getByRole("button", { name: "Add parts (1)" }).click();
     await page.getByRole("button", { name: "Add another part" }).click();
+    await page
+      .getByRole("dialog", { name: "Choose existing models" })
+      .getByRole("textbox", { name: "Search existing models" })
+      .fill(short);
     await page.getByRole("button", { name: new RegExp(short) }).click();
     await page.getByRole("button", { name: "Add parts (1)" }).click();
     await page.locator("fieldset").nth(1).getByRole("button", { name: "Add variant" }).click();
+    await page
+      .getByRole("dialog", { name: "Choose existing models" })
+      .getByRole("textbox", { name: "Search existing models" })
+      .fill(long);
     await page.getByRole("button", { name: new RegExp(long) }).click();
     await page.getByRole("button", { name: "Add variants (1)" }).click();
     await page
@@ -121,6 +133,10 @@ test.describe("multipart models", () => {
     await page.getByLabel("Name", { exact: true }).fill(group);
     await page.getByRole("button", { name: "Create multipart set" }).click();
     await page.getByRole("button", { name: "Add a part" }).click();
+    await page
+      .getByRole("dialog", { name: "Choose existing models" })
+      .getByRole("textbox", { name: "Search existing models" })
+      .fill(base);
     await page.getByRole("button", { name: new RegExp(base) }).click();
     await page.getByRole("button", { name: "Add parts (1)" }).click();
     await page.getByRole("button", { name: "Save changes" }).click();
@@ -132,6 +148,10 @@ test.describe("multipart models", () => {
     await page.getByLabel("Name", { exact: true }).fill(secondGroup);
     await page.getByRole("button", { name: "Create multipart set" }).click();
     await page.getByRole("button", { name: "Add a part" }).click();
+    await page
+      .getByRole("dialog", { name: "Choose existing models" })
+      .getByRole("textbox", { name: "Search existing models" })
+      .fill(base);
     await page.getByRole("button", { name: new RegExp(base) }).click();
     await page.getByRole("button", { name: "Add parts (1)" }).click();
     await page.getByRole("button", { name: "Save changes" }).click();
@@ -215,7 +235,10 @@ test.describe("multipart models", () => {
     const sidebar = page.locator("aside");
     const label = sidebar.getByRole("button", { name: folder, exact: true });
     await label.hover();
-    await label.locator("xpath=following-sibling::button[@title='Delete collection']").click();
+    await label
+      .locator("..")
+      .getByRole("button", { name: "Delete collection", exact: true })
+      .click();
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(label).toHaveCount(0);
   });

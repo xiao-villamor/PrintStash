@@ -33,7 +33,7 @@ def read(session, user):
 
 
 def update(session, user, value):
-    begin_write(session)
+    begin_write(session, immediate=True)
     # Serialize first-time inserts as well as updates for this user on PostgreSQL.
     session.exec(select(User.id).where(User.id == user.id).with_for_update()).one()
     row = session.get(UserSearchPreferences, user.id) or UserSearchPreferences(

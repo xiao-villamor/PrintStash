@@ -1,5 +1,6 @@
 "use client";
 
+import { useLibraryNavigationReads } from "@/features/library/navigation-reads";
 import { useTaxonomyCommands } from "@/features/library/taxonomy";
 
 import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
@@ -42,6 +43,7 @@ import { getErrorMessage, parseApiError, userMessage } from "@/lib/errors";
 import { filterValueText } from "@/lib/filter-labels";
 
 import { useUiLocale } from "@/lib/i18n";
+import { useIntentPrefetch } from "@/lib/use-intent-prefetch";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
@@ -68,7 +70,7 @@ import { MODEL_DND_MIME, captureModelDrag, readModelDrag, type ModelDrag } from 
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
-import { MultipartModelCard } from "@/components/multipart-model-browser";
+import { MultipartModelCard } from "@/components/multipart-model-card";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { DocumentBrowser } from "@/components/document-browser";
 import { FilterSidebar } from "@/components/filter-sidebar";
@@ -127,7 +129,6 @@ import {
   useCollectionLookup,
   useCollectionSearch,
   useModelFacets,
-  useLibraryPrefetch,
   usePrinters,
   useTags,
   type ModelListFilters,
@@ -139,7 +140,7 @@ import { useAuth } from "@/lib/auth-context";
 import { Link } from "@/lib/link";
 import { timeAgo } from "@/lib/format";
 import { rememberLastCollection, readLastView, rememberLastView } from "@/lib/last-collection";
-import { useViewportAssetUrl } from "@/lib/use-viewport-admission";
+import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { useStartupThumbnails } from "@/lib/use-startup-thumbnails";
 import { useThumbnailArrivals } from "@/lib/use-thumbnail-arrivals";
 import { cn } from "@/lib/utils";
@@ -777,9 +778,18 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     rememberLastView(docView);
   }, [docView]);
 
+  const startNavigationReads = useLibraryNavigationReads();
   function handleCollectionChange(path: string | null) {
     if (path === selectedCollection) return;
-    setSelectedIds(new Set());
+    startNavigationReads(path, {
+      ...folderModelFilters(path),
+      view: libraryView,
+      limit: PAGE_SIZE,
+      sort: sortKey,
+    });
+    // An already empty selection must not render the departing grid urgently
+    // before Router can commit the destination and start its critical reads.
+    setSelectedIds((current) => (current.size === 0 ? current : new Set()));
     const params = new URLSearchParams(searchParams.toString());
     if (path) params.set("c", path);
     else params.delete("c");
@@ -911,7 +921,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     sort: sortKey,
   };
   const modelQuery = useLibraryBrowse(browseParams);
-  const libraryPrefetch = useLibraryPrefetch();
 
   const selectedLookup = useCollectionLookup(selectedCollection);
   const selectedCollectionRow =
@@ -1001,6 +1010,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     });
   }, [refreshAuth]);
   const authority = useLibraryAuthority(browseReady ? (modelQuery.data?.pages[0] ?? null) : null, {
+    eventsReady: startup.canLoad("activity"),
     onRefresh: () => reading.refresh(refresh),
     onAuthorityRetired,
   });
@@ -1059,7 +1069,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       },
     },
   );
-  useStartupThumbnails(startupContent, browseReady);
+  useStartupThumbnails(startupContent, browseReady, libraryItems.length > 0);
   const thumbnails = useLibraryThumbnails(
     visibleModels,
     browseReady ? (modelQuery.data?.pages[0] ?? null) : null,
@@ -1205,29 +1215,31 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     [setTagTarget, setTagDialogOpen],
   );
 
-  const toggleSelect = useCallback(
-    (id: number, range = false) => {
-      // Capture this gesture once; React may replay the state updater.
-      const anchor = lastSelectedModelId.current;
-      const selectingRange = range && anchor !== null;
-      const from = selectingRange ? sortedModels.findIndex((model) => model.id === anchor) : -1;
-      const to = sortedModels.findIndex((model) => model.id === id);
-      const rangeModels =
-        from >= 0 && to >= 0 ? sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1) : [];
-      lastSelectedModelId.current = id;
-      for (const model of rangeModels) selectedModelSnapshot.current.set(model.id, model);
-      const model = sortedModels.find((item) => item.id === id);
-      if (model) selectedModelSnapshot.current.set(id, model);
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        if (selectingRange) rangeModels.forEach((model) => next.add(model.id));
-        else if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
-    },
-    [sortedModels],
-  );
+  const selectionOrder = useRef(sortedModels);
+  useLayoutEffect(() => {
+    selectionOrder.current = sortedModels;
+  }, [sortedModels]);
+  const toggleSelect = useCallback((id: number, range = false) => {
+    // Capture this gesture once; React may replay the state updater.
+    const sortedModels = selectionOrder.current;
+    const anchor = lastSelectedModelId.current;
+    const selectingRange = range && anchor !== null;
+    const from = selectingRange ? sortedModels.findIndex((model) => model.id === anchor) : -1;
+    const to = sortedModels.findIndex((model) => model.id === id);
+    const rangeModels =
+      from >= 0 && to >= 0 ? sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1) : [];
+    lastSelectedModelId.current = id;
+    for (const model of rangeModels) selectedModelSnapshot.current.set(model.id, model);
+    const model = sortedModels.find((item) => item.id === id);
+    if (model) selectedModelSnapshot.current.set(id, model);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selectingRange) rangeModels.forEach((model) => next.add(model.id));
+      else if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   function toggleCollectionSelect(id: number) {
     const row = visibleCollections.find((collection) => collection.id === id);
@@ -1618,22 +1630,27 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const availableRecentFolders = recentFolders.filter(
     (folder) => folder.path !== selectedCollection,
   );
-  // Warm a folder on hover/focus: the pointer's travel to the click hides most
-  // of the round-trip, so entering the folder renders from cache.
-  function prefetchFolder(path: string) {
-    if (path === selectedCollection) return;
-    void queryClient.prefetchInfiniteQuery(
-      libraryBrowseOptions({
+  const prefetchFolder = useIntentPrefetch(
+    (path, signal) => {
+      if (path === selectedCollection) return;
+      const options = libraryBrowseOptions({
         ...folderModelFilters(path),
         view: libraryView,
         limit: PAGE_SIZE,
         sort: sortKey,
-      }),
-    );
-    if (filtersEnabled) void libraryPrefetch.modelFacets(folderModelFilters(path));
-    const target = visibleCollections.find((collection) => collection.path === path);
-    if (target?.has_readme) void libraryPrefetch.collectionReadme(target.id);
-  }
+      });
+      const cancel = () => {
+        const query = queryClient.getQueryCache().find({ queryKey: options.queryKey, exact: true });
+        if (query && query.getObserversCount() === 0)
+          void queryClient.cancelQueries({ queryKey: options.queryKey, exact: true });
+      };
+      signal.addEventListener("abort", cancel, { once: true });
+      void queryClient
+        .prefetchInfiniteQuery(options)
+        .finally(() => signal.removeEventListener("abort", cancel));
+    },
+    startup.complete && browseReady && !refreshing,
+  );
   const canAdminSelectedCollection =
     user?.is_superuser || selectedCollectionRow?.effective_role === "admin";
   // Whether there is anywhere this reader may upload to, without listing it.
@@ -2166,10 +2183,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => {
-                      startup.request("filters");
-                      openDrawer();
-                    }}
+                    onClick={openDrawer}
                     className="w-full min-w-0 px-2"
                   >
                     <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
@@ -2343,10 +2357,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     type="button"
                     variant="outline"
                     size="xs"
-                    onClick={() => {
-                      startup.request("filters");
-                      openDrawer();
-                    }}
+                    onClick={openDrawer}
                     className="h-10 md:hidden sm:h-8"
                   >
                     <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
@@ -3058,7 +3069,7 @@ function CollectionFolderCard({
   collection: CollectionRead;
   onSelect: (path: string) => void;
   /** The user is about to open this folder (hover or focus): warm its data. */
-  onIntent?: (path: string) => void;
+  onIntent?: (path: string | null) => void;
   onDropModel?: (source: ModelDrag, path: string) => void;
   selectable?: boolean;
   selected?: boolean;
@@ -3074,6 +3085,8 @@ function CollectionFolderCard({
         data-collection-path={collection.path}
         onPointerEnter={() => !selectable && onIntent?.(collection.path)}
         onFocus={() => !selectable && onIntent?.(collection.path)}
+        onPointerLeave={() => onIntent?.(null)}
+        onBlur={() => onIntent?.(null)}
         onClick={() => (selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path))}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
@@ -3133,7 +3146,7 @@ function CollectionListRow({
   displayPath: string | null;
   onSelect: (path: string) => void;
   /** The user is about to open this folder (hover or focus): warm its data. */
-  onIntent?: (path: string) => void;
+  onIntent?: (path: string | null) => void;
   onDropModel?: (source: ModelDrag, path: string) => void;
   selectable?: boolean;
   selected?: boolean;
@@ -3149,6 +3162,8 @@ function CollectionListRow({
         data-collection-path={collection.path}
         onPointerEnter={() => !selectable && onIntent?.(collection.path)}
         onFocus={() => !selectable && onIntent?.(collection.path)}
+        onPointerLeave={() => onIntent?.(null)}
+        onBlur={() => onIntent?.(null)}
         onClick={() => (selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path))}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
@@ -3213,7 +3228,6 @@ function MultipartModelListRow({
 }) {
   useUiLocale();
   const { t } = useI18n();
-  const { url: thumb, ref: thumbnailRef } = useViewportAssetUrl(item.cover_thumbnail_url);
   return (
     <LibraryItemLink
       origin={origin}
@@ -3221,19 +3235,13 @@ function MultipartModelListRow({
       aria-label={item.name}
       className="group flex items-center gap-2 border-b border-border px-4 py-3 transition-colors hover:bg-muted active:bg-muted md:gap-3"
     >
-      <span
-        ref={thumbnailRef}
-        data-library-thumbnail={
-          item.cover_thumbnail_url ? (thumb ? "ready" : "pending") : "missing"
-        }
+      <ProtectedThumbnail
+        path={item.cover_thumbnail_url}
+        alt=""
         className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded border border-primary/30 bg-muted md:h-10 md:w-10"
-      >
-        {thumb ? (
-          <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" />
-        ) : (
-          <Boxes className="h-4 w-4 text-primary" aria-hidden />
-        )}
-      </span>
+        imageClassName="h-full w-full object-cover"
+        placeholder={<Boxes className="h-4 w-4 text-primary" aria-hidden />}
+      />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-foreground">{item.name}</span>
         <span className="mt-0.5 inline-flex rounded border border-primary/30 bg-card px-1.5 py-px font-mono text-3xs font-semibold uppercase tracking-wider text-primary">
@@ -3271,7 +3279,6 @@ function ModelListRow({
   draggable?: boolean;
 }) {
   useUiLocale();
-  const { url: thumb, ref: thumbnailRef } = useViewportAssetUrl(model.thumbnail_url);
   const printerPresence = model.printer_presence ?? [];
   return (
     <Localized>
@@ -3304,24 +3311,17 @@ function ModelListRow({
             ariaLabel={uiText("Select {value1}", { value1: String(model.name) })}
           />
         )}
-        <div
-          ref={thumbnailRef}
-          data-library-thumbnail={model.thumbnail_url ? (thumb ? "ready" : "pending") : "missing"}
+        <ProtectedThumbnail
+          path={model.thumbnail_url}
+          alt={model.name}
           className="w-8 h-8 md:w-10 md:h-10 rounded bg-muted flex-shrink-0 overflow-hidden border border-border"
-        >
-          {thumb ? (
-            <img
-              src={thumb}
-              alt={model.name}
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-          ) : (
+          imageClassName="h-full w-full object-cover"
+          placeholder={
             <div className="flex h-full w-full items-center justify-center">
               <FileText className="h-4 w-4 text-muted-foreground/50" />
             </div>
-          )}
-        </div>
+          }
+        />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-foreground truncate">{model.name}</p>
           {model.tags.length > 0 && (

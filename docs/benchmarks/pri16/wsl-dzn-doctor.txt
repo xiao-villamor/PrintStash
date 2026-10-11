@@ -1,0 +1,2 @@
+WARNING: dzn is not a conformant Vulkan implementation, testing use only.
+{"status": "failed", "reason": "capability_unavailable", "qualification": false}

@@ -8,11 +8,20 @@ so both apply to it (#295).
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
+from fastapi.testclient import TestClient
 
 # Pages are requested smaller than the smallest seeded library, so every size
 # fills one page and only the library behind it grows.
 LIBRARY_READS = [
+    # The smallest corpus has eight direct siblings; fill each page before comparing scale.
+    pytest.param(
+        "/api/v1/outliner/restore",
+        {"limit": 5, "expanded_paths": ["shared"]},
+        id="outliner-restore",
+    ),
     pytest.param("/api/v1/models/browse", {"limit": 10}, id="mixed-browse"),
     pytest.param(
         "/api/v1/outliner/collections", {"limit": 10}, id="outliner-collections"
@@ -37,3 +46,12 @@ LIBRARY_READS = [
     pytest.param("/api/v1/documents/trash", {}, id="document-trash"),
     pytest.param("/api/v1/multipart-builds", {"limit": 10}, id="multipart-builds"),
 ]
+
+
+def read_library(
+    client: TestClient, path: str, params: dict[str, Any], headers: dict[str, str]
+):
+    """The restoration read uses a body because persisted paths can be long."""
+    if path == "/api/v1/outliner/restore":
+        return client.post(path, json=params, headers=headers)
+    return client.get(path, params=params, headers=headers)

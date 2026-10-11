@@ -23,6 +23,76 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("ProtectedThumbnail", () => {
+  it("starts an admitted image without another visibility gate", async () => {
+    render(
+      <ProtectedThumbnail
+        path="/admitted/thumbnail"
+        alt="Admitted"
+        placeholder={<span>Missing</span>}
+      />,
+    );
+
+    const image = await screen.findByAltText("Admitted");
+
+    expect(image).toHaveAttribute("loading", "eager");
+  });
+
+  it("waits for load when early decoding cannot start yet", async () => {
+    const decoder = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new DOMException("Loading not started", "EncodingError"))
+      .mockResolvedValue(undefined);
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "decode");
+    Object.defineProperty(HTMLImageElement.prototype, "decode", {
+      configurable: true,
+      value: decoder,
+    });
+    try {
+      render(
+        <ProtectedThumbnail
+          path="/pending/decode"
+          alt="Pending"
+          placeholder={<span>Missing</span>}
+        />,
+      );
+      const image = await screen.findByAltText("Pending");
+      await waitFor(() => expect(decoder).toHaveBeenCalledOnce());
+      expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("pending");
+      await act(async () => fireEvent.load(image));
+      expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("ready");
+    } finally {
+      if (descriptor) Object.defineProperty(HTMLImageElement.prototype, "decode", descriptor);
+      else Reflect.deleteProperty(HTMLImageElement.prototype, "decode");
+    }
+  });
+
+  it("publishes a decoded cached image without another load event", async () => {
+    const decoded = Promise.withResolvers<void>();
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "decode");
+    Object.defineProperty(HTMLImageElement.prototype, "decode", {
+      configurable: true,
+      value: () => decoded.promise,
+    });
+    try {
+      render(
+        <ProtectedThumbnail
+          path="/cached/decode"
+          alt="Cached"
+          placeholder={<span>Missing</span>}
+        />,
+      );
+      const image = await screen.findByAltText("Cached");
+      expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("pending");
+      await act(async () => decoded.resolve());
+      await waitFor(() =>
+        expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("ready"),
+      );
+    } finally {
+      if (descriptor) Object.defineProperty(HTMLImageElement.prototype, "decode", descriptor);
+      else Reflect.deleteProperty(HTMLImageElement.prototype, "decode");
+    }
+  });
+
   it("reports an image ready only after decode", async () => {
     const decoded = Promise.withResolvers<void>();
     render(<ProtectedThumbnail path="/thumbnail" alt="Part" placeholder={<span>Missing</span>} />);
@@ -35,6 +105,30 @@ describe("ProtectedThumbnail", () => {
     await waitFor(() =>
       expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("ready"),
     );
+  });
+  it("reports failed protected downloads explicitly", async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response("unavailable", { status: 503 }));
+    render(
+      <ProtectedThumbnail path="/failed/download" alt="Part" placeholder={<span>Missing</span>} />,
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByText("Missing").parentElement?.getAttribute("data-library-thumbnail"),
+      ).toBe("failed"),
+    );
+    expect(screen.queryByAltText("Part")).toBeNull();
+  });
+  it("reports image element failures explicitly", async () => {
+    render(
+      <ProtectedThumbnail
+        path="https://example.test/broken.png"
+        alt="Part"
+        placeholder={<span>Missing</span>}
+      />,
+    );
+    const image = await screen.findByAltText("Part");
+    fireEvent.error(image);
+    expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("failed");
   });
   it("keeps missing image semantics", () => {
     render(<ProtectedThumbnail path={null} alt="Part" placeholder={<span>Missing</span>} />);
@@ -71,7 +165,7 @@ describe("ProtectedThumbnail", () => {
     expect(fetch).toHaveBeenCalledOnce();
   });
 
-  it("keeps a failed decode out of the readiness milestone", async () => {
+  it("reports failed decoding explicitly", async () => {
     render(
       <ProtectedThumbnail path="/failed/decode" alt="Failed" placeholder={<span>Missing</span>} />,
     );
@@ -82,7 +176,7 @@ describe("ProtectedThumbnail", () => {
       },
     });
     await act(async () => fireEvent.load(image));
-    expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("pending");
+    expect(image.parentElement?.getAttribute("data-library-thumbnail")).toBe("failed");
   });
 
   it("ignores a previous URL decode after image reassignment", async () => {

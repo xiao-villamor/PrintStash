@@ -84,3 +84,34 @@ class TestLibraryBrowse:
             "/api/v1/models/browse/revision", headers=superuser_headers
         )
         assert revision.json()["browse_revision"] != displayed["browse_revision"]
+
+    @pytest.mark.asyncio
+    async def test_preserves_mixed_order_across_continuation(
+        self, api, e2e_db, superuser_headers
+    ):
+        first = build_model(e2e_db, "A")
+        tied = build_multipart_model(e2e_db, "A")
+        second = build_model(e2e_db, "B")
+        last = build_multipart_model(e2e_db, "C")
+        cursor = None
+        observed = []
+        for _ in range(4):
+            params = {"limit": 1, "sort": "name-asc"}
+            if cursor is not None:
+                params["cursor"] = cursor
+            response = await api.get(
+                "/api/v1/models/browse", headers=superuser_headers, params=params
+            )
+            assert response.status_code == 200, response.text
+            body = response.json()
+            observed.extend(
+                (row["kind"], row[row["kind"]]["id"]) for row in body["items"]
+            )
+            cursor = body["next_cursor"]
+        assert observed == [
+            ("model", first.id),
+            ("multipart", tied.id),
+            ("model", second.id),
+            ("multipart", last.id),
+        ]
+        assert cursor is None

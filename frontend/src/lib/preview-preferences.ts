@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 
 export type PreviewQuality = "performance" | "balanced" | "detail";
+export type MeshRendererPreference = "auto" | "webgpu" | "webgl";
 export type ScreenshotScale = 1 | 2 | 3;
 
 export interface PreviewPreferences {
   previewQuality: PreviewQuality;
   screenshotScale: ScreenshotScale;
+  meshRenderer: MeshRendererPreference;
 }
 
 export const PREVIEW_PREFERENCES_STORAGE_KEY = "printstash.preview.preferences:v1";
@@ -22,6 +24,7 @@ declare global {
 export const DEFAULT_PREVIEW_PREFERENCES: PreviewPreferences = {
   previewQuality: "balanced",
   screenshotScale: 2,
+  meshRenderer: "webgl",
 };
 
 const PREVIEW_PIXEL_RATIOS = {
@@ -49,6 +52,7 @@ type StoredJsonValue =
 interface StoredPreviewPreferences {
   readonly previewQuality?: StoredJsonValue;
   readonly screenshotScale?: StoredJsonValue;
+  readonly meshRenderer?: StoredJsonValue;
 }
 
 const isBrowser = (): boolean => "window" in globalThis;
@@ -80,6 +84,12 @@ export function readPreviewPreferences(): PreviewPreferences {
       previewQuality: isPreviewQuality(stored.previewQuality)
         ? stored.previewQuality
         : DEFAULT_PREVIEW_PREFERENCES.previewQuality,
+      meshRenderer:
+        stored.meshRenderer === "auto" ||
+        stored.meshRenderer === "webgpu" ||
+        stored.meshRenderer === "webgl"
+          ? stored.meshRenderer
+          : DEFAULT_PREVIEW_PREFERENCES.meshRenderer,
       screenshotScale: isScreenshotScale(stored.screenshotScale)
         ? stored.screenshotScale
         : DEFAULT_PREVIEW_PREFERENCES.screenshotScale,

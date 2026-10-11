@@ -319,11 +319,11 @@ class TestScheduling:
 
     def test_reports_each_lanes_depth(self, harness: Harness) -> None:
         gate = threading.Event()
-        work_submission.submit(
-            harness.job(SERIAL_JOB, "depth/0", behaviour=gated(gate))
-        )
+        first = harness.job(SERIAL_JOB, "depth/0", behaviour=gated(gate))
+        work_submission.submit(first)
         harness.started("depth/0")
-        work_submission.submit(harness.job(SERIAL_JOB, "depth/1"))
+        second = harness.job(SERIAL_JOB, "depth/1")
+        work_submission.submit(second)
 
         depth = harness.engine.lane_depth(SERIAL)
         active = harness.engine.active()
@@ -332,6 +332,10 @@ class TestScheduling:
 
         assert depth.queued + depth.running == 2
         assert len([a for a in active if a.kind is ExecutionKind.JOB]) >= 2
+        # Application terminal state precedes the engine's workflow completion.
+        # Queue depth is engine evidence, so synchronize on those executions.
+        _wait_for_succeeded(harness, execution_id(first, 1))
+        _wait_for_succeeded(harness, execution_id(second, 1))
         after = harness.engine.lane_depth(SERIAL)
         assert (after.queued, after.running) == (0, 0)
 

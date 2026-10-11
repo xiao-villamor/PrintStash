@@ -31,10 +31,12 @@ API/frontend images addressable as `printstash-manual-api:candidate` and
 ## Two supported database modes
 
 Both modes use S3 for model/file objects. The default mode is PostgreSQL and
-is the realistic deployment topology. The SQLite mode exists specifically to
-exercise PrintStash's integrated backup/restore implementation. Integrated
-PrintStash PostgreSQL backup/restore is intentionally unsupported; use the
-external `pg_dump`/`pg_restore` procedure below for PostgreSQL.
+is the realistic deployment topology. The integrated PrintStash backup/restore
+flow supports both PostgreSQL and file-backed SQLite: PostgreSQL is captured as
+a portable SQLite-format snapshot inside the PrintStash archive and restored
+through the same API. The external `pg_dump`/`pg_restore` procedure below remains
+available for operator-managed pre-upgrade snapshots; it is not required by the
+integrated flow.
 
 These modes pin database and storage settings into the application runtime
 configuration. Never switch PostgreSQL+S3, SQLite+S3, or SQLite+local on
@@ -43,7 +45,7 @@ not a migration. Export the paired database/object evidence first, then reset
 before changing mode (or use a separately copied checkout/project):
 
 ```sh
-# First follow the PostgreSQL+S3 or SQLite backup export below.
+# First follow the integrated PostgreSQL+S3 or SQLite+S3 backup below.
 docker compose -p printstash-manual -f deploy/manual-testing/compose.yml \
   --env-file deploy/manual-testing/.env down -v --remove-orphans
 ```
@@ -306,44 +308,69 @@ docker compose -p printstash-manual -f deploy/manual-testing/compose.yml \
   --env-file deploy/manual-testing/.env logs --tail=200 api frontend seaweedfs spoolman
 ```
 
-### SQLite integrated backup/restore
+### Integrated backup/restore
 
-In SQLite mode, create and verify a PrintStash backup from the UI or API. With
+Run the following flow in either PostgreSQL+S3 or SQLite+S3 mode. Use the
+capability endpoint and verify the configured backend reports both create and
+restore support. For PostgreSQL, the database in the archive is a portable
+SQLite-format snapshot; restoring the archive applies it to the configured
+PostgreSQL database.
+
+In either mode, create and verify a PrintStash backup from the UI or API. With
 `ADMIN_TOKEN` set:
 
 ```sh
+AUTH_HEADER="$(printf '%s %s %s' 'Authorization:' 'Bearer' "$ADMIN_TOKEN")"
 curl -fsS -X POST "$API/api/v1/backups" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" | tee /tmp/printstash-backup.json | jq
-BACKUP_ID="$(jq -r .backup_id /tmp/printstash-backup.json)"
+  -H "$AUTH_HEADER" | tee /tmp/printstash-backup.json | jq
+JOB_ID="$(jq -r .job_id /tmp/printstash-backup.json)"
+JOB_STATE=""
+BACKUP_JOB_JSON=""
+ATTEMPT=0
+while [ "$ATTEMPT" -lt 120 ]; do
+  BACKUP_JOB_JSON="$(curl -fsS "$API/api/v1/jobs/$JOB_ID" -H "$AUTH_HEADER")"
+  JOB_STATE="$(printf '%s' "$BACKUP_JOB_JSON" | jq -r .state)"
+  case "$JOB_STATE" in
+    completed) break ;;
+    failed|cancelled) printf 'Backup Job ended in state %s\n' "$JOB_STATE" >&2; exit 1 ;;
+  esac
+  ATTEMPT=$((ATTEMPT + 1))
+  sleep 1
+done
+test "$JOB_STATE" = completed
+printf '%s\n' "$BACKUP_JOB_JSON" | tee /tmp/printstash-backup-job.json | jq
+BACKUP_ID="$(printf '%s' "$BACKUP_JOB_JSON" | jq -r .result.backup_id)"
 curl -fsS -X POST "$API/api/v1/backups/$BACKUP_ID/verify" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" | jq
-mkdir -p deploy/manual-testing/evidence/sqlite-backup
+  -H "$AUTH_HEADER" | jq
+mkdir -p deploy/manual-testing/evidence/integrated-backup
 curl -fsS "$API/api/v1/backups/$BACKUP_ID/download" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" \
-  -o "deploy/manual-testing/evidence/sqlite-backup/$BACKUP_ID.tar.gz"
-test -s "deploy/manual-testing/evidence/sqlite-backup/$BACKUP_ID.tar.gz"
-sha256sum "deploy/manual-testing/evidence/sqlite-backup/$BACKUP_ID.tar.gz"
+  -H "$AUTH_HEADER" \
+  -o "deploy/manual-testing/evidence/integrated-backup/$BACKUP_ID.tar.gz"
+test -s "deploy/manual-testing/evidence/integrated-backup/$BACKUP_ID.tar.gz"
+sha256sum "deploy/manual-testing/evidence/integrated-backup/$BACKUP_ID.tar.gz"
 curl -fsS "$API/api/v1/backups/capabilities/database" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" | jq
+  -H "$AUTH_HEADER" | jq
 ```
 
-The capability response must report SQLite create/restore support. Keep the
-backup archive outside Docker volumes before any reset. To exercise restore,
+The capability response must report `create_supported: true` and
+`restore_supported: true` for the configured backend (`sqlite` or `postgresql`).
+Keep the backup archive outside Docker volumes before any reset. To exercise restore,
 change a known marker in the UI, then restore the saved archive and verify the
 marker reverted (the endpoint is destructive and requires the admin token):
 
 ```sh
 curl -fsS -X POST "$API/api/v1/backups/$BACKUP_ID/restore" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" | tee /tmp/printstash-restore.json | jq
+  -H "$AUTH_HEADER" | tee /tmp/printstash-restore.json | jq
 curl -fsS "$API/api/v1/backups/$BACKUP_ID/verify" \
-  -H "Authorization: Bearer $ADMIN_TOKEN" | jq
+  -H "$AUTH_HEADER" | jq
 ```
 
-### PostgreSQL + S3 external snapshot
+### Optional operator-managed PostgreSQL + S3 snapshot
 
-Before upgrading or resetting, export the database and SeaweedFS volume to the
-ignored evidence directory. The top-level Compose name makes the volume name
-deterministic:
+This optional `pg_dump` procedure creates an operator-managed snapshot outside
+PrintStash's integrated archive. Before upgrading or resetting, export the
+database and SeaweedFS volume to the ignored evidence directory. The top-level
+Compose name makes the volume name deterministic:
 
 ```sh
 set -a; . deploy/manual-testing/.env; set +a

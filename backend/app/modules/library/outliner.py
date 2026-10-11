@@ -7,15 +7,27 @@ import binascii
 import hashlib
 import json
 from enum import Enum
+from functools import lru_cache
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import Select, func, literal, or_, select, tuple_, union_all
+from sqlalchemy import (
+    Select,
+    bindparam,
+    case,
+    func,
+    literal,
+    or_,
+    select,
+    tuple_,
+    union_all,
+)
 from sqlalchemy.orm import aliased
 from sqlmodel import Session, col
 
 from app.core.errors import ErrorKind, OperationError
 from app.db.models import (
+    SENTINEL_MODEL_HASH,
     Collection,
     Model,
     MultipartModel,
@@ -33,10 +45,14 @@ from app.modules.library.model_views.outliner import entry_response
 from app.schemas.models import ModelFilters
 from app.schemas.outliner import (
     OutlinerCollection,
+    OutlinerCollectionLevel,
     OutlinerCollectionPage,
+    OutlinerEntryLevel,
     OutlinerEntryPage,
     OutlinerKind,
     OutlinerQuery,
+    OutlinerRestoreQuery,
+    OutlinerRestoreRead,
     OutlinerSearchPage,
     OutlinerView,
 )
@@ -89,9 +105,14 @@ def _page(session: Session, statement: Select, source, query: OutlinerQuery, key
             )
         ).all()
     )
+    return _page_result(rows, query.limit, key)
+
+
+def _page_result(rows, limit: int, key: str):
+    """Both ordinary reads and restoration issue interchangeable cursors."""
     next_cursor = None
-    if len(rows) > query.limit:
-        rows = rows[: query.limit]
+    if len(rows) > limit:
+        rows = rows[:limit]
         last = rows[-1]
         token = Cursor(
             key=key, name=last.sort_name, kind=OutlinerKind(last.kind), id=last.id
@@ -142,8 +163,10 @@ def _entries(
     searching: bool = False,
     counts_only: bool = False,
     direct: bool = False,
+    visible=None,
 ):
-    visible = _visible(session, user)
+    if visible is None:
+        visible = _visible(session, user)
     allowed_multipart = select(col(MultipartModel.id)).where(
         or_(
             col(MultipartModel.collection_id).is_(None)
@@ -160,9 +183,9 @@ def _entries(
         )
         .exists()
     )
-    models = _filtered_stmt(session, user, query.filters()).with_only_columns(
-        *_columns(Model, OutlinerKind.MODEL, counts_only=counts_only)
-    )
+    models = _filtered_stmt(
+        session, user, query.filters(), visible=visible
+    ).with_only_columns(*_columns(Model, OutlinerKind.MODEL, counts_only=counts_only))
     # The canonical model predicate already scopes non-admins to live folders.
     # Administrators also need to exclude entries inside a trashed folder.
     if user.is_superuser:
@@ -236,26 +259,69 @@ def _filtered(query: OutlinerQuery) -> bool:
     return query.filters() != ModelFilters()
 
 
-def _folders(session: Session, user: User, query: OutlinerQuery, subtree):
-    folders = select(col(Collection.id)).where(
-        col(Collection.id).in_(_visible(session, user))
-    )
+def _folders(
+    session: Session, user: User, query: OutlinerQuery, entries, *, visible=None
+):
+    if visible is None:
+        visible = _visible(session, user)
+    folders = select(col(Collection.id)).where(col(Collection.id).in_(visible))
     if _filtered(query):
+        # Empty folders remain navigable without filters; ancestry is needed
+        # only to keep branches containing matching descendants.
+        _, subtree = _counts(entries)
         folders = folders.where(
             col(Collection.id).in_(select(subtree.c.id).where(subtree.c.count > 0))
         )
     return folders
 
 
-def _page_counts(
-    session: Session, entries, eligible, visible, ids: list[int], parent_id: int | None
-):
-    """Walk only the returned branches; never aggregate every ancestor first."""
-    if not ids:
-        return {}
+def _all_direct_counts(visible, *, include_unfiled: bool):
+    """Aggregate unfiltered rows before composing Models and Multipart Models."""
+
+    def allowed(column):
+        return or_(
+            column.in_(visible),
+            column.is_(None) if include_unfiled else literal(False),
+        )
+
+    models = (
+        select(
+            col(Model.collection_id).label("id"),
+            func.sum(case((col(Model.hash) != SENTINEL_MODEL_HASH, 1), else_=0)).label(
+                "count"
+            ),
+            func.count().label("models"),
+        )
+        .where(live(Model), allowed(col(Model.collection_id)))
+        .group_by(col(Model.collection_id))
+    )
+    multipart = (
+        select(
+            col(MultipartModel.collection_id).label("id"),
+            func.count().label("count"),
+            literal(0).label("models"),
+        )
+        .where(allowed(col(MultipartModel.collection_id)))
+        .group_by(col(MultipartModel.collection_id))
+    )
+    combined = union_all(models, multipart).subquery()
+    return (
+        select(
+            combined.c.id,
+            func.sum(combined.c.count).label("count"),
+            func.sum(combined.c.models).label("models"),
+        )
+        .group_by(combined.c.id)
+        .cte("page_direct")
+    )
+
+
+@lru_cache(maxsize=1)
+def _page_descendants():
+    """Reuse only the traversal shape, with bounded page roots bound at execution."""
     descendants = (
         select(col(Collection.id).label("root"), col(Collection.id).label("id"))
-        .where(col(Collection.id).in_(ids))
+        .where(col(Collection.id).in_(bindparam("page_count_root_ids", expanding=True)))
         .cte("page_descendants", recursive=True)
     )
     child = aliased(Collection)
@@ -264,16 +330,31 @@ def _page_counts(
             child, col(child.parent_id) == descendants.c.id
         )
     )
+    return descendants
+
+
+def _page_count_query(
+    entries, eligible, visible, ids, parent_id, *, unfiltered_counts=None
+):
+    descendants = _page_descendants()
     direct = (
-        select(entries.c.collection_id.label("id"), func.count().label("count"))
-        .group_by(entries.c.collection_id)
-        .cte("page_direct")
+        unfiltered_counts
+        if unfiltered_counts is not None
+        else (
+            select(entries.c.collection_id.label("id"), func.count().label("count"))
+            .group_by(entries.c.collection_id)
+            .cte("page_direct")
+        )
     )
     raw = (
-        select(col(Model.collection_id).label("id"), func.count().label("count"))
-        .where(live(Model))
-        .group_by(col(Model.collection_id))
-        .subquery()
+        select(direct.c.id, direct.c.models.label("count")).subquery()
+        if unfiltered_counts is not None
+        else (
+            select(col(Model.collection_id).label("id"), func.count().label("count"))
+            .where(live(Model))
+            .group_by(col(Model.collection_id))
+            .subquery()
+        )
     )
     totals = (
         select(
@@ -296,28 +377,60 @@ def _page_counts(
         .group_by(col(Collection.parent_id))
         .subquery()
     )
-    return {
-        row.id: row
-        for row in session.execute(
-            select(
-                col(Collection.id),
-                func.coalesce(direct.c.count, 0).label("direct"),
-                func.coalesce(totals.c.count, 0).label("total"),
-                func.coalesce(children.c.count, 0).label("children"),
-                totals.c.models,
-                totals.c.folders,
-                func.coalesce(
-                    select(direct.c.count)
-                    .where(direct.c.id == parent_id)
-                    .scalar_subquery(),
-                    0,
-                ).label("parent_direct"),
-            )
-            .outerjoin(direct, direct.c.id == col(Collection.id))
-            .outerjoin(totals, totals.c.root == col(Collection.id))
-            .outerjoin(children, children.c.id == col(Collection.id))
-            .where(col(Collection.id).in_(ids))
+    return (
+        select(
+            col(Collection.id),
+            func.coalesce(direct.c.count, 0).label("direct"),
+            func.coalesce(totals.c.count, 0).label("total"),
+            func.coalesce(children.c.count, 0).label("children"),
+            totals.c.models,
+            totals.c.folders,
+            func.coalesce(
+                select(direct.c.count)
+                .where(direct.c.id == parent_id)
+                .scalar_subquery(),
+                0,
+            ).label("parent_direct"),
         )
+        .outerjoin(direct, direct.c.id == col(Collection.id))
+        .outerjoin(totals, totals.c.root == col(Collection.id))
+        .outerjoin(children, children.c.id == col(Collection.id))
+        .where(col(Collection.id).in_(ids))
+    )
+
+
+@lru_cache(maxsize=1)
+def _administrator_restore_counts():
+    """Unfiltered administrator query structure, never rows or permission decisions."""
+    visible = select(col(Collection.id)).where(live(Collection))
+    return _page_count_query(
+        None,
+        visible,
+        visible,
+        bindparam("page_count_root_ids", expanding=True),
+        None,
+        unfiltered_counts=_all_direct_counts(visible, include_unfiled=True),
+    )
+
+
+def _page_counts(
+    session: Session,
+    entries,
+    eligible,
+    visible,
+    ids: list[int],
+    parent_id: int | None,
+    *,
+    unfiltered_counts=None,
+):
+    """Walk only returned branches and apply the current request's scope."""
+    if not ids:
+        return {}
+    statement = _page_count_query(
+        entries, eligible, visible, ids, parent_id, unfiltered_counts=unfiltered_counts
+    )
+    return {
+        row.id: row for row in session.execute(statement, {"page_count_root_ids": ids})
     }
 
 
@@ -326,8 +439,7 @@ def collections(
 ) -> OutlinerCollectionPage:
     _require_parent(session, user, query.parent_id)
     entries = _entries(session, user, query, counts_only=True)
-    _, subtree = _counts(entries)
-    eligible = _folders(session, user, query, subtree)
+    eligible = _folders(session, user, query, entries)
     source = select(
         col(Collection.id),
         col(Collection.name),
@@ -359,7 +471,12 @@ def collections(
     )
     ids = [row.id for row in all_rows]
     counts = _page_counts(
-        session, entries, eligible, _visible(session, user), ids, query.parent_id
+        session,
+        entries,
+        eligible,
+        _visible(session, user),
+        ids,
+        query.parent_id,
     )
     nodes = collection_tree.nodes_for_ids(
         session,
@@ -410,8 +527,7 @@ def _entry_rows(session: Session, user: User, query: OutlinerQuery, *, searching
         assert query.q is not None
         needle = query.q.strip()
         source = source.where(entries.c.name.icontains(needle, autoescape=True))
-        _, subtree = _counts(entries)
-        folder_ids = _folders(session, user, query, subtree)
+        folder_ids = _folders(session, user, query, entries)
         folders = select(
             col(Collection.id),
             col(Collection.name),
@@ -448,3 +564,234 @@ def entries(session: Session, user: User, query: OutlinerQuery) -> OutlinerEntry
 def search(session: Session, user: User, query: OutlinerQuery) -> OutlinerSearchPage:
     rows, cursor = _entry_rows(session, user, query, searching=True)
     return OutlinerSearchPage(items=rows, next_cursor=cursor)
+
+
+def restore(
+    session: Session, user: User, request: OutlinerRestoreQuery
+) -> OutlinerRestoreRead:
+    """First pages for known open branches, with shared predicates and projection.
+
+    Window limits apply per parent before any nodes are projected. Missing or
+    newly inaccessible paths from session storage are ignored, never revealed.
+    No cache of user-dependent server data survives the request.
+    """
+    query = OutlinerQuery.model_validate(
+        request.model_dump(exclude={"expanded_paths", "selected_path"})
+    )
+    scope = _visible(session, user).cte("restore_visible")
+    visible = select(scope.c.id)
+    wanted = set(request.expanded_paths)
+    lineage = (
+        set(ancestor for ancestor in collection_tree._prefixes(request.selected_path))
+        if request.selected_path
+        else set()
+    )
+    paths = wanted | lineage
+    known = list(
+        session.execute(
+            select(col(Collection.id), col(Collection.path), col(Collection.parent_id))
+            .where(col(Collection.path).in_(paths), col(Collection.id).in_(visible))
+            .order_by(col(Collection.path))
+        ).all()
+    )
+    parents: list[int | None] = [None, *(row.id for row in known if row.path in wanted)]
+    parent_ids = [id for id in parents if id is not None]
+    reveals = {
+        row.parent_id if row.parent_id in {node.id for node in known} else None: row.id
+        for row in known
+        if row.path in lineage
+    }
+    # Aggregates materialize only collection IDs, never names or edit tokens for
+    # every Model in the library. Rich rows are needed only for the entry pages.
+    entries = _entries(session, user, query, counts_only=True, visible=visible)
+    eligible = _folders(session, user, query, entries, visible=visible)
+    # Known parents are authorized already. Classify the bounded returned
+    # branches with their IDs; do not recompute the entire permission scope in
+    # each CASE expression for every collection in the library.
+    parent_scope = case(
+        (col(Collection.parent_id).in_(parent_ids), col(Collection.parent_id)),
+        else_=None,
+    )
+    source = (
+        select(
+            col(Collection.id),
+            col(Collection.name),
+            func.lower(col(Collection.name)).label("sort_name"),
+            literal(OutlinerKind.COLLECTION.value).label("kind"),
+            parent_scope.label("scope"),
+        )
+        .where(
+            col(Collection.id).in_(eligible),
+            or_(
+                col(Collection.parent_id).in_(parent_ids),
+                col(Collection.parent_id).is_(None),
+                col(Collection.parent_id).not_in(visible),
+            ),
+        )
+        .subquery()
+    )
+    ranked = select(
+        source,
+        func.row_number()
+        .over(
+            partition_by=source.c.scope,
+            order_by=(source.c.sort_name, source.c.kind, source.c.id),
+        )
+        .label("position"),
+    ).subquery()
+    rows = list(
+        session.execute(
+            select(ranked)
+            .where(
+                or_(
+                    ranked.c.position <= query.limit + 1,
+                    ranked.c.id.in_(reveals.values()),
+                )
+            )
+            .order_by(ranked.c.scope, ranked.c.position)
+        ).all()
+    )
+    siblings = {parent: [] for parent in parents}
+    revealed = {}
+    for row in rows:
+        if row.id == reveals.get(row.scope):
+            revealed[row.scope] = row
+        if row.position <= query.limit + 1:
+            siblings[row.scope].append(row)
+    pages = {
+        parent: _page_result(
+            siblings[parent],
+            query.limit,
+            _key(
+                user, query.model_copy(update={"parent_id": parent}), Scope.COLLECTIONS
+            ),
+        )
+        for parent in parents
+    }
+    node_ids = sorted(
+        {row.id for rows, _ in pages.values() for row in rows}
+        | {row.id for row in revealed.values()}
+        | set(parent_ids)
+    )
+    if user.is_superuser and query.view == OutlinerView.ALL and not _filtered(query):
+        counts = (
+            {
+                row.id: row
+                for row in session.execute(
+                    _administrator_restore_counts(), {"page_count_root_ids": node_ids}
+                )
+            }
+            if node_ids
+            else {}
+        )
+    else:
+        counts = _page_counts(
+            session,
+            entries,
+            eligible,
+            visible,
+            node_ids,
+            None,
+            unfiltered_counts=_all_direct_counts(
+                visible, include_unfiled=user.is_superuser
+            )
+            if query.view == OutlinerView.ALL and not _filtered(query)
+            else None,
+        )
+    nodes = collection_tree.nodes_for_ids(
+        session,
+        user,
+        node_ids,
+        {
+            id: collection_tree.SubtreeCounts(
+                models=int(row.models), collections=int(row.folders)
+            )
+            for id, row in counts.items()
+        },
+    )
+    projected = {
+        node.id: OutlinerCollection(
+            **node.model_dump(),
+            direct_entry_count=counts[node.id].direct,
+            subtree_entry_count=counts[node.id].total,
+            visible_child_count=counts[node.id].children,
+        )
+        for node in nodes
+    }
+    # The page aggregate already includes the authorized root count. Only a
+    # library without returned folders needs a separate read for unfiled entries.
+    root_count = (
+        next(iter(counts.values())).parent_direct
+        if counts
+        else session.execute(
+            select(func.count())
+            .select_from(entries)
+            .where(entries.c.collection_id.is_(None))
+        ).scalar_one()
+    )
+    collection_levels = [
+        OutlinerCollectionLevel(
+            parent_id=parent,
+            page=OutlinerCollectionPage(
+                items=[projected[row.id] for row in pages[parent][0]],
+                next_cursor=pages[parent][1],
+                parent_direct_entry_count=root_count
+                if parent is None
+                else counts[parent].direct,
+                revealed=projected[revealed[parent].id] if parent in revealed else None,
+            ),
+        )
+        for parent in parents
+    ]
+    entries = _entries(session, user, query, visible=visible)
+    entry_source = (
+        select(
+            entries,
+            func.row_number()
+            .over(
+                partition_by=entries.c.collection_id,
+                order_by=(entries.c.sort_name, entries.c.kind, entries.c.id),
+            )
+            .label("position"),
+        )
+        .where(
+            or_(
+                entries.c.collection_id.is_(None),
+                entries.c.collection_id.in_(parent_ids),
+            )
+        )
+        .subquery()
+    )
+    entry_rows = list(
+        session.execute(
+            select(entry_source, col(Collection.path).label("collection"))
+            .outerjoin(Collection, col(Collection.id) == entry_source.c.collection_id)
+            .where(entry_source.c.position <= query.limit + 1)
+            .order_by(entry_source.c.collection_id, entry_source.c.position)
+        ).all()
+    )
+    # Every entry belongs to one of the authorized, already projected parents.
+    # Reuse that request-local ancestry instead of traversing the tree again.
+    labels = {node.path: node.display_path for node in nodes}
+    leaves = {parent: [] for parent in parents}
+    for row in entry_rows:
+        leaves[row.collection_id].append(row)
+    entry_levels = []
+    for parent in parents:
+        items, cursor = _page_result(
+            leaves[parent],
+            query.limit,
+            _key(
+                user, query.model_copy(update={"collection_id": parent}), Scope.ENTRIES
+            ),
+        )
+        entry_levels.append(
+            OutlinerEntryLevel(
+                collection_id=parent,
+                page=OutlinerEntryPage(
+                    items=[entry_response(row, labels) for row in items],
+                    next_cursor=cursor,
+                ),
+            )
+        )
+    return OutlinerRestoreRead(collections=collection_levels, entries=entry_levels)

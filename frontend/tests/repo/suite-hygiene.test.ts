@@ -83,7 +83,13 @@ function mirrorOf(file: string): string | null {
   // `__tests__/foo.test.ts` mirrors `../foo.ts`; a file one level deeper, in
   // `__tests__/foo/bar.test.ts`, mirrors the module the *directory* is named for,
   // which is how a module too large for one test file is split.
+  // Native browser integrations mirror src/ while running in a real GPU API context.
+  const browserRelative = path.relative(path.join(FRONTEND_ROOT, "tests/browser"), file);
+  const browserModule = browserRelative.startsWith("..")
+    ? null
+    : path.join(FRONTEND_ROOT, "src", path.dirname(browserRelative), basename);
   const candidates = [
+    ...(browserModule === null ? [] : [browserModule + ".ts", browserModule + ".tsx"]),
     path.join(directory, "..", `${basename}.ts`),
     path.join(directory, "..", `${basename}.tsx`),
     path.join(directory, "..", basename, "index.ts"),

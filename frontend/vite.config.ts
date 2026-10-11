@@ -11,10 +11,9 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     localizationAssets(),
     tailwindcss(),
-    // Keep the default Oxc transform path fast. Native React Compiler remains
-    // an explicit profiling build until it demonstrates an interaction-time
-    // win and its unsupported diagnostics have been triaged.
-    react({ compiler: mode === "react-compiler" }),
+    // Only measured tree components opt in with "use memo". Broad compilation
+    // remains a separate diagnostic mode for unsupported component patterns.
+    react({ compiler: mode === "react-compiler" ? true : { compilationMode: "annotation" } }),
   ],
   resolve: {
     tsconfigPaths: true,

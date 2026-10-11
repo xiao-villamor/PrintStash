@@ -174,7 +174,7 @@ class TestPythonRuntime:
             "full": metadata["project"]["optional-dependencies"]["full"],
             "dev": metadata["project"]["optional-dependencies"]["dev"],
         }
-        research = {"moderngl", "glcontext"}
+        research = {"moderngl", "glcontext", "wgpu"}
 
         assert not research.intersection(
             Requirement(value).name.lower() for value in requirements[scope]
@@ -182,8 +182,22 @@ class TestPythonRuntime:
         assert {
             Requirement(value).name.lower()
             for value in metadata["project"]["optional-dependencies"]["gpu-pilot"]
-        } == research
+        } == {"moderngl", "glcontext"}
         assert (
             "gpu-pilot"
+            in metadata["tool"]["deptry"]["optional_dependencies_dev_groups"]
+        )
+
+    def test_pins_current_optional_webgpu_library(self) -> None:
+        metadata = _toml(PROJECT_PATHS[0])
+        assert metadata["project"]["optional-dependencies"]["webgpu-pilot"] == [
+            "wgpu==0.32.0"
+        ]
+        packages = [
+            p for p in _toml("backend/uv.lock")["package"] if p["name"] == "wgpu"
+        ]
+        assert [p["version"] for p in packages] == ["0.32.0"]
+        assert (
+            "webgpu-pilot"
             in metadata["tool"]["deptry"]["optional_dependencies_dev_groups"]
         )

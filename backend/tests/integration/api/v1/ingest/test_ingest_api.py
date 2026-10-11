@@ -761,7 +761,7 @@ class TestIngestModel:
         with Image.open(io.BytesIO(thumbnail.content)) as refreshed:
             assert refreshed.convert("RGB").getpixel(
                 (refreshed.width // 2, refreshed.height // 2)
-            ) == (220, 30, 20)
+            ) == pytest.approx((220, 30, 20), abs=3)
 
     def test_ingest_refuses_an_upload_when_staging_is_full(
         self,

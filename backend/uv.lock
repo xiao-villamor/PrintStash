@@ -1700,6 +1700,9 @@ storage-opendal = [
     { name = "asyncssh" },
     { name = "opendal" },
 ]
+webgpu-pilot = [
+    { name = "wgpu" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1779,10 +1782,11 @@ requires-dist = [
     { name = "watchfiles", specifier = ">=1.2,<2" },
     { name = "wgpu", marker = "extra == 'gpu'", specifier = ">=0.32,<0.33" },
     { name = "wgpu", marker = "extra == 'gpu-render'", specifier = ">=0.32,<0.33" },
+    { name = "wgpu", marker = "extra == 'webgpu-pilot'", specifier = "==0.32.0" },
     { name = "wsgidav", marker = "extra == 'dev'", specifier = ">=4.3,<5" },
     { name = "wsproto", marker = "extra == 'dev'", specifier = ">=1.3,<2" },
 ]
-provides-extras = ["async-db", "step", "full", "storage-opendal", "dev", "ai", "gpu-render", "gpu", "gpu-pilot"]
+provides-extras = ["async-db", "step", "full", "storage-opendal", "dev", "ai", "gpu-render", "gpu", "webgpu-pilot", "gpu-pilot"]
 
 [[package]]
 name = "printstash-core"

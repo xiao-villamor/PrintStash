@@ -71,6 +71,7 @@ import {
   Eraser,
   Eye,
   EyeOff,
+  Gpu,
   Files,
   FolderSync,
   Coins,
@@ -170,6 +171,7 @@ import {
   writePreviewPreferences,
   type PreviewPreferences,
   type PreviewQuality,
+  type MeshRendererPreference,
   type ScreenshotScale,
 } from "@/lib/preview-preferences";
 import {
@@ -206,6 +208,7 @@ type SettingsSection =
   | "spoolman"
   | "design"
   | "previews"
+  | "gpu"
   | "trash"
   | "about";
 
@@ -229,6 +232,7 @@ const SETTINGS_SECTIONS: {
   { id: "spoolman", labelKey: "settings.spoolman", icon: Boxes },
   { id: "design", labelKey: "settings.design", icon: Palette },
   { id: "previews", labelKey: "settings.previews", icon: Images },
+  { id: "gpu", labelKey: "settings.gpu", icon: Gpu },
   { id: "trash", labelKey: "settings.trash", icon: Trash2 },
   { id: "about", labelKey: "settings.about", icon: Info },
 ];
@@ -267,6 +271,11 @@ const PREVIEW_QUALITIES = [
   "balanced",
   "detail",
 ] as const satisfies readonly PreviewQuality[];
+const MESH_RENDERERS = [
+  "webgl",
+  "auto",
+  "webgpu",
+] as const satisfies readonly MeshRendererPreference[];
 const SCREENSHOT_SCALES = [1, 2, 3] as const satisfies readonly ScreenshotScale[];
 /** Widths the vault offers; a legacy config value outside this list shows as "Custom". */
 const MODEL_THUMBNAIL_WIDTHS = [320, 640, 1280] as const;
@@ -4349,6 +4358,43 @@ export function SettingsPanel() {
               </div>
             )}
 
+            {activeSection === "gpu" && (
+              <div className="space-y-6 animate-panel-in">
+                <SettingsCard
+                  icon={Gpu}
+                  title={uiText("3D rendering")}
+                  description={uiText("Choose how 3D models are rendered in this browser.")}
+                >
+                  <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
+                    <label className="block space-y-1">
+                      <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                        {uiText("Mesh renderer")}
+                      </span>
+                      <select
+                        aria-label={uiText("Mesh renderer")}
+                        value={previewPreferences.meshRenderer}
+                        onChange={(event) =>
+                          savePreviewPreference({
+                            meshRenderer: selectedOption(MESH_RENDERERS, event.target.value),
+                          })
+                        }
+                        className={INPUT}
+                      >
+                        <option value="webgl">{uiText("WebGL compatibility")}</option>
+                        <option value="auto">{uiText("Automatic · experimental")}</option>
+                        <option value="webgpu">{uiText("WebGPU · experimental")}</option>
+                      </select>
+                      <span className="block text-xs text-muted-foreground">
+                        {uiText(
+                          "WebGPU requires HTTPS or localhost. Unavailable devices use WebGL.",
+                        )}
+                      </span>
+                    </label>
+                  </div>
+                </SettingsCard>
+              </div>
+            )}
+
             {activeSection === "previews" && (
               <div className="space-y-6 animate-panel-in">
                 {user?.is_superuser && remoteConfig.isError && (
@@ -4390,6 +4436,7 @@ export function SettingsPanel() {
                         <option value="detail">{uiText("High detail · 2×")}</option>
                       </select>
                     </label>
+
                     <label className="block space-y-1">
                       <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                         {uiText("Screenshot resolution")}

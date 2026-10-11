@@ -41,3 +41,13 @@ export interface OutlinerParams extends OutlinerFilters {
   reveal_id?: number;
   q?: string;
 }
+
+export interface OutlinerRestoreParams extends OutlinerFilters {
+  view: OutlinerView;
+  expanded_paths: string[];
+  selected_path: string | null;
+}
+export interface OutlinerRestoreRead {
+  collections: { parent_id: number | null; page: OutlinerCollectionPage }[];
+  entries: { collection_id: number | null; page: OutlinerEntryPage }[];
+}

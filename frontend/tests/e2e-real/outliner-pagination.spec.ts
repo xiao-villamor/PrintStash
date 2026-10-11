@@ -119,7 +119,7 @@ test.describe("outliner pagination", () => {
         .toBe(seeded.destination.path);
 
       // Search finds the relocated model even though its destination has never opened.
-      await sidebar.getByPlaceholder("Filter outliner...").fill("Zebra paginated target");
+      await sidebar.getByPlaceholder("Filter outliner...").fill(seeded.target.name);
       await expect(
         sidebar.getByRole("button", { name: seeded.target.name, exact: true }),
       ).toBeVisible();

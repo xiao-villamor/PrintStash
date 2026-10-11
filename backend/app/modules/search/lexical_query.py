@@ -15,7 +15,6 @@ from sqlalchemy import (
     table,
     text,
 )
-from sqlalchemy.sql.visitors import cloned_traverse
 from sqlmodel import Session, select
 
 from app.db.models import (
@@ -144,13 +143,15 @@ class LibrarySearch:
             SearchPassage.subject_id.in_(allowed_model_ids),
             SearchPassage.access_dependencies_json == "[]",
         )
-        ranks = ranked_statement(session, query, allowed).cte()
+        ranks = ranked_statement(session, query, allowed).cte(
+            "library_search_ranks", nesting=True
+        )
         # SQLite cannot evaluate the FTS5 auxiliary bm25() inside an aggregate
         # after subquery flattening. Materialize its per-passage scores first.
         if session.get_bind().dialect.name == "sqlite":
-            # Clone ancestry retains the anonymous name's original owner when
-            # prefix_with() makes its generative copy (including Python 3.13).
-            ranks = cloned_traverse(ranks, {}, {}).prefix_with("MATERIALIZED")
+            # A local, explicit name needs no deep clone to retain an anonymous
+            # name owner. Nested scope also allows independently composed reads.
+            ranks = ranks.prefix_with("MATERIALIZED")
         return (
             select(
                 SearchPassage.subject_id.label("model_id"),

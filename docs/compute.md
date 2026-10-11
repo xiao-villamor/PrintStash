@@ -286,7 +286,7 @@ Preview profile 4 encodes WebP with `lossless=False`, `exact=False`, `method=2`,
 remains exact. RGB under fully transparent pixels is not retained. CPU and GPU
 paths share this encoder, including normalized embedded previews. PNG and the
 six analytic view pixels retain their prior behavior. Mesh thumbnail recipe 15,
-G-code thumbnail recipe 2 and the updated visual recipe schedule replacements
+G-code thumbnail recipe 3 and the updated visual recipe schedule replacements
 through existing derivative/index generation workflows.
 
 Publication validates dimensions, decoded alpha, nonempty content and a

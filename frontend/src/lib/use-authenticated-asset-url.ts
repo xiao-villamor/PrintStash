@@ -5,14 +5,23 @@ import { acquireAssetUrl, onCachedAssetInvalidation, peekCachedAssetUrl } from "
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
 
+export type AuthenticatedAsset =
+  | { status: "idle" | "pending" | "failed"; url: null }
+  | { status: "ready"; url: string };
+
 /** Protected image display ownership, optionally deferred until viewport admission. */
-export function useAuthenticatedAssetUrl(
+export function useAuthenticatedAsset(
   path: string | null | undefined,
   admitted = true,
-): string | null {
+): AuthenticatedAsset {
   const version = useSyncExternalStore(onAuthChange, getSessionVersion, () => 0);
   const [, refresh] = useState(0);
   const [invalidated, setInvalidated] = useState(0);
+  const [failure, setFailure] = useState<{
+    path: string;
+    version: number;
+    invalidated: number;
+  } | null>(null);
   useEffect(() => {
     if (!path) return;
     return onCachedAssetInvalidation(path, () => setInvalidated((value) => value + 1));
@@ -27,7 +36,7 @@ export function useAuthenticatedAssetUrl(
         if (alive) refresh((value) => value + 1);
       },
       () => {
-        if (alive) refresh((value) => value + 1);
+        if (alive) setFailure({ path, version, invalidated });
       },
     );
     return () => {
@@ -36,6 +45,17 @@ export function useAuthenticatedAssetUrl(
     };
   }, [path, admitted, version, invalidated]);
 
-  if (!path || !admitted) return null;
-  return peekCachedAssetUrl(path);
+  if (!path || !admitted) return { status: "idle", url: null };
+  const url = peekCachedAssetUrl(path);
+  if (url !== null) return { status: "ready", url };
+  const failed =
+    failure?.path === path && failure.version === version && failure.invalidated === invalidated;
+  return { status: failed ? "failed" : "pending", url: null };
+}
+
+export function useAuthenticatedAssetUrl(
+  path: string | null | undefined,
+  admitted = true,
+): string | null {
+  return useAuthenticatedAsset(path, admitted).url;
 }

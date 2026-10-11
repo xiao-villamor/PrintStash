@@ -25,6 +25,7 @@
     "lossless": false,
     "exact": false,
     "method": 2,
-    "quality": 85
+    "quality": 85,
+    "alphaQuality": 100
   }
 }

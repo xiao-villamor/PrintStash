@@ -16,7 +16,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from app.core.logging import get_logger
-from app.db.models import DerivativeKind, DerivativeState
+from app.db.models import DerivativeKind, DerivativeState, JobKind
 from app.schemas.jobs import JobStatus
 
 logger = get_logger(__name__)
@@ -58,6 +58,10 @@ def job_changed(status: JobStatus) -> None:
         "kind": status.kind,
         "state": status.state,
         "progress": status.progress,
+        # The admin socket also carries maintenance absent from the default
+        # Tasks list. Tell that reader whether its snapshot can have changed.
+        "task_visible": status.owner_user_id is not None
+        or status.kind == JobKind.BACKUPS_AUTOMATIC,
     }
     if status.owner_user_id is not None:
         _publish(f"jobs:{status.owner_user_id}", notice)

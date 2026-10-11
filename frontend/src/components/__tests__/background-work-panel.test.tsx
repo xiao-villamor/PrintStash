@@ -437,7 +437,7 @@ describe("BackgroundWorkPanel", () => {
   });
 
   describe("freshness", () => {
-    it("refreshes when a Job changes on the server", async () => {
+    it("refreshes administrator maintenance independently", async () => {
       const api = stubApi();
       renderPanel(api);
       await screen.findByRole("heading", { name: "What's happening now" });
@@ -449,6 +449,7 @@ describe("BackgroundWorkPanel", () => {
           job_id: "j",
           kind: "derivatives.mesh",
           state: "completed",
+          task_visible: false,
         }),
       });
 

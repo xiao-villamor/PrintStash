@@ -51,7 +51,7 @@ class FakeEventSocket implements EventSocket {
   send = vi.fn<(data: string) => void>();
   close = vi.fn<() => void>();
 
-  deliver(frame: { type: string; job_id?: string; state?: string }): void {
+  deliver(frame: { type: string; job_id?: string; state?: string; task_visible?: boolean }): void {
     this.onmessage?.({ data: JSON.stringify(frame) });
   }
 }
@@ -1385,6 +1385,32 @@ describe("createImportJobSynchronizer", () => {
     socket.deliver({ type: "job", job_id: "j1", state: "completed" });
     await vi.advanceTimersByTimeAsync(0);
 
+    expect(listJobs).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("ignores maintenance outside the Task Center", async () => {
+    listJobs.mockResolvedValue([aJob({ state: "completed" })]);
+    const stop = tc.startImportJobSync();
+    await handshake();
+    for (let i = 0; i < 60; i++) {
+      socket.deliver({
+        type: "job",
+        job_id: `maintenance-${i}`,
+        state: "completed",
+        task_visible: false,
+      });
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    expect(listJobs).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("refreshes tasks for visible Job notices", async () => {
+    const stop = tc.startImportJobSync();
+    await handshake();
+    socket.deliver({ type: "job", job_id: "owned-job", state: "completed", task_visible: true });
+    await vi.advanceTimersByTimeAsync(0);
     expect(listJobs).toHaveBeenCalledTimes(2);
     stop();
   });

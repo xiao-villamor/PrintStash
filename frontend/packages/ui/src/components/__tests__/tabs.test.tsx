@@ -21,22 +21,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Defined before the module import so `tabs.tsx`'s module-level feature detect
 // sees it, exactly as it would in a browser.
-const resizeObservers = vi.hoisted(() => {
+const { instances: resizeObservers, delivery: resizeDelivery } = vi.hoisted(() => {
   const instances: { reflow: () => void; disconnected: boolean }[] = [];
+  const delivery = { automatic: true };
   class FakeResizeObserver implements ResizeObserver {
     private entry: { reflow: () => void; disconnected: boolean };
     constructor(callback: ResizeObserverCallback) {
       this.entry = { reflow: () => callback([], this), disconnected: false };
       instances.push(this.entry);
     }
-    observe() {}
+    observe() {
+      if (delivery.automatic) this.entry.reflow();
+    }
     unobserve() {}
     disconnect() {
       this.entry.disconnected = true;
     }
   }
   globalThis.ResizeObserver = FakeResizeObserver;
-  return instances;
+  return { instances, delivery };
 });
 
 import { TabBar } from "../tabs";
@@ -58,6 +61,7 @@ let layout = new Map(LAYOUT);
 beforeEach(() => {
   layout = new Map(LAYOUT);
   resizeObservers.length = 0;
+  resizeDelivery.automatic = true;
   vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(
     function (this: HTMLElement) {
       return layout.get(this.textContent ?? "")?.left ?? 0;
@@ -209,6 +213,20 @@ describe("TabBar", () => {
   });
 
   describe("indicator", () => {
+    it("waits for native layout before positioning the first indicator", () => {
+      resizeDelivery.automatic = false;
+      render(<TabBar tabs={TABS} active="files" onChange={vi.fn<(key: string) => void>()} />);
+
+      expect(indicator()).toBeNull();
+      expect(
+        Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetWidth")?.get,
+      ).not.toHaveBeenCalled();
+
+      act(() => resizeObservers.at(-1)?.reflow());
+
+      expect(indicator()).toHaveStyle({ transform: "translateX(100px) scaleX(60)" });
+    });
+
     it("sits under the active tab", () => {
       render(<TabBar tabs={TABS} active="files" onChange={vi.fn<(key: string) => void>()} />);
 

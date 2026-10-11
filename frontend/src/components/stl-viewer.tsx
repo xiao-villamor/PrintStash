@@ -3,11 +3,11 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import React, { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Canvas, useLoader, useThree } from "@react-three/fiber";
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
-import { STLLoader, type OrbitControls as OrbitControlsImpl } from "three-stdlib";
+import { type OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import {
   comparisonTransform,
   sharedScale,
@@ -16,19 +16,16 @@ import {
 } from "@/lib/comparison-camera";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
-import { authHeaders } from "@/lib/api/request";
+import { useParsedStl } from "@/lib/use-parsed-stl";
+import { createMeshRenderer, type MeshRenderer, type RendererFallback } from "@/lib/mesh-renderer";
+import type { CameraPose } from "@/lib/comparison-camera";
+import type { MeshRendererPreference } from "@/lib/preview-preferences";
 import {
   previewPixelRatio,
   usePreviewPreferences,
   type ScreenshotScale,
 } from "@/lib/preview-preferences";
-import {
-  fitCameraToBounds,
-  heroCameraDirection,
-  screenshotDimensions,
-  screenshotHasForeground,
-  visibleCanvasBackground,
-} from "@/lib/thumbnail-camera";
+import { fitCameraToBounds, heroCameraDirection } from "@/lib/thumbnail-camera";
 import { useViewerReadiness } from "@/lib/use-viewer-readiness";
 import { useStlPreview, stlPreviewMessage } from "@/lib/use-stl-preview";
 
@@ -71,26 +68,23 @@ const sizeVec = new THREE.Vector3();
 const centerVec = new THREE.Vector3();
 
 function Mesh({
-  url,
+  geometry,
   displayMode,
   onSized,
+  onRendered,
   onGeometrySize,
   comparison,
   overlay = false,
 }: {
-  url: string;
+  geometry: THREE.BufferGeometry;
   displayMode: ViewerDisplayMode;
   onSized: (size: THREE.Vector3) => void;
+  onRendered?: () => void;
   onGeometrySize?: (size: number) => void;
   comparison?: MeshComparison;
   overlay?: boolean;
 }) {
   useUiLocale();
-  const geometry = useLoader(STLLoader, url, (loader) => {
-    loader.setRequestHeader(authHeaders());
-  });
-  useEffect(() => () => geometry.dispose(), [geometry]);
-  useEffect(() => () => useLoader.clear(STLLoader, url), [url]);
   const meshRef = useRef<THREE.Mesh>(null);
   const geometrySizeRef = useRef(onGeometrySize);
   useEffect(() => {
@@ -133,7 +127,7 @@ function Mesh({
   }, [geometry, onSized, comparison]);
 
   return (
-    <mesh ref={meshRef} geometry={geometry}>
+    <mesh ref={meshRef} geometry={geometry} onAfterRender={onRendered}>
       <meshStandardMaterial
         color={overlay ? "#497bbd" : "#8a93a6"}
         roughness={0.45}
@@ -149,6 +143,11 @@ function Mesh({
 
 function Scene({
   url,
+  geometry,
+  overlayGeometry,
+  renderer,
+  restoredPose,
+  rememberPose,
   onControlsReady,
   onLoadedChange,
   onGeometrySize,
@@ -177,13 +176,19 @@ function Scene({
     onLoadedChange?: (loaded: boolean) => void;
     onGeometrySize?: (size: number) => void;
     screenshotScale: ScreenshotScale;
+    geometry: THREE.BufferGeometry;
+    overlayGeometry: THREE.BufferGeometry | null;
+    renderer: MeshRenderer;
+    restoredPose: React.RefObject<CameraPose | null>;
+    rememberPose: (pose: CameraPose) => void;
   }) {
   useUiLocale();
   const orbitRef = useRef<OrbitControlsImpl>(null);
   const syncing = useRef(false);
+  const poseApplied = useRef(false);
   const sender = useRef(Symbol("comparison-camera"));
   const cameraRef = useRef<THREE.PerspectiveCamera>(null);
-  const { gl, scene, camera, invalidate, size: canvasSize } = useThree();
+  const { scene, camera, invalidate, size: canvasSize } = useThree();
   const [modelSize, setModelSize] = useState(
     () => new THREE.Vector3(NORMALIZED_SIZE, NORMALIZED_SIZE, NORMALIZED_SIZE),
   );
@@ -202,6 +207,7 @@ function Scene({
     [comparisonCamera, invalidate],
   );
 
+  const visible = useRef(false);
   const loadedChangeRef = useRef(onLoadedChange);
   useEffect(() => {
     loadedChangeRef.current = onLoadedChange;
@@ -216,11 +222,17 @@ function Scene({
     (nextSize: THREE.Vector3) => {
       setModelSize((current) => (current.equals(nextSize) ? current : nextSize));
       setLoaded(true);
-      loadedChangeRef.current?.(true);
       invalidate();
     },
     [invalidate, setLoaded],
   );
+
+  const handleRendered = useCallback(() => {
+    if (loaded && !visible.current) {
+      visible.current = true;
+      loadedChangeRef.current?.(true);
+    }
+  }, [loaded]);
 
   const gridSize = Math.max(modelSize.x, modelSize.z) * 2.6 || NORMALIZED_SIZE * 2.6;
   const floorY = -modelSize.y / 2;
@@ -259,49 +271,19 @@ function Scene({
     },
     screenshot: async () => {
       if (!loaded) throw new Error("preview_not_ready");
-      const renderSize = gl.getSize(new THREE.Vector2());
-      const dimensions = screenshotDimensions(
-        renderSize.x,
-        renderSize.y,
-        screenshotScale,
-        gl.capabilities.maxTextureSize,
-      );
-      const target = new THREE.WebGLRenderTarget(dimensions.width, dimensions.height, {
-        depthBuffer: true,
-        stencilBuffer: false,
-      });
-      target.texture.colorSpace = gl.outputColorSpace;
-      const previousTarget = gl.getRenderTarget();
-      const previousBackground = scene.background;
-      const visibleBackground = visibleCanvasBackground(gl.domElement);
-      const pixels = new Uint8Array(dimensions.width * dimensions.height * 4);
+      let captured;
       try {
-        if (visibleBackground) scene.background = visibleBackground;
-        gl.setRenderTarget(target);
-        gl.render(scene, camera);
-        gl.readRenderTargetPixels(target, 0, 0, dimensions.width, dimensions.height, pixels);
+        captured = await renderer.capture(scene, camera, screenshotScale);
       } finally {
-        scene.background = previousBackground;
-        gl.setRenderTarget(previousTarget);
-        target.dispose();
         invalidate();
       }
-      if (!screenshotHasForeground(pixels)) {
-        throw new Error("screenshot_empty");
-      }
-
-      const flipped = new Uint8ClampedArray(pixels.length);
-      const rowBytes = dimensions.width * 4;
-      for (let y = 0; y < dimensions.height; y += 1) {
-        const sourceStart = (dimensions.height - y - 1) * rowBytes;
-        flipped.set(pixels.subarray(sourceStart, sourceStart + rowBytes), y * rowBytes);
-      }
+      const { width, height, pixels } = captured;
       const output = document.createElement("canvas");
-      output.width = dimensions.width;
-      output.height = dimensions.height;
+      output.width = width;
+      output.height = height;
       const context = output.getContext("2d");
       if (!context) throw new Error("screenshot_canvas_unavailable");
-      context.putImageData(new ImageData(flipped, dimensions.width, dimensions.height), 0, 0);
+      context.putImageData(new ImageData(pixels, width, height), 0, 0);
       const blob = await new Promise<Blob>((resolve, reject) => {
         output.toBlob((value) => {
           if (value && value.size > 0) resolve(value);
@@ -322,9 +304,18 @@ function Scene({
   useEffect(() => {
     onControlsReady?.(controlsApi);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onControlsReady, modelSize, loaded, canvasSize.width, canvasSize.height]);
+  }, [
+    onControlsReady,
+    modelSize,
+    loaded,
+    canvasSize.width,
+    canvasSize.height,
+    renderer,
+    screenshotScale,
+  ]);
 
   useLayoutEffect(() => {
+    visible.current = false;
     loadedChangeRef.current?.(false);
   }, [url]);
 
@@ -332,7 +323,14 @@ function Scene({
   // the same safe framing as the generated thumbnail.
   useEffect(() => {
     if (loaded) {
-      controlsApi.fit();
+      const pose = restoredPose.current;
+      if (!poseApplied.current && pose !== null && cameraRef.current && orbitRef.current) {
+        poseApplied.current = true;
+        cameraRef.current.position.fromArray(pose.position);
+        orbitRef.current.target.fromArray(pose.target);
+        orbitRef.current.update();
+        invalidate();
+      } else controlsApi.fit();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loaded, modelSize, canvasSize.width, canvasSize.height, url]);
@@ -345,25 +343,26 @@ function Scene({
       <directionalLight position={[8, 12, 6]} intensity={1.2} castShadow />
       <directionalLight position={[-6, -4, -8]} intensity={0.25} />
       <directionalLight position={[0, -8, 0]} intensity={0.15} color="#8899bb" />
-      <Suspense fallback={null}>
+      <>
         <Mesh
           key={url}
-          url={url}
+          geometry={geometry}
           displayMode={displayMode}
           onSized={handleSized}
+          onRendered={handleRendered}
           onGeometrySize={onGeometrySize}
           comparison={comparison}
         />
-        {overlay && (
+        {overlay && overlayGeometry && (
           <Mesh
-            url={overlay.url}
+            geometry={overlayGeometry}
             displayMode="solid"
             onSized={() => {}}
             comparison={overlay.comparison}
             overlay
           />
         )}
-      </Suspense>
+      </>
       {showGrid && (
         <gridHelper args={[gridSize, 26, "#94a3b8", "#475569"]} position={[0, floorY, 0]} />
       )}
@@ -376,11 +375,14 @@ function Scene({
         maxPolarAngle={Math.PI / 2 - 0.02}
         onChange={() => {
           invalidate();
-          if (!syncing.current && cameraRef.current && orbitRef.current)
-            comparisonCamera?.publish(sender.current, {
+          if (cameraRef.current && orbitRef.current) {
+            const pose = {
               position: cameraRef.current.position.toArray(),
               target: orbitRef.current.target.toArray(),
-            });
+            };
+            if (loaded) rememberPose(pose);
+            if (!syncing.current) comparisonCamera?.publish(sender.current, pose);
+          }
         }}
       />
     </>
@@ -390,6 +392,7 @@ function Scene({
 interface MeshErrorBoundaryProps {
   children: React.ReactNode;
   fallback?: React.ReactNode;
+  onFailure?: () => void;
 }
 
 interface MeshErrorBoundaryState {
@@ -406,6 +409,10 @@ class MeshErrorBoundary extends React.Component<MeshErrorBoundaryProps, MeshErro
     return { hasError: true };
   }
 
+  componentDidCatch() {
+    this.props.onFailure?.();
+  }
+
   render() {
     if (this.state.hasError) {
       return (
@@ -419,6 +426,98 @@ class MeshErrorBoundary extends React.Component<MeshErrorBoundaryProps, MeshErro
     }
     return this.props.children;
   }
+}
+
+type SceneProps = React.ComponentProps<typeof Scene>;
+
+function RendererCanvas({
+  preference,
+  onFailure,
+  fallback,
+  onLoadedChange,
+  ...props
+}: Omit<SceneProps, "renderer"> & {
+  preference: MeshRendererPreference;
+  onFailure: (reason: RendererFallback) => void;
+  fallback: RendererFallback | null;
+}) {
+  const [controller] = useState(() => new AbortController());
+  const adapter = useRef<MeshRenderer | null>(null);
+  const canvas = useRef<HTMLCanvasElement | null>(null);
+  const [renderer, setRenderer] = useState<MeshRenderer | null>(null);
+  useEffect(
+    () => () => {
+      // StrictMode replays effects while the same canvas remains mounted.
+      if (canvas.current === null || canvas.current.isConnected) return;
+      controller.abort();
+      void adapter.current?.dispose().catch((error: Error) => {
+        console.warn("Mesh renderer cleanup failed", error);
+      });
+    },
+    [controller],
+  );
+  const factory = useCallback(
+    async (defaults: { canvas: EventTarget }) => {
+      if (!(defaults.canvas instanceof HTMLCanvasElement))
+        throw new Error("mesh_canvas_unavailable");
+      canvas.current = defaults.canvas;
+      const created = await createMeshRenderer(defaults.canvas, preference, controller.signal, () =>
+        onFailure("device_lost"),
+      );
+      adapter.current = created;
+      setRenderer(created);
+      return created.renderer;
+    },
+    [preference, controller, onFailure],
+  );
+  return (
+    <MeshErrorBoundary onFailure={() => onFailure("initialization_failed")}>
+      <Canvas
+        aria-label={uiText("3D model preview")}
+        className="h-full w-full touch-none overscroll-contain"
+        dpr={previewPixelRatio(usePreviewPreferences().previewQuality)}
+        frameloop="demand"
+        data-mesh-backend={renderer?.backend}
+        data-renderer-fallback={renderer?.fallback ?? fallback ?? undefined}
+        gl={factory}
+      >
+        {renderer && <Scene {...props} renderer={renderer} onLoadedChange={onLoadedChange} />}
+      </Canvas>
+    </MeshErrorBoundary>
+  );
+}
+
+function MeshCanvas(
+  props: Omit<SceneProps, "renderer" | "restoredPose" | "rememberPose"> & {
+    preference: MeshRendererPreference;
+  },
+) {
+  const [recovered, setRecovered] = useState<RendererFallback | null>(null);
+  const restoredPose = useRef<CameraPose | null>(null);
+  const { preference, onLoadedChange } = props;
+  const recover = useCallback(
+    (reason: RendererFallback) => {
+      if (!recovered && preference !== "webgl") {
+        onLoadedChange?.(false);
+        setRecovered(reason);
+      }
+    },
+    [recovered, preference, onLoadedChange],
+  );
+  const rememberPose = useCallback((pose: CameraPose) => {
+    restoredPose.current = pose;
+  }, []);
+  return (
+    <RendererCanvas
+      key={recovered ? "recovered" : "initial"}
+      {...props}
+      preference={recovered ? "webgl" : props.preference}
+      onFailure={recover}
+      fallback={recovered}
+      restoredPose={restoredPose}
+      rememberPose={rememberPose}
+    />
+  );
 }
 
 export function STLViewer({
@@ -441,9 +540,11 @@ export function STLViewer({
   const previewPreferences = usePreviewPreferences();
   const preview = useStlPreview(url, modelId, previewFetcher);
   const { loaded: meshLoaded, setLoaded: setMeshLoaded } = useViewerReadiness(
-    preview.state === "ready" ? preview.url : url,
+    (preview.state === "ready" ? preview.url : url) + ":" + previewPreferences.meshRenderer,
   );
   const overlayPreview = useStlPreview(overlay?.url ?? null, undefined, previewFetcher);
+  const parsed = useParsedStl(preview.state === "ready" ? preview.url : null);
+  const parsedOverlay = useParsedStl(overlayPreview.state === "ready" ? overlayPreview.url : null);
 
   useEffect(() => {
     onReadyChange?.(meshLoaded && preview.state === "ready");
@@ -465,7 +566,20 @@ export function STLViewer({
         <span className="text-xs">{stlPreviewMessage(failure.reason)}</span>
       </div>
     );
-  if (preview.state !== "ready" || (overlay !== undefined && overlayPreview.state !== "ready"))
+  if (parsed.state === "failed" || (overlay !== undefined && parsedOverlay.state === "failed"))
+    return (
+      <div
+        role="status"
+        className="flex h-full items-center justify-center text-on-surface-variant"
+      >
+        {uiText("Failed to load 3D preview")}
+      </div>
+    );
+  if (
+    preview.state !== "ready" ||
+    parsed.state !== "ready" ||
+    (overlay !== undefined && (overlayPreview.state !== "ready" || parsedOverlay.state !== "ready"))
+  )
     return (
       <div
         role="status"
@@ -479,43 +593,37 @@ export function STLViewer({
 
   return (
     <div className="relative h-full w-full touch-none overscroll-contain">
-      <MeshErrorBoundary key={url}>
-        <Canvas
-          aria-label={uiText("3D model preview")}
-          className="h-full w-full touch-none overscroll-contain"
-          dpr={previewPixelRatio(previewPreferences.previewQuality)}
-          frameloop="demand"
+      <MeshCanvas
+        key={`${preview.url}:${previewPreferences.meshRenderer}`}
+        url={preview.url}
+        geometry={parsed.geometry}
+        overlayGeometry={parsedOverlay.state === "ready" ? parsedOverlay.geometry : null}
+        preference={previewPreferences.meshRenderer}
+        onControlsReady={onControlsReady}
+        onLoadedChange={setMeshLoaded}
+        onGeometrySize={onGeometrySize}
+        displayMode={displayMode}
+        showGrid={showGrid}
+        screenshotName={screenshotName}
+        screenshotScale={previewPreferences.screenshotScale}
+        comparison={comparison}
+        comparisonCamera={comparisonCamera}
+        overlay={
+          overlay !== undefined && overlayPreview.state === "ready"
+            ? { ...overlay, url: overlayPreview.url }
+            : undefined
+        }
+      />
+      {/* Keep a loading indicator until the mounted scene has fitted the mesh. */}
+      {!meshLoaded && (
+        <div
+          role="status"
+          aria-label={uiText("Loading 3D preview")}
+          className="pointer-events-none absolute inset-0 flex items-center justify-center"
         >
-          <Scene
-            url={preview.url}
-            onControlsReady={onControlsReady}
-            onLoadedChange={setMeshLoaded}
-            onGeometrySize={onGeometrySize}
-            displayMode={displayMode}
-            showGrid={showGrid}
-            screenshotName={screenshotName}
-            screenshotScale={previewPreferences.screenshotScale}
-            comparison={comparison}
-            comparisonCamera={comparisonCamera}
-            overlay={
-              overlay !== undefined && overlayPreview.state === "ready"
-                ? { ...overlay, url: overlayPreview.url }
-                : undefined
-            }
-          />
-        </Canvas>
-        {/* Overlay while the mesh downloads/parses — the canvas mounts
-            immediately, so without this the viewer is a blank void. */}
-        {!meshLoaded && (
-          <div
-            role="status"
-            aria-label={uiText("Loading 3D preview")}
-            className="pointer-events-none absolute inset-0 flex items-center justify-center"
-          >
-            <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />
-          </div>
-        )}
-      </MeshErrorBoundary>
+          <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />
+        </div>
+      )}
     </div>
   );
 }
