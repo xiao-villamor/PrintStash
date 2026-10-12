@@ -53,7 +53,7 @@ def _derivative_job(file_id):
 class TestRenderBatchPublication:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "subdivisions", [0, 6], ids=["canonical", "deferred-normals"]
+        "subdivisions", [0, 6], ids=["small-visual", "large-visual"]
     )
     async def test_publishes_the_healthy_member_when_a_batched_job_is_cancelled(
         self,
@@ -149,8 +149,7 @@ class TestRenderBatchPublication:
                 assert [priority for _key, priority, _mode in batch] == [
                     Priority.BACKGROUND
                 ] * 2
-                expected_mode = "gpu-visual-v2" if subdivisions else "canonical"
-                assert [mode for _key, _priority, mode in batch] == [expected_mode] * 2
+                assert [mode for _key, _priority, mode in batch] == ["gpu-visual-v2"] * 2
                 cancelled = await api.post(
                     f"/api/v1/jobs/{cancelled_job.id}/cancel", headers=headers
                 )
