@@ -24,7 +24,7 @@ The probes are single passes on a shared WSL host. They establish component beha
 
 ## Validation
 
-Focused compute/admission/worker/handoff selection: **389 passed**. Ruff and Pyright: **0 errors**. Full backend gate and the immutable matched CPU/GPU comparison are in progress; no new overall speedup is claimed yet.
+Focused compute/admission/worker/handoff selection: **389 passed**. Ruff and Pyright: **0 errors**. The unrestricted full backend run was interrupted after **1111 passed, one failure and one collection error**. Combined unit/contract collection exposed missing package markers on the pre-existing `compute_render` packet test directories; both markers are now present. The DBOS dedupe case `TestIdentity::test_a_dedupe_key_is_free_again_once_its_execution_ends[dbos]` unexpectedly returned `EXISTING`. It passed on isolated recheck; this is a recorded intermittent failure, not claimed fixed. The combined packet/STL/dedupe recheck passed **54 tests**. The full lane over affected compute, media, admission, containment, DBOS contracts and ingestion paths and the immutable matched CPU/GPU comparison are in progress. Required PR CI supplies the exhaustive disjoint ordinary-suite gate. No new overall speedup is claimed yet.
 
 ## Coverage matrix
 
