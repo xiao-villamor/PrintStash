@@ -13,7 +13,7 @@ from __future__ import annotations
 import tempfile
 import time
 from contextlib import ExitStack
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
@@ -414,7 +414,7 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
             handoff_plan = (
                 thumbnail_handoff.plan(width, round(width * 3 / 4), file_row.size_bytes)
                 if DerivativeKind.THUMBNAIL in attempts
-                and (plan is None or file_row.file_type.value in {"stl", "obj"})
+                and plan is None
                 else None
             )
             output_bytes = MAX_PACKET_BYTES if handoff_plan is not None else 0
@@ -453,74 +453,18 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
             )
             result = None
             try:
-                # STL/OBJ previews own no topology. Publish their output before
-                # starting analysis, and release the host/GPU/codec credits first.
-                # Both paths remain under the existing durable Job and source lease.
-                split_visual = request.include_thumbnail and request.file_type in {
-                    "stl",
-                    "obj",
-                    ".stl",
-                    ".obj",
-                }
-                visual_request = (
-                    replace(request, include_geometry=False, include_fingerprint=False)
-                    if split_visual
-                    else request
-                )
-                publication_error = None
-                try:
-                    if handoff_plan is not None and split_visual:
-                        with thumbnail_handoff.reserve(
-                            handoff_plan, prepared.directory
-                        ) as handoff:
-                            # Publication consumed the frame. Drop the returned
-                            # image while its host credit still owns it.
-                            mesh_isolation.generate(
-                                visual_request, on_output=publish, handoff=handoff
-                            )
-                    elif handoff_plan is not None:
-                        handoff = stack.enter_context(
-                            thumbnail_handoff.reserve(handoff_plan, prepared.directory)
-                        )
-                        result = mesh_isolation.generate(
-                            visual_request, on_output=publish, handoff=handoff
-                        )
-                    else:
-                        result = mesh_isolation.generate(
-                            visual_request, on_output=publish
-                        )
-                except (ThumbnailPublicationError, OperationError, OSError) as exc:
-                    if not split_visual:
-                        raise
-                    publication_error = exc
-                except (MeshWorkerError, AdmissionTooLarge, TimeoutError) as exc:
-                    if not split_visual:
-                        raise
-                    reason = (
-                        ThumbnailFailureReason.TIMEOUT.value
-                        if isinstance(exc, TimeoutError)
-                        else ThumbnailFailureReason.RESOURCE_LIMIT.value
-                        if isinstance(exc, AdmissionTooLarge)
-                        else exc.reason.value
+                # Decode once under one native admission. Independent output
+                # consumers share source arrays; the GPU handoff starts after
+                # clean worker exit releases its native memory reservation.
+                if handoff_plan is not None:
+                    handoff = stack.enter_context(
+                        thumbnail_handoff.reserve(handoff_plan, prepared.directory)
                     )
-                    if DerivativeKind.THUMBNAIL not in outcome:
-                        _fail(
-                            attempts[DerivativeKind.THUMBNAIL],
-                            reason,
-                            deterministic=reason in _DETERMINISTIC,
-                        )
-                        published(DerivativeKind.THUMBNAIL, DerivativeState.FAILED)
-                if split_visual and (
-                    request.include_geometry or request.include_fingerprint
-                ):
-                    # Drop any preview result before admitting the analysis worker.
-                    result = None
-                    checkpoint()
                     result = mesh_isolation.generate(
-                        replace(request, include_thumbnail=False), on_output=publish
+                        request, on_output=publish, handoff=handoff
                     )
-                if publication_error is not None:
-                    raise publication_error
+                else:
+                    result = mesh_isolation.generate(request, on_output=publish)
                 if result is not None and result.fingerprint_result is not None:
                     if pending is None:
                         raise RuntimeError(

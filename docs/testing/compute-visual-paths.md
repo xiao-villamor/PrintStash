@@ -1,6 +1,8 @@
 # Independent visual preparation
 
-Runtime under measurement: `235c4524`. WSL, Linux user `local`.
+Historical, rejected throughput experiment. Runtime under measurement: `235c4524`.
+WSL, Linux user `local`. The [shared-source replacement](compute-shared-source-250.md)
+removes its duplicate workers and records the subsequent measured improvement.
 
 STL/OBJ thumbnail-only requests load bounded vertex/index arrays without importing
 Trimesh or SciPy. Float64 source coordinates are centred before converting visual
@@ -51,7 +53,12 @@ media/derivative and repository hygiene selection passed **8088 tests**; additio
 new focused cases and two STL/OBJ end-to-end cases passed. Ruff and Pyright passed.
 An import-spacing lint failure was fixed in `db03f63d`; the batched-cancellation
 E2E's old small-mesh CPU expectation was updated in `8bb5c040` and both cases
-passed locally. Neither correction changes benchmark runtime `235c4524`.
+passed locally. Neither test correction changes benchmark runtime `235c4524`. A final scope fix
+adds a distinct preview-preparation entry point: small analytic/embedding views
+retain their previous canonical-normal policy. A regression test first failed and
+then passed for this boundary. The 250-source run had optional analysis disabled;
+its preview preparation selects the same GPU representation. The published timings
+belong to the recorded `235c4524` image, not a rerun of this subsequent scope fix.
 
 ## 250-source measurement
 
@@ -197,6 +204,7 @@ the following is the closing assessment of the new visual path.
 | 15 | keeps cpu recovery canonical | Error | GPU unavailable | Canonical CPU representation | Unit | ✅ `unit/modules/media/test_mesh_render.py::TestDeferredPreparation::test_keeps_cpu_recovery_canonical` |
 | 16 | retains full geometry with smaller previews | Happy | Real STL/OBJ uploads; width 512 | Original bytes, triangle count and complete lossy alpha-bearing thumbnail | E2E | ✅ `e2e/test_ingest.py::TestMetadata::test_retains_full_geometry_with_smaller_previews` |
 | 17 | publishes the healthy member when a batched job is cancelled | Error | Small/large meshes sharing GPU fence; one Job cancelled | Cancelled output withheld; healthy image and original measurements published | E2E | ✅ `e2e/test_render_batch_publication.py::TestRenderBatchPublication::test_publishes_the_healthy_member_when_a_batched_job_is_cancelled` |
+| 18 | preserves small analytic preparation | Edge | GPU available; small analytic view input | Original canonical normal preparation retained | Unit | ✅ `unit/modules/media/test_mesh_render.py::TestDeferredPreparation::test_preserves_small_analytic_preparation` |
 
 The batched-cancellation E2E now expects GPU visual preparation for both small
 and large meshes, while retaining its assertions on cancelled/healthy outputs,

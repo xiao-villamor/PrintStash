@@ -354,11 +354,22 @@ class TestDeferredPreparation:
                 AssertionError("CPU normals computed before GPU selection")
             ),
         )
-        prepared = mesh_render.prepare_mesh_render(self.mesh(faces))
+        prepared = mesh_render.prepare_preview_render(self.mesh(faces))
         assert isinstance(prepared, VisualRender)
         assert not hasattr(prepared, "smooth_normals")
         assert not hasattr(prepared, "position_ids")
         assert prepared._canonical is None
+
+    def test_preserves_small_analytic_preparation(self, monkeypatch):
+        from printstash_core.mesh.render_geometry import PreparedRender
+
+        from app.runtime.compute import client
+
+        monkeypatch.setattr(client, "available", lambda **_: True)
+
+        prepared = mesh_render.prepare_mesh_render(self.mesh(1))
+
+        assert isinstance(prepared, PreparedRender)
 
     def test_keeps_cpu_recovery_canonical(self, monkeypatch):
         from printstash_core.mesh.render_geometry import PreparedRender

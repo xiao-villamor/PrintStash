@@ -1,37 +1,38 @@
 # Pipeline CPU/GPU de PrintStash: qué hace realmente y qué falta
 
-Estado actual: separación visual `235c4524`, WSL como usuario Linux `local`. La ruta ligera STL/OBJ ya está implementada; el solapamiento de varios lotes GPU sigue siendo una propuesta. Las cifras históricas se identifican por su runtime; la nueva prueba está en [rutas visuales separadas](compute-visual-paths.md).
+Estado actual: candidato con carga compartida, probado en WSL como usuario Linux `local`. La prueba de 250 terminó en 466,162 s monotónicos: 19,95 % menos que la mejor pasada anterior (582,315 s), con medidas e integridad idénticas. El experimento anterior con dos procesos por STL/OBJ (`235c4524`) empeoró el tiempo total y queda como evidencia histórica. Véase [carga compartida](compute-shared-source-250.md).
 
 **La GPU puede mantener varios modelos en VRAM y procesar muchas vistas sin una espera de CPU entre cada vista. Los límites actuales de PrintStash son decisiones de software.** El renderer ya agrupa vistas, pero recibe pocos modelos preparados y espera la descarga de un lote antes de ejecutar el siguiente. Por eso acelerar únicamente el dibujo no garantiza acelerar toda la importación.
 
 ## 1. Pipeline actual
 
-El diagrama representa STL/OBJ con GPU disponible. Son dos caminos de cálculo dentro del mismo trabajo durable, ejecutados visual primero y análisis después; otros modelos pueden ocupar etapas distintas a la vez. Una salida fallida no retira la otra. 3MF y STEP conservan la ruta general: dividir STEP ahora duplicaría la teselación CAD. La recuperación por CPU continúa disponible.
+El diagrama representa el candidato de una carga por fuente. STL sin huella opcional usa arrays de precisión original para dos consumidores separados. OBJ conserva su lector analítico porque sus normales/UV pueden modificar la unión de vértices; STEP y 3MF mantienen sus lectores especializados. El trabajo durable, la cancelación y las reservas siguen perteneciendo a los mismos coordinadores.
 
 ```mermaid
 flowchart TD
-    source["Original STL / OBJ bajo custodia"]
-    subgraph host["CPU + RAM + disco local"]
-        admit["Admisión del proceso visual"]
-        parser["Lector acotado STL/OBJ · NumPy<br/>Sin importar Trimesh/SciPy<br/>Sin topología ni volumen"]
-        packet["Centrar float64 → posiciones float32 + índices<br/>Paquete temporal · terminar proceso y liberar RAM"]
-        broker["Broker persistente · hasta 8 vistas por lote<br/>Subir buffers compactos"]
-        wait["map_sync · descargar RGBA"]
-        codec["Codec independiente · WebP con pérdida"]
-        publish["Publicar miniatura<br/>Liberar reserva del host"]
-        analysis["Otro proceso CPU: análisis del original<br/>Trimesh · topología · volumen · huella opcional"]
-        metadata["Publicar medidas originales"]
+    source["Original bajo custodia"]
+    subgraph worker["Una admisión · un proceso aislado · CPU/RAM"]
+        parser["Una sola carga<br/>STL: lector acotado → arrays float64<br/>OBJ/STEP/3MF: lector especializado"]
+        measure["Consumidor de medidas<br/>STL: topología de índices + integral float64<br/>Sin importar Trimesh<br/>Otros formatos: análisis existente"]
+        packet["Consumidor visual<br/>Centrar posiciones → float32 + índices<br/>Paquete compacto"]
+        finish["Terminar proceso y liberar reserva nativa"]
     end
-    subgraph device["GPU + VRAM"]
-        prepare["Soldadura visual y normales<br/>También modelos pequeños elegibles<br/>Bounds y cámara"]
-        render["Vertex shader: expandir caras al dibujar<br/>Rasterización · sombreado<br/>Recorte/reducción a 512×384"]
+    subgraph device["Broker persistente · GPU/VRAM"]
+        upload["Subir geometría compacta<br/>Agrupar hasta 8 vistas"]
+        prepare["Normales visuales · bounds · cámara"]
+        render["Expansión en vertex shader<br/>Rasterización · sombreado<br/>Recorte y reducción"]
     end
-    source --> admit --> parser --> packet --> broker --> prepare --> render --> wait
-    wait --> codec --> publish --> analysis --> metadata
-    source -.->|"Mismo original; lectura independiente"| analysis
-    wait -.->|"El broker espera antes del siguiente lote"| broker
+    metadata["Publicar medidas originales"]
+    readback["CPU: esperar map_sync y recibir RGBA"]
+    codec["CPU: WebP con pérdida · publicar miniatura"]
+    source --> parser
+    parser --> measure --> metadata
+    parser --> packet --> finish --> upload --> prepare --> render --> readback --> codec
+    measure --> finish
+    readback -.->|"El siguiente lote aún espera esta lectura"| upload
 ```
 
+Los consumidores tienen funciones y representaciones distintas, pero **no duplican la carga ni el proceso**. En esta implementación la medida termina antes de enviar el paquete visual. La topología y el volumen autoritativos de STL siguen en CPU: NumPy procesa índices y SciPy identifica componentes; el cálculo no construye un objeto Trimesh ni calcula inercia o centro de masa. Los resultados originales se verifican frente al cálculo anterior.
 **Las etapas pueden solaparse entre modelos:** un parser puede preparar B mientras la GPU dibuja A y el codec comprime una imagen anterior. Sin embargo, el propio bucle de ejecución del broker queda bloqueado en `map_sync`. Tener varios clientes conectados no equivale a tener varios lotes GPU en vuelo.
 
 La miniatura de estas pruebas es **512×384**, pero el perfil conserva supersampling: **se dibuja internamente a 1024×768 (factor 2)** antes de reducir a 512×384. El postprocesado GPU reduce la imagen antes de descargarla cuando su comprobación de capacidad funciona. Si falla, hay una ruta de finalización CPU. WebP se codifica con Pillow/libwebp en CPU; no se usa un encoder GPU de WebP.
@@ -41,7 +42,7 @@ La miniatura de estas pruebas es **512×384**, pero el perfil conserva supersamp
 Hay tres operaciones distintas:
 
 1. **Interpretar el archivo.** STL, OBJ y STEP son formatos de origen, no necesariamente los buffers que espera un shader. Los lectores actuales se ejecutan en CPU. OBJ requiere interpretar texto e índices; STEP requiere convertir geometría CAD en triángulos. Es posible diseñar lectores GPU para casos concretos, especialmente datos binarios regulares, pero el código actual no los tiene.
-2. **Materializar la representación del parser.** La ruta visual STL/OBJ mantiene solo posiciones e índices en NumPy; ya no construye Trimesh ni topología. El análisis del original sí utiliza Trimesh y CPU. El tamaño en disco no es su consumo de memoria. El lector todavía interpreta y valida el archivo en CPU: no se ha implementado un decodificador STL/OBJ en shaders.
+2. **Materializar la representación del parser.** STL básico mantiene posiciones e índices en NumPy que comparten sus consumidores; el cálculo de medidas crea topología temporal solo cuando corresponde. OBJ con medidas, CAD y huellas opcionales todavía utilizan sus lectores analíticos. El tamaño en disco no es su consumo de memoria. El lector todavía interpreta y valida el archivo en CPU: no se ha implementado un decodificador STL/OBJ en shaders.
 3. **Construir los vértices que se dibujan.** En la ruta compacta actual se suben posiciones e índices. El vertex shader consulta los tres índices de cada cara y calcula su posición/normal para dibujar. No se necesita fabricar en RAM un gran buffer de triángulos completos con todos sus atributos por cada cámara. El cálculo de normales visuales elegibles, bounds de render, cámara, sombreado y rasterización ya ocurre en GPU. Las mallas pequeñas elegibles también preparan las normales en GPU. Los casos rechazados y la ausencia de GPU conservan recuperación canónica en CPU.
 
 Mover solamente el destino final a VRAM no hace que un parser Python escriba allí sin copias. La mejora estructural consiste en **evitar construir representaciones CPU innecesarias**, emitir buffers compactos temprano y conservarlos en el dispositivo para reutilizarlos. La precisión de los metadatos originales no debe depender de la versión simplificada o `float32` que se usa para dibujar.
@@ -82,7 +83,9 @@ Se puede aumentar el presupuesto de dispositivo y revisar el límite por modelo.
 
 ## 5. Qué dicen los tiempos
 
-La nueva separación STL/OBJ se midió con **250 fuentes**: **766.257 s UTC**, frente
+El candidato de carga compartida termina en **466,162 s monotónicos / 509,649 s UTC**: mejora frente a la mejor pasada GPU anterior (**582,315 / 626,608 s**). Conserva 250 originales, todos los metadatos y 238 miniaturas. Los procesos vuelven a 250, las importaciones de Trimesh bajan a 120 y el pico de RAM a 1902,4 MiB. [Detalle y límites de la comparación](compute-shared-source-250.md).
+
+El experimento anterior de separación STL/OBJ se midió con **250 fuentes**: **766.257 s UTC**, frente
 a **650.899 s** del control anterior (**17.7 % más lenta**). La miniatura aparece
 antes dentro del trabajo (mediana 4.306 frente a 7.132 s), pero la cola desde la
 subida empeora (99.379 frente a 81.518 s). El número de procesos supervisados pasa
@@ -131,8 +134,8 @@ Los índices N−1, N y N+1 indican etapas que se pretende solapar entre lotes; 
 
 Orden de trabajo propuesto:
 
-1. **Preparación ligera: aplicada a STL/OBJ.** El nuevo lector genera arrays visuales sin Trimesh/SciPy y conserva aislamiento. Persistir parsers, compartir decodificación entre caminos o moverla a shaders son cambios adicionales, todavía pendientes.
-2. **Separar las reservas por etapa.** La ruta visual ya libera su crédito antes del análisis. Falta recalibrar más finamente la memoria de parseo, geometría lista y píxeles. La cola de preparación no debería estar artificialmente atada a la duración del codec; tampoco hay que liberar un crédito mientras sus buffers siguen vivos.
+1. **Compartir la carga: mejora medida de 19,95 %.** Una ejecución por fuente; STL básico comparte arrays entre medidas y preview y evita importar Trimesh. OBJ analítico requiere conservar normales/UV. El decodificador GPU sigue pendiente.
+2. **Separar las reservas por etapa.** La reserva nativa termina al salir limpiamente el proceso; la reserva del host conserva el paquete/píxeles hasta publicar. Falta recalibrar más finamente la memoria de parseo, geometría lista y píxeles. La cola de preparación no debería estar artificialmente atada a la duración del codec; tampoco hay que liberar un crédito mientras sus buffers siguen vivos.
 3. **Mantener 2–3 lotes en vuelo**, con staging/readback independientes, finalización asíncrona y propiedad de buffers hasta que su fence termine. Agrupar por bytes y vistas, además de por número de modelos. Esto requiere cambios de arquitectura y pruebas de cancelación/recuperación; no está aplicado en el renderer actual.
 4. **Ajustar VRAM y paquete a la carga real.** Ampliar presupuesto donde permita evitar rechazos o reutilizar geometría; medir throughput, cola y memoria. No asumir una mejora proporcional a la capacidad reservada.
 5. **Validar con el mismo conjunto de 250**, conservando fidelidad de metadatos, calidad visual, errores y tiempos. Una sola pasada no separa cambios pequeños de variabilidad del host.

@@ -418,12 +418,14 @@ class ThumbnailEngine:
                                 )
                         else:
                             try:
-                                visual_only = (
-                                    not request.include_geometry
-                                    and not request.include_fingerprint
-                                    and suffix in {".stl", ".obj"}
+                                array_source = not request.include_fingerprint and (
+                                    suffix == ".stl"
+                                    or (
+                                        suffix == ".obj"
+                                        and not request.include_geometry
+                                    )
                                 )
-                                if visual_only:
+                                if array_source:
                                     from .visual_loading import load_visual_mesh
 
                                     visual_mesh = load_visual_mesh(request.path, suffix)
@@ -570,6 +572,11 @@ class ThumbnailEngine:
                                             )
                                 else:
                                     volume = scene_volume
+                        elif visual_mesh is not None:
+                            from .array_measurements import geometry_from_arrays
+
+                            measured = geometry_from_arrays(visual_mesh)
+                            geometry, volume = measured.geometry, measured.volume
                         else:
                             measured = mesh_measurements.geometry_from_mesh(mesh)
                             geometry, volume = measured.geometry, measured.volume
@@ -654,7 +661,7 @@ class ThumbnailEngine:
                                                 source_scene.scene
                                             )
                                             if source_scene is not None
-                                            else mesh_render.prepare_mesh_render(
+                                            else mesh_render.prepare_preview_render(
                                                 visual_mesh
                                                 if visual_mesh is not None
                                                 else mesh

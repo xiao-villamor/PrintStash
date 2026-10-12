@@ -20,6 +20,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 
 from .gpu_normals import (
+    GPU_NORMALS_MIN_FACES,
     RenderInput,
     VisualRender,
     canonical,
@@ -72,7 +73,7 @@ def render_mesh_thumbnail(
     from app.runtime.compute.client import available
 
     if available(render=True):
-        prepared = prepare_mesh_render(mesh)
+        prepared = prepare_preview_render(mesh)
         if prepared is not None:
             return render_prepared_thumbnail(
                 prepared, name, width, height, output_format=output_format
@@ -89,10 +90,12 @@ def render_mesh_thumbnail(
     )
 
 
-def _prepare_geometry(geometry: PreparedRenderGeometry) -> RenderInput:
+def _prepare_geometry(
+    geometry: PreparedRenderGeometry, *, min_gpu_faces: int = GPU_NORMALS_MIN_FACES
+) -> RenderInput:
     from app.runtime.compute.client import available
 
-    if available(render=True):
+    if geometry.face_count >= min_gpu_faces and available(render=True):
         candidate = VisualRender(geometry)
         if eligible(candidate):
             return candidate
@@ -110,9 +113,15 @@ def prepare_mesh_render(mesh: RenderableMesh | None) -> RenderInput | None:
     return None if geometry is None else _prepare_geometry(geometry)
 
 
+def prepare_preview_render(mesh: RenderableMesh | None) -> RenderInput | None:
+    """Preview-only GPU preparation, independent of canonical analytic views."""
+    geometry = prepare_mesh(mesh)
+    return None if geometry is None else _prepare_geometry(geometry, min_gpu_faces=1)
+
+
 def prepare_scene_render(scene: ExpandedScene) -> RenderInput:
     """Retain source placements and select bounded optional normal preparation."""
-    return _prepare_geometry(prepare_scene(scene))
+    return _prepare_geometry(prepare_scene(scene), min_gpu_faces=1)
 
 
 def render_prepared_thumbnail(
@@ -219,6 +228,7 @@ __all__ = [
     "RenderedPixels",
     "RGBBackground",
     "prepare_mesh_render",
+    "prepare_preview_render",
     "prepare_scene_render",
     "render_prepared_thumbnail",
     "render_prepared_pixels",

@@ -2,7 +2,8 @@
 
 Coordinates remain float64 until render preparation centres them. OBJ materials,
 UVs and stored normals do not participate in the uniform preview shader. Source
-measurements continue through the analysis loader, never through these arrays.
+STL measurements consume these same source arrays; OBJ analysis retains its
+stored-normal and texture-aware loader.
 """
 
 from __future__ import annotations

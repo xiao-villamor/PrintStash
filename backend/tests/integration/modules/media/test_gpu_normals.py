@@ -33,7 +33,7 @@ class TestVisualRender:
         source = tmp_path / "triangle.obj"
         source.write_bytes(b"v 0 0 0\nv 10 0 0\nv 0 10 0\nf 1 2 3")
         monkeypatch.setattr(client, "available", lambda **kwargs: True)
-        prepared = mesh_render.prepare_mesh_render(load_visual_mesh(source, ".obj"))
+        prepared = mesh_render.prepare_preview_render(load_visual_mesh(source, ".obj"))
 
         payload = compute_geometry.encode(prepared, 512, 384, (None,), False)
         decoded = compute_geometry.decode(payload)
