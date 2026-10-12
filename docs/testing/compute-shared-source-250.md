@@ -165,6 +165,26 @@ direct SciPy declaration: the lock update only adds the direct dependency edge,
 without changing any installed package/version or benchmark code. The PR records
 the final exhaustive CI gate result for the latest commit.
 
+[Interactive HTML report (Spanish)](compute-pipeline-report.es.html) ·
 [Sanitized detailed counters](compute-shared-source-250-summary.json) ·
 [CPU/GPU diagram](compute-pipeline-explained.es.md) ·
 [Rejected split-worker result](compute-visual-paths.md)
+
+## Standalone HTML analysis
+
+The [Spanish HTML report](compute-pipeline-report.es.html) embeds 28 stage and
+coordination rows, CPU/GPU ownership, concurrency and memory boundaries, and the
+four comparable GPU passes. It works offline, distinguishes nested accumulated
+spans from cohort elapsed time, and marks unmeasured stages rather than assigning
+zero. It adds no runtime change or benchmark run.
+
+| Behaviour | Evidence | Status |
+| --- | --- | --- |
+| Every embedded stage statistic matches its source | All 28 rows checked against the sanitized JSON (unmeasured rows carry no statistics) | ✅ |
+| Filters select owners and detail rows | Chromium: default, all details and GPU filter counts | ✅ |
+| Sorting uses accumulated time or p95 | Chromium: supervision first by sum; admission first by p95 | ✅ |
+| Export preserves the measured dataset | Chromium download parsed and compared with all embedded rows | ✅ |
+| Printing includes all rows and restores filters | Chromium beforeprint/afterprint event assertions | ✅ |
+| Report works on mobile and without JavaScript | Chromium 390px width without document overflow; all 28 static rows visible with JavaScript disabled | ✅ |
+| Offline report needs no remote assets | Chromium: zero HTTP requests and zero page errors; local links and unique anchors checked | ✅ |
+| New CPU/GPU benchmark | Documentation only; existing immutable measurements reused | ⏭️ |
