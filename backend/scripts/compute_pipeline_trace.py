@@ -54,6 +54,7 @@ def timed(owner, name, stage):
         start, cpu = time.monotonic_ns(), time.thread_time_ns()
         outcome = "error"
         failure = None
+        next_check = args[0].next_check if stage == "cancellation_check" else None
         try:
             result = original(*args, **kwargs)
             outcome = "returned"
@@ -62,7 +63,15 @@ def timed(owner, name, stage):
             failure = type(exc).__name__
             raise
         finally:
-            emit(stage, start, cpu, outcome=outcome, failure=failure)
+            # Cheap throttled checkpoints are extremely frequent. Record only
+            # actual withdrawal queries (or cancellation), avoiding tracing I/O
+            # on the polling fast path itself.
+            if (
+                next_check is None
+                or args[0].next_check != next_check
+                or outcome == "error"
+            ):
+                emit(stage, start, cpu, outcome=outcome, failure=failure)
 
     setattr(owner, name, call)
 

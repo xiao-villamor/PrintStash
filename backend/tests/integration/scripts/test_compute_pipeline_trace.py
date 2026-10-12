@@ -120,3 +120,36 @@ class TestPoolTrace:
         assert row["stage"] == "pool_lifetime"
         assert row["acquired_ns"] is None
         assert row["outcome"] == "error"
+
+
+class TestCancellationTrace:
+    def test_omits_throttled_checkpoint_trace_writes(self, tmp_path, monkeypatch):
+        from app.core import cancellation
+
+        monkeypatch.setattr(trace, "_directory", tmp_path)
+        monkeypatch.setattr(cancellation.time, "monotonic", lambda: 10.0)
+        monkeypatch.setattr(cancellation._Probe, "check", cancellation._Probe.check)
+        trace.timed(cancellation._Probe, "check", "cancellation_check")
+        probe = cancellation._Probe(lambda: False)
+
+        probe.check()
+        probe.check()
+
+        [row] = records(tmp_path)
+        assert row["stage"] == "cancellation_check"
+        assert row["outcome"] == "returned"
+
+    def test_traces_cancellation_without_swallowing_it(self, tmp_path, monkeypatch):
+        from app.core import cancellation
+
+        monkeypatch.setattr(trace, "_directory", tmp_path)
+        monkeypatch.setattr(cancellation._Probe, "check", cancellation._Probe.check)
+        trace.timed(cancellation._Probe, "check", "cancellation_check")
+        probe = cancellation._Probe(lambda: True)
+
+        with pytest.raises(cancellation.OperationCancelled):
+            probe.check()
+
+        [row] = records(tmp_path)
+        assert row["outcome"] == "error"
+        assert row["failure"] == "OperationCancelled"
