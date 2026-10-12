@@ -296,8 +296,8 @@ class TestSTLBudgets:
         assert materialized.triangles.dtype == np.float64
         assert materialized.measurements.scanned_bytes == len(body)
         assert materialized.measurements.triangle_count == 2
-        # Binary count admits exact allocation directly; ASCII scans before its
-        # allocation. Each parser probes84 bytes before ASCII rewind/read.
+        # Binary count admits exact allocation directly; ASCII retains blocks
+        # from one complete pass. Its parser probes 84 bytes before rewinding.
         assert reads == expected_materialization_reads(len(body))
 
     @pytest.mark.parametrize("encoding", ["binary", "ascii"])

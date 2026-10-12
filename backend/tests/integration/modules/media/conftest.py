@@ -78,7 +78,7 @@ def encode_stl_count(encoding):
 def expected_materialization_reads(encoding):
     return {
         "binary": lambda size: [84, size],
-        "ascii": lambda size: [84, size + 84, size + 84],
+        "ascii": lambda size: [84, size + 84],
     }[encoding]
 
 

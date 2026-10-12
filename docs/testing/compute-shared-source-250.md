@@ -165,6 +165,7 @@ direct SciPy declaration: the lock update only adds the direct dependency edge,
 without changing any installed package/version or benchmark code. The PR records
 the final exhaustive CI gate result for the latest commit.
 
+[Follow-up: single-pass CPU preparation](compute-cpu-preparation-250.md) ·
 [Interactive HTML report (Spanish)](compute-pipeline-report.es.html) ·
 [Sanitized detailed counters](compute-shared-source-250-summary.json) ·
 [CPU/GPU diagram](compute-pipeline-explained.es.md) ·

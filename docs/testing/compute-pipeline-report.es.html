@@ -23,9 +23,17 @@ main,footer { max-width:1440px;margin:auto;padding:2rem clamp(1rem,4vw,3rem); } 
 <span class="eyebrow">PrintStash / Informe de ejecución / 12 octubre 2026</span>
 <h1>Del archivo 3D a la miniatura.<br>Qué hace la CPU y qué hace la GPU.</h1>
 <p class="lede">La GPU ya dibuja rápido. En esta prueba, la mayor oportunidad está antes del dibujo: preparar la geometría, arrancar sus dependencias y permitir que varios archivos avancen sin bloquearse por la reserva de RAM.</p>
-<p class="muted">Estado: candidato de carga compartida · WSL, usuario Linux <code>local</code> · 250 originales · Datos de una ejecución real. Este informe no lanza otra prueba.</p>
+<p class="muted">Desglose histórico: candidato inicial de carga compartida · WSL, usuario Linux <code>local</code> · 250 originales · Datos de una ejecución real. Este informe no lanza otra prueba.</p>
 <nav aria-label="Secciones"><a href="#pipeline">01 · Pipeline</a><a href="#times">02 · Tiempos</a><a href="#placement">03 · CPU o GPU</a><a href="#memory">04 · Memoria y concurrencia</a><a href="#comparison">05 · Comparación</a><a href="#next">06 · Qué optimizar</a><a href="#evidence">Fuentes y límites</a></nav>
 </header>
+<section class="frame pad" id="cpu-preparation-update" aria-labelledby="cpu-preparation-heading">
+<span class="eyebrow">Actualización · preparación CPU · comparación nueva</span>
+<h2 id="cpu-preparation-heading">STL ASCII: una sola pasada, con beneficio en ambos modos</h2>
+<p>El lector ya no interpreta el archivo completo dos veces. En una comparación nueva de 250 modelos, el total pasó de <strong>511,45 a 497,30 s (−2,77 %)</strong> y la carga de geometría de <strong>232,61 a 196,92 s acumulados (−15,34 %)</strong>. Las 238 imágenes son idénticas byte a byte y los 250 metadatos coinciden.</p>
+<p>En modo solo CPU, dos repeticiones con tres STL ASCII representativos mejoraron un <strong>29,02 %</strong>; ese porcentaje corresponde a esa muestra pequeña, no al lote completo. El pico de RAM del lote de 250 bajó de 1.960 a 1.934 MiB.</p>
+<p><strong>Los gráficos y el desglose que siguen conservan la ejecución histórica.</strong> Allí UTC dio 509,649 s y el reloj monotónico 466,162 s; en la comparación nueva ambos relojes coinciden. No mezclar esos relojes para comparar versiones. El resultado antes/después de este cambio es 511,449 → 497,296 s.</p>
+<p><a href="compute-cpu-preparation-250.md">Ver metodología, memoria, límites y resultados completos</a> · <a href="compute-cpu-preparation-250-summary.json">Descargar la nueva comparación detallada</a></p>
+</section>
 <div class="stats" aria-label="Resultados principales">
 <div class="stat"><span>Tiempo del lote completo</span><strong>466,162 s</strong><small>7 min 46 s · reloj monotónico</small></div>
 <div class="stat"><span>Frente a la mejor GPU anterior</span><strong>−19,95 %</strong><small>582,315 → 466,162 s</small></div>

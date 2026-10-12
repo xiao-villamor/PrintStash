@@ -390,23 +390,30 @@ def materialize_stl(path: Path, *, limits: STLReadLimits) -> STLMaterialized:
         raise STLBudgetExceeded("source budget")
     info = binary_stl_info(path)
     if info is None:
-        measured = scan_stl(path, limits=limits, snapshot=source)
-        count = measured.triangle_count
+        # ASCII has no count header. Retain bounded blocks from its one complete
+        # validated pass instead of decoding every coordinate again after a scan.
+        # Concatenation briefly owns both blocks and output (144 bytes/facet);
+        # the guarded worker's existing whole-pipeline face budget includes this
+        # workspace. No partial result escapes before EOF/snapshot validation.
+        blocks = list(iter_stl_blocks(path, limits, snapshot=source))
+        facets = blocks[0] if len(blocks) == 1 else np.concatenate(blocks, axis=0)
+        del blocks
+        count = len(facets)
     else:
         count = info[0]
-    if count > limits.max_triangles:
-        raise STLBudgetExceeded("triangle budget")
-    check_deadline(limits)
-    facets = np.empty((count, 3, 3), dtype=np.float64)
-    parsed = 0
-    for block in iter_stl_blocks(path, limits, snapshot=source):
-        stop = parsed + len(block)
-        if stop > count:
+        if count > limits.max_triangles:
+            raise STLBudgetExceeded("triangle budget")
+        check_deadline(limits)
+        facets = np.empty((count, 3, 3), dtype=np.float64)
+        parsed = 0
+        for block in iter_stl_blocks(path, limits, snapshot=source):
+            stop = parsed + len(block)
+            if stop > count:
+                raise STLSourceChanged("source facet count changed")
+            facets[parsed:stop] = block
+            parsed = stop
+        if parsed != count:
             raise STLSourceChanged("source facet count changed")
-        facets[parsed:stop] = block
-        parsed = stop
-    if parsed != count:
-        raise STLSourceChanged("source facet count changed")
     lower, upper = facets.min(axis=(0, 1)), facets.max(axis=(0, 1))
     check_deadline(limits)
     if snapshot_stl(path) != source:

@@ -4,6 +4,8 @@
 
 ### Performance
 
+- Decode ASCII STL geometry once for both CPU-only and GPU-enabled ingestion, retaining bounded source blocks instead of reparsing for allocation. Preserve exact source measurements, validation and output images. The fresh 250-source GPU comparison reduces elapsed time by 2.77%; a repeated three-source CPU-only probe improves by 29.02%.
+
 - Share a single bounded source-worker execution between measurements and previews. Basic STL measurements use source-precision arrays without importing Trimesh, preserving topology and signed-volume evidence; OBJ/CAD and optional fingerprints retain their specialized analysis. Eligible small previews now prepare normals on GPU while analytic views keep their canonical policy. The fixed 250-source WSL GPU comparison improves from 582.315 to 466.162 monotonic seconds with identical metadata and original-file integrity.
 
 - Reduce repeated compute fingerprinting and admission-ticket decoding, give cold GPU ownership its bounded startup allowance, retain canonical STL bounds without gathering another vertex array, and compile worker application bytecode during image builds. Count bounded OBJ sources under separate CPU/wall budgets so scheduling contention does not unnecessarily serialize the RAM pool.

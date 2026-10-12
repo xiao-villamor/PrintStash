@@ -478,3 +478,70 @@ class TestCompletionBudget:
 
         with pytest.raises(stl_reader.STLBudgetExceeded, match="deadline"):
             next(blocks)
+
+
+class TestMaterializeStl:
+    @pytest.mark.parametrize(
+        "encode", [_ascii_stl, _binary_stl], ids=["ascii", "binary"]
+    )
+    def test_decodes_source_facets_once(self, stl, limits, monkeypatch, encode):
+        source = stl(encode([TRIANGLE, SECOND] * 5))
+        decoded = []
+        original = reader.iter_stl_blocks
+
+        def observe(*args, **kwargs):
+            for block in original(*args, **kwargs):
+                decoded.append(len(block))
+                yield block
+
+        monkeypatch.setattr(reader, "iter_stl_blocks", observe)
+
+        result = reader.materialize_stl(source, limits=limits(chunk_triangles=4))
+
+        assert sum(decoded) == result.measurements.triangle_count == 10
+
+    @pytest.mark.parametrize(
+        "encode", [_ascii_stl, _binary_stl], ids=["ascii", "binary"]
+    )
+    def test_preserves_materialized_source_facets(self, stl, limits, encode):
+        import numpy as np
+
+        triangles = [TRIANGLE, SECOND] * 5
+        source = stl(encode(triangles))
+
+        result = reader.materialize_stl(source, limits=limits(chunk_triangles=4))
+
+        np.testing.assert_array_equal(result.triangles, triangles)
+        assert result.triangles.dtype == np.float64
+        assert result.measurements == reader.scan_stl(source, limits=limits())
+
+    def test_refuses_invalid_tail_after_complete_blocks(self, stl, limits):
+        source = stl(_ascii_stl([TRIANGLE] * 10) + b"invalid tail\n")
+
+        with pytest.raises(reader.InvalidSTL, match="content after endsolid"):
+            reader.materialize_stl(source, limits=limits(chunk_triangles=4))
+
+    def test_refuses_ascii_facet_budget_exhaustion(self, stl, limits):
+        source = stl(_ascii_stl([TRIANGLE] * 10))
+
+        with pytest.raises(reader.STLBudgetExceeded, match="triangle budget"):
+            reader.materialize_stl(source, limits=limits(max_triangles=9))
+
+    def test_refuses_replaced_source_during_materialization(
+        self, stl, limits, monkeypatch
+    ):
+        source = stl(_ascii_stl([TRIANGLE] * 10))
+        original = reader.iter_stl_blocks
+
+        def replace_after_block(*args, **kwargs):
+            blocks = original(*args, **kwargs)
+            yield next(blocks)
+            replacement = source.with_suffix(".replacement")
+            replacement.write_bytes(source.read_bytes())
+            replacement.replace(source)
+            yield from blocks
+
+        monkeypatch.setattr(reader, "iter_stl_blocks", replace_after_block)
+
+        with pytest.raises(reader.STLSourceChanged):
+            reader.materialize_stl(source, limits=limits(chunk_triangles=4))
