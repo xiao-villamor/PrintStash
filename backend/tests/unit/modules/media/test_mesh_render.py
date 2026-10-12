@@ -337,7 +337,10 @@ class TestDeferredPreparation:
             faces=np.tile([[0, 1, 2]], (count, 1)).astype(np.int64),
         )
 
-    def test_selects_gpu_before_cpu_normals_at_profitable_threshold(self, monkeypatch):
+    @pytest.mark.parametrize(
+        "faces", [1, 19_999, 20_000], ids=["one", "small", "large"]
+    )
+    def test_selects_gpu_before_cpu_normals(self, monkeypatch, faces):
         from printstash_core.mesh import render_geometry
 
         from app.modules.media.gpu_normals import VisualRender
@@ -351,21 +354,17 @@ class TestDeferredPreparation:
                 AssertionError("CPU normals computed before GPU selection")
             ),
         )
-        prepared = mesh_render.prepare_mesh_render(self.mesh(20_000))
+        prepared = mesh_render.prepare_mesh_render(self.mesh(faces))
         assert isinstance(prepared, VisualRender)
         assert not hasattr(prepared, "smooth_normals")
         assert not hasattr(prepared, "position_ids")
         assert prepared._canonical is None
 
-    def test_keeps_unprofitable_preparation_canonical(self, monkeypatch):
+    def test_keeps_cpu_recovery_canonical(self, monkeypatch):
         from printstash_core.mesh.render_geometry import PreparedRender
 
         from app.runtime.compute import client
 
-        monkeypatch.setattr(client, "available", lambda **_: True)
-        assert isinstance(
-            mesh_render.prepare_mesh_render(self.mesh(19_999)), PreparedRender
-        )
         monkeypatch.setattr(client, "available", lambda **_: False)
         assert isinstance(
             mesh_render.prepare_mesh_render(self.mesh(20_000)), PreparedRender

@@ -319,6 +319,7 @@ class ThumbnailEngine:
             geometry_outcome = GeometryRefused(ThumbnailFailureReason.RESOURCE_LIMIT)
 
         embedded = None
+        visual_mesh = None
         try:
             with mesh_policy.render_admission():
                 if (
@@ -417,13 +418,23 @@ class ThumbnailEngine:
                                 )
                         else:
                             try:
-                                mesh = (
-                                    mesh_loading.load_mesh(request.path)
-                                    if request.file_type is None
-                                    else mesh_loading.load_mesh(
-                                        request.path, file_type=suffix
-                                    )
+                                visual_only = (
+                                    not request.include_geometry
+                                    and not request.include_fingerprint
+                                    and suffix in {".stl", ".obj"}
                                 )
+                                if visual_only:
+                                    from .visual_loading import load_visual_mesh
+
+                                    visual_mesh = load_visual_mesh(request.path, suffix)
+                                else:
+                                    mesh = (
+                                        mesh_loading.load_mesh(request.path)
+                                        if request.file_type is None
+                                        else mesh_loading.load_mesh(
+                                            request.path, file_type=suffix
+                                        )
+                                    )
                             except GeometryError as exc:
                                 over_cap = exc.code == "resource_limit"
                                 refusal = (
@@ -442,18 +453,22 @@ class ThumbnailEngine:
 
                         phases.finish(
                             outcome=PhaseOutcome.COMPLETED
-                            if mesh is not None or source_scene is not None
+                            if mesh is not None
+                            or source_scene is not None
+                            or visual_mesh is not None
                             else PhaseOutcome.FAILED,
                             triangle_count=source_scene.triangle_count
                             if source_scene is not None
                             else len(mesh.faces)
                             if mesh is not None
+                            else len(visual_mesh.faces)
+                            if visual_mesh is not None
                             else None,
                         )
 
                     if source_scene is not None:
                         source_scan = SourceScanState.COMPLETE
-                    elif mesh is not None:
+                    elif mesh is not None or visual_mesh is not None:
                         source_scan = SourceScanState.COMPLETE
                         geometry_representation = CompleteGeometry()
 
@@ -584,7 +599,11 @@ class ThumbnailEngine:
                             image = embedded
                             strategy = ThumbnailStrategy.EMBEDDED
                             preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
-                        elif mesh is not None or source_scene is not None:
+                        elif (
+                            mesh is not None
+                            or visual_mesh is not None
+                            or source_scene is not None
+                        ):
                             if source_scene is not None:
                                 # Keep only already-admitted placed arrays for later
                                 # analysis; native mesh objects and topology caches
@@ -609,8 +628,11 @@ class ThumbnailEngine:
                             if source_scene is not None:
                                 render_triangles = source_scene.triangle_count
                             else:
-                                assert mesh is not None
-                                render_triangles = len(mesh.faces)
+                                render_mesh = (
+                                    visual_mesh if visual_mesh is not None else mesh
+                                )
+                                assert render_mesh is not None
+                                render_triangles = len(render_mesh.faces)
                             cap = int(settings.mesh_max_render_triangles)
                             ram_cap = mesh_policy.ram_triangle_cap(suffix)
                             if ram_cap is not None:
@@ -632,7 +654,11 @@ class ThumbnailEngine:
                                                 source_scene.scene
                                             )
                                             if source_scene is not None
-                                            else mesh_render.prepare_mesh_render(mesh)
+                                            else mesh_render.prepare_mesh_render(
+                                                visual_mesh
+                                                if visual_mesh is not None
+                                                else mesh
+                                            )
                                         )
                                         from app.runtime.compute.client import (
                                             render_ready,
@@ -670,7 +696,9 @@ class ThumbnailEngine:
                                             )
                                             if source_scene is not None
                                             else mesh_render.render_mesh_thumbnail(
-                                                mesh,
+                                                visual_mesh
+                                                if visual_mesh is not None
+                                                else mesh,
                                                 request.path.name,
                                                 width=width,
                                                 height=height,
@@ -704,9 +732,16 @@ class ThumbnailEngine:
                             image is None
                             and packet is None
                             and suffix == ".stl"
-                            and (over_cap or mesh is not None)
+                            and (
+                                over_cap or mesh is not None or visual_mesh is not None
+                            )
                         ):
-                            release_buffers = mesh is not None or sample_buffers_pending
+                            release_buffers = (
+                                mesh is not None
+                                or visual_mesh is not None
+                                or sample_buffers_pending
+                            )
+                            visual_mesh = None
                             reload_mesh_for_fingerprint = mesh is not None
                             prepared = None
                             mesh = None

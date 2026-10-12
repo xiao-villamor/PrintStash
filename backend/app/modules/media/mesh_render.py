@@ -20,7 +20,6 @@ from app.core.config import settings
 from app.core.logging import get_logger
 
 from .gpu_normals import (
-    GPU_NORMALS_MIN_FACES,
     RenderInput,
     VisualRender,
     canonical,
@@ -93,7 +92,7 @@ def render_mesh_thumbnail(
 def _prepare_geometry(geometry: PreparedRenderGeometry) -> RenderInput:
     from app.runtime.compute.client import available
 
-    if geometry.face_count >= GPU_NORMALS_MIN_FACES and available(render=True):
+    if available(render=True):
         candidate = VisualRender(geometry)
         if eligible(candidate):
             return candidate

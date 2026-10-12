@@ -2182,9 +2182,7 @@ def staged_mesh_outputs():
 
 
 class TestStagedMeshPublication:
-    @pytest.mark.parametrize(
-        "file_type", ["stl", "3mf"], ids=["weighted-share", "whole-pool"]
-    )
+    @pytest.mark.parametrize("file_type", ["3mf"], ids=["retained-scene"])
     def test_retains_one_worker_per_source(
         self, db_session, stored, monkeypatch, file_type
     ):
@@ -2230,7 +2228,7 @@ class TestStagedMeshPublication:
     ):
         from app.modules.media import thumbnail_handoff
 
-        artifact = stored("fingerprint-order.stl", content.binary_stl())
+        artifact = stored("fingerprint-order.3mf", three_mf())
         make_system_config(
             similarity_settings_json=json.dumps(
                 {"enabled": True, "fingerprint_on_ingest": True}
@@ -2265,7 +2263,7 @@ class TestStagedMeshPublication:
         from app.modules.media import thumbnail_handoff
         from app.runtime.native_admission import Resources
 
-        artifact = stored("host-timeout.stl", content.binary_stl())
+        artifact = stored("host-timeout.3mf", three_mf())
         plan = thumbnail_handoff.HandoffPlan(
             640, 480, Resources(1, 100), Resources(4, 400)
         )
@@ -2298,7 +2296,7 @@ class TestStagedMeshPublication:
         from app.modules.media import thumbnail_handoff
         from app.runtime.native_admission import Resources
 
-        artifact = stored("superseded-owner.stl", content.binary_stl())
+        artifact = stored("superseded-owner.3mf", three_mf())
         plan = thumbnail_handoff.HandoffPlan(
             640, 480, Resources(1, 100), Resources(4, 400)
         )
@@ -2336,7 +2334,7 @@ class TestStagedMeshPublication:
     def test_publishes_the_renderer_frame(
         self, db_session, stored, monkeypatch, staged_mesh_outputs
     ):
-        artifact = stored("framed.stl", content.binary_stl())
+        artifact = stored("framed.3mf", three_mf())
         geometry, thumbnail = staged_mesh_outputs
 
         def worker(_request, *, on_output):
@@ -2372,8 +2370,8 @@ class TestStagedMeshPublication:
     ):
         from app.db.session import get_session_factory
 
-        source = content.binary_stl()
-        artifact = stored("staged.stl", source)
+        source = three_mf()
+        artifact = stored("staged.3mf", source)
         observed = []
 
         def worker(_request, *, on_output):
@@ -2421,7 +2419,7 @@ class TestStagedMeshPublication:
         from app.db.session import get_session_factory
         from app.modules.media.fingerprints import ALGORITHM_VERSION
 
-        artifact = stored("pending-fingerprint.stl", content.binary_stl())
+        artifact = stored("pending-fingerprint.3mf", three_mf())
         make_system_config(
             similarity_settings_json=json.dumps(
                 {"enabled": True, "fingerprint_on_ingest": True}
@@ -2464,7 +2462,7 @@ class TestStagedMeshPublication:
         monkeypatch,
         staged_mesh_outputs,
     ):
-        artifact = stored("render-timeout.stl", content.binary_stl())
+        artifact = stored("render-timeout.3mf", three_mf())
 
         def worker(_request, *, on_output):
             on_output(staged_mesh_outputs[0])
@@ -2490,7 +2488,7 @@ class TestStagedMeshPublication:
         monkeypatch,
         staged_mesh_outputs,
     ):
-        artifact = stored("storage-failure.stl", content.binary_stl())
+        artifact = stored("storage-failure.3mf", three_mf())
         fault = RuntimeError("storage publication failed")
         reached_final = []
 
@@ -2530,7 +2528,7 @@ class TestStagedMeshPublication:
         from app.modules.derivatives import records
         from app.modules.derivatives.kinds import group
 
-        artifact = stored("withdrawn.stl", content.binary_stl())
+        artifact = stored("withdrawn.3mf", three_mf())
         accepted = []
 
         def worker(_request, *, on_output):
@@ -2561,3 +2559,113 @@ class TestStagedMeshPublication:
             _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL].state
             is not DerivativeState.READY
         )
+
+
+class TestIndependentMeshPaths:
+    @pytest.mark.parametrize(
+        "failure",
+        [None, "analysis", "preview"],
+        ids=["both-ready", "analysis-fails", "preview-fails"],
+    )
+    def test_publishes_outputs_independently(
+        self, db_session, stored, monkeypatch, staged_mesh_outputs, failure
+    ):
+        artifact = stored("independent.stl", content.binary_stl())
+        from app.modules.media.thumbnail_engine import ThumbnailEngine
+
+        observed = []
+
+        def worker(request, *, on_output, **kwargs):
+            if request.include_thumbnail:
+                assert not request.include_geometry
+                assert not request.include_fingerprint
+                if failure == "preview":
+                    raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
+            else:
+                observed.append(
+                    _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL].state
+                )
+                if failure == "analysis":
+                    raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
+            return ThumbnailEngine().generate(request, on_output=on_output)
+
+        monkeypatch.setattr(mesh_isolation, "generate", worker)
+
+        result = producers.derive_mesh(artifact.id)
+
+        expected = {
+            None: (DerivativeState.READY, DerivativeState.READY),
+            "analysis": (DerivativeState.READY, DerivativeState.FAILED),
+            "preview": (DerivativeState.FAILED, DerivativeState.READY),
+        }[failure]
+        assert observed == [expected[0]]
+        assert result.kinds == {
+            DerivativeKind.THUMBNAIL: expected[0],
+            DerivativeKind.METADATA: expected[1],
+        }
+
+    def test_preserves_cancellation(self, db_session, stored, monkeypatch):
+        from app.core.cancellation import OperationCancelled
+
+        artifact = stored("cancel-visual.stl", content.binary_stl())
+        reached = []
+
+        def worker(request, **kwargs):
+            reached.append(request.include_geometry)
+            raise OperationCancelled()
+
+        monkeypatch.setattr(mesh_isolation, "generate", worker)
+
+        with pytest.raises(OperationCancelled):
+            producers.derive_mesh(artifact.id)
+
+        assert reached == [False]
+        assert (
+            _rows(db_session, artifact.id)[DerivativeKind.METADATA].state
+            is DerivativeState.RUNNING
+        )
+
+    def test_releases_visual_host_memory_before_analysis(
+        self, db_session, stored, monkeypatch, staged_mesh_outputs
+    ):
+        import weakref
+        from app.modules.media import thumbnail_handoff
+        from app.modules.media.thumbnail_engine import ThumbnailEngine
+        from app.runtime.native_admission import Resources
+
+        artifact = stored("host-release.stl", content.binary_stl())
+        plan = thumbnail_handoff.HandoffPlan(
+            640, 480, Resources(1, 100), Resources(4, 400)
+        )
+        monkeypatch.setattr(thumbnail_handoff, "plan", lambda *args: plan)
+        released = []
+        references = []
+
+        class VisualResult:
+            image = bytes(1024 * 1024)
+
+        @contextmanager
+        def reserve(*args, **kwargs):
+            yield object()
+            assert references[0]() is None
+            released.append(True)
+
+        def worker(request, *, on_output, **kwargs):
+            if request.include_thumbnail:
+                on_output(staged_mesh_outputs[1])
+                result = VisualResult()
+                references.append(weakref.ref(result))
+                return result
+            assert released == [True]
+            return ThumbnailEngine().generate(request, on_output=on_output)
+
+        monkeypatch.setattr(thumbnail_handoff, "reserve", reserve)
+        monkeypatch.setattr(mesh_isolation, "generate", worker)
+
+        outcome = producers.derive_mesh(artifact.id)
+
+        assert released == [True]
+        assert outcome.kinds == {
+            DerivativeKind.THUMBNAIL: DerivativeState.READY,
+            DerivativeKind.METADATA: DerivativeState.READY,
+        }

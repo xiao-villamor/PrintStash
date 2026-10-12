@@ -364,17 +364,28 @@ class TestMetadata:
         assert len(benchies) == 1, f"dedup failed, got {benchies}"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("file_type", ["stl", "obj"], ids=["stl", "obj"])
     async def test_retains_full_geometry_with_smaller_previews(
-        self, api, tmp_path, e2e_db, monkeypatch
+        self, api, tmp_path, e2e_db, monkeypatch, file_type
     ):
         from tests.factories.geometry import tetrahedron
 
         monkeypatch.setitem(_overlay, "model_thumbnail_width", 512)
-        source = tetrahedron().export(file_type="stl")
+        mesh = tetrahedron()
+        source = {
+            "stl": mesh.export(file_type="stl"),
+            "obj": mesh.export(file_type="obj").encode(),
+        }[file_type]
         headers = await _setup_and_login(api, tmp_path)
         uploaded = await api.post(
             "/api/v1/ingest/model",
-            files={"file": ("small-preview.stl", source, "application/sla")},
+            files={
+                "file": (
+                    f"small-preview.{file_type}",
+                    source,
+                    "application/octet-stream",
+                )
+            },
             data={"model_name": "Small preview"},
             headers=headers,
         )

@@ -103,7 +103,9 @@ def defer(geometry: PreparedRenderGeometry) -> DeferredRender:
 def eligible(prepared: DeferredRender | VisualRender) -> bool:
     n, f, k = len(prepared.vertices), prepared.face_count, prepared.position_count
     return (
-        GPU_NORMALS_MIN_FACES <= f <= MAX_FACES
+        (1 if isinstance(prepared, VisualRender) else GPU_NORMALS_MIN_FACES)
+        <= f
+        <= MAX_FACES
         and 0 < n <= MAX_VERTICES
         and 0 < k <= n
         and n * 20 + f * 24 + k * 24 <= MAX_GEOMETRY_BYTES
