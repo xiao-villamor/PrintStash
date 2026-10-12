@@ -32,6 +32,7 @@ dependencies = [
     "PyJWT>=2.13,<3",
     "python-multipart>=0.0.32,<0.1",
     "psycopg[binary]>=3.3,<4",
+    "scipy>=1.18.1,<2",
     "SQLAlchemy>=2.0.52,<2.1",
     "sqlmodel>=0.0.39,<0.1",
     "starlette>=1.6,<2",

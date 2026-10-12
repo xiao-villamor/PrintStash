@@ -92,7 +92,9 @@ class TestAnalyzeMesh:
     def test_refuses_thumbnail_when_source_validation_exceeds_budget(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        from app.modules.media import stl_fallback
+        from printstash_core.mesh.similarity import GeometryError
+
+        from app.modules.media import stl_fallback, visual_loading
         from app.modules.media.stl_reader import STLReadLimits
 
         monkeypatch.setattr(
@@ -110,7 +112,10 @@ class TestAnalyzeMesh:
         )
         path.write_text("solid truncated\n" + (facet * 20) + "endsolid truncated\n")
         monkeypatch.setattr(mesh_policy, "estimate_triangle_count", lambda _p: None)
-        monkeypatch.setattr(mesh_loading, "load_mesh", lambda _p: None)
+        def refuse_source(*_args):
+            raise GeometryError("invalid_source")
+
+        monkeypatch.setattr(visual_loading, "load_visual_mesh", refuse_source)
 
         result = analyze(path)
 
@@ -122,7 +127,9 @@ class TestAnalyzeMesh:
     def test_measures_no_geometry_from_a_file_it_could_not_load(
         self, tmp_path: Path, monkeypatch
     ) -> None:
-        from app.modules.media import stl_fallback
+        from printstash_core.mesh.similarity import GeometryError
+
+        from app.modules.media import stl_fallback, visual_loading
         from app.modules.media.stl_reader import STLReadLimits
 
         monkeypatch.setattr(
@@ -140,7 +147,10 @@ class TestAnalyzeMesh:
         )
         path.write_text("solid truncated\n" + (facet * 20) + "endsolid truncated\n")
         monkeypatch.setattr(mesh_policy, "estimate_triangle_count", lambda _p: None)
-        monkeypatch.setattr(mesh_loading, "load_mesh", lambda _p: None)
+        def refuse_source(*_args):
+            raise GeometryError("invalid_source")
+
+        monkeypatch.setattr(visual_loading, "load_visual_mesh", refuse_source)
 
         result = analyze(path)
         geometry, _thumbnail = result.geometry, result.image
@@ -377,13 +387,39 @@ class TestAnalyzeMesh:
         assert geometry["triangle_count"] == 99  # cheap geometry kept
         assert thumb is None
 
+    def test_releases_plain_source_buffers(self, tmp_path: Path, monkeypatch) -> None:
+        import weakref
+
+        from app.modules.media import visual_loading
+
+        path = tmp_path / "shared.stl"
+        _real_binary_stl_cube(path)
+        references = []
+        load = visual_loading.load_visual_mesh
+
+        def observe(path, suffix):
+            source = load(path, suffix)
+            references.extend([weakref.ref(source.vertices), weakref.ref(source.faces)])
+            return source
+
+        monkeypatch.setattr(visual_loading, "load_visual_mesh", observe)
+        monkeypatch.setattr(
+            mesh_render, "render_mesh_thumbnail", lambda *a, **k: b"PNG"
+        )
+
+        result = analyze(path)
+
+        assert result.image == b"PNG"
+        assert len(references) == 2
+        assert all(reference() is None for reference in references)
+
     def test_loaded_mesh_triggers_memory_reclaim(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1_000_000)
         monkeypatch.setitem(_overlay, "mesh_max_load_mb", 0)
-        p = tmp_path / "ok.stl"
-        _write_binary_stl(p, 500)
+        p = tmp_path / "ok.obj"
+        _write_obj(p, 500)
 
         calls = {"n": 0}
         monkeypatch.setattr(mesh_loading, "load_mesh", lambda _p: _fake_mesh(500))

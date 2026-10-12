@@ -150,11 +150,20 @@ implementation. Final full-suite and latest-commit CI results are recorded in [P
 | Small preview GPU normals preserve analytic-view policy | `unit/modules/media/test_mesh_render.py`; GPU packet roundtrip | ✅ |
 | Real HTTP ingestion retains metadata/thumbnail contracts | Existing STL/OBJ ingest E2E plus 250-source real HTTP benchmark | ✅ |
 | Same images, invalid-source set, hashes, metadata and elapsed comparison | Immutable-image benchmark + decoded audit | ✅ |
+| Plain source arrays release after processing without retaining their buffers | `unit/modules/media/thumbnail_engine/test_processing.py::TestAnalyzeMesh::test_releases_plain_source_buffers` | ✅ |
+| Basic geometry numeric dependencies are declared directly | `repo/test_python_runtime.py::TestPythonRuntime::test_declares_basic_geometry_runtime_dependencies`; Deptry and offline lock check | ✅ |
 | CPU rerun | Explicit user preference; earlier CPU result retained | ⏭️ |
 
-The full local gate initially found two test-structure issues (module-level cases
-and a generated inapplicable skip). They were corrected before remote CI; neither
-changes the measured runtime. The PR records the final gate result.
+Local unit media + runtime-dependency validation passed **1612 tests** after
+updating old test doubles to the new source-loader seam. The two broad local
+attempts were stopped on test-structure issues (3767 passed / 2 failed) and then
+the obsolete Trimesh reclamation expectation (7376 passed / 1 failed); these are
+not reported as green full runs. The focused recheck closes all four old loader/
+reclamation assumptions and asserts actual plain-buffer release. Ruff, Pyright,
+Deptry and the offline lock check pass. Remote CI initially caught the missing
+direct SciPy declaration: the lock update only adds the direct dependency edge,
+without changing any installed package/version or benchmark code. The PR records
+the final exhaustive CI gate result for the latest commit.
 
 [Sanitized detailed counters](compute-shared-source-250-summary.json) ·
 [CPU/GPU diagram](compute-pipeline-explained.es.md) ·

@@ -71,8 +71,8 @@ class TestThumbnailEngine:
     def test_full_renderer_is_reported_as_the_selected_strategy(
         tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        source = tmp_path / "part.stl"
-        source.write_bytes(b"solid part\nendsolid part\n")
+        source = tmp_path / "part.obj"
+        source.write_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
         monkeypatch.setattr(mesh_policy, "exceeds_cap", lambda *_a, **_k: False)
         monkeypatch.setattr(mesh_loading, "load_mesh", lambda *_a, **_k: _Mesh())
         monkeypatch.setattr(

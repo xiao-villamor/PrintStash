@@ -188,6 +188,17 @@ class TestPythonRuntime:
             in metadata["tool"]["deptry"]["optional_dependencies_dev_groups"]
         )
 
+    def test_declares_basic_geometry_runtime_dependencies(self) -> None:
+        metadata = _toml(PROJECT_PATHS[0])
+        requirements = {
+            Requirement(value).name: Requirement(value)
+            for value in metadata["project"]["dependencies"]
+        }
+
+        for package in ("numpy", "scipy"):
+            assert package in requirements
+            assert requirements[package].specifier.contains(MESH_VERSIONS[package])
+
     def test_pins_current_optional_webgpu_library(self) -> None:
         metadata = _toml(PROJECT_PATHS[0])
         assert metadata["project"]["optional-dependencies"]["webgpu-pilot"] == [
