@@ -582,3 +582,13 @@ class TestDockerEntrypointRole:
         _run_entrypoint(script, fake_bin, server, tmp_path=tmp_path, role="worker")
 
         assert log.read_text().splitlines()[-1].startswith("server:10001:10001:")
+
+
+class TestWorkerBytecode:
+    def test_ships_compiled_worker_application_code(self):
+        dockerfile = (REPO_ROOT / "backend" / "Dockerfile").read_text()
+
+        assert "PYTHONDONTWRITEBYTECODE=1" in dockerfile
+        assert dockerfile.index(
+            "COPY --chown=printstash:printstash app ./app"
+        ) < dockerfile.index("RUN .venv/bin/python -m compileall -q app")

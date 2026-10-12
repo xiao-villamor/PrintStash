@@ -352,6 +352,9 @@ def _patch_engine(
     ``app.db.session.engine`` and ``app.modules.printing.printer_hub.engine``.
     See ADR-0001.
     """
+    from app.runtime.compute.discovery import _process_identity
+
+    _process_identity.cache_clear()
     monkeypatch.delenv("PRINTSTASH_COMPUTE_ROOT", raising=False)
     override_session_factory(_test_factory)
     # Query templates contain no rows, but keep their construction lifetime

@@ -300,3 +300,9 @@ The [codec and 1000-source comparison](testing/compute-codec-throughput.md)
 records the codec-only pilot and complete-pipeline measurements separately.
 The [previous lossless experiment](testing/compute-encoding.md) remains historical
 evidence rather than a claim about the current encoder.
+
+### Control-path lifetime
+
+Compute source/dependency identity is attested once per interpreter, keyed by PID; policy settings are still hashed on each connection. Deploy code/dependency changes by restarting every API, worker and broker together. Editing source files underneath a running interpreter is not a supported upgrade. Explicit supervisor warm-up gets up to 30 seconds before parser limits are installed; ordinary readiness probes retain the five-second cap and work requests keep their original deadline.
+
+Admission continues to prove every ticket’s live descriptor lock on every scan. Only decoding is cached, using inode, size, mtime and ctime; changed/dead receipts invalidate that cache. OBJ preflight retains 8 MiB/4096-byte limits, with a 250 ms thread-CPU allowance and one-second wall watchdog checked every 128 lines plus EOF. Unknown or unvalidated sources still claim the whole pool. The container compiles application bytecode at build time while retaining disposable guarded parser processes.

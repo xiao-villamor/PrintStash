@@ -3,7 +3,9 @@
 import hashlib
 import importlib.metadata
 import json
+import os
 import struct
+from functools import lru_cache
 from pathlib import Path
 
 from .contracts import ComputeUnavailable, DeviceInfo, Reason
@@ -46,6 +48,19 @@ def runtime_identity() -> str:
             sources.update(source.read_bytes())
     versions["implementation"] = sources.hexdigest()
     return hashlib.sha256(json.dumps(versions, sort_keys=True).encode()).hexdigest()
+
+
+@lru_cache(maxsize=1)
+def _process_identity(pid: int) -> str:
+    # A worker executes one deployed source/dependency snapshot. Rehashing that
+    # snapshot on every IPC call causes filesystem/GIL contention among Jobs.
+    # Key by PID so a fork cannot inherit another interpreter's attestation.
+    return runtime_identity()
+
+
+def process_identity() -> str:
+    """Attest this process once; deployments must restart all compute owners."""
+    return _process_identity(os.getpid())
 
 
 def physical_adapter(info: dict) -> bool:

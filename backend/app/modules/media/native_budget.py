@@ -41,11 +41,16 @@ DEFAULT_FACE_BYTES = 3000
 # This whole-pipeline coefficient includes the existing startup envelope.
 WEBP_FACE_BYTES = 4000
 THREE_MF_FACE_BYTES = 3600
-# Optional text preflight must stay cheap in the supervisor. Exhausting any
+# Optional text preflight must stay cheap in the supervisor. OBJ gets a
+# separate CPU allowance and wall watchdog: runnable-thread contention must not
+# turn a countable source into a whole-pool claim. Check at bounded 128-line
+# intervals (at most 512 KiB); parsing still happens in a guarded child. Exhausting any
 # bound keeps the original unknown-complexity claim; it never rejects a source.
 TEXT_PREFLIGHT_BYTES = 8 * 1024**2
 TEXT_PREFLIGHT_LINE_BYTES = 4096
 TEXT_PREFLIGHT_SECONDS = 0.1
+OBJ_PREFLIGHT_WALL_SECONDS = 1.0
+TEXT_PREFLIGHT_CPU_SECONDS = 0.25
 
 
 class RasterCodec(str, Enum):
@@ -193,12 +198,17 @@ def _obj_triangle_count(path: Path, *, deadline: float) -> int | None:
         before = STLSourceSnapshot.from_stat(os.fstat(stream.fileno()))
         if before.size > TEXT_PREFLIGHT_BYTES:
             return None
+        cpu_deadline = time.thread_time() + TEXT_PREFLIGHT_CPU_SECONDS
         coordinate_counts = [0, 0, 0]
         largest_references = [0, 0, 0]
         triangles = scanned = 0
+        lines = 0
         while True:
-            if time.monotonic() >= deadline:
+            if lines % 128 == 0 and (
+                time.monotonic() >= deadline or time.thread_time() >= cpu_deadline
+            ):
                 return None
+            lines += 1
             raw = stream.readline(TEXT_PREFLIGHT_LINE_BYTES + 1)
             if not raw:
                 break
@@ -223,6 +233,14 @@ def _obj_triangle_count(path: Path, *, deadline: float) -> int | None:
                 ):
                     return None
                 coordinate_counts[channel] += 1
+            elif parts[0] == "f" and len(parts) == 4 and b"/" not in raw:
+                # Plain triangles dominate exported OBJ. Check the same index
+                # bounds without the general three-channel nested tokenizer.
+                a, b, c = map(int, parts[1:])
+                if 0 in (a, b, c) or min(a, b, c) < -coordinate_counts[0]:
+                    return None
+                largest_references[0] = max(largest_references[0], a, b, c)
+                triangles += 1
             elif parts[0] in {"f", "l", "p"}:
                 if len(parts) < {"f": 4, "l": 3, "p": 2}[parts[0]]:
                     return None
@@ -248,7 +266,9 @@ def _obj_triangle_count(path: Path, *, deadline: float) -> int | None:
             elif parts[0] not in {"o", "g", "s"}:
                 return None
         if (
-            triangles == 0
+            time.monotonic() >= deadline
+            or time.thread_time() >= cpu_deadline
+            or triangles == 0
             or any(count > 3 * triangles for count in coordinate_counts)
             or any(
                 reference > count
@@ -288,7 +308,9 @@ def _source_triangle_count(source: MeshSource) -> int | None:
                 ),
             )
         if suffix == "obj":
-            return _obj_triangle_count(source.path, deadline=deadline)
+            return _obj_triangle_count(
+                source.path, deadline=time.monotonic() + OBJ_PREFLIGHT_WALL_SECONDS
+            )
     except InvalidSTL, OSError, ValueError:
         # Unknown, malformed, changing or expensive text retains full isolation.
         return None

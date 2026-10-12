@@ -126,6 +126,9 @@ ENV UV_CACHE_DIR=/tmp/printstash-uv-cache \
     UV_NO_SYNC=1
 
 COPY --chown=printstash:printstash app ./app
+# Fresh guarded parsers share code bytes, never interpreter or parser state.
+# Runtime bytecode writes are disabled, so compile application sources at build.
+RUN .venv/bin/python -m compileall -q app
 COPY --chown=printstash:printstash --chmod=0644 alembic.ini ./alembic.ini
 COPY --chown=printstash:printstash alembic ./alembic
 COPY docker-entrypoint.sh ./docker-entrypoint.sh

@@ -13,6 +13,43 @@ from tests.factories.content import ascii_stl, binary_stl
 
 
 class TestEstimateSources:
+    @pytest.mark.parametrize(
+        "indices", ["1 2 3", "-3 -2 -1"], ids=["positive", "relative"]
+    )
+    def test_counts_plain_obj_triangles(self, tmp_path, indices):
+        source = tmp_path / "mesh.obj"
+        source.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf " + indices + "\n")
+
+        claim = native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3), (native_budget.MeshSource(source, "obj"),)
+        )
+
+        assert claim == Resources(1, native_budget.MIN_NATIVE_MEMORY)
+
+    def test_bounds_obj_preflight_cpu(self, tmp_path, monkeypatch):
+        source = tmp_path / "mesh.obj"
+        source.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+        clock = iter([0.0, 0.251])
+        monkeypatch.setattr(native_budget.time, "thread_time", lambda: next(clock))
+
+        claim = native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3), (native_budget.MeshSource(source, "obj"),)
+        )
+
+        assert claim == Resources(1, 4 * 1024**3)
+
+    def test_counts_slower_bounded_text(self, tmp_path, monkeypatch):
+        source = tmp_path / "mesh.obj"
+        source.write_text("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+        clock = iter([0.0, 0.0, 0.15, 0.16])
+        monkeypatch.setattr(native_budget.time, "monotonic", lambda: next(clock))
+
+        claim = native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3), (native_budget.MeshSource(source, "obj"),)
+        )
+
+        assert claim == Resources(1, native_budget.MIN_NATIVE_MEMORY)
+
     def test_reads_binary_count_through_a_stable_descriptor(self, tmp_path):
         source = tmp_path / "mesh.stl"
         source.write_bytes(binary_stl(triangles=2))
@@ -233,6 +270,7 @@ class TestEstimateSources:
         source = tmp_path / "source"
         source.write_bytes(payload)
         monkeypatch.setattr(native_budget, "TEXT_PREFLIGHT_SECONDS", -1)
+        monkeypatch.setattr(native_budget, "OBJ_PREFLIGHT_WALL_SECONDS", -1)
         pool = Resources(4, 4 * 1024**3)
 
         amount = native_budget.estimate_sources(

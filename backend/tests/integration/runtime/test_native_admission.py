@@ -94,6 +94,53 @@ def orphan(tmp_path, request):
 
 
 class TestLocalResourcePool:
+    def test_observes_changed_live_admission_receipts(self, tmp_path):
+        from contextlib import ExitStack
+        from dataclasses import replace
+
+        from app.runtime.native_admission import _Ticket
+
+        pool = LocalResourcePool(tmp_path)
+        with pool.reserve(
+            Resources(1, 40), Resources(2, 100), checkpoint=lambda: None
+        ) as permit:
+            with ExitStack() as recovery, pool._coordinator(lambda: None):
+                original = pool._live(recovery)[0][0]
+                changed = replace(original, request=Resources(1, 41))
+                with permit.path.open("r+b", buffering=0) as handle:
+                    pool._write(handle, changed)
+                live, _ = pool._live(recovery)
+
+                assert live == [changed]
+                assert _Ticket.read(permit.fileno).request.bytes == 41
+
+    def test_rejects_corrupted_cached_receipts(self, tmp_path):
+        from contextlib import ExitStack
+
+        pool = LocalResourcePool(tmp_path)
+        with pool.reserve(
+            Resources(1, 40), Resources(2, 100), checkpoint=lambda: None
+        ) as permit:
+            with ExitStack() as recovery, pool._coordinator(lambda: None):
+                pool._live(recovery)
+                permit.path.write_bytes(b"corrupt")
+
+                with pytest.raises(AdmissionCorrupted, match="invalid live"):
+                    pool._live(recovery)
+
+    def test_reclaims_closed_cached_receipts(self, tmp_path):
+        pool = LocalResourcePool(tmp_path)
+        with pool.reserve(
+            Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+        ):
+            assert pool.has_waiters(checkpoint=lambda: None) is False
+
+        with pool.reserve(
+            Resources(1, 100), Resources(1, 100), checkpoint=lambda: None
+        ) as permit:
+            assert permit.resources == Resources(1, 100)
+            assert len(list(tmp_path.glob("*.ticket"))) == 1
+
     def test_admits_simultaneous_claims_within_capacity(self, tmp_path):
         pool = LocalResourcePool(tmp_path)
         with pool.reserve(Resources(1, 40), Resources(2, 100), checkpoint=lambda: None):

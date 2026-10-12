@@ -26,7 +26,7 @@ from .contracts import (
     Operation,
     Reason,
 )
-from .discovery import runtime_identity
+from .discovery import process_identity as runtime_identity
 from .health import cooling
 from .profile import identity as profile_identity
 from .protocol import (
@@ -112,7 +112,11 @@ def warm_render() -> None:
     idle owner has exited. Failed startup leaves the normal CPU path available.
     """
     if available(render=True):
-        state = status()
+        try:
+            state = status(deadline=time.monotonic() + 30)
+        except TimeoutError:
+            cooldown()
+            return
         if state.device is None:
             cooldown()
 
@@ -237,7 +241,13 @@ def exchange(
     root = directory()
     if root is None:
         raise ComputeUnavailable(Reason.BROKER_UNAVAILABLE)
-    request_deadline: float = getattr(request, "deadline", time.monotonic() + 5)
+    # Only explicit owner startup gets the caller's longer control allowance.
+    # Readiness probes keep their five-second cap and work requests retain their
+    # own original deadline. Warm-up runs before native limits are installed.
+    control_deadline = (
+        deadline if start is True and deadline is not None else time.monotonic() + 5
+    )
+    request_deadline: float = getattr(request, "deadline", control_deadline)
     deadline = request_deadline if deadline is None else min(deadline, request_deadline)
     checkpoint()
     try:

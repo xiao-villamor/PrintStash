@@ -5,7 +5,7 @@ import json
 
 from app.core.config import settings
 
-from .discovery import runtime_identity
+from .discovery import process_identity as runtime_identity
 
 
 def identity():

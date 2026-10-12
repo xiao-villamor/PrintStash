@@ -165,7 +165,7 @@ class TestWarmRender:
 
         monkeypatch.setattr(client, "available", lambda **kwargs: True)
         monkeypatch.setattr(
-            client, "status", lambda: client.cpu_status(Reason.DEVICE_FAILED)
+            client, "status", lambda **kwargs: client.cpu_status(Reason.DEVICE_FAILED)
         )
         monkeypatch.setattr(client, "_disabled_until", 0)
         client.warm_render()
@@ -404,3 +404,58 @@ class TestStatus:
         monkeypatch.setattr(client, "receive", receive)
         with pytest.raises(OperationCancelled):
             client.status(start=False, deadline=11, checkpoint=checkpoint)
+
+
+class TestExchangeDeadline:
+    def test_honors_the_explicit_startup_deadline(self, tmp_path, monkeypatch):
+        import time
+
+        from app.runtime.compute.protocol import StatusRequest
+
+        monkeypatch.setenv(client.ROOT_ENV, str(tmp_path))
+        deadline = time.monotonic() + 20
+
+        def stopped(root, given_deadline, **kwargs):
+            assert given_deadline == deadline
+            raise RuntimeError("deadline verified")
+
+        monkeypatch.setattr(client, "_connect", stopped)
+        with pytest.raises(RuntimeError, match="deadline verified"):
+            client.exchange(StatusRequest(), deadline=deadline, start=True)
+
+    def test_retains_the_request_work_deadline(self, tmp_path, monkeypatch):
+        import time
+
+        from app.runtime.compute.protocol import InferenceRequest, Priority
+
+        monkeypatch.setenv(client.ROOT_ENV, str(tmp_path))
+        deadline = time.monotonic() + 2
+        request = InferenceRequest(
+            deadline=deadline,
+            priority=Priority.BACKGROUND,
+            request_id="probe",
+            directory="/models",
+            model_key="fixture",
+            threads=1,
+            payload="e30=",
+        )
+
+        def stopped(root, given_deadline, **kwargs):
+            assert given_deadline == deadline
+            raise RuntimeError("deadline verified")
+
+        monkeypatch.setattr(client, "_connect", stopped)
+        with pytest.raises(RuntimeError, match="deadline verified"):
+            client.exchange(request, deadline=deadline + 20)
+
+    def test_cools_an_expired_startup(self, monkeypatch):
+        monkeypatch.setattr(client, "available", lambda **kwargs: True)
+        monkeypatch.setattr(client, "_disabled_until", 0)
+
+        def expired(**kwargs):
+            raise TimeoutError("compute_deadline")
+
+        monkeypatch.setattr(client, "status", expired)
+        client.warm_render()
+
+        assert client._disabled_until > 0

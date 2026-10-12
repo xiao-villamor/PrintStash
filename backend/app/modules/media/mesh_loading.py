@@ -206,11 +206,20 @@ def _load_stl_mesh(path: Path) -> Trimesh:
     except OSError as exc:
         raise GeometryError(FingerprintFailureCode.SOURCE_UNAVAILABLE.value) from exc
     count, facets = loaded.measurements.triangle_count, loaded.triangles
-    return trimesh.Trimesh(
+    mesh = trimesh.Trimesh(
         vertices=facets.reshape(-1, 3),
         faces=np.arange(count * 3, dtype=np.int64).reshape(-1, 3),
         process=False,
     )
+    # Every STL vertex belongs to a facet. The canonical reader already proved
+    # these exact bounds; trimesh's generic bounds path would gather another
+    # full vertex array before reducing it again. Install only after source
+    # arrays exist so its tracked-array cache still invalidates on mutation.
+    mesh._cache["bounds"] = np.asarray(
+        [loaded.measurements.bounds_min, loaded.measurements.bounds_max],
+        dtype=np.float64,
+    )
+    return mesh
 
 
 def load_mesh(path: Path, *, file_type: str | None = None) -> Trimesh | None:

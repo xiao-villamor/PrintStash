@@ -111,3 +111,42 @@ class TestRuntimeIdentity:
         monkeypatch.setattr(Path, "read_bytes", changed_source)
 
         assert runtime_identity() != before
+
+
+class TestProcessIdentity:
+    def test_reuses_the_deployed_runtime_identity(self, monkeypatch):
+        from app.runtime.compute import discovery
+
+        discovery._process_identity.cache_clear()
+        expected = discovery.process_identity()
+
+        def unavailable():
+            raise OSError("deployed source is unavailable")
+
+        monkeypatch.setattr(discovery, "runtime_identity", unavailable)
+        try:
+            assert discovery.process_identity() == expected
+        finally:
+            discovery._process_identity.cache_clear()
+
+    def test_rechecks_identity_in_a_new_process(self, monkeypatch):
+        from app.runtime.compute import discovery
+
+        discovery._process_identity.cache_clear()
+        original = discovery.process_identity()
+        monkeypatch.setattr(discovery.os, "getpid", lambda: -1)
+        monkeypatch.setattr(discovery, "runtime_identity", lambda: "new-deployment")
+        try:
+            assert discovery.process_identity() == "new-deployment"
+            assert original != "new-deployment"
+        finally:
+            discovery._process_identity.cache_clear()
+
+    def test_retains_mutable_policy_identity(self):
+        from app.core.config import _overlay
+        from app.runtime.compute.profile import identity
+
+        original = identity()
+        _overlay["compute_memory_mb"] = 1537
+
+        assert identity() != original

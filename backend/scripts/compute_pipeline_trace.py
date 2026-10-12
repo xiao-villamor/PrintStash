@@ -53,12 +53,16 @@ def timed(owner, name, stage):
     def call(*args, **kwargs):
         start, cpu = time.monotonic_ns(), time.thread_time_ns()
         outcome = "error"
+        failure = None
         try:
             result = original(*args, **kwargs)
             outcome = "returned"
             return result
+        except BaseException as exc:
+            failure = type(exc).__name__
+            raise
         finally:
-            emit(stage, start, cpu, outcome=outcome)
+            emit(stage, start, cpu, outcome=outcome, failure=failure)
 
     setattr(owner, name, call)
 
@@ -212,6 +216,12 @@ def instrument_pool(module):
 
 
 _METHODS = {
+    "numpy": [],
+    "trimesh": [],
+    "app.runtime.compute.profile": [(None, "identity", "profile_identity")],
+    "app.runtime.compute.discovery": [(None, "runtime_identity", "runtime_identity")],
+    "app.modules.media.native_budget": [(None, "estimate_sources", "source_estimate")],
+    "app.core.cancellation": [("_Probe", "check", "cancellation_check")],
     "app.runtime.compute.client": [
         (None, "_connect", "broker_connect"),
         (None, "exchange_render", "render_exchange"),

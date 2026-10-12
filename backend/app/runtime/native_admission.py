@@ -195,6 +195,7 @@ class LocalResourcePool:
     ) -> None:
         self.directory = directory
         self._reclaim = reclaim
+        self._records: dict[tuple[int, int, int, int, int], _Ticket] = {}
 
     @contextmanager
     def _coordinator(self, checkpoint: Callable[[], None]) -> Iterator[None]:
@@ -213,6 +214,7 @@ class LocalResourcePool:
         self, recovery: ExitStack
     ) -> tuple[list[_Ticket], list[tuple[Path, BinaryIO]]]:
         live = []
+        records = {}
         abandoned = []
         for path in self.directory.glob("*.ticket"):
             with ExitStack() as opened:
@@ -227,10 +229,25 @@ class LocalResourcePool:
                         recovery.enter_context(opened.pop_all())
                         abandoned.append((path, handle))
                     continue
-                ticket = _Ticket.read(handle.fileno())
+                # Decode only changed receipts, but re-prove descriptor custody
+                # every scan. ctime also invalidates writes that restore mtime;
+                # dead/inode-replaced receipts never inherit cached authority.
+                stat = os.fstat(handle.fileno())
+                key = (
+                    stat.st_dev,
+                    stat.st_ino,
+                    stat.st_size,
+                    stat.st_mtime_ns,
+                    stat.st_ctime_ns,
+                )
+                ticket = self._records.get(key)
+                if ticket is None:
+                    ticket = _Ticket.read(handle.fileno())
+                records[key] = ticket
                 if path.name != ticket.name + ".ticket":
                     raise AdmissionCorrupted("ticket path does not match identity")
                 live.append(ticket)
+        self._records = records
         return live, abandoned
 
     def has_waiters(self, *, checkpoint: Callable[[], None]) -> bool:
