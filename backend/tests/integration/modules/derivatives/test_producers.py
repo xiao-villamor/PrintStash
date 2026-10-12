@@ -2629,6 +2629,7 @@ class TestIndependentMeshPaths:
         self, db_session, stored, monkeypatch, staged_mesh_outputs
     ):
         import weakref
+
         from app.modules.media import thumbnail_handoff
         from app.modules.media.thumbnail_engine import ThumbnailEngine
         from app.runtime.native_admission import Resources
