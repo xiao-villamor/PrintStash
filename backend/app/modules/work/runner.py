@@ -228,6 +228,10 @@ class _HeldProgressFlusher:
                 self._thread.start()
             self._wake.notify()
 
+    def forget(self) -> None:
+        with self._wake:
+            self._due.clear()
+
     def _run(self) -> None:
         while True:
             with self._wake:
@@ -250,6 +254,11 @@ class _HeldProgressFlusher:
 
 
 _flusher = _HeldProgressFlusher()
+
+
+def forget_held_progress() -> None:
+    """Drop every pending flush. For a process whose database was replaced."""
+    _flusher.forget()
 
 
 def _withdrawn(
