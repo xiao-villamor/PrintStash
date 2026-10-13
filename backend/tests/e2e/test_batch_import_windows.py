@@ -3,6 +3,7 @@
 import asyncio
 import contextvars
 import threading
+import time
 from urllib.parse import urlsplit
 
 import pytest
@@ -13,6 +14,20 @@ from app.modules.ingestion import import_resolvers
 from tests.e2e._jobs import completed_job, settle
 from tests.factories.content import gcode
 from tests.fakes.server import start_server
+
+
+async def _first_file_reported(api, job_id: str, headers: dict[str, str]):
+    """The Job's status once it shows one processed file, or after ten seconds."""
+    deadline = time.monotonic() + 10
+    while True:
+        progress = await api.get(f"/api/v1/jobs/{job_id}", headers=headers)
+        if (
+            progress.status_code != 200
+            or progress.json()["processed"] == 1
+            or time.monotonic() > deadline
+        ):
+            return progress
+        await asyncio.sleep(0.05)
 
 
 class TestBatchImportWindows:
@@ -134,9 +149,11 @@ class TestBatchImportWindows:
                 "second download never started"
             )
             assert worker.is_alive()
-            progress = await api.get(
-                f"/api/v1/jobs/{job_id}", headers=superuser_headers
-            )
+            # Progress an attempt reports in its first second is written when
+            # that second is up, whether or not the step reports again: the
+            # second download is still blocked, and the first file must show.
+            progress = await _first_file_reported(api, job_id, superuser_headers)
+            assert worker.is_alive()
             assert progress.status_code == 200, progress.text
             assert progress.json()["processed"] == 1
             assert progress.json()["succeeded"] == 1

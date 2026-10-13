@@ -173,6 +173,13 @@ def _context(job: Job, *, age: float = 0.0) -> ExecutionContext:
     )
 
 
+def _wait_for(reached, *, seconds: float = 5.0) -> None:
+    """Give a background write up to ``seconds`` to land."""
+    deadline = time.monotonic() + seconds
+    while not reached() and time.monotonic() < deadline:
+        time.sleep(0.02)
+
+
 @pytest.fixture
 def writes(db_session: Session) -> list[str]:
     """Every transaction the application database begins as a writer."""
@@ -249,6 +256,37 @@ class TestExecutionContext:
         context.finish(JobOutcome.COMPLETED)
 
         assert _status(job.id).current_item == "second.stl"
+
+    def test_held_progress_is_written_when_the_hold_ends_without_another_report(
+        self, engine: InlineJobEngine, make_job
+    ) -> None:
+        # A step that reports once and then blocks (a slow download) never
+        # calls back: what it reported must still appear.
+        _overlay["jobs_progress_hold_seconds"] = 0.2
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+
+        context.update(current_item="first.stl", processed=1)
+
+        _wait_for(lambda: _status(job.id).processed == 1)
+        assert (_status(job.id).processed, _status(job.id).current_item) == (
+            1,
+            "first.stl",
+        )
+
+    def test_an_attempt_that_ended_inside_its_hold_is_not_written_again(
+        self, engine: InlineJobEngine, make_job, writes: list[str]
+    ) -> None:
+        _overlay["jobs_progress_hold_seconds"] = 0.2
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        context.update(processed=1)
+        context.settle(JobOutcome.COMPLETED)
+        writes.clear()
+
+        time.sleep(0.5)
+
+        assert writes == []
 
     def test_flush_due_writes_held_reports_once_the_attempt_is_watched(
         self, engine: InlineJobEngine, make_job, hold: float
