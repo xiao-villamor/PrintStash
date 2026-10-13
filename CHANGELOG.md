@@ -27,6 +27,20 @@
 
 ### Performance
 
+- **New thumbnails are 320 pixels wide by default** (was 640), still rendered at twice that and reduced, so a default install encodes and stores a quarter of the pixels. Thumbnails already made are left as they are, and an install that chose a width in Settings keeps it. Choose 640 in Settings for sharper cards on high-density displays.
+
+- A 3MF's slicer picture appears as soon as the file is committed. It used to wait until the mesh had been read and measured, although it needs nothing from the mesh.
+
+- Do about 45% less database writing per uploaded file on SQLite (write transactions per file 57 → 32):
+  - a Job attempt ends in one write that also carries its staging release and the notices to the work that follows it, instead of five to eight;
+  - progress a Job reports in its first second is written with its next write (`VAULT_JOBS_PROGRESS_HOLD_SECONDS`);
+  - scratch space for a file is admitted against the same free-space budget without a database write of its own;
+  - the search index reads a changed Model before it takes the database's writer, not while holding it.
+
+- An accepted upload starts sooner. The request hands its Job straight to the job engine instead of queuing a pass to find it, and the lane it was handed to is polled faster for a few seconds (`VAULT_JOBS_BOOSTED_QUEUE_POLL_INTERVAL_SECONDS`, `VAULT_JOBS_QUEUE_BOOST_SECONDS`). Median wait before an upload's import starts: 0.37 s → 0.13 s.
+
+- Geometry and thumbnail workers start from a process that has already loaded the application and its geometry libraries (Linux), instead of a fresh interpreter per file: about half a second of CPU less per file. Each worker keeps its own session, memory ceiling and deadline. `VAULT_MESH_WORKER_TEMPLATE_ENABLED=false` restores a fresh interpreter per file.
+
 - A file in a bulk upload now waits when the server is busy instead of failing. Session creation was limited to 30 per minute, which held a 200-file drop to one file every two seconds and failed files that arrived faster; that limit now bounds a runaway client (600 per minute) and staging admission paces real uploads.
 
 - Halve the CPU an idle installation spends polling its job queues: lanes nobody waits on (search, maintenance, notifications, similarity, captions, expansion) are looked at every two seconds (`VAULT_JOBS_RELAXED_QUEUE_POLL_INTERVAL_SECONDS`) instead of four times a second.
