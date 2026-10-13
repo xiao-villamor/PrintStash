@@ -12,7 +12,7 @@ import {
   searchSorts,
   writeSearchFilters,
 } from "@/lib/search-filters";
-import type { MessageKey } from "@/locales/catalogs";
+import type { MessageKey } from "@/lib/locale";
 import type { ModelSort, SavedViewFilters } from "@/types";
 
 const labels = {

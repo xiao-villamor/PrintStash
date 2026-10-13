@@ -51,7 +51,7 @@ export default defineConfig(({ mode }) => ({
     // would swallow the Playwright specs.
     globals: true,
     environment: "jsdom",
-    setupFiles: ["./vitest.setup.ts"],
+    setupFiles: ["./vitest.setup.ts", "./vitest.locale.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}", "tests/repo/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["tests/e2e/**", "tests/e2e-real/**", "tests/performance/**", "node_modules/**"],
     coverage: {

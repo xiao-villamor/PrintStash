@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } f
 import {
   currentLocale,
   localeDefinitions,
+  requestedLocale,
   setLocale,
   subscribeLocale,
   translate,
@@ -33,7 +34,8 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
     document.documentElement.lang = locale;
     document.documentElement.dir = localeDefinitions[locale].direction;
     try {
-      localStorage.setItem("printstash.locale", locale);
+      // A locale still loading is requested but not yet shown; do not overwrite it.
+      if (requestedLocale() === locale) localStorage.setItem("printstash.locale", locale);
     } catch {
       // The active selection still works when storage is unavailable.
     }

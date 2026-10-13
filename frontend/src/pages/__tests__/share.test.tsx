@@ -305,6 +305,33 @@ describe("SharePage", () => {
     });
   });
 
+  describe("a share with a large mesh", () => {
+    function renderLargeShare() {
+      return renderShare({
+        routes: {
+          "GET /api/v1/share/abc123": json(
+            sharedModel({ files: [publicFile({ size_bytes: 48 * 1024 * 1024 })] }),
+          ),
+        },
+      });
+    }
+
+    it("offers the 3D preview as an action", async () => {
+      // A stranger on an unknown connection should not pay for 48 MB by opening a link.
+      renderLargeShare();
+
+      expect(await screen.findByRole("button", { name: "Load 3D preview" })).toBeVisible();
+    });
+
+    it("requests no mesh until asked", async () => {
+      const { requests } = renderLargeShare();
+
+      await screen.findByRole("button", { name: "Load 3D preview" });
+
+      expect(requests().filter((call) => call.url.endsWith("/stl"))).toEqual([]);
+    });
+  });
+
   describe("a share with no mesh", () => {
     it("says so rather than showing an empty viewer", async () => {
       // The recipient did not choose what was in it; an unexplained blank looks

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Start with only the selected language. Each translation catalog is now its
+  own asset, loaded when its language is shown, which removes about a fifth of
+  the JavaScript downloaded at startup.
+
 - Read a Model's details once when opening it. The page no longer repeats the
   read just to confirm that nothing changed while it was connecting to live
   updates.
@@ -18,7 +22,8 @@
 
 - Open large Models on their thumbnail. A 3D preview whose source file is over
   16 MB is no longer downloaded just by opening the Model; the page shows its
-  size and a "Load 3D preview" action instead.
+  size and a "Load 3D preview" action instead. Shared links and the similar
+  Models comparison follow the same rule.
 
 - Enable mesh preview readiness after its first rendered frame; verify overlay alignment, display-mode pixels, and repeated resource cleanup on WebGL/WebGPU.
 
