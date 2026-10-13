@@ -829,6 +829,51 @@ class TestProvenance:
         assert provenance.effective_value(title) == "Local"
 
 
+class TestCommitStagedArtifact:
+    @staticmethod
+    def _commit(staged: Path, **fields):
+        stages: list[str] = []
+        outcome = ingestion.commit_staged_artifact(
+            ingestion.StagedArtifact(
+                staged_path=staged,
+                original_filename=staged.name,
+                model_name="Bracket",
+                file_type=FileType.STL,
+                **fields,
+            ),
+            ingestion_key=f"commit-{staged.name}",
+            report=lambda **reported: stages.append(reported["stage"]),
+        )
+        return outcome, stages
+
+    def test_hashes_a_file_whose_digest_is_not_known(
+        self, db_session: Session, storage, tmp_path: Path
+    ) -> None:
+        staged = _staged(tmp_path)
+        expected = hashlib.sha256(staged.read_bytes()).hexdigest()
+
+        outcome, stages = self._commit(staged)
+
+        assert (db_session.get(File, outcome.file_id).sha256, stages[0]) == (
+            expected,
+            "hashing",
+        )
+
+    def test_uses_the_digest_the_bytes_were_received_with(
+        self, db_session: Session, storage, tmp_path: Path
+    ) -> None:
+        # The digest is taken on the caller's proof, not recomputed: reading a
+        # large upload a second time is the cost this avoids.
+        staged = _staged(tmp_path)
+
+        outcome, stages = self._commit(staged, received_sha256="c" * 64)
+
+        assert (db_session.get(File, outcome.file_id).sha256, "hashing" in stages) == (
+            "c" * 64,
+            False,
+        )
+
+
 class TestDerivativeHandoff:
     def test_commits_the_artifact_without_a_thumbnail(
         self, db_session: Session, storage, model: Model, tmp_path: Path

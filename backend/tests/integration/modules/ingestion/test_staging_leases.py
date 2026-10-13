@@ -1080,6 +1080,88 @@ class TestCaptureSpoolContext:
         assert original.read_bytes() == b""
 
 
+class TestReceivedDigest:
+    """The digest computed as bytes arrived describes them only while the
+    staged path is still that very file."""
+
+    @staticmethod
+    def _received(session, make_user, make_ingest_request, path: Path):
+        from app.db.models import IngestRequestKind
+
+        actor = make_user()
+        request = make_ingest_request(actor, kind=IngestRequestKind.UPLOAD)
+        staging_leases.create_job_lease(
+            session,
+            job_id=request.job_id,
+            owner_user_id=actor.id,
+            path=path,
+            size_bytes=path.stat().st_size,
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        session.commit()
+        return request.job_id
+
+    def test_an_untouched_file_keeps_the_digest_it_was_received_with(
+        self, db_session, make_user, make_ingest_request, tmp_path
+    ) -> None:
+        path = tmp_path / "part.stl"
+        path.write_bytes(b"received bytes")
+        job_id = self._received(db_session, make_user, make_ingest_request, path)
+
+        digest = staging_leases.received_digest(db_session, job_id, path)
+
+        assert digest == hashlib.sha256(b"received bytes").hexdigest()
+
+    def test_a_file_rewritten_since_has_no_digest(
+        self, db_session, make_user, make_ingest_request, tmp_path
+    ) -> None:
+        path = tmp_path / "part.stl"
+        path.write_bytes(b"received bytes")
+        job_id = self._received(db_session, make_user, make_ingest_request, path)
+        path.write_bytes(b"different size now")
+
+        assert staging_leases.received_digest(db_session, job_id, path) is None
+
+    def test_a_file_replaced_by_another_of_the_same_size_has_no_digest(
+        self, db_session, make_user, make_ingest_request, tmp_path
+    ) -> None:
+        path = tmp_path / "part.stl"
+        path.write_bytes(b"received bytes")
+        job_id = self._received(db_session, make_user, make_ingest_request, path)
+        replacement = tmp_path / "other.stl"
+        replacement.write_bytes(b"replaced bytes")
+        replacement.replace(path)
+
+        assert staging_leases.received_digest(db_session, job_id, path) is None
+
+    def test_a_file_that_is_gone_has_no_digest(
+        self, db_session, make_user, make_ingest_request, tmp_path
+    ) -> None:
+        path = tmp_path / "part.stl"
+        path.write_bytes(b"received bytes")
+        job_id = self._received(db_session, make_user, make_ingest_request, path)
+        path.unlink()
+
+        assert staging_leases.received_digest(db_session, job_id, path) is None
+
+    def test_another_path_has_no_digest(
+        self, db_session, make_user, make_ingest_request, tmp_path
+    ) -> None:
+        path = tmp_path / "part.stl"
+        path.write_bytes(b"received bytes")
+        job_id = self._received(db_session, make_user, make_ingest_request, path)
+        other = tmp_path / "copy.stl"
+        other.write_bytes(b"received bytes")
+
+        assert staging_leases.received_digest(db_session, job_id, other) is None
+
+    def test_a_job_without_a_lease_has_no_digest(self, db_session, tmp_path) -> None:
+        path = tmp_path / "part.stl"
+        path.write_bytes(b"received bytes")
+
+        assert staging_leases.received_digest(db_session, "no-such-job", path) is None
+
+
 class TestOpenJobInput:
     def test_waiting_owner_cancels_promptly(
         self,

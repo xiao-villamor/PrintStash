@@ -102,6 +102,8 @@ def _upload(ctx: JobContext) -> None:
     with _job_input(ctx) as staged:
         request = _request(ctx)
         selection = requests.selection(request)
+        with get_session_factory().scoped_session() as session:
+            received = staging_leases.received_digest(session, ctx.job_id, staged)
         ingest_staged_file(
             job_context=ctx,
             artifact=StagedArtifact(
@@ -125,6 +127,7 @@ def _upload(ctx: JobContext) -> None:
                 revision_notes=selection.get("revision_notes"),
                 is_recommended=bool(selection.get("is_recommended")),
                 auto_recommend_first_gcode=False,
+                received_sha256=received,
             ),
             actor_user_id=request.owner_user_id,
             ingestion_key=selection.get("ingestion_key"),

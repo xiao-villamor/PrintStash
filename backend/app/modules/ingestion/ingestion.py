@@ -1006,6 +1006,10 @@ class StagedArtifact:
     revision_notes: str | None = None
     is_recommended: bool = False
     auto_recommend_first_gcode: bool = True
+    # The digest computed while these bytes were received, when the caller has
+    # proof the staged file is still that one (``staging_leases.received_digest``).
+    # Without it the commit hashes the file.
+    received_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1062,8 +1066,12 @@ def commit_staged_artifact(
                 resumed=True,
             )
 
-    report(stage="hashing", label="hashing", step=1, total_steps=2, progress=0)
-    blob_hash = sha256_file(artifact.staged_path, on_chunk=checkpoint)
+    if artifact.received_sha256 is not None:
+        # Hashed as the bytes arrived, and proven to be the same file since.
+        blob_hash = artifact.received_sha256
+    else:
+        report(stage="hashing", label="hashing", step=1, total_steps=2, progress=0)
+        blob_hash = sha256_file(artifact.staged_path, on_chunk=checkpoint)
 
     if provenance_context is not None:
         provenance_context = replace(provenance_context, blob_sha256=blob_hash)

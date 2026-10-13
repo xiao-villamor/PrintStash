@@ -28,6 +28,7 @@ from app.db.models import (
 )
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session_factory
+from app.modules.ingestion import staging_leases
 from app.modules.ingestion.ingestion import (
     StagedArtifact,
     add_gcode_revision_to_model,
@@ -72,6 +73,11 @@ def run_verified_upload_ingestion(
         owner_user_id = upload.owner_user_id
         target_id = upload.target_id
         staged_path = _staged_path(session, job_id)
+        received = (
+            staging_leases.received_digest(session, job_id, staged_path)
+            if staged_path is not None
+            else None
+        )
         # Native uploads already have verified bytes in the store. Preserve
         # their identity through the Job so publication can copy them there.
         staged_origin = (
@@ -141,6 +147,7 @@ def run_verified_upload_ingestion(
                     source_hash=options.get("source_hash"),
                     target_library_id=options.get("target_library_id"),
                     staged_origin=staged_origin,
+                    received_sha256=received,
                 ),
                 actor_user_id=owner_user_id,
                 session_factory=session_factory,

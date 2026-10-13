@@ -1218,6 +1218,24 @@ def job_leases(session: Session, job_id: str) -> list[StagingLease]:
     return list(session.exec(select(StagingLease).where(StagingLease.job_id == job_id)))
 
 
+def received_digest(session: Session, job_id: str, path: Path) -> str | None:
+    """The SHA-256 recorded when ``path`` was received, if it is still that file.
+
+    The digest was computed as the bytes arrived. It still describes them only
+    while the path is the very file the lease recorded: same device, inode,
+    size and change time. Anything else (a replaced or rewritten file, a Job
+    with several inputs, a lease without an identity) returns ``None`` and the
+    caller hashes the file itself.
+    """
+    leases = job_leases(session, job_id)
+    if len(leases) != 1:
+        return None
+    (lease,) = leases
+    if _matching_path(lease) != path:
+        return None
+    return lease.sha256
+
+
 def _required_job_lease(session: Session, job_id: str) -> StagingLease:
     """Select one exact received lease before snapshotting or returning its path."""
     leases = job_leases(session, job_id)
