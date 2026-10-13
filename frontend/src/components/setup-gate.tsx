@@ -15,8 +15,10 @@ import { useUiLocale } from "@/lib/i18n";
  *   `/login` (or `/` if already authenticated — layout handles that via the
  *   AuthProvider).
  *
- * The probe runs once per path entry. Query owns cancellation and retry;
- * no background polling competes with explicit setup recovery.
+ * The probe runs once per admission subject: each setup entry path is its own
+ * subject and every other path shares one, so navigating inside the app neither
+ * re-probes nor hides the admitted shell. Query owns cancellation and retry; no
+ * background polling competes with explicit setup recovery.
  */
 
 import { Activity, useEffect, useId, useState } from "react";
@@ -24,7 +26,7 @@ import { usePathname, useRouter } from "@/lib/navigation";
 import { Loader2 } from "lucide-react";
 
 import { useQuery } from "@tanstack/react-query";
-import { setupGateOptions } from "@/features/setup/entry";
+import { setupAdmissionSubject, setupGateOptions } from "@/features/setup/entry";
 import { useAuth } from "@/lib/auth-context";
 
 interface Props {
@@ -38,9 +40,10 @@ export function SetupGate({ children }: Props) {
   const auth = useAuth();
   const isSuperuser = auth.user?.is_superuser === true;
   const entry = useId();
-  const [navigation, setNavigation] = useState({ pathname, generation: 0 });
-  if (navigation.pathname !== pathname)
-    setNavigation({ pathname, generation: navigation.generation + 1 });
+  const subject = setupAdmissionSubject(pathname);
+  const [navigation, setNavigation] = useState({ subject, generation: 0 });
+  if (navigation.subject !== subject)
+    setNavigation({ subject, generation: navigation.generation + 1 });
   const probe = useQuery(setupGateOptions(entry, navigation.generation));
   // This is the accepted entry decision, not a second status snapshot. A public
   // credential entry must survive its own intentional auth/cache retirement.
@@ -75,8 +78,8 @@ export function SetupGate({ children }: Props) {
     } else if (redirect) router.replace(redirect);
   }, [probe.error, redirect, router]);
 
-  // A new route must wait for admission without destroying the already admitted
-  // shell's transient state. Activity retires effects while hidden; rejection
+  // A new admission subject must wait for its probe without destroying the
+  // already admitted shell's transient state. Activity retires effects while hidden; rejection
   // removes the subtree, and AuthProvider independently keys it by session.
   const retain = ready || (probe.isPending && acceptedAt !== null);
   return (

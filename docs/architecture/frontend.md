@@ -361,7 +361,9 @@ See [Multipart qualification](../library-multipart-validation.md).
 
 Events are hints to obtain authorized state. Reconnect resync must recover missed
 notices; socket generation/disposal prevents late-ticket connections from reviving
-a dead subscription. Browser focus and offline recovery are part of the same
+a dead subscription. An established connection outlives its last listener by a
+short idle window so one route handing over to the next reuses it; a notice that
+arrives while nobody listens is owed to the next listener as a `resync`. Browser focus and offline recovery are part of the same
 feature lifecycle. Preserve command-specific polling where completion controls the
 next action; consolidate duplicate remote readers rather than banning all timers.
 
@@ -617,7 +619,14 @@ or routing-framework change is required. Evidence: `docs/frontend-m10-validation
 
 ### Setup admission and transient route state
 
-`SetupGate` owns the setup-status decision for each pathname entry. Before the
+`SetupGate` owns the setup-status decision for each admission subject
+(`setupAdmissionSubject` in `features/setup/entry.ts`). `/setup`, `/login` and
+`/getting-started` are each their own subject, because they are where
+`configured` and `storage_choice_required` change; every other path shares one
+subject. Navigation inside the application therefore keeps the accepted
+admission: it sends no probe, and the shell's effects, event connection and
+queries stay alive. Entering or leaving a setup entry path, and any session
+change, is probed again. Before the
 first accepted response it mounts no application content. During a later probe,
 React Activity hides the admitted subtree and cleans up its effects while
 preserving transient state, such as a newly created document's editor mode. A
