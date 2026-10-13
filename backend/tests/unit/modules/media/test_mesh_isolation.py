@@ -189,7 +189,81 @@ class TestSupervise:
         assert raised.value.supervision.exit_cause.value == "reply_limit"
 
 
+class TestExitDescriptor:
+    def test_becomes_readable_when_the_process_exits(self) -> None:
+        import select
+        import subprocess
+
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        descriptor = mesh_isolation._exit_descriptor(child.pid)
+        assert descriptor is not None
+
+        readable, _, _ = select.select([descriptor], [], [], 10)
+
+        os.close(descriptor)
+        child.wait()
+        assert readable == [descriptor]
+
+    def test_a_process_that_is_gone_has_none(self) -> None:
+        import subprocess
+
+        child = subprocess.Popen([sys.executable, "-c", "pass"])
+        child.wait()
+
+        assert mesh_isolation._exit_descriptor(child.pid) is None
+
+
 class TestSuperviseAfterEof:
+    def test_waits_for_the_exit_instead_of_asking_for_it(self, monkeypatch) -> None:
+        # A worker that has finished replying is only being waited on. Each
+        # look at it walks its process tree; the exit itself wakes the wait.
+        from app.modules.media import native_process
+
+        sample = native_process.process_tree_rss_bytes
+        samples: list[int] = []
+
+        def counted(pid: int):
+            samples.append(pid)
+            return sample(pid)
+
+        monkeypatch.setattr(native_process, "process_tree_rss_bytes", counted)
+
+        supervise(
+            _child("import os, time; os.close(1); time.sleep(0.6)"),
+            memory_budget=256 * MB,
+            timeout_seconds=4,
+        )
+
+        assert len(samples) <= 15
+
+    def test_collects_the_exit_where_no_descriptor_announces_it(
+        self, monkeypatch
+    ) -> None:
+        monkeypatch.setattr(mesh_isolation, "_exit_descriptor", lambda _pid: None)
+
+        reply = supervise(
+            _child(
+                "import os, time; os.write(1, b'reply'); os.close(1); time.sleep(0.1)"
+            ),
+            memory_budget=256 * MB,
+            timeout_seconds=4,
+        )
+
+        assert reply == b"reply"
+
+    def test_reads_a_reply_that_outlives_the_exit_notice(self) -> None:
+        # A descendant keeps the pipe open after the worker itself has exited.
+        script = (
+            "import os, subprocess, sys\n"
+            "subprocess.Popen([sys.executable, '-c',"
+            " 'import os, time; time.sleep(0.3); os.write(1, b\"late\")'])\n"
+            "os.write(1, b'early-')\n"
+        )
+
+        reply = supervise(_child(script), memory_budget=256 * MB, timeout_seconds=4)
+
+        assert reply == b"early-late"
+
     def test_enforces_memory_budget_after_stdout_closes(self, tmp_path: Path) -> None:
         pid_file = tmp_path / "pid"
         script = (

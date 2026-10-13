@@ -384,6 +384,21 @@ def _watchdog_error(cause: WorkerExitCause) -> MeshWorkerError:
     )
 
 
+def _exit_descriptor(pid: int) -> int | None:
+    """A descriptor that becomes readable when ``pid`` exits, where there is one.
+
+    Linux only. Without it the supervisor learns of an exit by asking, which
+    it then has to do often enough not to add latency to every worker.
+    """
+    opener = getattr(os, "pidfd_open", None)
+    if opener is None:
+        return None
+    try:
+        return opener(pid)
+    except OSError:
+        return None
+
+
 def supervise_result(
     command: list[str],
     *,
@@ -420,6 +435,7 @@ def supervise_result(
     error: MeshWorkerError | None = None
     cancelled: OperationCancelled | None = None
     process: subprocess.Popen[bytes] | None = None
+    exit_descriptor: int | None = None
     watchdog: _CallbackWatchdog | None = None
     temporary = (
         tempfile.TemporaryDirectory(prefix="printstash-mesh-")
@@ -468,9 +484,13 @@ def supervise_result(
                 process.pid, deadline, memory_budget, lifecycle
             )
             watchdog.thread.start()
+        exit_descriptor = _exit_descriptor(process.pid)
         with selectors.DefaultSelector() as selector:
             selector.register(process.stdout, selectors.EVENT_READ)
+            if exit_descriptor is not None:
+                selector.register(exit_descriptor, selectors.EVENT_READ)
             stdout_closed = False
+            exit_watched = exit_descriptor is not None
             while True:
                 checkpoint()
                 if withdrawn is not None and withdrawn():
@@ -494,9 +514,20 @@ def supervise_result(
                         if rss > memory_budget:
                             cause = WorkerExitCause.MEMORY_LIMIT
                             raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
+                # Once the reply has ended only the exit is awaited. Its
+                # descriptor wakes this loop the moment it happens; without one
+                # the exit has to be asked for, often.
                 for key, _ in selector.select(
-                    _REAP_POLL_SECONDS if stdout_closed else _POLL_SECONDS
+                    _REAP_POLL_SECONDS
+                    if stdout_closed and not exit_watched
+                    else _POLL_SECONDS
                 ):
+                    if key.fd == exit_descriptor:
+                        # Readable from now on: stop watching, keep reading
+                        # whatever the reply still holds.
+                        selector.unregister(key.fd)
+                        exit_watched = False
+                        continue
                     chunk = os.read(key.fd, 65536)
                     if not chunk:
                         stdout_closed = True
@@ -584,6 +615,8 @@ def supervise_result(
                 peak_rss = (
                     observed_rss if peak_rss is None else max(peak_rss, observed_rss)
                 )
+        if exit_descriptor is not None:
+            os.close(exit_descriptor)
         try:
             if process is not None:
                 terminate_worker(process, lifecycle)
