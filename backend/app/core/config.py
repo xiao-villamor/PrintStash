@@ -144,6 +144,9 @@ class Settings(BaseSettings):
     db_url: str = Field(default=None, validate_default=True)
     sqlite_synchronous: str = "NORMAL"
     sqlite_busy_timeout_ms: int = Field(default=30_000, ge=1)
+    # Kept SQLite connections. Each costs a page cache and a parsed schema
+    # (a few MiB); one discarded and reopened costs a schema parse per use.
+    sqlite_pool_size: int = Field(default=24, ge=1, le=256)
 
     jwt_secret: str = DEFAULT_JWT_SECRET
     # How a fresh installation gets its first owner (resolved and validated
@@ -219,6 +222,9 @@ class Settings(BaseSettings):
     # DBOS polls each lane. This is dispatch latency, separate from the
     # recovery tick; chained ingest/reconcile/derive queues used to each wait 1s.
     jobs_queue_poll_interval_seconds: float = Field(default=0.25, ge=0.05, le=5)
+    # Lanes nobody waits on (search, upkeep, notifications). Every look at a
+    # queue costs database statements whether or not work is there.
+    jobs_relaxed_queue_poll_interval_seconds: float = Field(default=2.0, ge=0.05, le=60)
     jobs_reconcile_interval_seconds: int = Field(default=300, ge=10, le=86400)
     jobs_reconcile_batch: int = Field(default=500, ge=1, le=10000)
     jobs_lane_headroom_factor: int = Field(default=2, ge=1, le=100)

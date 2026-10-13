@@ -52,10 +52,26 @@ def _set_sqlite_pragmas(dbapi_conn, _record) -> None:
         load_sqlite_vector_extension(dbapi_conn)
 
 
+def _pool_options(url: str) -> dict[str, int]:
+    """Keep SQLite connections instead of rebuilding them under concurrency.
+
+    A new SQLite connection re-reads and parses the whole schema before its
+    first statement: about 5 ms of CPU here, against microseconds for a kept
+    one. SQLAlchemy's default pool keeps five and discards every connection
+    above that on return, so a burst of Job, reconciler and request threads
+    (each often holding a nested session) paid that cost on most transactions.
+    PostgreSQL keeps the library default: its connections are a server limit.
+    """
+    if not url.startswith("sqlite"):
+        return {}
+    return {"pool_size": settings.sqlite_pool_size, "max_overflow": 16}
+
+
 _engine: Engine = create_engine(
     _normalized_db_url,
     echo=False,
     connect_args=_connect_args,
+    **_pool_options(_normalized_db_url),
 )
 
 if _normalized_db_url.startswith("sqlite"):

@@ -244,6 +244,37 @@ class TestSetSqlitePragmas:
             engine.dispose()
 
 
+class TestPoolOptions:
+    def test_sqlite_keeps_the_configured_number_of_connections(self, monkeypatch):
+        monkeypatch.setitem(_overlay, "sqlite_pool_size", 7)
+
+        assert db_session_mod._pool_options("sqlite:////data/db/vault.sqlite") == {
+            "pool_size": 7,
+            "max_overflow": 16,
+        }
+
+    def test_postgres_keeps_the_library_pool(self):
+        assert db_session_mod._pool_options("postgresql+psycopg://u:p@db/v") == {}
+
+    def test_a_burst_above_the_library_default_reuses_its_connections(self, tmp_path):
+        engine = create_engine(
+            f"sqlite:///{tmp_path / 'pool.sqlite'}",
+            connect_args={"check_same_thread": False},
+            **db_session_mod._pool_options("sqlite:///pool.sqlite"),
+        )
+        opened: list[int] = []
+        event.listen(engine, "connect", lambda *_: opened.append(1))
+        try:
+            for _ in range(3):
+                held = [engine.connect() for _ in range(12)]
+                for connection in held:
+                    connection.close()
+        finally:
+            engine.dispose()
+
+        assert len(opened) == 12
+
+
 class TestCreateAsyncEngineForDb:
     def test_create_async_engine_for_db_sqlite(self) -> None:
         engine = create_async_engine_for_db("sqlite:///:memory:")

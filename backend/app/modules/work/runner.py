@@ -162,14 +162,16 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
     try:
         definition = catalog_module.get_catalog().definition(context.definition)
         with get_session_factory().scoped_session() as session:
-            active = jobs.lock_execution(
+            # A read is the whole check: the session ends before the step
+            # runs, so a row lock taken here protected nothing and only made
+            # every step queue behind the database's single writer.
+            if not jobs.owns_execution(
                 session,
                 context.job_id,
                 epoch=context.execution_epoch,
                 attempt=context.attempt,
-                states=(JobState.RUNNING,),
-            )
-            if active is None:
+                state=JobState.RUNNING,
+            ):
                 return StepOutcome.CANCELLED.value
             refused = definition.admission(session)
         if refused is not None:

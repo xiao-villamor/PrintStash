@@ -105,7 +105,12 @@ if TYPE_CHECKING:
 
 REPLY_MAGIC = b"MSH1"
 MAX_REPLY_BYTES = 32 * 1024 * 1024
-_POLL_SECONDS = 0.025
+# Output wakes the supervisor at once; this is only how often it samples the
+# worker's memory and looks for a cancel or deadline while the worker is quiet.
+# The worker's own address-space limit is the hard ceiling in between.
+_POLL_SECONDS = 0.1
+# After the reply ends, only the exit status is awaited.
+_REAP_POLL_SECONDS = 0.01
 
 
 class MeshWorkerError(Exception):
@@ -489,7 +494,9 @@ def supervise_result(
                         if rss > memory_budget:
                             cause = WorkerExitCause.MEMORY_LIMIT
                             raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
-                for key, _ in selector.select(_POLL_SECONDS):
+                for key, _ in selector.select(
+                    _REAP_POLL_SECONDS if stdout_closed else _POLL_SECONDS
+                ):
                     chunk = os.read(key.fd, 65536)
                     if not chunk:
                         stdout_closed = True

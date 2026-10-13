@@ -8,6 +8,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 
+# Each probe is a database read. Forced checkpoints still guard every
+# publication, so this only bounds how soon idle waiting notices a cancel.
+_PROBE_SECONDS = 0.5
+
 
 class OperationCancelled(BaseException):
     """Unwind owned resources without turning withdrawal into a failed result."""
@@ -21,7 +25,7 @@ class _Probe:
 
     def check(self, *, force: bool = False) -> None:
         if not self.stopped and (force or time.monotonic() >= self.next_check):
-            self.next_check = time.monotonic() + 0.2
+            self.next_check = time.monotonic() + _PROBE_SECONDS
             self.stopped = self.withdrawn()
         if self.stopped:
             raise OperationCancelled()

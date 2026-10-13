@@ -116,6 +116,17 @@ class LaneOrder(StrEnum):
     FIFO = "fifo"
 
 
+class LanePace(StrEnum):
+    """How soon an engine must notice work queued on a lane.
+
+    An engine that polls pays for every look, working or idle. Lanes someone
+    is waiting on are looked at often; lanes of background upkeep are not.
+    """
+
+    PROMPT = "prompt"
+    RELAXED = "relaxed"
+
+
 @dataclass(frozen=True)
 class Lane:
     """A concurrency class of work.
@@ -133,10 +144,13 @@ class Lane:
     partitioned: bool = False
     rate_limit: tuple[int, float] | None = None
     queue_order: LaneOrder = LaneOrder.PRIORITY
+    pace: LanePace = LanePace.PROMPT
 
     def __post_init__(self) -> None:
         if not isinstance(self.queue_order, LaneOrder):
             raise TypeError("lane_queue_order_requires_enum")
+        if not isinstance(self.pace, LanePace):
+            raise TypeError("lane_pace_requires_enum")
         if self.concurrency < 1:
             raise ValueError("lane_concurrency_below_one")
 

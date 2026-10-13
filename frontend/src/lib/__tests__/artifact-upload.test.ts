@@ -17,6 +17,7 @@ import {
 } from "@/lib/artifact-upload";
 import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
 import type { ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
+import { ApiError } from "@/lib/errors";
 
 const NOW = "2026-09-09T00:00:00Z";
 
@@ -445,4 +446,119 @@ describe("upload session callback lifetime", () => {
       expect(api.getArtifactUploadPlan).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("upload admission", () => {
+  const file = () => new File(["12345678"], "part.stl", { type: "model/stl" });
+  const request = { purpose: "model", target_role: "new_model" } as const;
+
+  function admittingApi(): ArtifactUploadApi {
+    const api = anApi();
+    vi.mocked(api.createArtifactUpload).mockResolvedValue(aSession());
+    vi.mocked(api.getArtifactUploadPlan).mockResolvedValue({
+      session_id: "session-1",
+      mode: "api_chunks",
+      chunk_size: 8,
+      max_parallel: 2,
+      upload_path: "/opaque/chunks/{index}",
+      uploaded_parts: [],
+      expires_at: NOW,
+    });
+    vi.mocked(api.putArtifactUploadChunk).mockResolvedValue(aSession());
+    vi.mocked(api.finalizeArtifactUpload).mockResolvedValue(
+      aSession({ state: "ingesting", job_id: "job-1" }),
+    );
+    return api;
+  }
+
+  it("waits out a rate-limited session request", async () => {
+    const api = admittingApi();
+    vi.mocked(api.createArtifactUpload)
+      .mockRejectedValueOnce(new ApiError(429, "rate_limited", "rate_limited"))
+      .mockResolvedValueOnce(aSession());
+    const pauses: number[] = [];
+
+    const result = await uploadArtifact(file(), request, {
+      api,
+      digest,
+      pause: async (milliseconds) => void pauses.push(milliseconds),
+    });
+
+    expect(result.job_id).toBe("job-1");
+    expect(pauses).toEqual([500]);
+  });
+
+  it("waits for staging room without opening a second session", async () => {
+    const api = admittingApi();
+    vi.mocked(api.finalizeArtifactUpload)
+      .mockReset()
+      .mockRejectedValueOnce(new ApiError(507, "staging_capacity_exceeded", "full"))
+      .mockRejectedValueOnce(new ApiError(507, "staging_capacity_exceeded", "full"))
+      .mockResolvedValueOnce(aSession({ state: "ingesting", job_id: "job-1" }));
+    const pauses: number[] = [];
+
+    const result = await uploadArtifact(file(), request, {
+      api,
+      digest,
+      pause: async (milliseconds) => void pauses.push(milliseconds),
+    });
+
+    expect(result.job_id).toBe("job-1");
+    expect(pauses).toEqual([500, 1_000]);
+    expect(api.createArtifactUpload).toHaveBeenCalledOnce();
+    expect(api.putArtifactUploadChunk).toHaveBeenCalledOnce();
+  });
+
+  it("reports any other refusal without waiting", async () => {
+    const api = admittingApi();
+    vi.mocked(api.createArtifactUpload)
+      .mockReset()
+      .mockRejectedValue(new ApiError(400, "unsupported_file_type", "no"));
+    const pauses: number[] = [];
+
+    await expect(
+      uploadArtifact(file(), request, {
+        api,
+        digest,
+        pause: async (milliseconds) => void pauses.push(milliseconds),
+      }),
+    ).rejects.toThrow("unsupported_file_type");
+    expect(pauses).toEqual([]);
+  });
+
+  it("stops waiting once the server has stayed full for ten minutes", async () => {
+    const api = admittingApi();
+    vi.mocked(api.createArtifactUpload)
+      .mockReset()
+      .mockRejectedValue(new ApiError(507, "staging_capacity_exceeded", "full"));
+    let waited = 0;
+
+    await expect(
+      uploadArtifact(file(), request, {
+        api,
+        digest,
+        pause: async (milliseconds) => void (waited += milliseconds),
+      }),
+    ).rejects.toThrow("staging_capacity_exceeded");
+    expect(waited).toBeGreaterThanOrEqual(10 * 60_000);
+    expect(waited).toBeLessThan(10 * 60_000 + 4_000);
+  });
+
+  it("stops waiting when the upload is paused", async () => {
+    const api = admittingApi();
+    vi.mocked(api.createArtifactUpload)
+      .mockReset()
+      .mockRejectedValue(new ApiError(429, "rate_limited", "rate_limited"));
+    const controller = new AbortController();
+
+    await expect(
+      uploadArtifact(file(), request, {
+        api,
+        digest,
+        signal: controller.signal,
+        pause: async () => controller.abort(new DOMException("Upload paused", "AbortError")),
+      }),
+    ).rejects.toThrow("Upload paused");
+    expect(api.createArtifactUpload).toHaveBeenCalledOnce();
+  });
 });

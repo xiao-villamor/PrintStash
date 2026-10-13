@@ -15,7 +15,7 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.db.models import JobKind, LaneName, WorkLaneOverride
 
-from .contracts import JobDefinition, JobEngine, Lane, LaneOrder
+from .contracts import JobDefinition, JobEngine, Lane, LaneOrder, LanePace
 
 # How many reconcile passes run at once, deployment-wide.
 RECONCILE_CONCURRENCY = 4
@@ -38,22 +38,46 @@ def default_lanes() -> dict[LaneName, Lane]:
             settings.jobs_derive_light_concurrency,
             queue_order=LaneOrder.FIFO,
         ),
-        Lane(LaneName.SIMILARITY, settings.jobs_similarity_concurrency, scope="global"),
+        Lane(
+            LaneName.SIMILARITY,
+            settings.jobs_similarity_concurrency,
+            scope="global",
+            pace=LanePace.RELAXED,
+        ),
         Lane(LaneName.NETWORK, settings.jobs_network_concurrency),
         Lane(
             LaneName.NOTIFY,
             settings.jobs_notify_concurrency,
             partitioned=True,
             rate_limit=(settings.jobs_notify_rate_per_minute, 60.0),
+            pace=LanePace.RELAXED,
         ),
         # Fleet routing is one fleet-wide decision: one dispatcher, anywhere.
         Lane(LaneName.PRINTING, settings.jobs_printing_concurrency, scope="global"),
         Lane(
-            LaneName.MAINTENANCE, settings.jobs_maintenance_concurrency, scope="global"
+            LaneName.MAINTENANCE,
+            settings.jobs_maintenance_concurrency,
+            scope="global",
+            pace=LanePace.RELAXED,
         ),
-        Lane(LaneName.SEARCH, settings.jobs_search_concurrency, scope="global"),
-        Lane(LaneName.CAPTIONS, settings.jobs_captions_concurrency, scope="global"),
-        Lane(LaneName.EXPANSION, settings.jobs_expansion_concurrency, scope="global"),
+        Lane(
+            LaneName.SEARCH,
+            settings.jobs_search_concurrency,
+            scope="global",
+            pace=LanePace.RELAXED,
+        ),
+        Lane(
+            LaneName.CAPTIONS,
+            settings.jobs_captions_concurrency,
+            scope="global",
+            pace=LanePace.RELAXED,
+        ),
+        Lane(
+            LaneName.EXPANSION,
+            settings.jobs_expansion_concurrency,
+            scope="global",
+            pace=LanePace.RELAXED,
+        ),
         Lane(LaneName.RECONCILE, RECONCILE_CONCURRENCY, scope="global"),
     )
     return {lane.name: lane for lane in lanes}

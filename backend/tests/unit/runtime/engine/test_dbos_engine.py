@@ -17,7 +17,7 @@ from dbos import error as dbos_error
 
 from app.db.models import LaneName
 from app.modules.work.catalog import WorkCatalog, default_lanes
-from app.modules.work.contracts import Lane, RetryPolicy
+from app.modules.work.contracts import Lane, LanePace, RetryPolicy
 from app.runtime.engine import dbos_engine
 from app.runtime.engine.dbos_engine import DbosJobEngine, system_database_url
 
@@ -59,10 +59,10 @@ class TestSystemDatabase:
 
 
 class TestConfig:
-    def test_sqlite_waits_out_a_locked_file(self) -> None:
+    def test_sqlite_opens_its_own_connections(self) -> None:
         config = _engine()._config()
 
-        assert config["db_engine_kwargs"] == {"connect_args": {"timeout": 30}}
+        assert set(config["db_engine_kwargs"]) == {"creator"}
         assert "dbos_system_schema" not in config
 
     def test_postgres_names_its_schema(self) -> None:
@@ -93,7 +93,9 @@ def registered(monkeypatch) -> dict[str, dict]:
 
 
 class TestQueues:
-    def test_dispatch_cadence_uses_the_deployment_setting(self, registered, monkeypatch):
+    def test_dispatch_cadence_uses_the_deployment_setting(
+        self, registered, monkeypatch
+    ):
         from app.core.config import _overlay
 
         monkeypatch.setitem(_overlay, "jobs_queue_poll_interval_seconds", 0.25)
@@ -112,6 +114,32 @@ class TestQueues:
         engine._register_queue(Lane(LaneName.INGEST, 2))
 
         assert registered["ingest"]["polling_interval_sec"] == 0.05
+
+    def test_a_relaxed_lane_is_polled_at_the_relaxed_cadence(
+        self, registered, monkeypatch
+    ):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "jobs_queue_poll_interval_seconds", 0.25)
+        monkeypatch.setitem(_overlay, "jobs_relaxed_queue_poll_interval_seconds", 2.0)
+        _engine()._register_queue(
+            Lane(LaneName.SEARCH, 1, scope="global", pace=LanePace.RELAXED)
+        )
+
+        assert registered["search"]["polling_interval_sec"] == 2.0
+
+    def test_a_relaxed_lane_is_never_polled_faster_than_a_prompt_one(
+        self, registered, monkeypatch
+    ):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "jobs_queue_poll_interval_seconds", 3.0)
+        monkeypatch.setitem(_overlay, "jobs_relaxed_queue_poll_interval_seconds", 2.0)
+        _engine()._register_queue(
+            Lane(LaneName.SEARCH, 1, scope="global", pace=LanePace.RELAXED)
+        )
+
+        assert registered["search"]["polling_interval_sec"] == 3.0
 
     def test_a_worker_lane_bounds_each_process(self, registered) -> None:
         _engine()._register_queue(Lane(LaneName.INGEST, 2))

@@ -136,3 +136,52 @@ class TestAuditListener:
             == "[redacted]"
             for row in rows
         )
+
+
+class TestBookkeepingRows:
+    """Machine bookkeeping is not an audit event; what a person changed is."""
+
+    def _audited(self, db_session, table: str) -> list[AuditLog]:
+        return list(
+            db_session.exec(
+                select(AuditLog).where(AuditLog.resource_type == table)
+            ).all()
+        )
+
+    def test_a_job_write_leaves_no_row_trail(self, db_session, make_job) -> None:
+        install_audit_listeners()
+        job = make_job()
+        job.attempts = 1
+        db_session.add(job)
+        db_session.commit()
+
+        assert self._audited(db_session, "jobs") == []
+
+    def test_a_reconciler_cursor_write_leaves_no_row_trail(self, db_session) -> None:
+        from app.db.models import JobKind, ReconcileCursor
+
+        install_audit_listeners()
+        db_session.add(ReconcileCursor(source=JobKind.SOURCES_SCAN))
+        db_session.commit()
+
+        assert self._audited(db_session, "reconcile_cursors") == []
+
+    def test_a_capacity_claim_leaves_no_row_trail(
+        self, db_session, make_capacity_reservation
+    ) -> None:
+        install_audit_listeners()
+        claim = make_capacity_reservation()
+        db_session.delete(claim)
+        db_session.commit()
+
+        assert self._audited(db_session, "capacity_reservations") == []
+
+    def test_a_library_write_is_still_recorded(self, db_session) -> None:
+        install_audit_listeners()
+        model = build_model(db_session, name="Kept", slug="kept", hash="9" * 64)
+        model.name = "Renamed"
+        db_session.add(model)
+        db_session.commit()
+
+        actions = {row.action for row in self._audited(db_session, "models")}
+        assert "update" in actions

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -1055,6 +1056,25 @@ def _committed_by_key(
         return None
 
 
+_STAGE_REPORT_SECONDS = 1.0
+
+
+def _paced_report(job_context: JobContext) -> Report:
+    """Report a stage only once the commit has run long enough to be watched.
+
+    Each report is a write transaction on the Job. A small file is hashed and
+    committed before anyone could read "hashing", so those writes only delayed
+    the commit they described; a large file still reports each stage it enters.
+    """
+    started = time.monotonic()
+
+    def report(**fields: Any) -> None:
+        if time.monotonic() - started >= _STAGE_REPORT_SECONDS:
+            job_context.update(**fields)
+
+    return report
+
+
 def ingest_staged_file(
     *,
     job_context: JobContext,
@@ -1079,7 +1099,7 @@ def ingest_staged_file(
             actor_user_id=actor_user_id,
             session_factory=session_factory,
             provenance_context=provenance_context,
-            report=lambda **fields: job_context.update(**fields),
+            report=_paced_report(job_context),
         )
     except Exception as exc:  # noqa: BLE001 - the Job records the failure
         logger.exception("ingestion commit failed", extra={"job_id": job_id})

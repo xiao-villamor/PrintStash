@@ -21,6 +21,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BULK_UPLOAD_CONCURRENCY,
   bulkTargetCollection,
   dirOf,
   entriesFromDataTransfer,
@@ -30,6 +31,7 @@ import {
   isGcodeFile,
   isMeshFile,
   mergeBulkItems,
+  runBounded,
   walkEntries,
   type BulkItem,
 } from "@/lib/bulk-upload";
@@ -277,5 +279,107 @@ describe("walkEntries", () => {
     } as FileSystemEntry;
 
     expect(await walkEntries([unsupported])).toEqual([]);
+  });
+});
+
+// --- runBounded ------------------------------------------------------------
+
+describe("runBounded", () => {
+  /** Work that records how many items were in flight when each one started. */
+  function tracked() {
+    let active = 0;
+    const started: string[] = [];
+    const peaks: number[] = [];
+    const release = new Map<string, () => void>();
+    const work = (name: string): Promise<void> => {
+      active += 1;
+      started.push(name);
+      peaks.push(active);
+      return new Promise<void>((resolve) => {
+        release.set(name, () => {
+          active -= 1;
+          resolve();
+        });
+      });
+    };
+    return { started, peaks, release, work };
+  }
+
+  const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  it("keeps no more than the limit in flight", async () => {
+    const { started, peaks, release, work } = tracked();
+    const done = runBounded(["a", "b", "c", "d", "e"], 2, work);
+    await settle();
+    expect(started).toEqual(["a", "b"]);
+
+    for (const name of ["a", "b", "c", "d", "e"]) {
+      release.get(name)?.();
+      await settle();
+    }
+    await done;
+
+    expect(Math.max(...peaks)).toBe(2);
+  });
+
+  it("starts files in queue order", async () => {
+    const { started, release, work } = tracked();
+    const done = runBounded(["a", "b", "c", "d"], 2, work);
+    await settle();
+    release.get("b")?.();
+    await settle();
+    release.get("a")?.();
+    await settle();
+    release.get("c")?.();
+    release.get("d")?.();
+    await done;
+
+    expect(started).toEqual(["a", "b", "c", "d"]);
+  });
+
+  it("runs every file exactly once", async () => {
+    const seen: number[] = [];
+
+    await runBounded([1, 2, 3, 4, 5, 6, 7], 3, async (value) => void seen.push(value));
+
+    expect(seen.toSorted((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it("finishes at once for an empty queue", async () => {
+    const seen: number[] = [];
+
+    await runBounded<number>([], 3, async (value) => void seen.push(value));
+
+    expect(seen).toEqual([]);
+  });
+
+  it("uses one lane per file when the queue is shorter than the limit", async () => {
+    const { peaks, release, work } = tracked();
+    const done = runBounded(["a", "b"], 5, work);
+    await settle();
+    release.get("a")?.();
+    release.get("b")?.();
+    await done;
+
+    expect(Math.max(...peaks)).toBe(2);
+  });
+
+  it("keeps the other lanes going when one file's work rejects", async () => {
+    const seen: string[] = [];
+
+    await runBounded(["bad", "b", "c"], 2, async (name) => {
+      if (name === "bad") throw new Error("lane failed");
+      seen.push(name);
+    });
+
+    expect(seen).toEqual(["b", "c"]);
+  });
+
+  it.each([0, -1, 1.5])("refuses a limit of %s", async (limit) => {
+    await expect(runBounded(["a"], limit, async () => {})).rejects.toThrow("bulk_upload_limit");
+  });
+
+  it("stays below the server's four staged uploads per user", () => {
+    expect(BULK_UPLOAD_CONCURRENCY).toBe(3);
   });
 });

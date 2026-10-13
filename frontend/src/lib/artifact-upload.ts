@@ -1,3 +1,4 @@
+import { parseApiError } from "@/lib/errors";
 import { withSessionRequest } from "@/lib/session-transport";
 import { sha256 } from "@noble/hashes/sha2.js";
 
@@ -77,6 +78,47 @@ export interface UploadOptions {
   onSession?: (id: string) => void;
   digest?: (blob: Blob) => Promise<string>;
   api?: ArtifactUploadApi;
+  /** Waits out one busy refusal; replaced in tests so no real time passes. */
+  pause?: (milliseconds: number) => Promise<void>;
+}
+
+/** Longest a queued file waits for the server to have room before it fails. */
+const BUSY_WAIT_LIMIT_MS = 10 * 60_000;
+const BUSY_WAIT_STEPS_MS = [500, 1_000, 2_000, 4_000];
+
+const pauseFor = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+/**
+ * The server refuses new upload work while its staging area or request budget
+ * is full. That is a "not yet", so a queued file waits its turn; every other
+ * refusal is an answer and is reported at once.
+ */
+function isBusyRefusal(cause: unknown): boolean {
+  const error = parseApiError(cause);
+  return (
+    (error.status === 429 && error.code === "rate_limited") ||
+    error.code === "staging_capacity_exceeded"
+  );
+}
+
+async function whenAdmitted<T>(
+  attempt: () => Promise<T>,
+  assertCurrent: () => void,
+  pause: (milliseconds: number) => Promise<void>,
+): Promise<T> {
+  let waited = 0;
+  for (let refusals = 0; ; refusals += 1) {
+    try {
+      return await attempt();
+    } catch (cause) {
+      if (!isBusyRefusal(cause) || waited >= BUSY_WAIT_LIMIT_MS) throw cause;
+    }
+    const step = BUSY_WAIT_STEPS_MS[Math.min(refusals, BUSY_WAIT_STEPS_MS.length - 1)];
+    await pause(step);
+    waited += step;
+    assertCurrent();
+  }
 }
 
 const activeControllers = new Map<string, AbortController>();
@@ -191,7 +233,11 @@ async function transfer(
       totalBytes: file.size,
     });
     request.assertCurrent();
-    const finalized = await api.finalizeArtifactUpload(session.id);
+    const finalized = await whenAdmitted(
+      () => api.finalizeArtifactUpload(session.id),
+      request.assertCurrent,
+      options.pause ?? pauseFor,
+    );
     request.assertCurrent();
     options.onProgress?.({
       phase: finalized.state === "completed" ? "completed" : "ingesting",
@@ -215,13 +261,18 @@ export async function uploadArtifact(
     options.onProgress?.({ phase: "hashing", transferredBytes: 0, totalBytes: file.size });
     const sha256 = await digest(file);
     transport.assertCurrent();
-    const session = await api.createArtifactUpload({
-      ...request,
-      filename: file.name,
-      media_type: file.type || "application/octet-stream",
-      size_bytes: file.size,
-      sha256,
-    });
+    const session = await whenAdmitted(
+      () =>
+        api.createArtifactUpload({
+          ...request,
+          filename: file.name,
+          media_type: file.type || "application/octet-stream",
+          size_bytes: file.size,
+          sha256,
+        }),
+      transport.assertCurrent,
+      options.pause ?? pauseFor,
+    );
     transport.assertCurrent();
     rememberArtifactUpload(session.id);
     const controlled = controlledOptions(session.id, { ...options, digest });

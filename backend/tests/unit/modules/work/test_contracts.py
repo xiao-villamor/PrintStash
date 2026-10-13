@@ -183,3 +183,48 @@ class TestLaneOrder:
         priority = Lane(LaneName.MAINTENANCE, 2, queue_order=LaneOrder.PRIORITY)
         assert fifo.headroom == 3
         assert priority.headroom == 2 * factor
+
+
+class TestLanePace:
+    def test_a_lane_is_prompt_unless_declared_otherwise(self):
+        from app.modules.work.contracts import LanePace
+
+        assert Lane(LaneName.INGEST, 1).pace is LanePace.PROMPT
+
+    def test_pace_requires_a_closed_enum(self):
+        with pytest.raises(TypeError, match="lane_pace"):
+            Lane(LaneName.MAINTENANCE, 1, pace="relaxed")
+
+    @pytest.mark.parametrize(
+        "lane",
+        [
+            LaneName.INGEST,
+            LaneName.DERIVE_NATIVE,
+            LaneName.DERIVE_LIGHT,
+            LaneName.NETWORK,
+            LaneName.PRINTING,
+            LaneName.RECONCILE,
+        ],
+    )
+    def test_lanes_someone_waits_on_stay_prompt(self, lane):
+        from app.modules.work.catalog import default_lanes
+        from app.modules.work.contracts import LanePace
+
+        assert default_lanes()[lane].pace is LanePace.PROMPT
+
+    @pytest.mark.parametrize(
+        "lane",
+        [
+            LaneName.SEARCH,
+            LaneName.MAINTENANCE,
+            LaneName.NOTIFY,
+            LaneName.SIMILARITY,
+            LaneName.CAPTIONS,
+            LaneName.EXPANSION,
+        ],
+    )
+    def test_background_upkeep_lanes_are_relaxed(self, lane):
+        from app.modules.work.catalog import default_lanes
+        from app.modules.work.contracts import LanePace
+
+        assert default_lanes()[lane].pace is LanePace.RELAXED

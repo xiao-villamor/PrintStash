@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import sqlite3
 import threading
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -52,6 +53,7 @@ from app.modules.work.contracts import (
     Lane,
     LaneDepth,
     LaneOrder,
+    LanePace,
     PassSubmission,
     RetryPolicy,
     Submission,
@@ -144,6 +146,37 @@ def system_database_url(db_url: str) -> tuple[str, str | None]:
     ), "dbos"
 
 
+_SQLITE_BUSY_SECONDS = 30
+
+
+def _sqlite_system_connection(url: str) -> Callable[[], sqlite3.Connection]:
+    """Open the engine's SQLite file the way the application opens its own.
+
+    DBOS leaves its file in rollback-journal mode with full synchronisation and
+    begins every transaction IMMEDIATE, so each queue poll and checkpoint
+    excluded every other one and forced the journal to disk. Write-ahead
+    logging lets its polls read while a checkpoint commits. The engine's copy
+    is disposable: the reconciler rebuilds lost executions from Job rows.
+    """
+    database = make_url(url).database
+    if database is None:
+        raise ValueError("engine_requires_file_backed_sqlite")
+    synchronous = settings.sqlite_synchronous.upper()
+    if synchronous not in {"NORMAL", "FULL"}:
+        raise ValueError("sqlite_synchronous must be NORMAL or FULL")
+
+    def connect() -> sqlite3.Connection:
+        # The timeout waits out a locked file instead of failing the checkpoint.
+        connection = sqlite3.connect(
+            database, timeout=_SQLITE_BUSY_SECONDS, check_same_thread=False
+        )
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute(f"PRAGMA synchronous={synchronous}")
+        return connection
+
+    return connect
+
+
 class _DbosRunner:
     def run(self, name: str, fn: Callable[[], Any], retry: RetryPolicy) -> Any:
         options: dict[str, Any] = {"name": name}
@@ -220,7 +253,9 @@ class DbosJobEngine(JobEngine):
         if self.schema is not None:
             config["dbos_system_schema"] = self.schema
         else:
-            config["db_engine_kwargs"] = {"connect_args": {"timeout": 30}}
+            config["db_engine_kwargs"] = {
+                "creator": _sqlite_system_connection(self.url)
+            }
         return config
 
     def _register_workflows(self) -> None:
@@ -351,7 +386,9 @@ class DbosJobEngine(JobEngine):
 
     def _register_queue(self, lane: Lane) -> Queue:
         options: dict[str, Any] = {
-            "polling_interval_sec": self.polling,
+            "polling_interval_sec": self.polling
+            if lane.pace is LanePace.PROMPT
+            else max(self.polling, settings.jobs_relaxed_queue_poll_interval_seconds),
             "on_conflict": "always_update",
         }
         if lane.partitioned:

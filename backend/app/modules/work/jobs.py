@@ -315,6 +315,16 @@ class JobStore:
             return None
         return row
 
+    @staticmethod
+    def owns_execution(
+        session: Session, job_id: str, *, epoch: str, attempt: int, state: JobState
+    ) -> bool:
+        """Whether this attempt still holds the Job, read without locking it."""
+        row = session.exec(
+            select(Job.execution_epoch, Job.attempts, Job.state).where(Job.id == job_id)
+        ).first()
+        return row is not None and tuple(row) == (epoch, attempt, state)
+
     # -- status -------------------------------------------------------------
 
     def update(

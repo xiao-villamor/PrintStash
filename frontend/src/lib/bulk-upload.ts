@@ -148,3 +148,31 @@ export async function walkEntries(entries: FileSystemEntry[]): Promise<BulkItem[
   const nested = await Promise.all(entries.map(walkEntry));
   return nested.flat();
 }
+
+/**
+ * How many files of one bulk upload are in flight at once. The server admits
+ * four staged uploads per user; one is left for whatever else the same person
+ * starts while a folder is going up.
+ */
+export const BULK_UPLOAD_CONCURRENCY = 3;
+
+/**
+ * Run `work` over `items` with at most `limit` in flight, in queue order.
+ * `work` owns its own failures: one that rejects stops its lane, not the rest.
+ */
+export async function runBounded<T>(
+  items: readonly T[],
+  limit: number,
+  work: (item: T) => Promise<void>,
+): Promise<void> {
+  if (!Number.isInteger(limit) || limit < 1) throw new RangeError("bulk_upload_limit");
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < items.length) {
+      const item = items[next];
+      next += 1;
+      await work(item);
+    }
+  };
+  await Promise.allSettled(Array.from({ length: Math.min(limit, items.length) }, lane));
+}

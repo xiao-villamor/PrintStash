@@ -7,7 +7,7 @@ serialized: every attempt rebuilds what it needs from the subject row.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import ClassVar, Optional
 from uuid import uuid4
 
 from sqlalchemy import CheckConstraint, Column, ForeignKey, Index, Integer, Text, text
@@ -32,6 +32,11 @@ class Job(SQLModel, table=True):
     Staging leases, Pending Imports and upload sessions point at it through
     ``job_id``: the Job, not an engine execution, owns their staged bytes.
     """
+
+    # Machine bookkeeping, rewritten many times per Job: user actions on work
+    # are recorded explicitly, and a row-level trail of every heartbeat only
+    # adds a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
 
     __tablename__ = "jobs"
     __table_args__ = (
@@ -111,6 +116,11 @@ class ReconcileCursor(SQLModel, table=True):
     a finishing pass as still active and would drop the nudge).
     """
 
+    # Machine bookkeeping, rewritten many times per Job: user actions on work
+    # are recorded explicitly, and a row-level trail of every heartbeat only
+    # adds a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
+
     __tablename__ = "reconcile_cursors"
     __table_args__ = (
         enum_check("source", JobKind),
@@ -187,6 +197,11 @@ class WorkFence(SQLModel, table=True):
     crashed holder's fence expires on its own after ``expires_at``.
     """
 
+    # Machine bookkeeping, rewritten many times per Job: user actions on work
+    # are recorded explicitly, and a row-level trail of every heartbeat only
+    # adds a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
+
     __tablename__ = "work_fences"
 
     name: str = Field(primary_key=True, max_length=64)
@@ -199,6 +214,11 @@ class WorkFence(SQLModel, table=True):
 
 class WorkExecutor(SQLModel, table=True):
     """A process that runs jobs, with its role and last heartbeat."""
+
+    # Machine bookkeeping, rewritten many times per Job: user actions on work
+    # are recorded explicitly, and a row-level trail of every heartbeat only
+    # adds a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
 
     __tablename__ = "work_executors"
     __table_args__ = (enum_check("role", ProcessRole),)

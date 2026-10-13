@@ -1,7 +1,12 @@
 /** Session-bound execution of accepted model uploads; modal disposal does not own this work. */
 import { getModel } from "@/lib/api/models";
 import { uploadArtifact, type ArtifactUploadProgress } from "@/lib/artifact-upload";
-import { bulkTargetCollection, type BulkItem } from "@/lib/bulk-upload";
+import {
+  BULK_UPLOAD_CONCURRENCY,
+  bulkTargetCollection,
+  runBounded,
+  type BulkItem,
+} from "@/lib/bulk-upload";
 import { ApiError } from "@/lib/errors";
 import { uiMessage, uiText } from "@/lib/locale";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
@@ -194,8 +199,9 @@ export async function runModelUpload(
 }
 
 // Bulk: create one task per mesh upfront (so the whole queue is visible in
-// the task center), then process sequentially to avoid hammering the vault
-// with concurrent uploads. Each file becomes its own model — no G-code
+// the task center), then keep a few in flight: the server's own staging
+// admission is the backpressure, and a refused file waits for room instead of
+// failing. Each file becomes its own model — no G-code
 // linking, which is what keeps this distinct from the "Files" tab.
 export async function runBulkModelUpload(
   {
@@ -226,7 +232,7 @@ export async function runBulkModelUpload(
     }),
   }));
   try {
-    for (const { item, taskId } of queue) {
+    await runBounded(queue, BULK_UPLOAD_CONCURRENCY, async ({ item, taskId }) => {
       if (session !== getSessionVersion()) return;
       // Mirror the file's source folder into a nested collection under the
       // chosen base — the backend auto-creates intermediate collections.
@@ -247,7 +253,7 @@ export async function runBulkModelUpload(
         onUploaded,
         session,
       );
-    }
+    });
   } finally {
     // One invalidation after the entire queue, including partial failures.
     if (session === getSessionVersion()) {

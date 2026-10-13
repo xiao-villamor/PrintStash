@@ -1203,3 +1203,49 @@ class TestActiveJobQueryPlans:
         assert all(
             not any("SCAN jobs" in detail for detail in plan) for plan in plans
         ), plans
+
+
+class TestOwnsExecution:
+    """A step asks whether its attempt still holds the Job, without locking it."""
+
+    def _running(self, make_job) -> Job:
+        return make_job(state=JobState.RUNNING, attempts=2, execution_epoch="epoch-a")
+
+    def test_the_current_attempt_owns_its_job(self, db_session, make_job) -> None:
+        job = self._running(make_job)
+
+        assert JobStore.owns_execution(
+            db_session, job.id, epoch="epoch-a", attempt=2, state=JobState.RUNNING
+        )
+
+    @pytest.mark.parametrize(
+        ("epoch", "attempt", "state"),
+        [
+            ("epoch-b", 2, JobState.RUNNING),
+            ("epoch-a", 1, JobState.RUNNING),
+            ("epoch-a", 2, JobState.QUEUED),
+        ],
+        ids=["replaced-epoch", "superseded-attempt", "other-state"],
+    )
+    def test_a_stale_claim_does_not_own_the_job(
+        self, db_session, make_job, epoch, attempt, state
+    ) -> None:
+        job = self._running(make_job)
+
+        assert not JobStore.owns_execution(
+            db_session, job.id, epoch=epoch, attempt=attempt, state=state
+        )
+
+    def test_a_missing_job_is_owned_by_nobody(self, db_session) -> None:
+        assert not JobStore.owns_execution(
+            db_session, "absent", epoch="e", attempt=1, state=JobState.RUNNING
+        )
+
+    def test_the_check_does_not_become_the_writer(self, db_session, make_job) -> None:
+        job = self._running(make_job)
+
+        JobStore.owns_execution(
+            db_session, job.id, epoch="epoch-a", attempt=2, state=JobState.RUNNING
+        )
+
+        assert not db_session.connection().connection.driver_connection.in_transaction

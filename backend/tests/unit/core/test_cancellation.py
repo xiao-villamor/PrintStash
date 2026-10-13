@@ -18,11 +18,19 @@ class TestCancellationScope:
         monkeypatch.setattr(cancellation.time, "monotonic", lambda: now[0])
         with cancellation.cancellation_scope(lambda: bool(calls.append(now[0]))):
             cancellation.checkpoint()
-            now[0] = 0.1
+            now[0] = 0.4
             cancellation.checkpoint()
-            now[0] = 0.3
+            now[0] = 0.5
             cancellation.checkpoint()
-        assert calls == [0, 0.3]
+        assert calls == [0, 0.5]
+
+    def test_a_forced_checkpoint_probes_inside_the_throttle(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(cancellation.time, "monotonic", lambda: 0.0)
+        with cancellation.cancellation_scope(lambda: bool(calls.append(1))):
+            cancellation.checkpoint()
+            cancellation.checkpoint(force=True)
+        assert calls == [1, 1]
 
     def test_latches_withdrawal(self, monkeypatch):
         stopped = [True]

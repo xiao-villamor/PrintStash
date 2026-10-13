@@ -70,10 +70,15 @@ from .ingest import (
 
 router = APIRouter(prefix="/artifact-uploads", tags=["artifact-uploads"])
 
-_create_limit = rate_limit(30, 60.0)
-_plan_limit = rate_limit(180, 60.0)
+# These bound a runaway client, not a folder of models: staging admission
+# (active uploads per user, pending count, bytes) is what paces real uploads.
+# Thirty sessions a minute held a 200-file drop to one file every two seconds
+# and, without a client retry, failed the files that arrived faster.
+CREATE_SESSIONS_PER_MINUTE = 600
+_create_limit = rate_limit(CREATE_SESSIONS_PER_MINUTE, 60.0)
+_plan_limit = rate_limit(1200, 60.0)
 _chunk_limit = rate_limit(600, 60.0)
-_finalize_limit = rate_limit(60, 60.0)
+_finalize_limit = rate_limit(600, 60.0)
 _native_part_limit = rate_limit(600, 60.0)
 
 

@@ -470,7 +470,7 @@ class TestArtifactUploads:
             client.post(
                 "/api/v1/artifact-uploads", json=_request(b"x"), headers=auth_headers
             )
-            for _ in range(31)
+            for _ in range(upload_api.CREATE_SESSIONS_PER_MINUTE + 1)
         ]
 
         assert responses[-1].status_code == 429
