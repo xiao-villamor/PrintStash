@@ -84,6 +84,7 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
     updated_at: FROZEN_NOW,
     files: [],
     starred: false,
+    derivatives_revision: "0",
     ...over,
   };
 }

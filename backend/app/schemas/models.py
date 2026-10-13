@@ -170,6 +170,9 @@ class ModelRead(EditingBase):
     files: List[FileRead] = []
     trashed_source_files: List[TrashedSourceFileRead] = []
     starred: bool = False
+    # Opaque; equal to the `revision` of a later `subscribed` acknowledgement on
+    # this Model's channel when no derivative changed in between.
+    derivatives_revision: str
 
 
 class ModelPrinterFileRead(BaseModel):

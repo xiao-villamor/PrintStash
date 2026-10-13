@@ -323,6 +323,7 @@ export function aModel(
     updated_at: FROZEN_NOW,
     files: [],
     starred: false,
+    derivatives_revision: "0",
     similarity: { open_candidates: 0, confirmed: 0 },
     ...override,
   };

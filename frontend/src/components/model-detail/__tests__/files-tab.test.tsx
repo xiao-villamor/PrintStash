@@ -52,6 +52,7 @@ const updatedModel: ModelRead = {
   updated_at: "2026-01-01T00:00:00Z",
   files: [{ ...artifact, tags: ["Existing", "Workshop"] }],
   starred: false,
+  derivatives_revision: "0",
 };
 
 describe("FilesTab", () => {

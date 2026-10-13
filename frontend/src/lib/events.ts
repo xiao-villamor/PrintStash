@@ -24,7 +24,9 @@ import type { DerivativeState, JobState } from "@/types";
 export type EventNotice =
   | { type: "resync" }
   | { type: "derivative_policy" }
-  | { type: "subscribed"; channel: string }
+  // `revision` is present on Model channels only: the Model's derivative
+  // revision when the subscription took effect (`ModelRead.derivatives_revision`).
+  | { type: "subscribed"; channel: string; revision?: string }
   | {
       type: "job";
       job_id: string;
@@ -282,7 +284,8 @@ export function subscribeEvents(listener: EventListener): () => void {
  * every `resync`, and the server's `subscribed` acknowledgement of this
  * Model's channel: a derivative that settled before the subscription took
  * effect was announced to nobody, so a follower refetches on that
- * acknowledgement. The server checks the viewer may see the Model.
+ * acknowledgement unless it already holds the revision the acknowledgement
+ * names. The server checks the viewer may see the Model.
  */
 export function followModel(modelId: number, listener: EventListener): () => void {
   const channel = `model:${modelId}`;

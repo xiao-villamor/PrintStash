@@ -26,6 +26,7 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
+from app.modules.derivatives import records as derivative_records
 from app.modules.identity import rbac
 from app.modules.library import collection_tree, provenance
 from app.schemas.models import (
@@ -221,6 +222,7 @@ def detail(session: Session, model_id: int, user: User) -> ModelRead | None:
             if file.id is not None
         ],
         starred=starred,
+        derivatives_revision=derivative_records.model_revision(session, model_id),
     )
 
 

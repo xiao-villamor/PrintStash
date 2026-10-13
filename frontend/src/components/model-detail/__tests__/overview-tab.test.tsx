@@ -58,6 +58,7 @@ const model: ModelRead = {
   updated_at: "2026-08-24T00:00:00Z",
   files: [],
   starred: false,
+  derivatives_revision: "0",
 };
 
 function renderOverview(sourceUrl: string) {
