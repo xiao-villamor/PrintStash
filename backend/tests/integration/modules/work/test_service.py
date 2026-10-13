@@ -135,6 +135,14 @@ class TestDispatch:
             job.attempts,
         ) == (True, 1)
 
+    def test_tells_the_engine_someone_is_waiting(self, work_engine, make_job) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN)
+
+        service.dispatch(job.id, JobKind.SOURCES_SCAN)
+
+        (execution,) = work_engine.executions.values()
+        assert execution.submission.expedite is True
+
     def test_an_accepted_job_needs_no_reconcile_pass(
         self, work_engine, make_job
     ) -> None:

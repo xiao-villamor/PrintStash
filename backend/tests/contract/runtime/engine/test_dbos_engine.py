@@ -1,4 +1,10 @@
-"""Actual engine queue ordering, persistent ticks and DBOS system-state upgrades."""
+"""Actual engine queue ordering, persistent ticks and DBOS system-state upgrades.
+
+The engine finds queued work only by polling. A lane that was just handed
+interactive work is polled faster for a short window and then returns to its
+own interval. When this goes red, either an upload waits half an ordinary
+polling interval for nothing, or an idle server keeps paying for the fast one.
+"""
 
 import sqlite3
 import threading
@@ -11,6 +17,7 @@ from dbos import DBOS
 from sqlalchemy import Column, Integer, MetaData, Table, create_engine
 from sqlmodel import select
 
+from app.core.config import _overlay
 from app.db.models import Job, JobState, LaneName, WorkPriority
 from app.db.session import get_session_factory
 from app.modules.work import catalog as catalog_module
@@ -20,6 +27,7 @@ from app.modules.work.contracts import Deduplicated, JobSubmission, SubmitOutcom
 from app.runtime.engine.dbos_engine import TICK_WORKFLOW, system_database_url
 from tests.containers import fresh_postgres_database
 from tests.contract.modules.work._harness import (
+    FAST,
     PLAIN,
     RECORD,
     DbosHarness,
@@ -139,6 +147,106 @@ class TestPersistentTick:
             ).one()
             assert found.state == JobState.COMPLETED
         assert "tick/missed-nudge" not in RECORD.discover
+
+
+def _submission(job, *, expedite: bool = True) -> JobSubmission:
+    return JobSubmission(
+        execution_id=submission.execution_id(job.id, 1, job.execution_epoch),
+        job_id=job.id,
+        definition=job.kind,
+        subject_key=job.subject_key,
+        lane=FAST,
+        priority=WorkPriority.INTERACTIVE,
+        attempt=1,
+        execution_epoch=job.execution_epoch,
+        routing=Deduplicated(submission.dedupe_key(job.kind, job.subject_key)),
+        expedite=expedite,
+    )
+
+
+def _interval(harness, lane: LaneName) -> float:
+    return harness.engine._queues[lane].polling_interval_sec
+
+
+class TestLaneBoost:
+    def test_a_job_a_request_waits_on_boosts_its_lane(self, engine):
+        _overlay["jobs_boosted_queue_poll_interval_seconds"] = 0.02
+        job_id = engine.job(PLAIN, "boost/1")
+        with get_session_factory().scoped_session() as session:
+            job = session.get(Job, job_id)
+
+        engine.engine.submit(_submission(job))
+
+        assert (engine.engine.boosted_lanes(), _interval(engine, FAST)) == (
+            frozenset({FAST}),
+            0.02,
+        )
+
+    def test_a_job_nobody_waits_on_leaves_its_lane_alone(self, engine):
+        _overlay["jobs_boosted_queue_poll_interval_seconds"] = 0.02
+        job_id = engine.job(PLAIN, "boost/2")
+        with get_session_factory().scoped_session() as session:
+            job = session.get(Job, job_id)
+
+        engine.engine.submit(_submission(job, expedite=False))
+
+        assert (engine.engine.boosted_lanes(), _interval(engine, FAST)) == (
+            frozenset(),
+            0.1,
+        )
+
+    def test_a_reconcile_pass_boosts_nothing(self, engine):
+        _overlay["jobs_boosted_queue_poll_interval_seconds"] = 0.02
+
+        submission.nudge(PLAIN)
+
+        assert engine.engine.boosted_lanes() == frozenset()
+
+    def test_a_boost_ends_after_its_window(self, engine):
+        _overlay["jobs_boosted_queue_poll_interval_seconds"] = 0.02
+        _overlay["jobs_queue_boost_seconds"] = 0.2
+        job_id = engine.job(PLAIN, "boost/3")
+        with get_session_factory().scoped_session() as session:
+            job = session.get(Job, job_id)
+        engine.engine.submit(_submission(job))
+
+        engine.wait_for(lambda: not engine.engine.boosted_lanes())
+
+        assert _interval(engine, FAST) == 0.1
+
+    def test_a_window_of_zero_disables_the_boost(self, engine):
+        _overlay["jobs_boosted_queue_poll_interval_seconds"] = 0.02
+        _overlay["jobs_queue_boost_seconds"] = 0.0
+        job_id = engine.job(PLAIN, "boost/4")
+        with get_session_factory().scoped_session() as session:
+            job = session.get(Job, job_id)
+
+        engine.engine.submit(_submission(job))
+
+        assert (engine.engine.boosted_lanes(), _interval(engine, FAST)) == (
+            frozenset(),
+            0.1,
+        )
+
+    def test_a_boost_no_faster_than_the_lane_changes_nothing(self, engine):
+        _overlay["jobs_boosted_queue_poll_interval_seconds"] = 1.0
+        job_id = engine.job(PLAIN, "boost/5")
+        with get_session_factory().scoped_session() as session:
+            job = session.get(Job, job_id)
+
+        engine.engine.submit(_submission(job))
+
+        assert engine.engine.boosted_lanes() == frozenset()
+
+    def test_a_boosted_job_still_runs_to_completion(self, engine):
+        _overlay["jobs_boosted_queue_poll_interval_seconds"] = 0.02
+        engine.relaunch(app_version=VERSION, listen_lanes=None)
+        job_id = engine.job(PLAIN, "boost/6")
+
+        submission.submit(job_id, expedite=True)
+        engine.settle()
+
+        assert engine.state(job_id) == JobState.COMPLETED
 
 
 def _recover_legacy_job(harness):

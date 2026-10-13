@@ -99,7 +99,7 @@ def dispatch(job_id: str, definition: JobKind) -> None:
         return
     result = PassResult()
     try:
-        submit_job(job_id, result)
+        submit_job(job_id, result, expedite=True)
     except Exception:  # noqa: BLE001 - the reconciler recovers the submission
         logger.exception("job dispatch failed", extra={"job_id": job_id})
     if result.submitted == 0:

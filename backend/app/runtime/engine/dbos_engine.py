@@ -19,6 +19,7 @@ import asyncio
 import contextvars
 import sqlite3
 import threading
+import time
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -233,6 +234,10 @@ class DbosJobEngine(JobEngine):
         self._queues: dict[LaneName, Queue] = {}
         self._launched = False
         self._lock = threading.Lock()
+        # Lanes polled at the boosted interval, with when each returns to its own.
+        self._boosted: dict[LaneName, float] = {}
+        self._boost_lock = threading.Lock()
+        self._relax_timer: threading.Timer | None = None
 
     @property
     def executor_id(self) -> str:
@@ -384,11 +389,80 @@ class DbosJobEngine(JobEngine):
         except Exception as exc:
             raise RuntimeError(_FIFO_DRAIN_REQUIRED) from exc
 
+    def _interval(self, lane: Lane) -> float:
+        """How often ``lane`` is polled when nothing has just been handed to it."""
+        return (
+            self.polling
+            if lane.pace is LanePace.PROMPT
+            else max(self.polling, settings.jobs_relaxed_queue_poll_interval_seconds)
+        )
+
+    def _boost(self, name: LaneName) -> None:
+        """Poll ``name`` faster for a short while. Never raises into a submission.
+
+        The engine only finds queued work by polling, so a Job someone waits on
+        sits half a polling interval on average. Polling every lane that often
+        would be paid for all day by an idle server; boosting the one lane a
+        request just dispatched to is paid for only while a batch arrives.
+        """
+        window = settings.jobs_queue_boost_seconds
+        lane = self.catalog.lanes[name]
+        boosted = min(
+            self._interval(lane), settings.jobs_boosted_queue_poll_interval_seconds
+        )
+        if window <= 0 or boosted >= self._interval(lane):
+            return
+        with self._boost_lock:
+            already = name in self._boosted
+            self._boosted[name] = time.monotonic() + window
+            if already:
+                return
+            try:
+                self._queues[name].set_polling_interval_sec(boosted)
+            except Exception:  # noqa: BLE001 - the lane keeps its own interval
+                del self._boosted[name]
+                logger.exception("lane boost failed", extra={"lane": name.value})
+                return
+            if self._relax_timer is None:
+                self._arm_relax(window)
+
+    def _arm_relax(self, delay: float) -> None:
+        timer = threading.Timer(max(delay, 0.01), self._relax)
+        timer.daemon = True
+        timer.name = "work-lane-relax"
+        self._relax_timer = timer
+        timer.start()
+
+    def _relax(self) -> None:
+        """Return lanes whose boost has run out to their own interval."""
+        with self._boost_lock:
+            self._relax_timer = None
+            now = time.monotonic()
+            for name, until in list(self._boosted.items()):
+                if until > now:
+                    continue
+                queue = self._queues.get(name)
+                try:
+                    if queue is not None:
+                        queue.set_polling_interval_sec(
+                            self._interval(self.catalog.lanes[name])
+                        )
+                except Exception:  # noqa: BLE001 - tried again at the next expiry
+                    logger.exception("lane relax failed", extra={"lane": name.value})
+                    self._boosted[name] = now + 1.0
+                    continue
+                del self._boosted[name]
+            if self._boosted:
+                self._arm_relax(min(self._boosted.values()) - now)
+
+    def boosted_lanes(self) -> frozenset[LaneName]:
+        """Lanes currently polled at the boosted interval."""
+        with self._boost_lock:
+            return frozenset(self._boosted)
+
     def _register_queue(self, lane: Lane) -> Queue:
         options: dict[str, Any] = {
-            "polling_interval_sec": self.polling
-            if lane.pace is LanePace.PROMPT
-            else max(self.polling, settings.jobs_relaxed_queue_poll_interval_seconds),
+            "polling_interval_sec": self._interval(lane),
             "on_conflict": "always_update",
         }
         if lane.partitioned:
@@ -411,6 +485,11 @@ class DbosJobEngine(JobEngine):
         with self._lock:
             if not self._launched:
                 return
+            with self._boost_lock:
+                if self._relax_timer is not None:
+                    self._relax_timer.cancel()
+                    self._relax_timer = None
+                self._boosted.clear()
             DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=10)
             self._queues.clear()
             self._launched = False
@@ -451,6 +530,8 @@ class DbosJobEngine(JobEngine):
                     )
         except dbos_error.DBOSQueueDeduplicatedError:
             return SubmitOutcome.DEDUPLICATED
+        if isinstance(submission, JobSubmission) and submission.expedite:
+            self._boost(submission.lane)
         return SubmitOutcome.ACCEPTED
 
     def cancel(self, execution_id: str) -> None:

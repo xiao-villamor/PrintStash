@@ -96,6 +96,14 @@ absorbed by a queued backfill pass. The tick, a single persistent DBOS
 schedule, nudges every definition at `JOBS_RECONCILE_INTERVAL_SECONDS` as a
 safety net, and schedule sources become due on it.
 
+A request that records a Job it will wait on (an upload, a URL import)
+dispatches it itself after its commit: it submits the Job through the same
+path a pass uses, so no pass is queued to find it. Anything short of an
+accepted submission falls back to a nudge, and the repair pass remains the
+recovery. Because the engine finds queued work only by polling, that
+submission also boosts its lane's polling for a few seconds: the Job is picked
+up sooner, and so is the rest of a batch that follows it.
+
 The dirty mark is a write, so it travels with a write that already happens.
 `nudge_after_commit` stamps it as the caller's transaction commits, and a Job's
 terminal write stamps the sources its completion affects; only the pass is
@@ -247,6 +255,7 @@ both Compose files run the first with no setting.
 | --- | --- | --- |
 | `JOBS_QUEUE_POLL_INTERVAL_SECONDS` | 0.25 | DBOS lane dispatch polling (0.05–5 seconds); lower values trade more local database polling for shorter queue handoffs |
 | `JOBS_RELAXED_QUEUE_POLL_INTERVAL_SECONDS` | 2.0 | Polling of lanes nobody waits on (search, maintenance, notify, similarity, captions, expansion); never faster than the interval above. Every look at a queue costs database statements whether or not work is there |
+| `JOBS_BOOSTED_QUEUE_POLL_INTERVAL_SECONDS` / `JOBS_QUEUE_BOOST_SECONDS` | 0.1 / 3.0 | A lane a request has just dispatched a Job to is polled at the first for the second, then returns to its own interval; a window of 0 disables it |
 | `JOBS_RECONCILE_INTERVAL_SECONDS` | 300 | Safety-net tick |
 | `JOBS_RECONCILE_BATCH` | 500 | Most Jobs one pass creates |
 | `JOBS_LANE_HEADROOM_FACTOR` | 2 | Pending depth multiplier for ordinary lanes; derivation lanes reserve concurrency plus one |

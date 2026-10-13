@@ -65,6 +65,7 @@ def submit(
     *,
     now: datetime | None = None,
     reserved_backfill_epoch: str | None = None,
+    expedite: bool = False,
 ) -> SubmitOutcome | None:
     """Submit the next attempt of an active Job. ``None`` when nothing to do.
 
@@ -101,6 +102,7 @@ def submit(
             routing=Deduplicated(dedupe_key(row.kind, row.subject_key))
             if definition.partition is None
             else Partitioned(definition.partition(row.subject_key)),
+            expedite=expedite,
         )
         pending_epoch = row.submitted_epoch != row.execution_epoch
     outcome = engine.submit(submission)

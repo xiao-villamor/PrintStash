@@ -508,7 +508,11 @@ def _reserve_backfill_epoch(
 
 
 def submit_job(
-    job_id: str, result: PassResult, *, lease: _DiscoveryLease | None = None
+    job_id: str,
+    result: PassResult,
+    *,
+    lease: _DiscoveryLease | None = None,
+    expedite: bool = False,
 ) -> None:
     """Submit one active Job's next attempt under the lane's admission rules.
 
@@ -546,7 +550,7 @@ def submit_job(
                 return
             outcome = submit(job_id, reserved_backfill_epoch=epoch)
         else:
-            outcome = submit(job_id)
+            outcome = submit(job_id, expedite=expedite)
     except fences.FenceHeld:
         result.count(PassNote.CLAIMED_ELSEWHERE)
         result.deferred += 1

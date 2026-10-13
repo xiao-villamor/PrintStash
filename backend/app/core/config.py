@@ -225,6 +225,11 @@ class Settings(BaseSettings):
     # Lanes nobody waits on (search, upkeep, notifications). Every look at a
     # queue costs database statements whether or not work is there.
     jobs_relaxed_queue_poll_interval_seconds: float = Field(default=2.0, ge=0.05, le=60)
+    # A lane a request has just dispatched a Job to is polled faster for a short
+    # while: someone is waiting on it, and more of the same batch usually
+    # follows. Idle lanes keep the intervals above. A window of 0 disables it.
+    jobs_boosted_queue_poll_interval_seconds: float = Field(default=0.1, ge=0.01, le=5)
+    jobs_queue_boost_seconds: float = Field(default=3.0, ge=0, le=600)
     jobs_reconcile_interval_seconds: int = Field(default=300, ge=10, le=86400)
     jobs_reconcile_batch: int = Field(default=500, ge=1, le=10000)
     jobs_lane_headroom_factor: int = Field(default=2, ge=1, le=100)

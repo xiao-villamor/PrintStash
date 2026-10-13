@@ -440,6 +440,9 @@ class JobSubmission:
     execution_epoch: str
     routing: Deduplicated | Partitioned
     delay_seconds: float | None = None
+    # A request is waiting on this very submission (an upload it just
+    # accepted), so the engine may spend a little to pick it up sooner.
+    expedite: bool = False
 
 
 @dataclass(frozen=True)
