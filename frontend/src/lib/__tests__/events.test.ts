@@ -1,9 +1,10 @@
 /*
  * The events socket every view shares to hear that background work changed.
  *
- * One connection per tab, opened while anything listens and closed when
- * nothing does: a socket per component would multiply server load by the
- * number of mounted views. It reconnects with a bounded backoff, and after a
+ * One connection per tab, opened while anything listens and closed shortly
+ * after nothing does: a socket per component would multiply server load by the
+ * number of mounted views, and a socket per route would pay for a ticket, a
+ * handshake and a resync on every navigation. It reconnects with a bounded backoff, and after a
  * reconnect re-follows every Model a view still shows, because the server
  * forgot the old connection's subscriptions. A frame it does not understand is
  * ignored rather than guessed at; a newer server may send kinds this build
@@ -54,6 +55,9 @@ function follow(modelId: number, listener: (notice: EventNotice) => void): () =>
   stops.push(stop);
   return stop;
 }
+
+/** How long an established connection outlives its last listener. */
+const IDLE_CLOSE_MS = 10_000;
 
 let sockets: FakeSocket[];
 const opened = vi.fn<() => Promise<EventSocket>>();
@@ -127,10 +131,74 @@ describe("subscribeEvents", () => {
     const socket = await connected();
 
     first();
-    expect(socket.close).not.toHaveBeenCalled();
     second();
+    await vi.advanceTimersByTimeAsync(IDLE_CLOSE_MS);
 
     expect(socket.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the connection while another listener remains", async () => {
+    const first = subscribe(vi.fn<(notice: EventNotice) => void>());
+    subscribe(vi.fn<(notice: EventNotice) => void>());
+    const socket = await connected();
+
+    first();
+    await vi.advanceTimersByTimeAsync(IDLE_CLOSE_MS);
+
+    expect(socket.close).not.toHaveBeenCalled();
+  });
+
+  it("keeps the connection for a listener that arrives before the idle close", async () => {
+    const leaving = subscribe(vi.fn<(notice: EventNotice) => void>());
+    const socket = await connected();
+
+    leaving();
+    await vi.advanceTimersByTimeAsync(IDLE_CLOSE_MS - 1);
+    subscribe(vi.fn<(notice: EventNotice) => void>());
+    await vi.advanceTimersByTimeAsync(IDLE_CLOSE_MS);
+
+    expect(socket.close).not.toHaveBeenCalled();
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells the next listener to resync after a notice nobody heard", async () => {
+    const leaving = subscribe(vi.fn<(notice: EventNotice) => void>());
+    const socket = await connected();
+    leaving();
+    socket.frame(JSON.stringify({ type: "derivative_policy" }));
+
+    const heard = vi.fn<(notice: EventNotice) => void>();
+    subscribe(heard);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(heard.mock.calls).toEqual([[{ type: "resync" }]]);
+  });
+
+  it("stays quiet for a listener that missed nothing", async () => {
+    const leaving = subscribe(vi.fn<(notice: EventNotice) => void>());
+    await connected();
+    leaving();
+
+    const heard = vi.fn<(notice: EventNotice) => void>();
+    subscribe(heard);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(heard).not.toHaveBeenCalled();
+  });
+
+  it("forgets an unheard notice once the idle connection closes", async () => {
+    const leaving = subscribe(vi.fn<(notice: EventNotice) => void>());
+    const socket = await connected();
+    leaving();
+    socket.frame(JSON.stringify({ type: "derivative_policy" }));
+    await vi.advanceTimersByTimeAsync(IDLE_CLOSE_MS);
+
+    const heard = vi.fn<(notice: EventNotice) => void>();
+    subscribe(heard);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(heard).not.toHaveBeenCalled();
+    expect(opened).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -337,6 +405,7 @@ describe("the default connection", () => {
     ws.onopen?.();
 
     stop();
+    await vi.advanceTimersByTimeAsync(IDLE_CLOSE_MS);
 
     expect(ws.close).toHaveBeenCalledTimes(1);
   });
@@ -379,6 +448,7 @@ describe("event connection lifetimes", () => {
     const oldMessage = old.onmessage;
     const oldClose = old.onclose;
     stop();
+    await vi.advanceTimersByTimeAsync(IDLE_CLOSE_MS);
     const heard = vi.fn<(notice: EventNotice) => void>();
     subscribe(heard);
     await connected();
@@ -411,6 +481,15 @@ describe("event connection lifetimes", () => {
     const socket = await connected();
     socket.frame('{"type":"resync"}');
     expect(heard).not.toHaveBeenCalled();
+    expect(socket.close).toHaveBeenCalledOnce();
+  });
+
+  it("retires an idle event socket on logout", async () => {
+    const stop = subscribe(vi.fn<(notice: EventNotice) => void>());
+    const socket = await connected();
+    stop();
+    clearLogin();
+    await vi.advanceTimersByTimeAsync(IDLE_CLOSE_MS);
     expect(socket.close).toHaveBeenCalledOnce();
   });
 

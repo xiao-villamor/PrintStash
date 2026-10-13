@@ -2,14 +2,18 @@
 
 ## Unreleased
 
-- Open Models faster from the Library: resting the pointer or keyboard focus on
-  a Model card reads its details ahead of the click.
+- Keep one events connection and one setup admission while moving between
+  application pages. Opening a Model and returning no longer hides the app
+  behind a setup probe, reopens the events socket or refetches every view.
 
 - Keep folder descriptions and model cards together when navigating, clamp long descriptions before the first paint, and avoid fading cached library thumbnails on every visit.
 
 - Enable mesh preview readiness after its first rendered frame; verify overlay alignment, display-mode pixels, and repeated resource cleanup on WebGL/WebGPU.
 
 - Extend native mesh preview checks for camera movement, screenshot scales, capture failures, and disposal; retain WebGPU as experimental after baseline comparison.
+
+- Open Models faster from the Library: resting the pointer or keyboard focus on
+  a Model card reads its details ahead of the click.
 
 - Release the mesh preview GPU device when renderer construction or initialization cleanup fails.
 

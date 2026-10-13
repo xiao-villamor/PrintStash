@@ -1446,6 +1446,8 @@ describe("createImportJobSynchronizer", () => {
     await handshake();
 
     stop();
+    // The connection outlives its last listener by the events idle window.
+    await vi.advanceTimersByTimeAsync(10_000);
 
     expect(socket.close).toHaveBeenCalled();
   });
