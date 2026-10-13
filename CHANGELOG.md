@@ -4,6 +4,8 @@
 
 ### Performance
 
+- Release prepared thumbnail parsers before GPU eligibility/dispatch instead of repeating broker status inside each disposable process. Keep model publication ahead of background DBOS captures, preserve guarded recovery from the same geometry packet, use compact exact OBJ corner keys, and skip STL preflight scans that cannot change the minimum memory claim.
+
 - Simplify source geometry preparation and native supervision: load qualified OBJ directly, bound text admission without parsing coordinates twice, avoid redundant vertex/edge sorting, and reuse a narrow cancellation query with fresh results. Keep native settings minimal and sample each staged worker's RAM once. A fixed 250-source WSL GPU comparison improves from 497.090 to 358.937 seconds (27.79%, using the longer of the two recorded clocks in the final repeat; first candidate: 357.279 seconds), preserving all metadata, 238 byte-identical images and the same 12 invalid-source outcomes; CPU-only geometry uses the same preparation path.
 
 - Decode ASCII STL geometry once for both CPU-only and GPU-enabled ingestion, retaining bounded source blocks instead of reparsing for allocation. Preserve exact source measurements, validation and output images. The fresh 250-source GPU comparison reduces elapsed time by 2.77%; a repeated three-source CPU-only probe improves by 29.02%.

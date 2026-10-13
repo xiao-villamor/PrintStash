@@ -87,6 +87,53 @@ class TestPacketCustody:
 
 
 class TestPreparedExecution:
+    def test_parser_prepares_packet_without_compute_transport(self, tmp_path):
+        source = tmp_path / "source.stl"
+        source.write_bytes(trimesh.creation.box().export(file_type="stl"))
+        output = tmp_path / "packet"
+        output.mkdir()
+        script = r"""
+import importlib.abc, sys, time
+from pathlib import Path
+class Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname in {'app.runtime.compute.client', 'app.runtime.compute.protocol', 'app.runtime.compute.contracts'}:
+            raise AssertionError('unexpected compute transport import: ' + fullname)
+sys.meta_path.insert(0, Block())
+from app.runtime.native_admission import LocalResourcePool
+from app.runtime.native_runtime import bind_pool
+bind_pool(LocalResourcePool(Path(sys.argv[3])))
+from app.modules.media.mesh_worker import ThumbnailEngine
+from app.modules.media.mesh_contracts import PreparedThumbnailResult, ThumbnailRequest
+from app.modules.media.thumbnail_packet import read_packet, validate_payload
+result = ThumbnailEngine().prepare(
+    ThumbnailRequest(Path(sys.argv[1]), include_fingerprint=False, output_format='WEBP'),
+    Path(sys.argv[2]), deadline=time.monotonic() + 30,
+)
+assert isinstance(result, PreparedThumbnailResult)
+assert result.metadata.geometry['triangle_count'] == 12
+assert result.metadata.geometry['volume_mm3'] == 1
+output = Path(sys.argv[2])
+stat = output.stat()
+payload = read_packet(output, result.packet, 640, 480, directory_identity=(stat.st_dev, stat.st_ino))
+assert validate_payload(payload, 640, 480) == 12
+"""
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                script,
+                str(source),
+                str(output),
+                str(tmp_path / "pool"),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=40,
+            cwd=BACKEND_DIR,
+        )
+        assert result.returncode == 0, result.stderr
+
     def test_codec_imports_no_numeric_runtime(self):
         script = r"""
 import importlib.abc,sys,time,json,struct
@@ -120,9 +167,11 @@ assert encode_pixels(rendered,deadline=time.monotonic()+10).startswith(b'RIFF')
 
 
 class TestPreparedEligibility:
-    def test_keeps_unqualified_geometry_in_the_parser(self, tmp_path, monkeypatch):
+    def test_emits_geometry_when_renderer_readiness_changes(
+        self, tmp_path, monkeypatch
+    ):
         from app.core.config import _overlay
-        from app.modules.media.mesh_contracts import ThumbnailResult
+        from app.modules.media.mesh_contracts import PreparedThumbnailResult
         from app.modules.media.mesh_protocol import PreparedThumbnailOutput
         from app.modules.media.thumbnail_engine import ThumbnailEngine
         from app.runtime.compute import client
@@ -132,36 +181,38 @@ class TestPreparedEligibility:
         source.write_bytes(trimesh.creation.box().export(file_type="stl"))
         output = tmp_path / "packet"
         output.mkdir()
-        deadline = time.monotonic() + 30
-        checks, frames = [], []
+        frames = []
+        # GPU eligibility can change after the supervisor chooses the handoff.
+        # Its eventual dispatch owns the refusal and guarded packet recovery.
+        monkeypatch.setattr(client, "render_ready", lambda **kwargs: False)
 
-        def refuse(**kwargs):
-            checks.append(kwargs)
-            return False
-
-        monkeypatch.setattr(client, "render_ready", refuse)
         result = ThumbnailEngine().prepare(
             ThumbnailRequest(source, include_fingerprint=False, output_format="WEBP"),
             output,
-            deadline=deadline,
+            deadline=time.monotonic() + 30,
             on_output=frames.append,
         )
-        assert isinstance(result, ThumbnailResult)
-        assert result.image is not None
-        assert checks[0]["units"] == 12
-        assert checks[0]["deadline"] == deadline
-        assert not (output / PACKET_NAME).exists()
-        assert not any(isinstance(frame, PreparedThumbnailOutput) for frame in frames)
+
+        assert isinstance(result, PreparedThumbnailResult)
+        assert result.metadata.geometry["triangle_count"] == 12
+        assert result.metadata.geometry["volume_mm3"] == pytest.approx(1)
+        packet = next(
+            frame.packet
+            for frame in frames
+            if isinstance(frame, PreparedThumbnailOutput)
+        )
+        owned = output.stat()
+        assert read_packet(
+            output, packet, 640, 480, directory_identity=(owned.st_dev, owned.st_ino)
+        )
 
     @pytest.mark.parametrize("cancelled", [False, True], ids=["deadline", "cancelled"])
-    def test_propagates_withdrawal_during_readiness(
+    def test_propagates_withdrawal_before_packet_preparation(
         self, tmp_path, monkeypatch, cancelled
     ):
-        from app.core.cancellation import OperationCancelled
+        from app.core.cancellation import OperationCancelled, cancellation_scope
         from app.core.config import _overlay
-        from app.modules.media import mesh_render
         from app.modules.media.thumbnail_engine import ThumbnailEngine
-        from app.runtime.compute import client
 
         monkeypatch.setitem(_overlay, "compute_mode", "cpu")
         source = tmp_path / "mesh.stl"
@@ -169,23 +220,15 @@ class TestPreparedEligibility:
         output = tmp_path / "packet"
         output.mkdir()
         error = OperationCancelled if cancelled else TimeoutError
+        deadline = time.monotonic() + 30 if cancelled else time.monotonic() - 1
 
-        def withdraw(**kwargs):
-            raise error()
-
-        monkeypatch.setattr(client, "render_ready", withdraw)
-        monkeypatch.setattr(
-            mesh_render,
-            "render_mesh_thumbnail",
-            lambda *a, **k: pytest.fail("withdrawn packet rendered"),
-        )
-        with pytest.raises(error):
+        with cancellation_scope(lambda: cancelled), pytest.raises(error):
             ThumbnailEngine().prepare(
                 ThumbnailRequest(
                     source, include_fingerprint=False, output_format="WEBP"
                 ),
                 output,
-                deadline=time.monotonic() + 30,
+                deadline=deadline,
             )
         assert not (output / PACKET_NAME).exists()
 

@@ -124,12 +124,11 @@ def _load_obj_source(path: Path) -> VisualMesh | None:
         or largest_ignored_reference > len(xyz)
     ):
         return None
-    # Exact integer pairs preserve stored-normal seams. The numeric order of
-    # these vertex IDs is irrelevant: face order and every corner coordinate
-    # remain identical, including first source representatives when welding.
-    pairs, inverse = np.unique(
-        np.column_stack((vertex_indices, normal_indices)),
-        axis=0,
-        return_inverse=True,
+    # Pack each exact (position, normal) pair into one integer. Both channels
+    # are bounded by 3 * MAX_ANALYSIS_FACES, so the product fits int64. Numeric
+    # sorting preserves the pair table's lexicographic order and normal seams
+    # without allocating/sorting a structured two-column array.
+    keys, inverse = np.unique(
+        vertex_indices * normal_count + normal_indices, return_inverse=True
     )
-    return VisualMesh(xyz[pairs[:, 0]], inverse.reshape(-1, 3))
+    return VisualMesh(xyz[keys // normal_count], inverse.reshape(-1, 3))

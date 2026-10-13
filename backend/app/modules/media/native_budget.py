@@ -317,7 +317,7 @@ def _ascii_triangle_bound(path: Path) -> int | None:
         return count
 
 
-def _source_triangle_count(source: MeshSource) -> int | None:
+def _source_triangle_count(source: MeshSource, *, minimum_faces: int = 0) -> int | None:
     """Conservative source counts for admission, never geometry certification."""
     from app.modules.media.stl_reader import binary_stl_info
 
@@ -329,8 +329,16 @@ def _source_triangle_count(source: MeshSource) -> int | None:
             with source.path.open("rb") as stream:
                 before = STLSourceSnapshot.from_stat(os.fstat(stream.fileno()))
                 info = binary_stl_info(source.path)
+                byte_bound = before.size // 50
+                # If even the densest source fits the startup floor, a full
+                # text scan cannot reduce admission. The guarded loader still
+                # owns syntax; the snapshot checks below still own identity.
                 bound = (
-                    info[0] if info is not None else _ascii_triangle_bound(source.path)
+                    info[0]
+                    if info is not None
+                    else byte_bound
+                    if byte_bound <= minimum_faces
+                    else _ascii_triangle_bound(source.path)
                 )
                 if bound is None:
                     # A binary facet occupies 50 bytes; even a minimally
@@ -360,6 +368,15 @@ def estimate_sources(
     *,
     work: WorkProfile = GeometryWork(),
 ) -> Resources:
+    minimum, _incremental, face_bytes = _work_memory(work)
+    # The floor applies to the combined request, not separately to each source.
+    # Multi-source work needs actual bounds to retain its aggregate allowance.
+    minimum_faces = minimum // face_bytes if len(sources) == 1 else 0
     return request(
-        pool, tuple(_source_triangle_count(source) for source in sources), work=work
+        pool,
+        tuple(
+            _source_triangle_count(source, minimum_faces=minimum_faces)
+            for source in sources
+        ),
+        work=work,
     )

@@ -92,16 +92,24 @@ def _withdrawn(
 ) -> bool:
     """Whether this execution is cancelled, missing or superseded."""
     with get_session_factory().scoped_session() as session:
-        row = session.exec(
-            _WITHDRAWAL_QUERY, params={"withdrawal_job_id": job_id}
-        ).first()
+        # A typed scalar read needs no ORM execution/identity-map machinery.
+        # Keep the factory and the fresh, short transaction for every probe.
+        row = (
+            session.connection()
+            .execute(_WITHDRAWAL_QUERY, {"withdrawal_job_id": job_id})
+            .first()
+        )
         if row is None:
             return True
         state, current_attempt, current_epoch = row
-        return state is JobState.CANCELLED or attempt is not None and (
-            current_attempt != attempt
-            or state is JobState.QUEUED
-            or current_epoch != execution_epoch
+        return (
+            state is JobState.CANCELLED
+            or attempt is not None
+            and (
+                current_attempt != attempt
+                or state is JobState.QUEUED
+                or current_epoch != execution_epoch
+            )
         )
 
 

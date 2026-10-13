@@ -333,10 +333,10 @@ def render_ready(
 ) -> bool:
     """Only an already qualified final-pixel owner can accept parser handoff.
 
-    Unknown units are used before parsing to require a valid recipe interval;
-    the parser repeats this check with its actual face count. The broker retains
-    final authority after a restart or receipt change. A cold owner stays on the
-    combined path, which can initialize rendering outside this readiness probe.
+    Unknown units are used before parsing to require a valid recipe interval.
+    Actual face counts and current eligibility are enforced by the broker at
+    dispatch, after clean parser exit releases native credit. A cold owner stays
+    on the combined path, which can initialize rendering outside this probe.
     """
 
     def remaining() -> None:

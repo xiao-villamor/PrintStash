@@ -19,6 +19,7 @@ from app.db.models import (
     ArtifactDerivative,
     DerivativeKind,
     DerivativeState,
+    File,
     FileType,
     Job,
     JobKind,
@@ -181,7 +182,7 @@ class TestDerivativeWorkPriority:
         assert thumbnail.content
 
     @pytest.mark.asyncio
-    async def test_capacity_wait_preserves_the_attempt(
+    async def test_model_remains_usable_while_derivatives_wait(
         self,
         api,
         superuser_headers,
@@ -212,6 +213,32 @@ class TestDerivativeWorkPriority:
                 assert {row.state for row in outputs} == {DerivativeState.RUNNING}
                 assert {row.attempts for row in outputs} == {1}
                 assert all(row.failure_reason is None for row in outputs)
+                assert not future.done()
+                # The source is already a usable Model while its background
+                # derivatives wait for native capacity.
+                artifact = e2e_db.get(File, file_id)
+                assert artifact is not None
+                browse = await api.get(
+                    "/api/v1/models/browse", headers=superuser_headers
+                )
+                assert browse.status_code == 200, browse.text
+                card = next(
+                    row["model"]
+                    for row in browse.json()["items"]
+                    if row["kind"] == "model"
+                    and row["model"]["id"] == artifact.model_id
+                )
+                assert card["thumbnail_url"] is None
+                detail = await api.get(
+                    f"/api/v1/models/{artifact.model_id}", headers=superuser_headers
+                )
+                assert detail.status_code == 200, detail.text
+                assert file_id in {row["id"] for row in detail.json()["files"]}
+                original = await api.get(
+                    f"/api/v1/files/{file_id}/download", headers=superuser_headers
+                )
+                assert original.status_code == 200, original.text
+                assert original.content == content.binary_stl(triangles=2)
                 assert not future.done()
             future.result(timeout=30)
         completed = _mesh_job(file_id)

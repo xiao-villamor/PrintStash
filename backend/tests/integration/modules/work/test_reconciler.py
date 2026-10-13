@@ -526,6 +526,7 @@ class TestPass:
 
         assert PROBE.calls == 2
         assert [job.subject_key for job in _jobs(db_session)] == ["late"]
+        assert _passes(engine, SOURCED) == []
 
     def test_overlapping_loser_does_not_cover_the_next_nudge(
         self, engine: InlineJobEngine, db_session: Session

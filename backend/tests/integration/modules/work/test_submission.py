@@ -9,7 +9,7 @@ never raises into the caller, because the tick recovers a lost nudge.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlmodel import Session, select
@@ -263,6 +263,73 @@ class TestNudge:
         assert cursor.pass_queued_at is not None
         (queued,) = _passes(work_engine, JobKind.SOURCES_SCAN)
         assert queued.submission.priority is WorkPriority.INTERACTIVE
+
+    @pytest.mark.parametrize("priority", list(WorkPriority))
+    def test_a_nudge_marks_a_running_pass_dirty_without_queuing_another(
+        self, work_engine, db_session: Session, priority
+    ) -> None:
+        started = datetime(2026, 1, 1, tzinfo=UTC)
+        nudge(JobKind.SOURCES_SCAN, now=started)
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        cursor.holder = "active-executor"
+        cursor.holder_expires_at = started + timedelta(minutes=1)
+        cursor.pass_queued_at = None
+        cursor.pass_priority = None
+        db_session.commit()
+
+        arrived = started + timedelta(seconds=1)
+        nudge(JobKind.SOURCES_SCAN, now=arrived, priority=priority)
+
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        assert cursor.nudged_at == arrived.replace(tzinfo=None)
+        assert cursor.holder == "active-executor"
+        assert cursor.pass_queued_at is None
+        assert len(_passes(work_engine, JobKind.SOURCES_SCAN)) == 1
+
+    @pytest.mark.parametrize(
+        ("holder", "remaining_seconds"),
+        [(None, None), ("expired-executor", -1), ("expired-executor", 0)],
+    )
+    def test_a_nudge_after_owner_release_queues_a_pass(
+        self, work_engine, db_session: Session, holder, remaining_seconds
+    ) -> None:
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        nudge(JobKind.SOURCES_SCAN, now=now - timedelta(seconds=1))
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        cursor.holder = holder
+        cursor.holder_expires_at = (
+            None
+            if remaining_seconds is None
+            else now + timedelta(seconds=remaining_seconds)
+        )
+        cursor.pass_queued_at = None
+        cursor.pass_priority = None
+        db_session.commit()
+
+        nudge(JobKind.SOURCES_SCAN, now=now)
+
+        assert len(_passes(work_engine, JobKind.SOURCES_SCAN)) == 2
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        assert cursor.pass_queued_at == now.replace(tzinfo=None)
+
+    def test_a_delayed_nudge_keeps_its_wakeup_while_a_pass_is_running(
+        self, work_engine, db_session: Session
+    ) -> None:
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        nudge(JobKind.SOURCES_SCAN, now=now)
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        cursor.holder = "active-executor"
+        cursor.holder_expires_at = now + timedelta(minutes=1)
+        db_session.commit()
+
+        nudge(JobKind.SOURCES_SCAN, now=now + timedelta(seconds=1), delay=45)
+
+        passes = _passes(work_engine, JobKind.SOURCES_SCAN)
+        assert len(passes) == 2
+        assert passes[-1].submission.delay_seconds == 45
+        assert _cursor(db_session, JobKind.SOURCES_SCAN).nudged_at == now.replace(
+            tzinfo=None
+        )
 
     def test_a_second_nudge_rides_on_the_queued_pass(self, work_engine) -> None:
         nudge(JobKind.SOURCES_SCAN)

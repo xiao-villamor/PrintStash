@@ -96,15 +96,32 @@ def _prepare_geometry(
     from app.runtime.compute.client import available
 
     if geometry.face_count >= min_gpu_faces and available(render=True):
-        candidate = VisualRender(geometry)
-        if eligible(candidate):
-            return candidate
-        return canonical(
-            candidate, face_chunk_size=settings.mesh_render_face_chunk_size
-        )
+        return _prepare_visual_geometry(geometry)
     return prepare_normals(
         geometry, face_chunk_size=settings.mesh_render_face_chunk_size
     )
+
+
+def _prepare_visual_geometry(geometry: PreparedRenderGeometry) -> RenderInput:
+    candidate = VisualRender(geometry)
+    if eligible(candidate):
+        return candidate
+    return canonical(candidate, face_chunk_size=settings.mesh_render_face_chunk_size)
+
+
+def prepare_preview_packet(mesh: RenderableMesh | None) -> RenderInput | None:
+    """Prepare an admitted handoff without consulting the compute owner.
+
+    The broker or guarded CPU fallback consumes these same bounded arrays after
+    the parser exits. Preparing them needs no transport, driver or status schema.
+    """
+    geometry = prepare_mesh(mesh)
+    return None if geometry is None else _prepare_visual_geometry(geometry)
+
+
+def prepare_scene_packet(scene: ExpandedScene) -> RenderInput:
+    """Keep placements in a deferred packet, independent of current GPU state."""
+    return _prepare_visual_geometry(prepare_scene(scene))
 
 
 def prepare_mesh_render(mesh: RenderableMesh | None) -> RenderInput | None:

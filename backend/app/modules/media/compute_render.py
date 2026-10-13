@@ -2,9 +2,7 @@
 
 import struct
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Callable
 from uuid import uuid4
 
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_RECIPE
@@ -17,28 +15,16 @@ from app.runtime.compute import client
 from app.runtime.compute.contracts import ComputeUnavailable, Reason
 from app.runtime.compute.protocol import MAX_FRAME, BinaryRenderRequest, Priority
 
+from .render_context import background_render_scope as background_render_scope
+from .render_context import background_rendering
+
 RECIPE = "webgpu-native-raster-v4"
-_background_render: ContextVar[bool] = ContextVar("background_render", default=False)
-
-
-@contextmanager
-def background_render_scope() -> Iterator[None]:
-    """Derivative Jobs may coalesce even when their discovery tier is interactive.
-
-    This changes only compute dispatch. FIFO Job ordering and native admission
-    retain their original scheduling priority; direct query renders stay urgent.
-    """
-    token = _background_render.set(True)
-    try:
-        yield
-    finally:
-        _background_render.reset(token)
 
 
 def render_priority() -> Priority:
     return (
         Priority.BACKGROUND
-        if _background_render.get() or current_priority() is WorkPriority.BACKFILL
+        if background_rendering() or current_priority() is WorkPriority.BACKFILL
         else Priority.INTERACTIVE
     )
 

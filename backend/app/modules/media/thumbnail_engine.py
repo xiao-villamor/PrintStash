@@ -25,7 +25,7 @@ from printstash_core.mesh.measurements import (
 from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
-from app.core.cancellation import OperationCancelled, checkpoint
+from app.core.cancellation import OperationCancelled
 from app.core.logging import get_logger
 from app.core.native_settings import settings
 from app.modules.media import (
@@ -183,12 +183,17 @@ class ThumbnailEngine:
         deadline: float,
         on_output: OutputSink | None = None,
     ) -> ThumbnailResult | PreparedThumbnailResult:
-        return self._generate(
+        from .thumbnail_pixels import check_deadline
+
+        check_deadline(deadline, force=True)
+        result = self._generate(
             request,
             on_output=on_output,
             output_directory=directory,
             preparation_deadline=deadline,
         )
+        check_deadline(deadline, force=True)
+        return result
 
     def _generate(
         self,
@@ -669,28 +674,26 @@ class ThumbnailEngine:
                                 try:
                                     if output_directory is not None:
                                         render_input = (
-                                            mesh_render.prepare_scene_render(
+                                            mesh_render.prepare_scene_packet(
                                                 source_scene.scene
                                             )
                                             if source_scene is not None
-                                            else mesh_render.prepare_preview_render(
+                                            else mesh_render.prepare_preview_packet(
                                                 visual_mesh
                                                 if visual_mesh is not None
                                                 else mesh
                                             )
                                         )
-                                        from app.runtime.compute.client import (
-                                            render_ready,
-                                        )
+                                        from .thumbnail_pixels import check_deadline
 
-                                        from .compute_render import render_recipe
-
-                                        if render_input is not None and render_ready(
-                                            recipe=render_recipe(width, height),
-                                            units=render_input.face_count,
-                                            deadline=preparation_deadline,
-                                            checkpoint=checkpoint,
-                                        ):
+                                        assert preparation_deadline is not None
+                                        check_deadline(preparation_deadline, force=True)
+                                        # The supervisor selected this handoff. Release
+                                        # parser credit before the broker checks actual
+                                        # units and current GPU eligibility at dispatch.
+                                        # Refusal renders the same packet under guarded
+                                        # CPU admission, without reopening the source.
+                                        if render_input is not None:
                                             try:
                                                 packet = write_packet(
                                                     render_input,

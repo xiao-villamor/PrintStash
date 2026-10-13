@@ -1,7 +1,10 @@
 """Real broker status and guarded parser transfer through bounded local IPC."""
 
+import contextvars
 import io
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import trimesh
@@ -15,13 +18,44 @@ from app.modules.media import (
     native_process,
     thumbnail_handoff,
 )
-from app.modules.media.mesh_contracts import ThumbnailRequest
+from app.modules.media.mesh_contracts import PreparedThumbnailResult, ThumbnailRequest
+from app.modules.media.thumbnail_engine import ThumbnailEngine
 from app.runtime import native_runtime, preparation_runtime
 from app.runtime.native_admission import Resources
 from tests.fixtures.compute_renderer import qualified_renderer as qualified_renderer
 
 
 class TestPreparedExecution:
+    def test_prepares_geometry_while_gpu_is_busy(self, tmp_path, qualified_renderer):
+        source = tmp_path / "source.stl"
+        source.write_bytes(trimesh.creation.box().export(file_type="stl"))
+        output = tmp_path / "packet"
+        output.mkdir()
+        with ThreadPoolExecutor(2) as executor:
+            busy = executor.submit(
+                contextvars.copy_context().run, qualified_renderer.occupy
+            )
+            try:
+                assert qualified_renderer.owner_busy.wait(5)
+                preparing = executor.submit(
+                    contextvars.copy_context().run,
+                    ThumbnailEngine().prepare,
+                    ThumbnailRequest(
+                        source, include_fingerprint=False, output_format="WEBP"
+                    ),
+                    output,
+                    deadline=time.monotonic() + 30,
+                )
+                result = preparing.result(timeout=3)
+                assert isinstance(result, PreparedThumbnailResult)
+                assert result.metadata.geometry["triangle_count"] == 12
+                assert result.metadata.geometry["volume_mm3"] == pytest.approx(1)
+                assert not busy.done()
+            finally:
+                qualified_renderer.release_owner.set()
+                qualified_renderer.release_batch.set()
+                busy.result(timeout=10)
+
     @pytest.mark.parametrize(
         "refused", [False, True], ids=["gpu-success", "cpu-recovery"]
     )

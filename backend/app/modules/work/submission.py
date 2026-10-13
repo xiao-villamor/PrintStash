@@ -12,11 +12,13 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 
-from sqlmodel import Session
+from sqlalchemy import update
+from sqlmodel import Session, col
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import ensure_utc, utcnow
+from app.db.affected import affected
 from app.db.models import (
     ACTIVE_JOB_STATES,
     Job,
@@ -214,6 +216,21 @@ def nudge(
         catalog_module.get_catalog().definition(source)
         if delay is None:
             with get_session_factory().scoped_session() as session:
+                # Mark a live owner dirty atomically with its release. It will
+                # consume this nudge before releasing; no extra DBOS workflow
+                # is needed merely to lose the same single-flight claim.
+                if affected(
+                    session,
+                    update(ReconcileCursor)
+                    .where(
+                        col(ReconcileCursor.source) == source,
+                        col(ReconcileCursor.holder).is_not(None),
+                        col(ReconcileCursor.holder_expires_at) > now,
+                    )
+                    .values(nudged_at=now),
+                ):
+                    session.commit()
+                    return
                 cursor = _cursor(session, source)
                 cursor.nudged_at = now
                 covered = _covered(cursor, priority, now)

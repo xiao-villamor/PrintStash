@@ -14,6 +14,52 @@ from tests.factories.content import ascii_stl, binary_stl
 
 class TestEstimateSources:
     @pytest.mark.parametrize(
+        "payload",
+        [ascii_stl(triangles=1000), binary_stl(triangles=1000), b"solid invalid\n"],
+        ids=["ascii", "binary", "invalid"],
+    )
+    def test_minimum_claim_needs_only_a_header(
+        self, tmp_path, count_source_reads, payload
+    ):
+        source = tmp_path / "source.stl"
+        source.write_bytes(payload)
+        reads = count_source_reads(source)
+        pool = Resources(4, 4 * 1024**3)
+
+        claim = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "stl"),)
+        )
+
+        assert claim == Resources(1, native_budget.MIN_NATIVE_MEMORY)
+        assert sum(reads) <= 84
+
+    def test_large_ascii_source_retains_its_weighted_claim(self, tmp_path):
+        source = tmp_path / "source.stl"
+        source.write_bytes(ascii_stl(triangles=200_000))
+
+        claim = native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3), (native_budget.MeshSource(source, "stl"),)
+        )
+
+        assert claim == Resources(1, 600_000_000)
+
+    def test_combined_sources_keep_their_aggregate_claim(self, tmp_path):
+        first = tmp_path / "first.stl"
+        second = tmp_path / "second.stl"
+        first.write_bytes(ascii_stl(triangles=100_000))
+        second.write_bytes(ascii_stl(triangles=100_000))
+
+        claim = native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3),
+            (
+                native_budget.MeshSource(first, "stl"),
+                native_budget.MeshSource(second, "stl"),
+            ),
+        )
+
+        assert claim == Resources(1, 600_000_000)
+
+    @pytest.mark.parametrize(
         "indices", ["1 2 3", "-3 -2 -1"], ids=["positive", "relative"]
     )
     def test_counts_plain_obj_triangles(self, tmp_path, indices):

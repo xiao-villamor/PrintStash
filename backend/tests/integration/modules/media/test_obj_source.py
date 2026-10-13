@@ -69,6 +69,22 @@ class TestLoadObjSource:
 
         assert actual == expected
 
+    def test_keeps_distinct_corner_pairs_at_index_boundaries(self, tmp_path):
+        source = tmp_path / "source.obj"
+        source.write_bytes(
+            b"v 0 0 0\nv 10 0 0\nv 0 20 0\n"
+            b"vn 0 0 1\nvn 0 0 1\n"
+            b"f 1//2 2//1 3//2\nf 1//2 2//2 3//1\n"
+        )
+
+        actual = obj_source.load_obj_source(source)
+
+        assert actual is not None
+        np.testing.assert_array_equal(actual.faces, [[0, 1, 4], [0, 2, 3]])
+        np.testing.assert_array_equal(
+            actual.vertices, [[0, 0, 0], [10, 0, 0], [10, 0, 0], [0, 20, 0], [0, 20, 0]]
+        )
+
     def test_preserves_normal_index_seams(self, tmp_path):
         source = tmp_path / "source.obj"
         source.write_bytes(_TETRA)
