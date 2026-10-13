@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Keep one events connection and one setup admission while moving between
+  application pages. Opening a Model and returning no longer hides the app
+  behind a setup probe, reopens the events socket or refetches every view.
+
 - Keep folder descriptions and model cards together when navigating, clamp long descriptions before the first paint, and avoid fading cached library thumbnails on every visit.
 
 - Enable mesh preview readiness after its first rendered frame; verify overlay alignment, display-mode pixels, and repeated resource cleanup on WebGL/WebGPU.

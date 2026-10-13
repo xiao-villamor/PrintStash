@@ -1,9 +1,49 @@
-/** Real paginated Library navigation restores the originating entry's reading position. */
+/** Real Library navigation keeps its connection and restores the originating entry's reading position. */
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "./helpers";
+import { modelCard, uploadGcodeModel } from "./util";
 
 test.describe("Library navigation", () => {
+  test("reuses the admitted shell through real Model detail navigation", async ({ page }) => {
+    const name = `e2e-nav-connection-${Date.now()}`;
+    await uploadGcodeModel(page, name);
+    let sockets = 0;
+    let probes = 0;
+    page.on("websocket", (socket) => {
+      if (new URL(socket.url()).pathname === "/api/v1/events/ws") sockets += 1;
+    });
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/v1/setup/status") probes += 1;
+    });
+    try {
+      // ── A fresh page load opens the connection and is admitted ─────────────
+      await page.goto("/");
+      await expect(modelCard(page, name)).toBeVisible();
+      await expect.poll(() => sockets).toBe(1);
+      await page.waitForLoadState("networkidle");
+      const admitted = probes;
+      expect(admitted).toBeGreaterThan(0);
+
+      // ── Detail and Back are application paths: nothing is reopened ─────────
+      await modelCard(page, name).click();
+      await expect(page.getByRole("heading", { name })).toBeVisible();
+      await page.getByRole("link", { name: "Back", exact: true }).click();
+      await expect(modelCard(page, name)).toBeVisible();
+      await page.waitForLoadState("networkidle");
+
+      expect(sockets).toBe(1);
+      expect(probes).toBe(admitted);
+    } finally {
+      const found = await (
+        await page.request.get(`/api/v1/models?q=${encodeURIComponent(name)}`)
+      ).json();
+      for (const model of found.items ?? found) {
+        expect((await page.request.delete(`/api/v1/models/${model.id}`)).status()).toBe(204);
+      }
+    }
+  });
+
   for (const { layout, width, height } of [
     { layout: "grid", width: 1280, height: 900 },
     { layout: "list", width: 390, height: 844 },

@@ -98,6 +98,6 @@ describe("useDerivativeRefresh", () => {
 
     unmount();
 
-    expect(socket.close).toHaveBeenCalled();
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ unsubscribe: "model:3" }));
   });
 });

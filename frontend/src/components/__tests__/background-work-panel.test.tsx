@@ -457,13 +457,25 @@ describe("BackgroundWorkPanel", () => {
     });
 
     it("stops listening when it leaves the page", async () => {
-      const { unmount } = renderPanel(stubApi());
+      const api = stubApi();
+      const { unmount } = renderPanel(api);
       await screen.findByRole("heading", { name: "What's happening now" });
       await waitFor(() => expect(socket.onmessage).not.toBeNull());
 
       unmount();
+      const reads = vi.mocked(api.overview).mock.calls.length;
+      socket.onmessage?.({
+        data: JSON.stringify({
+          type: "job",
+          job_id: "j",
+          kind: "derivatives.mesh",
+          state: "completed",
+          task_visible: false,
+        }),
+      });
+      await Promise.resolve();
 
-      expect(socket.close).toHaveBeenCalled();
+      expect(api.overview).toHaveBeenCalledTimes(reads);
     });
   });
 });
