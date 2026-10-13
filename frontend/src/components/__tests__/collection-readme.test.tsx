@@ -87,6 +87,21 @@ describe("CollectionReadme", () => {
       expect(await screen.findByRole("heading", { name: "Shelf rig" })).toBeInTheDocument();
     });
 
+    it.each([
+      { label: "at the collapsed height", height: 192, expandable: false },
+      { label: "one pixel beyond the collapsed height", height: 193, expandable: true },
+    ])(
+      "offers expansion only when text exceeds the limit: $label",
+      async ({ height, expandable }) => {
+        vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(height);
+        renderReadme({ readme: "Height boundary." });
+
+        await screen.findByText("Height boundary.");
+
+        expect(screen.queryByRole("button", { name: "Show more" }) !== null).toBe(expandable);
+      },
+    );
+
     it("offers editing to somebody who may write", async () => {
       renderReadme({ readme: "Brackets." });
 

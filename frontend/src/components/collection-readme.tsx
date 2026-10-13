@@ -50,7 +50,7 @@ export function CollectionReadme({
   useLayoutEffect(() => {
     const el = contentRef.current;
     if (!el) return;
-    const measure = () => setOverflows(el.scrollHeight > CLAMP_PX + 8);
+    const measure = () => setOverflows(el.scrollHeight > CLAMP_PX);
     // Measure before paint, then track images that change the prose later.
     measure();
     if (!("ResizeObserver" in window)) return;
