@@ -5,6 +5,11 @@ engine accepted it, so a crash in between re-derives the same execution id.
 ``nudge`` is how hot paths ask for work: it stamps the dirty mark and enqueues
 a reconcile pass unless one of at least its priority is already waiting. It
 never raises into the caller, because the tick recovers a lost nudge.
+
+The stamp is a write, and a transaction that records intent already is one:
+``stamp`` and ``nudge_after_commit`` put the dirty mark in that transaction, so
+a nudge costs no commit of its own. When this goes red, either a nudge can be
+seen before the intent it announces, or every nudge is a second writer again.
 """
 
 from __future__ import annotations
@@ -12,12 +17,14 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import event
 from sqlmodel import Session, select
 
 from app.core.config import settings
 from app.core.time import utcnow
 from app.db.models import JobKind, JobState, ReconcileCursor, WorkPriority
 from app.modules.work import catalog as catalog_module
+from app.modules.work import submission as submission_module
 from app.modules.work.catalog import WorkCatalog
 from app.modules.work.contracts import (
     Deduplicated,
@@ -31,6 +38,8 @@ from app.modules.work.submission import (
     nudge,
     nudge_after_commit,
     nudge_all,
+    queue_stamped,
+    stamp,
     submit,
 )
 
@@ -49,6 +58,23 @@ def _cursor(session: Session, source: JobKind) -> ReconcileCursor:
     cursor = session.get(ReconcileCursor, source)
     assert cursor is not None
     return cursor
+
+
+@pytest.fixture
+def commits(db_session: Session) -> list[bool]:
+    """One entry per transaction the application database commits."""
+    seen: list[bool] = []
+
+    def record(_conn) -> None:
+        seen.append(True)
+
+    target = db_session.get_bind()
+    event.listen(target, "commit", record)
+    yield seen
+    event.remove(target, "commit", record)
+
+
+AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class TestSubmit:
@@ -414,12 +440,184 @@ class TestNudge:
         nudge(JobKind.SOURCES_SCAN)
 
 
+class TestStamp:
+    def test_asks_for_a_pass_of_a_source_nobody_is_working_on(
+        self, work_engine, db_session: Session
+    ) -> None:
+        needed = stamp(db_session, JobKind.SOURCES_SCAN, now=AT)
+        db_session.commit()
+
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        assert (
+            needed,
+            cursor.nudged_at,
+            cursor.pass_queued_at,
+            cursor.pass_priority,
+        ) == (
+            True,
+            AT.replace(tzinfo=None),
+            AT.replace(tzinfo=None),
+            WorkPriority.INTERACTIVE,
+        )
+
+    def test_queues_nothing_itself(self, work_engine, db_session: Session) -> None:
+        stamp(db_session, JobKind.SOURCES_SCAN, now=AT)
+        db_session.commit()
+
+        assert _passes(work_engine, JobKind.SOURCES_SCAN) == []
+
+    def test_a_queued_pass_covers_the_next_stamp(
+        self, work_engine, db_session: Session
+    ) -> None:
+        stamp(db_session, JobKind.SOURCES_SCAN, now=AT)
+
+        needed = stamp(db_session, JobKind.SOURCES_SCAN, now=AT + timedelta(seconds=1))
+        db_session.commit()
+
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        assert (needed, cursor.nudged_at, cursor.pass_queued_at) == (
+            False,
+            (AT + timedelta(seconds=1)).replace(tzinfo=None),
+            AT.replace(tzinfo=None),
+        )
+
+    def test_a_backfill_pass_does_not_cover_an_interactive_stamp(
+        self, work_engine, db_session: Session
+    ) -> None:
+        stamp(db_session, JobKind.SOURCES_SCAN, now=AT, priority=WorkPriority.BACKFILL)
+
+        needed = stamp(db_session, JobKind.SOURCES_SCAN, now=AT)
+        db_session.commit()
+
+        assert (needed, _cursor(db_session, JobKind.SOURCES_SCAN).pass_priority) == (
+            True,
+            WorkPriority.INTERACTIVE,
+        )
+
+    def test_marks_a_running_pass_dirty_without_asking_for_another(
+        self, work_engine, db_session: Session
+    ) -> None:
+        db_session.add(
+            ReconcileCursor(
+                source=JobKind.SOURCES_SCAN,
+                holder="active-executor",
+                holder_expires_at=AT + timedelta(minutes=1),
+            )
+        )
+        db_session.commit()
+
+        needed = stamp(db_session, JobKind.SOURCES_SCAN, now=AT)
+        db_session.commit()
+
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        assert (needed, cursor.nudged_at, cursor.pass_queued_at) == (
+            False,
+            AT.replace(tzinfo=None),
+            None,
+        )
+
+    def test_a_rolled_back_caller_leaves_no_mark(
+        self, work_engine, db_session: Session
+    ) -> None:
+        stamp(db_session, JobKind.SOURCES_SCAN, now=AT)
+
+        db_session.rollback()
+
+        assert db_session.exec(select(ReconcileCursor)).all() == []
+
+    def test_commits_nothing_itself(
+        self, work_engine, db_session: Session, commits: list[bool]
+    ) -> None:
+        stamp(db_session, JobKind.SOURCES_SCAN, now=AT)
+
+        assert commits == []
+
+
+class TestQueueStamped:
+    def test_queues_one_pass_per_source(self, work_engine) -> None:
+        queue_stamped([JobKind.SOURCES_SCAN, JobKind.INGESTION_UPLOAD])
+
+        assert (
+            len(_passes(work_engine, JobKind.SOURCES_SCAN)),
+            len(_passes(work_engine, JobKind.INGESTION_UPLOAD)),
+        ) == (1, 1)
+
+    def test_an_engine_that_refuses_never_raises_into_the_caller(
+        self, work_engine, monkeypatch, caplog
+    ) -> None:
+        def refuse(_submission):
+            raise RuntimeError("engine down")
+
+        monkeypatch.setattr(work_engine, "submit", refuse)
+
+        queue_stamped([JobKind.SOURCES_SCAN])
+
+        assert "reconciler nudge failed" in caplog.text
+
+
 class TestNudgeAfterCommit:
     def test_nudges_once_the_transaction_commits(
         self, work_engine, db_session: Session
     ) -> None:
         nudge_after_commit(db_session, JobKind.SOURCES_SCAN)
         assert _passes(work_engine, JobKind.SOURCES_SCAN) == []
+
+        db_session.commit()
+
+        assert len(_passes(work_engine, JobKind.SOURCES_SCAN)) == 1
+
+    def test_marks_the_source_dirty_in_the_callers_own_commit(
+        self, work_engine, db_session: Session, commits: list[bool]
+    ) -> None:
+        nudge_after_commit(db_session, JobKind.SOURCES_SCAN)
+
+        db_session.commit()
+
+        assert (
+            len(commits),
+            _cursor(db_session, JobKind.SOURCES_SCAN).nudged_at is not None,
+        ) == (1, True)
+
+    def test_a_rolled_back_transaction_leaves_no_mark(
+        self, work_engine, db_session: Session
+    ) -> None:
+        nudge_after_commit(db_session, JobKind.SOURCES_SCAN)
+
+        db_session.rollback()
+
+        assert db_session.exec(select(ReconcileCursor)).all() == []
+
+    def test_a_mark_that_cannot_be_written_never_fails_the_commit(
+        self, work_engine, db_session: Session, monkeypatch, make_user
+    ) -> None:
+        def refuse(*_args, **_kwargs):
+            raise RuntimeError("cursor unavailable")
+
+        owner = make_user("stamp-refused")
+        monkeypatch.setattr(submission_module, "stamp", refuse)
+        owner.email = "stamp-refused@example.test"
+        db_session.add(owner)
+        nudge_after_commit(db_session, JobKind.SOURCES_SCAN)
+
+        db_session.commit()
+
+        db_session.refresh(owner)
+        assert owner.email == "stamp-refused@example.test"
+
+    def test_a_mark_that_could_not_be_written_is_nudged_after_the_commit(
+        self, work_engine, db_session: Session, monkeypatch
+    ) -> None:
+        written = stamp
+        calls: list[JobKind] = []
+
+        def refuse_once(session, source, **kwargs):
+            calls.append(source)
+            if len(calls) == 1:
+                raise RuntimeError("cursor unavailable")
+            return written(session, source, **kwargs)
+
+        monkeypatch.setattr(submission_module, "stamp", refuse_once)
+        nudge_after_commit(db_session, JobKind.SOURCES_SCAN)
 
         db_session.commit()
 

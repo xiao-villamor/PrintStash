@@ -10,14 +10,16 @@ engine replays the same path on recovery.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
+from threading import Lock
 from typing import Any
 
 from sqlalchemy import bindparam
 from sqlmodel import select
 
 from app.core.cancellation import OperationCancelled, cancellation_scope
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
 from app.core.work_priority import priority_scope
@@ -25,8 +27,8 @@ from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, WorkPriorit
 from app.db.session import get_session_factory
 
 from . import catalog as catalog_module
-from .contracts import NO_RETRY, JobDefinition, JobOutcome, Step, StepRunner
-from .jobs import failure_of, jobs
+from .contracts import NO_RETRY, JobOutcome, Step, StepRunner, no_hook
+from .jobs import Settlement, failure_of, jobs
 
 logger = get_logger(__name__)
 
@@ -58,25 +60,118 @@ class ExecutionContext:
     execution_id: str
     attempt: int
     execution_epoch: str
+    started: float = field(default_factory=time.monotonic, repr=False, compare=False)
+    # Reports held back since the last write, oldest first.
+    _held: list[dict[str, Any]] = field(
+        default_factory=list, init=False, repr=False, compare=False
+    )
+    _lock: Lock = field(default_factory=Lock, init=False, repr=False, compare=False)
+    # What this execution knows it has already written. Both live in memory
+    # only: an execution recovered after a crash settles in full again.
+    _ended: bool = field(default=False, init=False, repr=False, compare=False)
+    _cleaned: bool = field(default=False, init=False, repr=False, compare=False)
+
+    def _take_held(self) -> list[dict[str, Any]]:
+        with self._lock:
+            held, self._held = self._held, []
+        return held
 
     def update(self, **fields: Any) -> None:
+        with self._lock:
+            if time.monotonic() - self.started < settings.jobs_progress_hold_seconds:
+                self._held.append(fields)
+                return
+            held, self._held = self._held, []
         jobs.update(
             self.job_id,
             expected_attempt=self.attempt,
             expected_epoch=self.execution_epoch,
+            earlier=held,
             **fields,
         )
 
+    def flush_due(self) -> None:
+        """Write held reports once the attempt has run long enough to be watched."""
+        with self._lock:
+            if (
+                not self._held
+                or time.monotonic() - self.started < settings.jobs_progress_hold_seconds
+            ):
+                return
+            held, self._held = self._held, []
+        jobs.update(
+            self.job_id,
+            expected_attempt=self.attempt,
+            expected_epoch=self.execution_epoch,
+            earlier=held[:-1],
+            **held[-1],
+        )
+
     def finish(self, outcome: JobOutcome, **fields: Any) -> None:
+        self._end(outcome, cleanup=False, **fields)
+
+    def settle(self, outcome: JobOutcome, **fields: Any) -> None:
+        self._end(outcome, cleanup=True, **fields)
+
+    def _end(
+        self,
+        outcome: JobOutcome,
+        *,
+        cleanup: bool,
+        error: str | None = None,
+        **fields: Any,
+    ) -> Settlement | None:
+        """One transaction for what this attempt's end owes.
+
+        The terminal write, the subject's failure hook and the dirty stamps of
+        the sources its completion nudges commit together; with ``cleanup``,
+        so does the definition's settled cleanup. The passes are queued once
+        that commit is durable.
+        """
+        from .submission import queue_stamped, stamp
+
         definition = catalog_module.get_catalog().definition(self.definition)
-        jobs.settle_attempt(
+        passes: list[JobKind] = []
+
+        def stamp_completion(session: Any) -> None:
+            now = utcnow()
+            for source in sorted(
+                dict.fromkeys((definition.name, *definition.completion_nudges))
+            ):
+                if stamp(session, source, now=now):
+                    passes.append(source)
+
+        owes_cleanup = definition.on_settled is not no_hook
+        settlement = jobs.settle(
             self.job_id,
             self.attempt,
             outcome,
             execution_epoch=self.execution_epoch,
             on_failure=definition.on_failure,
+            on_settled=definition.on_settled if cleanup and owes_cleanup else None,
+            on_transition=stamp_completion,
+            error=error,
+            earlier=self._take_held(),
             **fields,
         )
+        if settlement is None:
+            return None
+        if settlement.transitioned:
+            queue_stamped(passes)
+            self._ended = True
+        if settlement.cleaned or not owes_cleanup:
+            self._cleaned = True
+        return settlement
+
+    @property
+    def ended(self) -> bool:
+        """Whether a write of this execution made the Job terminal."""
+        return self._ended
+
+    @property
+    def cleaned(self) -> bool:
+        """Whether the settled cleanup committed (or the definition has none)."""
+        return self._cleaned
 
     def cancelled(self) -> bool:
         return _withdrawn(self.job_id, self.attempt, self.execution_epoch)
@@ -177,14 +272,14 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
         if refused is not None:
             context.finish(JobOutcome.CANCELLED, error=refused, retryable=False)
             return StepOutcome.CANCELLED.value
-        with (
-            cancellation_scope(
-                lambda: _withdrawn(
-                    context.job_id, context.attempt, context.execution_epoch
-                )
-            ),
-            priority_scope(context.priority),
-        ):
+
+        def withdrawn() -> bool:
+            # The probe is the one thing a long step is sure to keep calling,
+            # so it is also what lets held progress out.
+            context.flush_due()
+            return _withdrawn(context.job_id, context.attempt, context.execution_epoch)
+
+        with cancellation_scope(withdrawn), priority_scope(context.priority):
             step.fn(context)
     except OperationCancelled:
         record_step(
@@ -201,37 +296,42 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
     return StepOutcome.DONE.value
 
 
-def _settle(
-    job_id: str,
-    attempt: int,
-    execution_epoch: str,
-    definition: JobDefinition,
-    subject_key: str,
-    error: str | None,
-) -> None:
+def _settle(context: ExecutionContext, error: str | None) -> None:
     """Record the attempt's outcome and nudge whoever waits on completion.
 
     A step may already have finished the Job (a recorded failure, a partial
-    completion); the first terminal write wins, so these are no-ops then.
+    completion); the first terminal write wins and already carried the
+    completion stamps. What is still owed is written in one transaction: the
+    terminal write if no step made it, and the definition's settled cleanup if
+    it has one and no step ran it. Nothing owed means no transaction at all.
+    An execution recovered after a crash knows none of this and settles in
+    full; every part is idempotent.
     """
-    status = jobs.settle_attempt(
-        job_id,
-        attempt,
-        JobOutcome.COMPLETED if error is None else JobOutcome.FAILED,
-        error=error,
-        execution_epoch=execution_epoch,
-        on_failure=definition.on_failure,
-    )
-    if status is None:
+    if context.ended and context.cleaned:
         return
-    if status.terminal:
+    recovered = not context.ended
+    settlement = context._end(
+        JobOutcome.COMPLETED if error is None else JobOutcome.FAILED,
+        cleanup=True,
+        error=error,
+    )
+    if settlement is None:
+        return
+    definition = catalog_module.get_catalog().definition(context.definition)
+    if not context.cleaned:
         jobs.reconcile_settled_attempt(
-            job_id, attempt, definition.on_settled, execution_epoch=execution_epoch
+            context.job_id,
+            context.attempt,
+            definition.on_settled,
+            execution_epoch=context.execution_epoch,
         )
-    from .submission import nudge
+    if recovered and not settlement.transitioned:
+        # An earlier execution ended the Job; whether it queued its passes is
+        # not known here, and a repeated nudge costs one covered stamp.
+        from .submission import nudge
 
-    for source in dict.fromkeys((definition.name, *definition.completion_nudges)):
-        nudge(source)
+        for source in dict.fromkeys((definition.name, *definition.completion_nudges)):
+            nudge(source)
 
 
 def execute_job(
@@ -288,10 +388,4 @@ def execute_job(
         )
         # An exception with no message still names what failed.
         error = failure_of(exc)
-    runner.run(
-        "work.settle",
-        lambda: _settle(
-            job_id, attempt, execution_epoch, definition, subject_key, error
-        ),
-        NO_RETRY,
-    )
+    runner.run("work.settle", lambda: _settle(context, error), NO_RETRY)

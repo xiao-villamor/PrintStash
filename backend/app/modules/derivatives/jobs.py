@@ -38,9 +38,7 @@ def _step(
         try:
             outcome = produce(
                 file_id_of(ctx.subject_key),
-                execution=JobExecution(
-                    ctx.job_id, ctx.attempt, ctx.execution_epoch
-                ),
+                execution=JobExecution(ctx.job_id, ctx.attempt, ctx.execution_epoch),
             )
         except OperationError as exc:
             if exc.code != SkipReason.DERIVATIVE_GROUP_DISABLED:
@@ -140,3 +138,19 @@ def nudge_for(session: Session, file_row: File) -> None:
     for derivative_group in groups_for(file_row):
         if controls[derivative_group.definition].enabled:
             nudge(derivative_group.definition)
+
+
+def nudge_with_commit(session: Session, file_row: File) -> None:
+    """Inside an Artifact's transaction: nudge its groups as that commits.
+
+    The dirty marks are written with the Artifact, so its derivative sources
+    cost the commit no second transaction; a rollback nudges nothing.
+    """
+    from app.modules.work.submission import nudge_after_commit
+
+    from .kinds import groups_for
+
+    controls = policy.resolve(session)
+    for derivative_group in groups_for(file_row):
+        if controls[derivative_group.definition].enabled:
+            nudge_after_commit(session, derivative_group.definition)

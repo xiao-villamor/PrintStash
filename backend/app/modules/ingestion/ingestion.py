@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -463,6 +462,7 @@ def persist_artifact(
             filename=original_filename,
         )
     )
+    from app.modules.derivatives.jobs import nudge_for, nudge_with_commit
     from app.modules.storage.capacity import CapacityManager, CapacityResource
     from app.modules.storage.capacity_estimates import vault_allocation
 
@@ -636,6 +636,11 @@ def persist_artifact(
             publications=(blob_publication,) if blob_publication is not None else (),
             retirements=provenance_retirements,
         )
+        # Derivatives are not part of the File+Metadata integrity boundary. The
+        # sources find this Artifact by themselves; the nudge only makes that
+        # happen now rather than at the next tick, and its dirty marks ride on
+        # this commit instead of taking the writer again after it.
+        nudge_with_commit(session, file_row)
         commit_started = True
         session.commit()
     except BaseException as exc:
@@ -687,14 +692,11 @@ def persist_artifact(
         if reservation is not None:
             reservation.release()
 
-    # Derivatives are not part of the File+Metadata integrity boundary. The
-    # sources find this Artifact by themselves; the nudge only makes that
-    # happen now rather than at the next tick. Read policy from the caller's
-    # database; a resolved commit returns its detached row without refreshing it.
-    from app.modules.derivatives.jobs import nudge_for
-
-    nudge_for(session, file_row)
     if commit_resolved:
+        # The acknowledgement was lost, and with it the nudge that commit
+        # carried: the resolved row is detached, so nudge from the caller's
+        # database without refreshing it.
+        nudge_for(session, file_row)
         return file_row
     session.refresh(file_row)
     return file_row
@@ -1056,25 +1058,6 @@ def _committed_by_key(
         return None
 
 
-_STAGE_REPORT_SECONDS = 1.0
-
-
-def _paced_report(job_context: JobContext) -> Report:
-    """Report a stage only once the commit has run long enough to be watched.
-
-    Each report is a write transaction on the Job. A small file is hashed and
-    committed before anyone could read "hashing", so those writes only delayed
-    the commit they described; a large file still reports each stage it enters.
-    """
-    started = time.monotonic()
-
-    def report(**fields: Any) -> None:
-        if time.monotonic() - started >= _STAGE_REPORT_SECONDS:
-            job_context.update(**fields)
-
-    return report
-
-
 def ingest_staged_file(
     *,
     job_context: JobContext,
@@ -1084,7 +1067,12 @@ def ingest_staged_file(
     provenance_context: ProvenanceContext | None = None,
     ingestion_key: str | None = None,
 ) -> CommitOutcome | None:
-    """Commit one staged file on behalf of Job ``job_id`` and settle the Job."""
+    """Commit one staged file on behalf of Job ``job_id`` and settle the Job.
+
+    A committed Artifact settles the Job: the terminal write runs the
+    definition's settled cleanup in the same transaction, which is what
+    releases the staged bytes' receipt.
+    """
     job_id = job_context.job_id
 
     key = ingestion_key or job_id
@@ -1099,7 +1087,7 @@ def ingest_staged_file(
             actor_user_id=actor_user_id,
             session_factory=session_factory,
             provenance_context=provenance_context,
-            report=_paced_report(job_context),
+            report=job_context.update,
         )
     except Exception as exc:  # noqa: BLE001 - the Job records the failure
         logger.exception("ingestion commit failed", extra={"job_id": job_id})
@@ -1110,7 +1098,7 @@ def ingest_staged_file(
         # The Artifact is durable even though a later step failed: report what
         # exists rather than a failure the user would retry into a duplicate.
         model_id, file_id = committed
-        job_context.finish(
+        job_context.settle(
             JobOutcome.COMPLETED,
             completion="partial",
             model_id=model_id,
@@ -1120,10 +1108,9 @@ def ingest_staged_file(
             total=1,
             succeeded=1,
         )
-        release_job_staging(job_context)
         return None
     _fault_injection_checkpoint("before_terminal", job_id)
-    job_context.finish(
+    job_context.settle(
         JobOutcome.COMPLETED,
         completion="complete",
         model_id=outcome.model_id,
@@ -1140,7 +1127,6 @@ def ingest_staged_file(
             **({"deduplicated": True} if outcome.deduplicated else {}),
         },
     )
-    release_job_staging(job_context)
     return outcome
 
 

@@ -75,12 +75,18 @@ def _job_input(ctx: JobContext) -> Iterator[Path]:
     finally:
         primary = sys.exception()
         try:
-            jobs.reconcile_settled_attempt(
-                ctx.job_id,
-                ctx.attempt,
-                _settled,
-                execution_epoch=ctx.execution_epoch,
-            )
+            # The terminal write already released a receipt whose bytes were
+            # moved. One that had to wait for this custody to end is released
+            # now; with none left there is nothing to take the writer for.
+            with get_session_factory().scoped_session() as session:
+                waiting = staging_leases.job_leases(session, ctx.job_id)
+            if waiting:
+                jobs.reconcile_settled_attempt(
+                    ctx.job_id,
+                    ctx.attempt,
+                    _settled,
+                    execution_epoch=ctx.execution_epoch,
+                )
         except Exception as exc:
             if primary is None:
                 raise

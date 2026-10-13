@@ -1006,6 +1006,171 @@ class TestSettleAttempt:
         )
 
 
+class TestSettle:
+    def test_reports_the_write_that_ended_the_job(self, make_job) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN, state=JobState.RUNNING, attempts=1)
+
+        settlement = JobStore().settle(
+            job.id,
+            1,
+            JobOutcome.COMPLETED,
+            execution_epoch=job.execution_epoch,
+            on_failure=lambda *_: None,
+        )
+
+        assert (settlement.status.state, settlement.transitioned) == (
+            JobState.COMPLETED,
+            True,
+        )
+
+    def test_commits_the_settled_cleanup_with_the_terminal_state(
+        self, db_session, make_job, make_user
+    ) -> None:
+        owner = make_user("settle-cleanup")
+        job = make_job(kind=JobKind.SOURCES_SCAN, state=JobState.RUNNING, attempts=1)
+
+        def cleanup(session: Session, _subject: str) -> None:
+            session.get(User, owner.id).email = "cleaned@example.test"
+
+        settlement = JobStore().settle(
+            job.id,
+            1,
+            JobOutcome.COMPLETED,
+            execution_epoch=job.execution_epoch,
+            on_failure=lambda *_: None,
+            on_settled=cleanup,
+        )
+
+        db_session.refresh(owner)
+        assert (settlement.cleaned, owner.email) == (True, "cleaned@example.test")
+
+    def test_a_failing_cleanup_is_undone_without_undoing_the_settlement(
+        self, db_session, make_job, make_user
+    ) -> None:
+        owner = make_user("settle-broken-cleanup")
+        email = owner.email
+        job = make_job(kind=JobKind.SOURCES_SCAN, state=JobState.RUNNING, attempts=1)
+
+        def cleanup(session: Session, _subject: str) -> None:
+            session.get(User, owner.id).email = "half-done@example.test"
+            session.flush()
+            raise OSError("receipt busy")
+
+        settlement = JobStore().settle(
+            job.id,
+            1,
+            JobOutcome.COMPLETED,
+            execution_epoch=job.execution_epoch,
+            on_failure=lambda *_: None,
+            on_settled=cleanup,
+        )
+
+        db_session.refresh(owner)
+        db_session.refresh(job)
+        assert (settlement.cleaned, owner.email, job.state) == (
+            False,
+            email,
+            JobState.COMPLETED,
+        )
+
+    def test_replays_the_cleanup_for_a_job_already_ended(self, make_job) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN, state=JobState.COMPLETED, attempts=1)
+        cleaned: list[str] = []
+
+        settlement = JobStore().settle(
+            job.id,
+            1,
+            JobOutcome.COMPLETED,
+            execution_epoch=job.execution_epoch,
+            on_failure=lambda *_: None,
+            on_settled=lambda _session, subject: cleaned.append(subject),
+        )
+
+        assert (settlement.transitioned, settlement.cleaned, cleaned) == (
+            False,
+            True,
+            [job.subject_key],
+        )
+
+    def test_runs_the_transition_hook_only_for_the_write_that_ends_the_job(
+        self, make_job
+    ) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN, state=JobState.RUNNING, attempts=1)
+        calls: list[int] = []
+        store = JobStore()
+        arguments = {
+            "execution_epoch": job.execution_epoch,
+            "on_failure": lambda *_: None,
+            "on_transition": lambda _session: calls.append(1),
+        }
+        store.settle(job.id, 1, JobOutcome.COMPLETED, **arguments)
+
+        store.settle(job.id, 1, JobOutcome.COMPLETED, **arguments)
+
+        assert calls == [1]
+
+    def test_a_failing_transition_hook_keeps_the_settlement(
+        self, db_session, make_job
+    ) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN, state=JobState.RUNNING, attempts=1)
+
+        def refuse(_session: Session) -> None:
+            raise RuntimeError("cursor unavailable")
+
+        JobStore().settle(
+            job.id,
+            1,
+            JobOutcome.COMPLETED,
+            execution_epoch=job.execution_epoch,
+            on_failure=lambda *_: None,
+            on_transition=refuse,
+        )
+
+        db_session.refresh(job)
+        assert job.state is JobState.COMPLETED
+
+    def test_merges_reports_held_before_the_terminal_write(self, make_job) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN, state=JobState.RUNNING, attempts=1)
+
+        settlement = JobStore().settle(
+            job.id,
+            1,
+            JobOutcome.COMPLETED,
+            execution_epoch=job.execution_epoch,
+            on_failure=lambda *_: None,
+            earlier=[{"processed": 1, "current_item": "a.stl"}, {"processed": 2}],
+            total=2,
+        )
+
+        status = settlement.status
+        assert (status.processed, status.current_item, status.total) == (2, "a.stl", 2)
+
+    def test_a_superseded_attempt_settles_nothing(self, make_job) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN, state=JobState.RUNNING, attempts=2)
+
+        settlement = JobStore().settle(
+            job.id,
+            1,
+            JobOutcome.COMPLETED,
+            execution_epoch=job.execution_epoch,
+            on_failure=lambda *_: None,
+        )
+
+        assert settlement is None
+
+    def test_a_failure_without_a_reason_is_refused(self, make_job) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN, state=JobState.RUNNING, attempts=1)
+
+        with pytest.raises(ValueError, match="failed_job_requires_error"):
+            JobStore().settle(
+                job.id,
+                1,
+                JobOutcome.FAILED,
+                execution_epoch=job.execution_epoch,
+                on_failure=lambda *_: None,
+            )
+
+
 class TestReconcileSettledAttempt:
     @pytest.mark.parametrize(
         "old_epoch", [False, True], ids=["older-attempt", "older-epoch"]

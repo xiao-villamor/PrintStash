@@ -738,6 +738,9 @@ def build_audit_event(
 
 def build_job_context(job_id: str):
     """Claim a real stored Job before invoking a worker body directly in a test."""
+    import time
+
+    from app.core.config import settings
     from app.db.session import get_session_factory
     from app.modules.work.runner import ExecutionContext, _begin
     from app.modules.work.submission import execution_id
@@ -758,6 +761,10 @@ def build_job_context(job_id: str):
             execution_id(job.id, attempt, job.execution_epoch),
             attempt,
             job.execution_epoch,
+            # An attempt that has already run past the progress hold, so each
+            # report a test makes is written when it is made. The hold itself
+            # is covered where the runner is tested.
+            started=time.monotonic() - settings.jobs_progress_hold_seconds,
         )
     _begin(job_id, attempt, context.execution_epoch)
     return context

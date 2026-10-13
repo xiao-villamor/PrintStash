@@ -39,7 +39,12 @@ Work Source, Nudge, Lane, Fence, Derivative, Recipe) are in `CONTEXT.md`.
 5. Register it in `app/bootstrap/work.py:definitions()`.
 6. Steps must be idempotent: a crash re-runs a step, and a resubmitted attempt
    re-runs all of them. Check `ctx.cancelled()` between units of long work, and
-   report progress with `ctx.update(...)`.
+   report progress with `ctx.update(...)`. Progress is display only: reports
+   made in the first second of an attempt are held and written with the next
+   write, so never read a Job's status back to learn what a step did.
+7. A step that ends its Job and no longer needs what `on_settled` releases
+   calls `ctx.settle(outcome, ...)`; one that still holds its staged input
+   calls `ctx.finish(...)` and lets the cleanup run after the last step.
 
 ## Add a Work Source
 

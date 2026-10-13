@@ -28,6 +28,7 @@ from app.db.models import (
 from app.modules.derivatives import jobs as derivative_jobs
 from app.modules.derivatives import producers
 from app.modules.derivatives.source import DerivativeSource, subject_key
+from app.modules.work.contracts import PassSubmission
 from tests.factories import content
 from tests.integration.api.v1._ingest_assertions import drain_work
 
@@ -51,6 +52,14 @@ def _job(session: Session, definition: str) -> Job:
     job = session.exec(select(Job).where(Job.kind == definition)).first()
     assert job is not None
     return job
+
+
+def _pass_sources(engine) -> list[JobKind]:
+    return sorted(
+        execution.submission.source
+        for execution in engine.executions.values()
+        if isinstance(execution.submission, PassSubmission)
+    )
 
 
 class TestDefinitions:
@@ -190,6 +199,46 @@ class TestNudgeFor:
         assert sorted(nudged) == sorted(
             g.definition for g in groups_for(artifact) if g != group(disabled)
         )
+
+
+class TestNudgeWithCommit:
+    def test_queues_the_groups_pass_once_the_transaction_commits(
+        self, db_session, make_model, make_file, work_engine
+    ) -> None:
+        artifact = make_file(make_model(), filename="part.stl")
+        work_engine.executions.clear()
+        derivative_jobs.nudge_with_commit(db_session, artifact)
+        before = _pass_sources(work_engine)
+
+        db_session.commit()
+
+        assert (before, _pass_sources(work_engine)) == ([], [JobKind.DERIVATIVES_MESH])
+
+    def test_a_rolled_back_transaction_nudges_nothing(
+        self, db_session, make_model, make_file, work_engine
+    ) -> None:
+        artifact = make_file(make_model(), filename="part.stl")
+        work_engine.executions.clear()
+        derivative_jobs.nudge_with_commit(db_session, artifact)
+
+        db_session.rollback()
+
+        assert _pass_sources(work_engine) == []
+
+    def test_a_disabled_group_is_not_nudged(
+        self, db_session, make_model, make_file, work_engine
+    ) -> None:
+        derivative_jobs.policy.update(
+            db_session,
+            {derivative_jobs.policy.SETTINGS[JobKind.DERIVATIVES_MESH]: False},
+        )
+        artifact = make_file(make_model(), filename="part.stl")
+        work_engine.executions.clear()
+        derivative_jobs.nudge_with_commit(db_session, artifact)
+
+        db_session.commit()
+
+        assert _pass_sources(work_engine) == []
 
 
 class TestCancel:

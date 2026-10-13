@@ -192,6 +192,15 @@ class JobContext(Protocol):
         """Record the Job's terminal outcome from inside a step."""
         ...
 
+    def settle(self, outcome: JobOutcome, **fields: Any) -> None:
+        """``finish``, with the definition's settled cleanup in the same write.
+
+        For a step that no longer needs what that cleanup releases (its staged
+        input, its scratch space): the Job ends and gives them up in one
+        transaction instead of two.
+        """
+        ...
+
     def cancelled(self) -> bool: ...
 
     def nudge(self, source: JobKind) -> None:
@@ -280,7 +289,7 @@ CancelHook = Callable[["Session", str], None]
 RetryHook = Callable[["Session", str], bool]
 
 
-def _no_hook(_session: Session, *_args: str) -> None:
+def no_hook(_session: Session, *_args: str) -> None:
     return None
 
 
@@ -310,9 +319,9 @@ class JobDefinition:
     # What administrators see for this kind of work (Settings → Background work).
     label: str
     source: WorkSource | None = None
-    cancel: CancelHook = _no_hook
-    on_failure: FailureHook = _no_hook
-    on_settled: CancelHook = _no_hook
+    cancel: CancelHook = no_hook
+    on_failure: FailureHook = no_hook
+    on_settled: CancelHook = no_hook
     retry: RetryHook = _no_retry_hook
     # Sources this definition's completions should nudge (always its own).
     completion_nudges: tuple[JobKind, ...] = ()

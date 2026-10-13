@@ -10,10 +10,13 @@ nothing is lost with it.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 
 from sqlalchemy import update
-from sqlmodel import Session, col
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlmodel import Session, col, select
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -28,6 +31,7 @@ from app.db.models import (
     WorkPriority,
 )
 from app.db.session import get_session_factory
+from app.db.transactions import begin_write
 
 from . import catalog as catalog_module
 from .contracts import (
@@ -143,8 +147,6 @@ def _cancel_superseded(submission: JobSubmission) -> None:
     # obsolete, but cannot accidentally authorize cancellation of a future epoch.
     active = engine.active()
     with get_session_factory().scoped_session() as session:
-        from sqlmodel import select
-
         related = session.exec(
             select(Job).where(
                 Job.kind == submission.definition,
@@ -170,24 +172,91 @@ def _cancel_superseded(submission: JobSubmission) -> None:
             break
 
 
-def _cursor(session: Session, source: JobKind) -> ReconcileCursor:
-    cursor = session.get(ReconcileCursor, source)
-    if cursor is None:
-        cursor = ReconcileCursor(source=source)
-        session.add(cursor)
-    return cursor
-
-
-def _covered(cursor: ReconcileCursor, priority: WorkPriority, now: datetime) -> bool:
+def _covered(
+    queued_at: datetime | None,
+    queued_priority: WorkPriority | None,
+    priority: WorkPriority,
+    now: datetime,
+) -> bool:
     """Whether a pass already queued, recently enough, serves this nudge."""
-    if cursor.pass_queued_at is None:
+    if queued_at is None:
         return False
     grace = timedelta(seconds=settings.jobs_submit_grace_seconds)
-    if ensure_utc(cursor.pass_queued_at) <= now - grace:
+    if ensure_utc(queued_at) <= now - grace:
         return False
     return (
-        priority is WorkPriority.BACKFILL
-        or cursor.pass_priority is WorkPriority.INTERACTIVE
+        priority is WorkPriority.BACKFILL or queued_priority is WorkPriority.INTERACTIVE
+    )
+
+
+def stamp(
+    session: Session,
+    source: JobKind,
+    *,
+    now: datetime,
+    priority: WorkPriority = WorkPriority.INTERACTIVE,
+) -> bool:
+    """Mark ``source`` dirty in the caller's transaction; never commits.
+
+    Returns whether a pass has to be queued once that transaction commits. A
+    pass that is running sees the stamp when it tries to release its claim and
+    runs again; one already queued at this priority or better covers it.
+    Written as plain statements so a caller's session keeps no cursor object.
+    """
+    table = getattr(ReconcileCursor, "__table__")  # noqa: B009
+    # Mark a live owner dirty atomically with its release. It will consume
+    # this nudge before releasing; no extra engine workflow is needed merely
+    # to lose the same single-flight claim.
+    if affected(
+        session,
+        update(ReconcileCursor)
+        .where(
+            col(ReconcileCursor.source) == source,
+            col(ReconcileCursor.holder).is_not(None),
+            col(ReconcileCursor.holder_expires_at) > now,
+        )
+        .values(nudged_at=now)
+        .execution_options(synchronize_session=False),
+    ):
+        return False
+    insert = sqlite_insert if session.get_bind().dialect.name == "sqlite" else pg_insert
+    session.execute(
+        insert(table)
+        .values(source=source)
+        .on_conflict_do_nothing(index_elements=["source"])
+    )
+    queued_at, queued_priority = session.execute(
+        select(ReconcileCursor.pass_queued_at, ReconcileCursor.pass_priority).where(
+            col(ReconcileCursor.source) == source
+        )
+    ).one()
+    covered = _covered(queued_at, queued_priority, priority, now)
+    values: dict[str, object] = {"nudged_at": now}
+    if not covered:
+        values.update(pass_queued_at=now, pass_priority=priority)
+    session.execute(
+        update(ReconcileCursor)
+        .where(col(ReconcileCursor.source) == source)
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    return not covered
+
+
+def queue_pass(
+    source: JobKind,
+    *,
+    priority: WorkPriority = WorkPriority.INTERACTIVE,
+    delay: float | None = None,
+) -> None:
+    """Queue one reconcile pass over ``source`` in the engine."""
+    catalog_module.get_engine().submit(
+        PassSubmission(
+            execution_id=f"reconcile:{source.value}:{uuid.uuid4().hex}",
+            source=source,
+            priority=priority,
+            delay_seconds=delay,
+        )
     )
 
 
@@ -216,41 +285,26 @@ def nudge(
         catalog_module.get_catalog().definition(source)
         if delay is None:
             with get_session_factory().scoped_session() as session:
-                # Mark a live owner dirty atomically with its release. It will
-                # consume this nudge before releasing; no extra DBOS workflow
-                # is needed merely to lose the same single-flight claim.
-                if affected(
-                    session,
-                    update(ReconcileCursor)
-                    .where(
-                        col(ReconcileCursor.source) == source,
-                        col(ReconcileCursor.holder).is_not(None),
-                        col(ReconcileCursor.holder_expires_at) > now,
-                    )
-                    .values(nudged_at=now),
-                ):
-                    session.commit()
-                    return
-                cursor = _cursor(session, source)
-                cursor.nudged_at = now
-                covered = _covered(cursor, priority, now)
-                if not covered:
-                    cursor.pass_queued_at = now
-                    cursor.pass_priority = priority
-                session.add(cursor)
+                needed = stamp(session, source, now=now, priority=priority)
                 session.commit()
-            if covered:
+            if not needed:
                 return
-        catalog_module.get_engine().submit(
-            PassSubmission(
-                execution_id=f"reconcile:{source.value}:{uuid.uuid4().hex}",
-                source=source,
-                priority=priority,
-                delay_seconds=delay,
-            )
-        )
+        queue_pass(source, priority=priority, delay=delay)
     except Exception:  # noqa: BLE001 - the tick recovers a lost nudge
         logger.exception("reconciler nudge failed", extra={"source": source.value})
+
+
+def queue_stamped(sources: Iterable[JobKind]) -> None:
+    """Queue the passes ``stamp`` asked for, after its transaction committed.
+
+    Never raises into the caller: the stamp is already durable, and the tick
+    recovers a pass that could not be queued.
+    """
+    for source in sources:
+        try:
+            queue_pass(source)
+        except Exception:  # noqa: BLE001 - the tick recovers a lost nudge
+            logger.exception("reconciler nudge failed", extra={"source": source.value})
 
 
 def nudge_after_commit(session: Session, source: JobKind) -> None:
@@ -258,25 +312,60 @@ def nudge_after_commit(session: Session, source: JobKind) -> None:
 
     For intent recorded inside a caller's transaction (a transactional
     outbox): nudging before the commit could run a pass that cannot see the
-    row yet, and nudging after a rollback would be noise.
+    row yet, and nudging after a rollback would be noise. The dirty stamp is
+    written as that transaction commits, so the nudge costs it no transaction
+    of its own; only the pass is queued afterwards.
     """
     from sqlalchemy import event
 
     # One nudge per source per transaction, however many rows it recorded, and
-    # one pair of listeners per session, however many transactions it runs.
+    # one set of listeners per session, however many transactions it runs.
     pending: set[JobKind] | None = session.info.get(_PENDING_NUDGES)
     if pending is None:
         pending = session.info[_PENDING_NUDGES] = set()
+        session.info[_STAMPED_NUDGES] = {}
+        event.listen(session, "before_commit", _stamp_committing)
         event.listen(session, "after_commit", _nudge_committed)
         event.listen(session, "after_soft_rollback", _forget_rolled_back)
     pending.add(source)
 
 
 _PENDING_NUDGES = "work_nudges_after_commit"
+# source -> whether its pass must be queued; ``None`` when the stamp could not
+# be written with the transaction and the nudge runs on its own afterwards.
+_STAMPED_NUDGES = "work_nudges_stamped"
 
 
 def _pending_nudges(session: Session) -> set[JobKind]:
     return session.info[_PENDING_NUDGES]
+
+
+def _stamped_nudges(session: Session) -> dict[JobKind, bool | None]:
+    return session.info[_STAMPED_NUDGES]
+
+
+def _stamp_committing(session: Session) -> None:
+    # A released savepoint is reported as a commit too; only the outermost
+    # commit makes the intent durable.
+    if session.get_nested_transaction() is not None:
+        return
+    pending = _pending_nudges(session)
+    if not pending or not catalog_module.bound():
+        return
+    stamped = _stamped_nudges(session)
+    now = utcnow()
+    # Sorted, so two transactions stamping the same sources take the cursor
+    # rows in one order.
+    for source in sorted(pending):
+        try:
+            catalog_module.get_catalog().definition(source)
+            begin_write(session)
+            with session.begin_nested():
+                stamped[source] = stamp(session, source, now=now)
+        except Exception:  # noqa: BLE001 - a nudge never fails the caller's commit
+            logger.exception("reconciler nudge failed", extra={"source": source.value})
+            stamped[source] = None
+    pending.clear()
 
 
 def _nudge_committed(session: Session) -> None:
@@ -284,17 +373,20 @@ def _nudge_committed(session: Session) -> None:
     # holds the write lock that the nudge's own session would wait on.
     if session.get_nested_transaction() is not None:
         return
-    pending = _pending_nudges(session)
-    sources = sorted(pending)
-    pending.clear()
-    for source in sources:
-        nudge(source)
+    stamped = _stamped_nudges(session)
+    outcomes = sorted(stamped.items())
+    stamped.clear()
+    queue_stamped(source for source, needed in outcomes if needed)
+    for source, needed in outcomes:
+        if needed is None:
+            nudge(source)
 
 
 def _forget_rolled_back(session: Session, previous_transaction) -> None:
     if previous_transaction.nested:
         return
     _pending_nudges(session).clear()
+    _stamped_nudges(session).clear()
 
 
 def forget_queued_passes() -> int:

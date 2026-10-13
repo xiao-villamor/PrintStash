@@ -36,6 +36,7 @@ from app.db.session import get_session_factory
 from app.modules.ingestion import staging_leases
 from app.modules.ingestion.artifact_uploads import handoff
 from app.modules.work import service as work_service
+from app.modules.work.contracts import JobOutcome
 from app.modules.work.jobs import jobs
 from app.modules.work.submission import nudge, submit
 from app.runtime.engine.inline import InlineJobEngine
@@ -352,8 +353,6 @@ class TestFailure:
     ) -> None:
         upload, _job_id = _verified(db_session, make_job, owner)
 
-        from app.modules.work.contracts import JobOutcome
-
         build_job_context(_job_id).finish(
             JobOutcome.FAILED, error="boom", retryable=True
         )
@@ -383,6 +382,71 @@ class TestFailure:
     def test_the_job_retry_defers_to_the_client(self, db_session: Session) -> None:
         # The client re-uploads; the Job cannot rebuild bytes it no longer has.
         assert UPLOAD.retry(db_session, handoff.subject_key("gone")) is False
+
+
+class TestSettled:
+    def test_a_committed_upload_is_completed_by_the_jobs_terminal_write(
+        self, db_session: Session, make_job: MakeJob, owner: User
+    ) -> None:
+        upload, job_id = _verified(db_session, make_job, owner)
+        version = upload.version
+
+        build_job_context(job_id).settle(JobOutcome.COMPLETED)
+
+        db_session.expire_all()
+        row = db_session.get(ArtifactUploadSession, upload.id)
+        assert (row.state, row.error_code, row.version) == (
+            ArtifactUploadState.COMPLETED,
+            None,
+            version + 1,
+        )
+
+    def test_the_staged_receipt_is_released_by_the_same_write(
+        self, db_session: Session, make_job: MakeJob, owner: User
+    ) -> None:
+        _upload, job_id = _verified(db_session, make_job, owner)
+
+        build_job_context(job_id).settle(JobOutcome.COMPLETED)
+
+        assert (
+            db_session.exec(
+                select(StagingLease).where(StagingLease.job_id == job_id)
+            ).all()
+            == []
+        )
+
+    def test_a_job_still_running_leaves_the_upload_ingesting(
+        self, db_session: Session, make_job: MakeJob, owner: User
+    ) -> None:
+        upload, job_id = _verified(db_session, make_job, owner)
+        build_job_context(job_id)
+
+        UPLOAD.on_settled(db_session, handoff.subject_key(upload.id))
+        db_session.commit()
+
+        db_session.expire_all()
+        assert db_session.get(ArtifactUploadSession, upload.id).state == (
+            ArtifactUploadState.INGESTING
+        )
+
+    def test_a_replay_leaves_a_completed_upload_as_it_is(
+        self, db_session: Session, make_job: MakeJob, owner: User
+    ) -> None:
+        upload, job_id = _verified(db_session, make_job, owner)
+        build_job_context(job_id).settle(JobOutcome.COMPLETED)
+        db_session.expire_all()
+        version = db_session.get(ArtifactUploadSession, upload.id).version
+
+        UPLOAD.on_settled(db_session, handoff.subject_key(upload.id))
+        db_session.commit()
+
+        db_session.expire_all()
+        assert db_session.get(ArtifactUploadSession, upload.id).version == version
+
+    def test_an_upload_that_is_gone_changes_nothing(self, db_session: Session) -> None:
+        UPLOAD.on_settled(db_session, handoff.subject_key("gone"))
+
+        assert db_session.exec(select(ArtifactUploadSession)).all() == []
 
 
 class TestRecovery:

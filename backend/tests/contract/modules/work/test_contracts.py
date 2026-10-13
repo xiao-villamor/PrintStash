@@ -19,6 +19,7 @@ from datetime import timedelta
 
 import pytest
 
+from app.core.config import _overlay
 from app.core.time import utcnow
 from app.db.models import JobKind, JobState, LaneName, WorkPriority
 from app.modules.work import submission as work_submission
@@ -94,10 +95,13 @@ def _submission(
 
 
 class TestRunning:
-    def test_exposes_progress_reported_inside_a_step(self, harness: Harness) -> None:
+    def test_exposes_progress_reported_inside_a_step(
+        self, harness: Harness, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         def report(ctx) -> None:
             ctx.update(stage="archiving", processed=3, total=8)
 
+        monkeypatch.setitem(_overlay, "jobs_progress_hold_seconds", 0.0)
         job_id = harness.job(PLAIN, "progress/1", behaviour=report)
         seen: list[tuple[str, str | None, int, int | None]] = []
         jobs.subscribe(
@@ -110,6 +114,45 @@ class TestRunning:
         harness.settle()
 
         assert (job_id, "archiving", 3, 8) in seen
+
+    def test_keeps_progress_a_short_attempt_reported(
+        self, harness: Harness, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def report(ctx) -> None:
+            ctx.update(current_item="plate.stl", processed=3, total=8)
+
+        monkeypatch.setitem(_overlay, "jobs_progress_hold_seconds", 60.0)
+        job_id = harness.job(PLAIN, "progress/2", behaviour=report)
+
+        work_submission.submit(job_id)
+        harness.settle()
+
+        status = jobs.get(job_id)
+        assert status is not None
+        assert (status.state, status.current_item, status.processed, status.total) == (
+            JobState.COMPLETED,
+            "plate.stl",
+            3,
+            8,
+        )
+
+    def test_publishes_a_short_attempt_once(
+        self, harness: Harness, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def report(ctx) -> None:
+            ctx.update(stage="archiving", processed=3, total=8)
+
+        monkeypatch.setitem(_overlay, "jobs_progress_hold_seconds", 60.0)
+        job_id = harness.job(PLAIN, "progress/3", behaviour=report)
+        seen: list[tuple[str, JobState, str | None]] = []
+        jobs.subscribe(
+            lambda status: seen.append((status.job_id, status.state, status.stage))
+        )
+
+        work_submission.submit(job_id)
+        harness.settle()
+
+        assert seen == [(job_id, JobState.COMPLETED, "completed")]
 
     def test_runs_a_jobs_steps_in_order_to_completion(self, harness: Harness) -> None:
         job_id = harness.job(PLAIN, "plain/1")

@@ -7,16 +7,32 @@ restore holds the gate it is deferred (waited on durably), not failed. A Job
 cancelled mid-run stops before its next step. Every completion nudges its own
 definition and the sources it names, which is what keeps level-triggered work
 flowing without a tick.
+
+An attempt's end is one write: the terminal state, the subject's failure hook,
+the completion stamps and, when the step asks for it, the settled cleanup.
+Progress a short attempt reports is held and written with that same write.
+When this goes red an attempt either pays for transactions nobody reads or
+loses what it reported.
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 
 import pytest
+from sqlalchemy import event
 from sqlmodel import Session
 
-from app.db.models import Job, JobKind, JobState, LaneName, WorkPriority
+from app.core.config import _overlay
+from app.db.models import (
+    Job,
+    JobKind,
+    JobState,
+    LaneName,
+    ReconcileCursor,
+    WorkPriority,
+)
 from app.modules.work import catalog as catalog_module
 from app.modules.work.catalog import WorkCatalog, default_lanes
 from app.modules.work.contracts import (
@@ -30,7 +46,7 @@ from app.modules.work.contracts import (
     Step,
 )
 from app.modules.work.jobs import jobs
-from app.modules.work.runner import execute_job
+from app.modules.work.runner import ExecutionContext, _settle, execute_job
 from app.runtime.engine.inline import InlineJobEngine, _Execution, _Runner
 
 # Probes borrow real kinds and a lane; this catalog holds only them.
@@ -43,6 +59,7 @@ LANE = LaneName.INGEST
 class Trace:
     steps: list[str] = field(default_factory=list)
     failures: list[tuple[str, str]] = field(default_factory=list)
+    settled: list[str] = field(default_factory=list)
     behaviour: dict[str, object] = field(default_factory=dict)
 
 
@@ -64,10 +81,18 @@ def _failed(_session, subject: str, reason: str) -> None:
     TRACE.failures.append((subject, reason))
 
 
+def _cleanup(session, subject: str) -> None:
+    TRACE.settled.append(subject)
+    behaviour = TRACE.behaviour.get("settled")
+    if callable(behaviour):
+        behaviour(session, subject)
+
+
 @pytest.fixture
 def engine() -> InlineJobEngine:
     TRACE.steps.clear()
     TRACE.failures.clear()
+    TRACE.settled.clear()
     TRACE.behaviour.clear()
     catalog = WorkCatalog(
         [
@@ -76,6 +101,7 @@ def engine() -> InlineJobEngine:
                 lane=LANE,
                 steps=(Step("one", _step("one")), Step("two", _step("two"))),
                 on_failure=_failed,
+                on_settled=_cleanup,
                 completion_nudges=(READ_ONLY,),
                 label="Mutating probe",
             ),
@@ -131,6 +157,320 @@ def _nudged(engine: InlineJobEngine) -> set[JobKind]:
         for ex in engine.executions.values()
         if isinstance(ex.submission, PassSubmission)
     }
+
+
+def _context(job: Job, *, age: float = 0.0) -> ExecutionContext:
+    """The context of ``job``'s first attempt, begun ``age`` seconds ago."""
+    return ExecutionContext(
+        job_id=job.id,
+        definition=job.kind,
+        subject_key=job.subject_key,
+        priority=job.priority,
+        execution_id=f"{job.id}:{job.execution_epoch}:1",
+        attempt=1,
+        execution_epoch=job.execution_epoch,
+        started=time.monotonic() - age,
+    )
+
+
+@pytest.fixture
+def writes(db_session: Session) -> list[str]:
+    """Every transaction the application database begins as a writer."""
+    seen: list[str] = []
+
+    def record(_conn, _cursor, statement, *_rest) -> None:
+        if statement.startswith("BEGIN IMMEDIATE"):
+            seen.append(statement)
+
+    target = db_session.get_bind()
+    event.listen(target, "before_cursor_execute", record)
+    yield seen
+    event.remove(target, "before_cursor_execute", record)
+
+
+@pytest.fixture
+def hold() -> float:
+    _overlay["jobs_progress_hold_seconds"] = 30.0
+    return 30.0
+
+
+class TestExecutionContext:
+    def test_holds_a_report_made_before_the_attempt_is_watched(
+        self, engine: InlineJobEngine, make_job, hold: float, writes: list[str]
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+
+        context.update(stage="hashing", total=4)
+
+        assert (_status(job.id).stage, _status(job.id).total, writes) == (
+            None,
+            None,
+            [],
+        )
+
+    def test_writes_a_report_made_once_the_attempt_is_watched(
+        self, engine: InlineJobEngine, make_job, hold: float
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job, age=hold)
+
+        context.update(stage="hashing", total=4)
+
+        assert (_status(job.id).stage, _status(job.id).total) == ("hashing", 4)
+
+    def test_writes_held_reports_with_the_next_one_in_one_transaction(
+        self, engine: InlineJobEngine, make_job, hold: float, writes: list[str]
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        context.update(current_item="plate.stl", processed=1)
+        context.update(processed=2)
+        context.started -= hold
+
+        context.update(total=8)
+
+        status = _status(job.id)
+        assert (status.current_item, status.processed, status.total, len(writes)) == (
+            "plate.stl",
+            2,
+            8,
+            1,
+        )
+
+    def test_a_later_held_report_overrides_an_earlier_one(
+        self, engine: InlineJobEngine, make_job, hold: float
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        context.update(current_item="first.stl")
+        context.update(current_item="second.stl")
+
+        context.finish(JobOutcome.COMPLETED)
+
+        assert _status(job.id).current_item == "second.stl"
+
+    def test_flush_due_writes_held_reports_once_the_attempt_is_watched(
+        self, engine: InlineJobEngine, make_job, hold: float
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        context.update(stage="hashing", total=4)
+        context.started -= hold
+
+        context.flush_due()
+
+        assert (_status(job.id).stage, _status(job.id).total) == ("hashing", 4)
+
+    def test_flush_due_keeps_holding_inside_the_hold(
+        self, engine: InlineJobEngine, make_job, hold: float, writes: list[str]
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        context.update(stage="hashing")
+
+        context.flush_due()
+
+        assert (_status(job.id).stage, writes) == (None, [])
+
+    def test_flush_due_with_nothing_held_writes_nothing(
+        self, engine: InlineJobEngine, make_job, hold: float, writes: list[str]
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job, age=hold)
+
+        context.flush_due()
+
+        assert writes == []
+
+    def test_finish_carries_held_reports_into_the_terminal_status(
+        self, engine: InlineJobEngine, make_job, hold: float, writes: list[str]
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        context.update(current_item="plate.stl", processed=3, total=8)
+
+        context.finish(JobOutcome.COMPLETED)
+
+        status = _status(job.id)
+        assert (status.state, status.current_item, status.processed, len(writes)) == (
+            "completed",
+            "plate.stl",
+            3,
+            1,
+        )
+
+    def test_finish_stamps_every_source_its_completion_affects(
+        self, engine: InlineJobEngine, make_job, db_session: Session
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        stamped = {
+            source
+            for source in (MUTATING, READ_ONLY)
+            if db_session.get(ReconcileCursor, source).nudged_at is not None
+        }
+        assert (stamped, _nudged(engine)) == (
+            {MUTATING, READ_ONLY},
+            {MUTATING, READ_ONLY},
+        )
+
+    def test_finish_leaves_the_settled_cleanup_to_the_end_of_the_attempt(
+        self, engine: InlineJobEngine, make_job
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+
+        context.finish(JobOutcome.COMPLETED)
+
+        assert (TRACE.settled, context.ended, context.cleaned) == ([], True, False)
+
+    def test_settle_runs_the_settled_cleanup_in_the_terminal_write(
+        self, engine: InlineJobEngine, make_job, writes: list[str]
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+
+        context.settle(JobOutcome.COMPLETED)
+
+        assert (_status(job.id).state, TRACE.settled, context.cleaned, len(writes)) == (
+            "completed",
+            [job.subject_key],
+            True,
+            1,
+        )
+
+    def test_settle_keeps_the_job_terminal_when_its_cleanup_fails(
+        self, engine: InlineJobEngine, make_job
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        TRACE.behaviour["settled"] = lambda *_: (_ for _ in ()).throw(OSError("busy"))
+
+        context.settle(JobOutcome.COMPLETED)
+
+        assert (_status(job.id).state, context.ended, context.cleaned) == (
+            "completed",
+            True,
+            False,
+        )
+
+    def test_a_definition_without_cleanup_is_clean_once_finished(
+        self, engine: InlineJobEngine, make_job
+    ) -> None:
+        job = make_job(kind=READ_ONLY, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+
+        context.finish(JobOutcome.COMPLETED)
+
+        assert (context.ended, context.cleaned) == (True, True)
+
+    def test_a_superseded_context_ends_nothing(
+        self, engine: InlineJobEngine, make_job
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=2)
+        context = _context(job)
+
+        context.settle(JobOutcome.COMPLETED)
+
+        assert (_status(job.id).state, TRACE.settled, context.ended) == (
+            "running",
+            [],
+            False,
+        )
+
+
+class TestSettle:
+    def test_an_attempt_that_settled_itself_costs_no_further_transaction(
+        self, engine: InlineJobEngine, make_job, writes: list[str]
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        context.settle(JobOutcome.COMPLETED)
+        writes.clear()
+
+        _settle(context, None)
+
+        assert (writes, TRACE.settled) == ([], [job.subject_key])
+
+    def test_runs_the_cleanup_a_finished_step_left_in_one_transaction(
+        self, engine: InlineJobEngine, make_job, writes: list[str]
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        context.finish(JobOutcome.COMPLETED)
+        writes.clear()
+
+        _settle(context, None)
+
+        assert (TRACE.settled, len(writes)) == ([job.subject_key], 1)
+
+    def test_a_finished_job_without_cleanup_costs_no_transaction(
+        self, engine: InlineJobEngine, make_job, writes: list[str]
+    ) -> None:
+        job = make_job(kind=READ_ONLY, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        context.finish(JobOutcome.COMPLETED)
+        writes.clear()
+
+        _settle(context, None)
+
+        assert writes == []
+
+    def test_completes_a_job_no_step_finished_in_one_transaction(
+        self, engine: InlineJobEngine, make_job, writes: list[str]
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+
+        _settle(_context(job), None)
+
+        assert (_status(job.id).state, TRACE.settled, len(writes)) == (
+            "completed",
+            [job.subject_key],
+            1,
+        )
+
+    def test_retries_a_cleanup_that_failed_with_the_terminal_write(
+        self, engine: InlineJobEngine, make_job
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        context = _context(job)
+        TRACE.behaviour["settled"] = lambda *_: (_ for _ in ()).throw(OSError("busy"))
+        context.settle(JobOutcome.COMPLETED)
+        TRACE.behaviour.clear()
+        TRACE.settled.clear()
+
+        _settle(context, None)
+
+        assert (TRACE.settled, context.cleaned) == ([job.subject_key], True)
+
+    def test_a_recovered_execution_stamps_again_for_a_job_already_ended(
+        self, engine: InlineJobEngine, make_job, db_session: Session
+    ) -> None:
+        # It cannot know whether the execution that ended the Job lived long
+        # enough to queue its passes, so it marks the sources dirty once more.
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        _context(job).finish(JobOutcome.COMPLETED)
+        first = db_session.get(ReconcileCursor, READ_ONLY).nudged_at
+        db_session.expire_all()
+
+        _settle(_context(job), None)
+
+        assert db_session.get(ReconcileCursor, READ_ONLY).nudged_at > first
+
+    def test_a_failure_recorded_at_the_end_reaches_the_failure_hook(
+        self, engine: InlineJobEngine, make_job
+    ) -> None:
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+
+        _settle(_context(job), "exploded")
+
+        assert (_status(job.id).state, TRACE.failures) == (
+            "failed",
+            [(job.subject_key, "exploded")],
+        )
 
 
 class TestExecuteJob:
@@ -443,7 +783,6 @@ class TestAttemptSettlement:
         from app.modules.derivatives import records
         from app.modules.derivatives.jobs import definitions
         from app.modules.derivatives.kinds import recipes_for
-        from app.modules.work.runner import _settle
 
         artifact = make_file(make_model(), filename="retry.stl")
         job = make_job(
@@ -476,11 +815,15 @@ class TestAttemptSettlement:
         db_session.commit()
 
         _settle(
-            job.id,
-            1,
-            job.execution_epoch,
-            definition,
-            job.subject_key,
+            ExecutionContext(
+                job_id=job.id,
+                definition=definition.name,
+                subject_key=job.subject_key,
+                priority=job.priority,
+                execution_id=f"{job.id}:{job.execution_epoch}:1",
+                attempt=1,
+                execution_epoch=job.execution_epoch,
+            ),
             "late_old_worker_error",
         )
 
@@ -567,7 +910,6 @@ class TestEpochCallbacks:
     def test_old_epoch_cannot_write_to_same_attempt_number(
         self, db_session, engine, make_job
     ):
-        from app.modules.work.runner import ExecutionContext, _settle
 
         job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
         old_epoch = job.execution_epoch
@@ -587,14 +929,7 @@ class TestEpochCallbacks:
 
         context.update(processed=99)
         context.finish(JobOutcome.FAILED, error="late callback")
-        _settle(
-            job.id,
-            1,
-            old_epoch,
-            catalog_module.get_catalog().definition(MUTATING),
-            job.subject_key,
-            "late error",
-        )
+        _settle(context, "late error")
 
         assert _status(job.id).state is JobState.RUNNING
         assert _status(job.id).processed == 0

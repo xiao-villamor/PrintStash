@@ -236,6 +236,10 @@ class Settings(BaseSettings):
     jobs_resubmit_cooldown_seconds: int = Field(default=30, ge=0, le=3600)
     jobs_resubmit_burst: int = Field(default=3, ge=1, le=100)
     jobs_submit_grace_seconds: int = Field(default=60, ge=1, le=3600)
+    # Progress a step reports before its attempt has run this long is held and
+    # written with the next write, so a short attempt costs no transaction for
+    # reports nobody could have read.
+    jobs_progress_hold_seconds: float = Field(default=1.0, ge=0, le=60)
     jobs_executor_stale_seconds: int = Field(default=120, ge=10, le=86400)
     jobs_retention_days: int = Field(default=7, ge=1, le=365)
     jobs_system_retention_hours: int = Field(default=24, ge=1, le=8760)

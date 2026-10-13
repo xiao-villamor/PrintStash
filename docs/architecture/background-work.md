@@ -96,6 +96,33 @@ absorbed by a queued backfill pass. The tick, a single persistent DBOS
 schedule, nudges every definition at `JOBS_RECONCILE_INTERVAL_SECONDS` as a
 safety net, and schedule sources become due on it.
 
+The dirty mark is a write, so it travels with a write that already happens.
+`nudge_after_commit` stamps it as the caller's transaction commits, and a Job's
+terminal write stamps the sources its completion affects; only the pass is
+queued afterwards. A rolled-back transaction leaves no mark. A process that
+dies between the commit and queuing the pass leaves a mark that covers further
+nudges for the grace window, after which the tick queues the pass.
+
+## An attempt's writes
+
+A Job attempt writes as rarely as its guarantees allow:
+
+- **Begin** claims the attempt.
+- **Progress** a step reports in the first `JOBS_PROGRESS_HOLD_SECONDS` of its
+  attempt is held in memory and merged into the next write, so an attempt that
+  ends sooner never pays for reports nobody could read. Past the hold each
+  report is written when it is made. Held progress is lost with the process;
+  steps never depend on it.
+- **The end** is one transaction: the terminal state, the subject's failure
+  hook and the completion marks. A step that no longer needs its staged input
+  ends with `ctx.settle(...)` instead of `ctx.finish(...)`, which puts the
+  definition's settled cleanup in the same transaction. Otherwise the cleanup
+  runs once the last step returns. A definition without a settled cleanup
+  takes no transaction for it.
+
+Every part is idempotent, and what an execution has already written is known
+only in memory: an execution recovered after a crash settles in full again.
+
 ## Derivative scheduling
 
 `derive.native` and `derive.light` use one FIFO engine queue each, with equal
@@ -226,6 +253,7 @@ both Compose files run the first with no setting.
 | `JOBS_MAX_RESUBMITS` | 3 | Interrupted attempts before a Job fails |
 | `JOBS_RESUBMIT_COOLDOWN_SECONDS` / `JOBS_RESUBMIT_BURST` | 30 / 3 | A subject finished this often waits the window out |
 | `JOBS_SUBMIT_GRACE_SECONDS` | 60 | How long a queued pass absorbs further nudges |
+| `JOBS_PROGRESS_HOLD_SECONDS` | 1.0 | How long an attempt runs before the progress it reports is written (0–60 seconds; 0 writes every report) |
 | `JOBS_EXECUTOR_STALE_SECONDS` | 120 | Heartbeat age after which an executor's work is rerun |
 | `JOBS_RETENTION_DAYS` / `JOBS_RETENTION_PER_USER` | 7 / 500 | User Job history |
 | `JOBS_SYSTEM_RETENTION_HOURS` | 24 | Ownerless (backfill) Job history |

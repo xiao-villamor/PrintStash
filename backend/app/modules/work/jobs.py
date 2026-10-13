@@ -11,6 +11,7 @@ import json
 import re
 import uuid
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Optional, cast
 
@@ -190,6 +191,20 @@ def _merge(payload: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+@dataclass(frozen=True)
+class Settlement:
+    """What one settling write did to a Job this attempt holds.
+
+    ``transitioned`` is false when an earlier write had already made the Job
+    terminal. ``cleaned`` says the definition's settled cleanup committed with
+    this write, so nothing has to replay it.
+    """
+
+    status: JobStatus
+    transitioned: bool
+    cleaned: bool
+
+
 class JobStore:
     """Every read and write of Job rows goes through this one owner."""
 
@@ -333,12 +348,15 @@ class JobStore:
         *,
         expected_attempt: int | None = None,
         expected_epoch: str | None = None,
+        earlier: Sequence[dict[str, Any]] = (),
         **fields: Any,
     ) -> None:
         """Merge progress into an active Job.
 
         A terminal Job is immutable: a step still reporting after its Job was
         cancelled (the cancel races the running step) changes nothing.
+        ``earlier`` are reports held back since the last write, merged first
+        and in order, so several reports cost one transaction.
         """
         self._write(
             job_id,
@@ -346,6 +364,7 @@ class JobStore:
             fields,
             expected_attempt=expected_attempt,
             expected_epoch=expected_epoch,
+            earlier=earlier,
         )
 
     def finish(
@@ -381,7 +400,7 @@ class JobStore:
         withdraw: Callable[[Session, str], None],
     ) -> JobStatus | None:
         """Withdraw intent and cancel atomically; a withdrawal error aborts both."""
-        return self._write(
+        settlement = self._write(
             job_id,
             JobOutcome.CANCELLED,
             {"error": "cancelled_by_user"},
@@ -390,6 +409,7 @@ class JobStore:
             expected_state=expected_state,
             before_transition=withdraw,
         )
+        return None if settlement is None else settlement.status
 
     def settle_attempt(
         self,
@@ -408,6 +428,41 @@ class JobStore:
         Workers omit expected_state, which excludes a queued retry. Reconciliation
         supplies the state it observed, so evidence for a queued Job is explicit.
         """
+        settlement = self.settle(
+            job_id,
+            attempt,
+            outcome,
+            execution_epoch=execution_epoch,
+            on_failure=on_failure,
+            error=error,
+            expected_state=expected_state,
+            **fields,
+        )
+        return None if settlement is None else settlement.status
+
+    def settle(
+        self,
+        job_id: str,
+        attempt: int,
+        outcome: JobOutcome,
+        *,
+        execution_epoch: str,
+        on_failure: Callable[[Session, str, str], None],
+        on_settled: Callable[[Session, str], None] | None = None,
+        on_transition: Callable[[Session], None] | None = None,
+        error: str | None = None,
+        expected_state: JobState | None = None,
+        earlier: Sequence[dict[str, Any]] = (),
+        **fields: Any,
+    ) -> Settlement | None:
+        """Settle an attempt and everything owed with it in one transaction.
+
+        The terminal write, the subject's failure hook, the definition's settled
+        cleanup (``on_settled``) and whatever the caller records because the Job
+        ended (``on_transition``, run only by the write that ends it) commit
+        together. Each hook has its own savepoint: a hook that fails is logged
+        and undone, and the settlement stands.
+        """
         if outcome is JobOutcome.FAILED and error is None:
             raise ValueError("failed_job_requires_error")
         if error is not None:
@@ -421,6 +476,9 @@ class JobStore:
             expected_epoch=execution_epoch,
             expected_state=expected_state,
             failure_hook=on_failure,
+            settled_hook=on_settled,
+            transition_hook=on_transition,
+            earlier=earlier,
         )
 
     def reconcile_settled_attempt(
@@ -467,7 +525,10 @@ class JobStore:
         expected_state: JobState | None = None,
         failure_hook: Callable[[Session, str, str], None] | None = None,
         before_transition: Callable[[Session, str], None] | None = None,
-    ) -> JobStatus | None:
+        settled_hook: Callable[[Session, str], None] | None = None,
+        transition_hook: Callable[[Session], None] | None = None,
+        earlier: Sequence[dict[str, Any]] = (),
+    ) -> Settlement | None:
         with get_session_factory().scoped_session() as session:
             if expected_attempt is not None and expected_epoch is None:
                 raise ValueError("execution_epoch_required")
@@ -488,7 +549,10 @@ class JobStore:
             if not terminal:
                 if before_transition is not None:
                     before_transition(session, row.subject_key)
-                payload = _merge(json.loads(row.status_json), fields)
+                payload = json.loads(row.status_json)
+                for report in earlier:
+                    payload = _merge(payload, report)
+                payload = _merge(payload, fields)
                 now = utcnow()
                 if outcome is not None:
                     self._apply_terminal(row, payload, outcome, now)
@@ -515,10 +579,28 @@ class JobStore:
                     logger.exception(
                         "job failure hook failed", extra={"job_id": job_id}
                     )
+            cleaned = False
+            if settled_hook is not None and row.state in TERMINAL_STATES:
+                try:
+                    with session.begin_nested():
+                        settled_hook(session, row.subject_key)
+                    cleaned = True
+                except Exception:  # noqa: BLE001 - startup retries exact-receipt cleanup
+                    logger.exception(
+                        "job settlement cleanup failed", extra={"job_id": job_id}
+                    )
+            if transition_hook is not None and not terminal and outcome is not None:
+                try:
+                    with session.begin_nested():
+                        transition_hook(session)
+                except Exception:  # noqa: BLE001 - settlement survives a broken hook
+                    logger.exception(
+                        "job transition hook failed", extra={"job_id": job_id}
+                    )
             session.commit()
         if not terminal:
             self._changed(status)
-        return status
+        return Settlement(status=status, transitioned=not terminal, cleaned=cleaned)
 
     @staticmethod
     def _apply_terminal(
