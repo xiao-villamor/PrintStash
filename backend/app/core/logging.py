@@ -4,7 +4,7 @@ import logging
 import re
 import sys
 
-from app.core.config import settings
+from app.core.native_settings import settings
 
 _CONFIGURED = False
 _QUERY_URL = re.compile(r"((?:https?://|/)[^\s\"'<>?]+)\?[^\s\"'<>]*")

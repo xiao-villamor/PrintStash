@@ -18,8 +18,8 @@ from typing import Literal, Optional
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
 from app.core.cancellation import checkpoint
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.native_settings import settings
 from app.modules.media import native_process
 from app.modules.media.native_execution import admission
 from app.runtime.native_admission import NativePermit, Resources

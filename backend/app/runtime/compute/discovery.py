@@ -80,7 +80,7 @@ def adapter_evidence(info: dict) -> dict:
 
 
 def configure_backend() -> None:
-    from app.core.config import settings
+    from app.core.native_settings import settings
 
     backend = settings.compute_backend
     if backend == "auto" and not Path("/dev/dxg").exists():

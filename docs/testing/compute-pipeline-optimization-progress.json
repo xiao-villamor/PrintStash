@@ -1,0 +1,110 @@
+{
+  "status": "performance_threshold_met_validation_pending",
+  "required_reduction_percent": 20,
+  "threshold_seconds": 397.836875122,
+  "cohort_sha256": "2780f43fa04318c7c8ebbc0b127e250f5887e0b3f4382f2d8800e4d72ccd3824",
+  "sources": 250,
+  "original_bytes": 808880155,
+  "render": {
+    "width": 512,
+    "height": 384,
+    "webp_quality": 85,
+    "webp_method": 2,
+    "alpha": "exact"
+  },
+  "runs": [
+    {
+      "name": "baseline_single_pass_ascii",
+      "seconds": 497.296093902,
+      "image": "sha256:e15e2459fc5ad5a45c3d4b1922616fbf16bc1f4670b3677640fdad789597237a"
+    },
+    {
+      "name": "admission_only_rejected",
+      "seconds": 468.188339103,
+      "image": "sha256:8d4f1fa85143cfddb412e0b671adf5dab9f32da6306b088a6876c12ce8adfcc3",
+      "result": "rejected_output_regression",
+      "changed_invalid_outcomes": 4,
+      "reason": "Four malformed STL prefixes changed from invalid_source to resource_limit. This result does not count as an improvement; the later byte-bound fallback repairs classification."
+    },
+    {
+      "name": "admission_and_obj_arrays",
+      "seconds": 440.390018691,
+      "image": "sha256:ed015b14a5c51efd29a0b13079288914ec48d3f2dbccdb41604135cad2e068d0",
+      "metadata_equal": 250,
+      "byte_identical_images": 238,
+      "same_invalid_sources": 12,
+      "r2_requests": 0
+    },
+    {
+      "name": "wal_only_followup",
+      "seconds": 598.629018229,
+      "image": "sha256:fa38708a0817f7c3bd7328e3939c0a0cc87fbead2006bfce42d10d9b53897488",
+      "result": "slower_not_an_improvement"
+    },
+    {
+      "name": "wal_and_pool_two",
+      "image": "sha256:2237fdf20bc6900ab7911158b50beef618291a30526926739ccd270543042974",
+      "result": "rejected_incomplete",
+      "publication_seconds": null,
+      "reason": "Stopped after elapsed already exceeded the fixed full250 threshold; no completed-cohort score."
+    },
+    {
+      "name": "native_worker_startup",
+      "image": "sha256:5d8e8c3bd688310397a4a1e8fdb6eb7cfbb709f9ab25267359f8f77f8b6f2d5a",
+      "result": "rejected_incomplete",
+      "publication_seconds": null,
+      "reason": "Stopped after elapsed already exceeded the fixed full250 threshold; no completed-cohort score."
+    },
+    {
+      "name": "stl_source_byte_bound_and_startup",
+      "seconds": 542.716989324,
+      "image": "sha256:5fc8ba476eadf9409d1b5dbe52563d30b599b3c51d4a481d07bd4cd03581934a",
+      "result": "slower_not_an_improvement",
+      "metadata_equal": 250,
+      "byte_identical_images": 238,
+      "same_invalid_sources": 12,
+      "r2_requests": 0,
+      "whole_pool_memory_claims": 22,
+      "native_wait_seconds_accumulated": 285.438025956,
+      "peak_container_ram_bytes": 1775017984
+    },
+    {
+      "name": "array_measurement_simplification",
+      "seconds": 515.196078906,
+      "image": "sha256:cde3f9d4d5d8dfe07f9512f695f028bbb9fe04a8f19b2a43bb1c60e9835fb1b6",
+      "result": "target_not_met",
+      "metadata_equal": 250,
+      "byte_identical_image_multiset": 238,
+      "same_invalid_sources": 12,
+      "r2_requests": 0
+    },
+    {
+      "name": "unchanged_original_gpu_control_after_old_benchmark_cleanup",
+      "seconds": 497.089745785,
+      "image": "sha256:e15e2459fc5ad5a45c3d4b1922616fbf16bc1f4670b3677640fdad789597237a",
+      "metadata_equal": 250,
+      "same_invalid_sources": 12,
+      "r2_requests": 0,
+      "environment": "Two completed old benchmark containers stopped; main application retained. Same condition for next candidate.",
+      "interpretation": "Reproduces original 497.296 s baseline; does not support attributing the regression to residual benchmark containers."
+    },
+    {
+      "name": "lean_preparation_and_coordination",
+      "seconds": 357.279319394,
+      "seconds_utc": 357.279319095,
+      "image": "sha256:1ceb26c4daa1dc2844ea57d623b44d167e0160f6f6f03b071c62b63fc8ef9275",
+      "reduction_vs_original_percent": 28.155615180760396,
+      "reduction_vs_contemporary_control_percent": 28.125791685807666,
+      "metadata_equal": 250,
+      "byte_identical_images": 238,
+      "same_invalid_sources": 12,
+      "r2_requests": 0
+    }
+  ],
+  "scope_notes": [
+    "Same observers and rendering settings. No full CPU rerun.",
+    "Diagnostic profiling runs do not establish performance gains.",
+    "GPU geometry measurements and bounded streaming preparation are proposed, not implemented.",
+    "Sequential runs on a shared WSL host; not a randomized multi-run estimate."
+  ]
+}

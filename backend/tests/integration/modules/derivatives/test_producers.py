@@ -892,8 +892,8 @@ class TestDeriveMesh:
         self, db_session: Session, stored, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The #259 shape through the whole pipeline: stored, derived, recorded."""
-        monkeypatch.setenv("VAULT_MESH_MAX_RENDER_TRIANGLES", "1000")
-        monkeypatch.setenv("VAULT_MESH_MEMORY_BUDGET_FRACTION", "0")
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
+        monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0.0)
         placements = tuple((1, f"1 0 0 0 1 0 0 0 1 {i * 5} 0 0") for i in range(400))
         artifact = stored("plate.3mf", three_mf(build=placements))
 

@@ -11,7 +11,7 @@ from printstash_core.mesh.preview_profile import PREVIEW_PROFILE, RASTERIZER_REC
 from printstash_core.mesh.rasterizer import RenderedPixels, postprocess_rgba
 
 from app.core.cancellation import OperationCancelled, checkpoint
-from app.core.config import settings
+from app.core.native_settings import settings
 from app.core.work_priority import WorkPriority, current_priority
 from app.runtime.compute import client
 from app.runtime.compute.contracts import ComputeUnavailable, Reason

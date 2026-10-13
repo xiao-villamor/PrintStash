@@ -5,7 +5,7 @@ This owner imports no mesh loader, renderer or subprocess orchestrator.
 
 from pathlib import Path, PurePosixPath
 
-from app.core.config import settings
+from app.core.native_settings import settings
 from app.runtime.native_admission import Resources
 
 
@@ -23,7 +23,7 @@ def memory_limit_bytes() -> int | None:
         raw = Path("/sys/fs/cgroup/memory.max").read_text().strip()
         if raw != "max":
             limits.append(int(raw))
-    except (OSError, ValueError):
+    except OSError, ValueError:
         pass
     # On a host service the cgroup filesystem is mounted above this process's
     # group. Reading only its root misses MemoryMax on the service or a parent
@@ -42,7 +42,7 @@ def memory_limit_bytes() -> int | None:
                     value = int((group / "memory.max").read_text().strip())
                     if value > 0:
                         limits.append(value)
-                except (OSError, ValueError):
+                except OSError, ValueError:
                     pass
                 group = group.parent
     except OSError:
@@ -53,14 +53,14 @@ def memory_limit_bytes() -> int | None:
         )
         if 0 < v1 < (1 << 62):  # v1 uses a huge sentinel for "unlimited"
             limits.append(v1)
-    except (OSError, ValueError):
+    except OSError, ValueError:
         pass
     try:  # host total
         for line in Path("/proc/meminfo").read_text().splitlines():
             if line.startswith("MemTotal:"):
                 limits.append(int(line.split()[1]) * 1024)
                 break
-    except (OSError, ValueError, IndexError):
+    except OSError, ValueError, IndexError:
         pass
     return min(limits) if limits else None
 
@@ -83,7 +83,7 @@ def process_rss_bytes(pid: int) -> int | None:
         for line in Path(f"/proc/{pid}/status").read_text().splitlines():
             if line.startswith("VmRSS:"):
                 return int(line.split()[1]) * 1024
-    except (OSError, ValueError, IndexError):
+    except OSError, ValueError, IndexError:
         return None
     return None
 
@@ -110,7 +110,7 @@ def process_tree_rss_bytes(pid: int) -> int | None:
                 .read_text()
                 .split()
             )
-        except (OSError, ValueError):
+        except OSError, ValueError:
             # A process can exit between the two reads.
             continue
     return total if found else None

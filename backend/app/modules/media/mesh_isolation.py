@@ -41,7 +41,7 @@ from printstash_core.mesh.similarity import GeometryError
 
 from app import __file__ as application_file
 from app.core.cancellation import OperationCancelled, checkpoint
-from app.core.config import _overlay, settings
+from app.core.native_settings import settings
 from app.modules.media import mesh_policy, native_process
 from app.modules.media.fingerprints import (
     FingerprintRecord,
@@ -479,12 +479,16 @@ def supervise_result(
                 if time.monotonic() >= deadline:
                     cause = WorkerExitCause.DEADLINE
                     raise MeshWorkerError(ThumbnailFailureReason.TIMEOUT)
-                rss = native_process.process_tree_rss_bytes(process.pid)
-                if rss is not None:
-                    peak_rss = rss if peak_rss is None else max(peak_rss, rss)
-                    if rss > memory_budget:
-                        cause = WorkerExitCause.MEMORY_LIMIT
-                        raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
+                # Staged publication already has an independent RSS monitor.
+                # Keep a single sampler for that tree, including while callbacks
+                # block; duplicate /proc walks only contend with useful work.
+                if watchdog is None:
+                    rss = native_process.process_tree_rss_bytes(process.pid)
+                    if rss is not None:
+                        peak_rss = rss if peak_rss is None else max(peak_rss, rss)
+                        if rss > memory_budget:
+                            cause = WorkerExitCause.MEMORY_LIMIT
+                            raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
                 for key, _ in selector.select(_POLL_SECONDS):
                     chunk = os.read(key.fd, 65536)
                     if not chunk:
@@ -633,6 +637,8 @@ def runtime_overrides() -> dict[str, str | int | float | bool]:
     configured differently. Only scalars cross: every setting the worker reads
     is one.
     """
+    from app.core.config import _overlay
+
     return {
         key: value
         for key, value in dict(_overlay).items()
@@ -701,9 +707,15 @@ def _run_worker(
     )
     with admission(amount, capacity, checkpoint=check) as permit:
         check()
+        if module == "app.modules.media.mesh_worker":
+            from app.core.native_settings import capture
+
+            payload = {**spec, "native_settings": capture()}
+        else:
+            payload = {"overrides": runtime_overrides(), **spec}
         command = worker_command(
             module,
-            [json.dumps({"overrides": runtime_overrides(), **spec})],
+            [json.dumps(payload)],
             permit.resources.bytes,
         )
         return supervise_result(
@@ -817,7 +829,12 @@ def read_spec(argv: list[str]) -> dict[str, Any]:
     """The request a worker was started with, after adopting the parent's overrides."""
     (raw,) = argv
     spec = json.loads(raw)
-    _overlay.update(spec["overrides"])
+    from app.core.native_settings import installed
+
+    if not installed():
+        from app.core.config import _overlay
+
+        _overlay.update(spec["overrides"])
     return spec
 
 

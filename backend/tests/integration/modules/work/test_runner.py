@@ -363,6 +363,30 @@ class TestExecuteJob:
 
 
 class TestActiveAttempt:
+    def test_withdrawal_reads_current_authority_without_cached_results(self, make_job):
+        from app.db.session import get_session_factory
+        from app.modules.work.runner import _withdrawn
+
+        job = make_job(
+            kind=JobKind.DERIVATIVES_MESH, state=JobState.RUNNING, attempts=1
+        )
+        assert not _withdrawn(job.id, 1, job.execution_epoch)
+        assert _withdrawn(job.id, 1, "retired-epoch")
+        with get_session_factory().scoped_session() as session:
+            row = session.get(Job, job.id)
+            assert row is not None
+            row.state = JobState.CANCELLED
+            session.add(row)
+            session.commit()
+        assert _withdrawn(job.id, 1, job.execution_epoch)
+        assert _withdrawn(job.id)
+        with get_session_factory().scoped_session() as session:
+            row = session.get(Job, job.id)
+            assert row is not None
+            session.delete(row)
+            session.commit()
+        assert _withdrawn(job.id)
+
     def test_superseded_execution_is_withdrawn(self, make_job):
         from app.modules.work.runner import _withdrawn
 

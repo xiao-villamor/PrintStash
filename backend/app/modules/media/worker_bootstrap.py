@@ -321,6 +321,15 @@ def _run(argv: list[str]) -> int:
     os.environ[WORKER_MARKER] = str(os.getpid())
     sys.argv = [module, *arguments]
     try:
+        if module == "app.modules.media.mesh_worker":
+            import json
+
+            (raw_spec,) = arguments
+            native_settings = json.loads(raw_spec).get("native_settings")
+            if native_settings is not None:
+                from app.core.native_settings import install
+
+                install(native_settings)
         from app.core.work_priority import WorkPriority, priority_scope
 
         # ContextVars do not cross exec. Bind the supervisor's scheduling tier

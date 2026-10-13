@@ -16,7 +16,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from app.core.cancellation import checkpoint as cancellation_checkpoint
-from app.core.config import settings
+from app.core.native_settings import settings
 
 from .contracts import (
     Capability,

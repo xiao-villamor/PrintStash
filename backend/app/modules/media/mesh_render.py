@@ -16,8 +16,8 @@ from printstash_core.mesh.render_geometry import (
 )
 from printstash_core.mesh.similarity.components import ExpandedScene
 
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.native_settings import settings
 
 from .gpu_normals import (
     GPU_NORMALS_MIN_FACES,

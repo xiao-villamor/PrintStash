@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.cancellation import checkpoint
-from app.core.config import settings
+from app.core.native_settings import settings
 from app.modules.storage.artifact_content import ArtifactHandle
 from app.runtime import preparation_runtime
 from app.runtime.native_admission import NativePermit, Resources

@@ -36,6 +36,10 @@ def main() -> None:
     parser.add_argument("--spec")
     args = parser.parse_args()
     if args.role == "render-worker":
+        from app.core.native_settings import install
+
+        install(json.loads(args.spec)["native_settings"])
+
         from app.core.cancellation import checkpoint
         from app.modules.media.mesh_protocol import GeometryOutput
         from app.modules.media.mesh_worker import main as render_worker

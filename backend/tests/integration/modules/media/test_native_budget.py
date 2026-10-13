@@ -66,8 +66,6 @@ class TestEstimateSources:
     @pytest.mark.parametrize(
         "file_type,payload",
         [
-            pytest.param("stl", b"solid text\nendsolid\n", id="ascii"),
-            pytest.param("stl", b"truncated", id="malformed"),
             pytest.param("3mf", b"PK", id="archive"),
             pytest.param("obj", b"v 0 0 0\n", id="polygon"),
         ],
@@ -132,7 +130,7 @@ class TestEstimateSources:
             pytest.param(b"f 1//2 2//2 3//2", id="out-of-range-normal"),
         ],
     )
-    def test_unverified_obj_indices_retain_full_pool(self, tmp_path, face):
+    def test_index_validation_remains_with_the_guarded_obj_loader(self, tmp_path, face):
         source = tmp_path / "mesh.obj"
         source.write_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 1\n" + face + b"\n")
         pool = Resources(4, 4 * 1024**3)
@@ -141,7 +139,7 @@ class TestEstimateSources:
             pool, (native_budget.MeshSource(source, "obj"),)
         )
 
-        assert amount == Resources(1, pool.bytes)
+        assert amount == Resources(1, native_budget.MIN_NATIVE_MEMORY)
 
     def test_embedded_material_reference_retains_whole_pool(self, tmp_path):
         source = tmp_path / "mesh.obj"
@@ -170,69 +168,41 @@ class TestEstimateSources:
         assert amount == Resources(1, 1024**3)
 
     @pytest.mark.parametrize(
-        "file_type,payload",
+        "tail,weighted",
         [
-            pytest.param(
-                "stl",
-                ascii_stl(triangles=2) + b"facet normal 0 0 1\n",
-                id="incomplete-ascii",
-            ),
-            pytest.param(
-                "stl",
-                ascii_stl().replace(b"vertex 1 0 0", b"vertex nan 0 0"),
-                id="nonfinite-ascii",
-            ),
-            pytest.param(
-                "obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 4\n", id="missing-vertex"
-            ),
-            pytest.param(
-                "obj",
-                b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf -4 -2 -1\n",
-                id="missing-relative-vertex",
-            ),
-            pytest.param(
-                "obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 0 2 3\n", id="zero-index"
-            ),
-            pytest.param(
-                "obj", b"v nan 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n", id="nonfinite-vertex"
-            ),
-            pytest.param(
-                "obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2\n", id="incomplete-face"
-            ),
-            pytest.param(
-                "obj",
-                b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\nmtllib external.mtl\n",
-                id="material",
-            ),
-            pytest.param(
-                "obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 \\\n3\n", id="continuation"
-            ),
-            pytest.param(
-                "obj",
-                b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1//1 2//1 3//1\n",
-                id="normal-indices",
-            ),
-            pytest.param(
-                "obj",
-                b"v 0 0 0\n" * 4 + b"f 1 2 3\n",
-                id="excess-unreferenced-vertices",
-            ),
-            pytest.param("obj", b"v 0 0 0\n\xff", id="nonascii"),
+            pytest.param(b"f 1 2 4\n", True, id="missing-vertex"),
+            pytest.param(b"f -4 -2 -1\n", True, id="missing-relative-vertex"),
+            pytest.param(b"f 0 2 3\n", True, id="zero-index"),
+            pytest.param(b"f 1//1 2//1 3//1\n", True, id="missing-normal"),
+            pytest.param(b"f 1 2\n", False, id="incomplete-face"),
+            pytest.param(b"f 1 2 3\nmtllib external.mtl\n", False, id="material"),
+            pytest.param(b"f 1 2 \\\n3\n", False, id="continuation"),
+            pytest.param(b"v 0 0 0\nf 1 2 3\n", False, id="excess-vertices"),
+            pytest.param(b"\xff", False, id="nonascii"),
         ],
     )
-    def test_unverified_text_retains_whole_pool(self, tmp_path, file_type, payload):
-        source = tmp_path / "source"
-        source.write_bytes(payload)
+    def test_obj_admission_bounds_storage_without_certifying_indices(
+        self, tmp_path, tail, weighted
+    ):
+        source = tmp_path / "source.obj"
+        source.write_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\n" + tail)
         pool = Resources(4, 4 * 1024**3)
-
         amount = native_budget.estimate_sources(
-            pool, (native_budget.MeshSource(source, file_type),)
+            pool, (native_budget.MeshSource(source, "obj"),)
         )
+        expected = native_budget.MIN_NATIVE_MEMORY if weighted else pool.bytes
+        assert amount == Resources(1, expected)
 
-        assert amount == Resources(1, pool.bytes)
+    def test_numeric_validation_belongs_to_the_guarded_loader(self, tmp_path):
+        source = tmp_path / "source.obj"
+        source.write_bytes(b"v nan 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+        pool = Resources(4, 4 * 1024**3)
+        assert native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "obj"),)
+        ) == Resources(1, native_budget.MIN_NATIVE_MEMORY)
 
-    @pytest.mark.parametrize("file_type", ["stl", "obj"])
-    def test_oversized_text_remains_unknown_without_loading(self, tmp_path, file_type):
+    def test_oversized_text_remains_unknown_without_loading(self, tmp_path):
+        file_type = "obj"
         source = tmp_path / "source"
         with source.open("wb") as stream:
             stream.truncate(native_budget.TEXT_PREFLIGHT_BYTES + 1)
@@ -245,8 +215,8 @@ class TestEstimateSources:
         assert amount == Resources(1, pool.bytes)
         assert source.stat().st_blocks * 512 < 1024**2
 
-    @pytest.mark.parametrize("file_type", ["stl", "obj"])
-    def test_long_text_line_retains_whole_pool(self, tmp_path, file_type):
+    def test_long_text_line_retains_whole_pool(self, tmp_path):
+        file_type = "obj"
         source = tmp_path / "source"
         source.write_bytes(b"#" * (native_budget.TEXT_PREFLIGHT_LINE_BYTES + 1))
         pool = Resources(4, 4 * 1024**3)
@@ -257,16 +227,9 @@ class TestEstimateSources:
 
         assert amount == Resources(1, pool.bytes)
 
-    @pytest.mark.parametrize(
-        "file_type,payload",
-        [
-            pytest.param("stl", ascii_stl(), id="ascii-stl"),
-            pytest.param("obj", b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n", id="obj"),
-        ],
-    )
-    def test_expired_text_preflight_retains_whole_pool(
-        self, tmp_path, monkeypatch, file_type, payload
-    ):
+    def test_expired_text_preflight_retains_whole_pool(self, tmp_path, monkeypatch):
+        file_type = "obj"
+        payload = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"
         source = tmp_path / "source"
         source.write_bytes(payload)
         monkeypatch.setattr(native_budget, "TEXT_PREFLIGHT_SECONDS", -1)
@@ -686,3 +649,205 @@ class TestCallerProfiles:
         assert bootstrap_ceilings == [expected]
         assert current_permit() is None
         assert source.read_bytes() == binary_stl(triangles=12)
+
+
+class TestAsciiTriangleBound:
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param(ascii_stl(triangles=3), id="ordinary"),
+            pytest.param(ascii_stl(triangles=3).rstrip(), id="no-final-newline"),
+            pytest.param(ascii_stl(triangles=3).replace(b"\n", b"\r\n"), id="crlf"),
+            pytest.param(
+                ascii_stl(triangles=3).replace(b"endfacet", b"# comment\n\nendfacet"),
+                id="comments",
+            ),
+            pytest.param(
+                ascii_stl(triangles=3) + b"# pad\n" * 90000, id="multiple-read-blocks"
+            ),
+        ],
+    )
+    def test_bounds_authoritative_triangle_count(self, tmp_path, payload):
+        from app.modules.media.stl_reader import scan_stl
+
+        source = tmp_path / "source.stl"
+        source.write_bytes(payload)
+        actual = scan_stl(source).triangle_count
+
+        bound = native_budget._ascii_triangle_bound(source)
+
+        assert bound is not None
+        assert bound >= actual == 3
+
+    @pytest.mark.parametrize(
+        "prefix",
+        [b"1902\n", b".793998\n", b"cet normal 0 0 1\n", b"ex 0 0 0\n"],
+        ids=[
+            "truncated-number",
+            "truncated-coordinate",
+            "truncated-facet",
+            "truncated-vertex",
+        ],
+    )
+    def test_ambiguous_prefix_keeps_loader_density_headroom(self, tmp_path, prefix):
+        source = tmp_path / "source.stl"
+        source.write_bytes(prefix + ascii_stl(triangles=3))
+        pool = Resources(4, 4 * 1024**3)
+
+        claim = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "stl"),)
+        )
+
+        assert claim == Resources(1, native_budget.MIN_NATIVE_MEMORY)
+        assert native_budget._ascii_triangle_bound(source) is None
+        assert native_budget.face_capacity(
+            claim.bytes, ".stl"
+        ) >= mesh_policy.estimate_triangle_count(source)
+
+    def test_cpu_watchdog_declines_detailed_count(self, tmp_path, monkeypatch):
+        source = tmp_path / "source.stl"
+        source.write_bytes(ascii_stl())
+        clock = iter([0.0, 0.251])
+        monkeypatch.setattr(native_budget.time, "thread_time", lambda: next(clock))
+
+        bound = native_budget._ascii_triangle_bound(source)
+
+        assert bound is None
+
+    def test_canonical_worker_rejects_invalid_tail(self, tmp_path, monkeypatch):
+        from app.core.config import _overlay
+        from app.modules.media import mesh_isolation
+        from app.modules.media.mesh_contracts import (
+            ThumbnailFailureReason,
+            ThumbnailRequest,
+        )
+
+        source = tmp_path / "source.stl"
+        source.write_bytes(ascii_stl(triangles=2) + b"facet normal 0 0 1\n")
+        monkeypatch.setitem(_overlay, "compute_mode", "cpu")
+        pool = Resources(4, 4 * 1024**3)
+        claim = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "stl"),)
+        )
+
+        with admit(claim, pool, checkpoint=lambda: None):
+            result = mesh_isolation.generate(
+                ThumbnailRequest(source, width=96, height=72)
+            )
+
+        assert claim == Resources(1, native_budget.MIN_NATIVE_MEMORY)
+        assert result.image is None
+        assert result.failure_reason is ThumbnailFailureReason.INVALID_SOURCE
+
+
+class TestStableStlByteBound:
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            b"solid text\nendsolid\n",
+            b"truncated",
+            b"",
+            b"#" * (native_budget.TEXT_PREFLIGHT_LINE_BYTES + 1),
+            ascii_stl().replace(b"vertex 1 0 0", b"vertex nan 0 0"),
+        ],
+    )
+    def test_small_stl_does_not_monopolize_the_pool(self, tmp_path, payload):
+        source = tmp_path / "source.stl"
+        source.write_bytes(payload)
+        pool = Resources(4, 4 * 1024**3)
+        claim = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "stl"),)
+        )
+        assert claim == Resources(1, native_budget.MIN_NATIVE_MEMORY)
+
+    def test_expired_scan_keeps_a_source_byte_bound(self, tmp_path, monkeypatch):
+        source = tmp_path / "source.stl"
+        source.write_bytes(ascii_stl())
+        monkeypatch.setattr(native_budget, "OBJ_PREFLIGHT_WALL_SECONDS", -1)
+        pool = Resources(4, 4 * 1024**3)
+        claim = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "stl"),)
+        )
+        assert claim == Resources(1, native_budget.MIN_NATIVE_MEMORY)
+
+    def test_large_malformed_stl_retains_loader_headroom(self, tmp_path):
+        source = tmp_path / "source.stl"
+        with source.open("wb") as stream:
+            stream.write(b"not an STL")
+            stream.truncate(16 * 1024**2)
+        pool = Resources(4, 4 * 1024**3)
+        claim = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "stl"),)
+        )
+        assert native_budget.MIN_NATIVE_MEMORY < claim.bytes < pool.bytes
+        assert native_budget.face_capacity(
+            claim.bytes, ".stl"
+        ) >= mesh_policy.estimate_triangle_count(source)
+        assert source.stat().st_blocks * 512 < 1024**2
+
+    @pytest.mark.parametrize(
+        "prefix", [b"1902\n", b".793998\n", b"cet normal 0 0 1\n", b"ex 0 0 0\n"]
+    )
+    def test_invalid_prefix_stays_invalid_under_weighted_admission(
+        self, tmp_path, monkeypatch, prefix
+    ):
+        from app.core.config import _overlay
+        from app.modules.media import mesh_isolation
+        from app.modules.media.mesh_contracts import (
+            ThumbnailFailureReason,
+            ThumbnailRequest,
+        )
+
+        source = tmp_path / "source.stl"
+        source.write_bytes(prefix + ascii_stl() + b" " * (12 * 1024**2))
+        monkeypatch.setitem(_overlay, "compute_mode", "cpu")
+        pool = Resources(4, 4 * 1024**3)
+        claim = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "stl"),)
+        )
+        with admit(claim, pool, checkpoint=lambda: None):
+            result = mesh_isolation.generate(
+                ThumbnailRequest(source, width=96, height=72)
+            )
+        assert claim.bytes < pool.bytes
+        assert result.image is None
+        assert result.failure_reason is ThumbnailFailureReason.INVALID_SOURCE
+
+
+class TestWeightedObjRefusals:
+    @pytest.mark.parametrize(
+        "face",
+        [
+            b"f 1 2 4",
+            b"f -4 -2 -1",
+            b"f 0 2 3",
+            b"f 1//2 2//2 3//2",
+            b"f 1///1 2///1 3///1",
+            b"f 1// 2// 3//",
+        ],
+    )
+    def test_weighted_admission_preserves_guarded_loader_outcome(
+        self, tmp_path, monkeypatch, face
+    ):
+        from app.core.config import _overlay
+        from app.modules.media import mesh_isolation
+        from app.modules.media.mesh_contracts import ThumbnailRequest
+
+        source = tmp_path / "source.obj"
+        source.write_bytes(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 0 1\n" + face + b"\n")
+        monkeypatch.setitem(_overlay, "compute_mode", "cpu")
+        pool = Resources(4, 4 * 1024**3)
+        claim = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "obj"),)
+        )
+        request = ThumbnailRequest(source, include_thumbnail=False)
+        with admit(Resources(1, pool.bytes), pool, checkpoint=lambda: None):
+            reference = mesh_isolation.generate(request)
+        with admit(claim, pool, checkpoint=lambda: None):
+            actual = mesh_isolation.generate(request)
+        assert claim.bytes < pool.bytes
+        assert actual.geometry == reference.geometry
+        assert actual.geometry_outcome == reference.geometry_outcome
+        assert actual.volume == reference.volume
+        assert actual.failure_reason == reference.failure_reason
+        assert actual.image is None

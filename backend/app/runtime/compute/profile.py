@@ -3,7 +3,7 @@
 import hashlib
 import json
 
-from app.core.config import settings
+from app.core.native_settings import settings
 
 from .discovery import process_identity as runtime_identity
 

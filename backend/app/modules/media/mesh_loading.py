@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING, Optional, cast
 
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.native_settings import settings
 from app.modules.media import mesh_policy
 
 if TYPE_CHECKING:

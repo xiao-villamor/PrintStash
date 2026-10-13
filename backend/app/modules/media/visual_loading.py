@@ -2,8 +2,8 @@
 
 Coordinates remain float64 until render preparation centres them. OBJ materials,
 UVs and stored normals do not participate in the uniform preview shader. Source
-STL measurements consume these same source arrays; OBJ analysis retains its
-stored-normal and texture-aware loader.
+STL measurements consume these same source arrays. Qualified OBJ measurements
+use obj_source to preserve normal seams; other dialects retain the analytical loader.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from printstash_core.mesh.similarity import GeometryError
 
-from app.core.config import settings
+from app.core.native_settings import settings
 from app.modules.media import mesh_policy
 from app.modules.media.stl_reader import (
     InvalidSTL,

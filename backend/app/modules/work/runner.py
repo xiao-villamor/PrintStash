@@ -14,6 +14,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from sqlalchemy import bindparam
+from sqlmodel import select
+
 from app.core.cancellation import OperationCancelled, cancellation_scope
 from app.core.logging import get_logger
 from app.core.time import utcnow
@@ -28,6 +31,11 @@ from .jobs import failure_of, jobs
 logger = get_logger(__name__)
 
 _ADMISSION_WAIT_MAX_S = 30.0
+# Cache only the query shape. Every cancellation checkpoint reads fresh state;
+# progress payloads, timestamps, and ORM objects are unnecessary for authority.
+_WITHDRAWAL_QUERY = select(Job.state, Job.attempts, Job.execution_epoch).where(
+    Job.id == bindparam("withdrawal_job_id")
+)
 
 
 class StepOutcome(StrEnum):
@@ -84,16 +92,16 @@ def _withdrawn(
 ) -> bool:
     """Whether this execution is cancelled, missing or superseded."""
     with get_session_factory().scoped_session() as session:
-        row = session.get(Job, job_id)
-        return (
-            row is None
-            or row.state is JobState.CANCELLED
-            or attempt is not None
-            and (
-                row.attempts != attempt
-                or row.state is JobState.QUEUED
-                or row.execution_epoch != execution_epoch
-            )
+        row = session.exec(
+            _WITHDRAWAL_QUERY, params={"withdrawal_job_id": job_id}
+        ).first()
+        if row is None:
+            return True
+        state, current_attempt, current_epoch = row
+        return state is JobState.CANCELLED or attempt is not None and (
+            current_attempt != attempt
+            or state is JobState.QUEUED
+            or current_epoch != execution_epoch
         )
 
 

@@ -17,8 +17,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.core.cancellation import checkpoint
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.native_settings import settings
 from app.modules.media import native_process
 from app.modules.media.stl_reader import STLMeasurements
 from app.modules.media.worker_bootstrap import WORKER_MARKER

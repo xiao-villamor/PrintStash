@@ -26,8 +26,8 @@ from printstash_core.mesh.similarity import GeometryError
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
 from app.core.cancellation import OperationCancelled, checkpoint
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.native_settings import settings
 from app.modules.media import (
     mesh_loading,
     mesh_measurements,
@@ -430,11 +430,23 @@ class ThumbnailEngine:
 
                                     visual_mesh = load_visual_mesh(request.path, suffix)
                                 else:
+                                    if (
+                                        suffix == ".obj"
+                                        and not request.include_fingerprint
+                                        and request.include_geometry
+                                    ):
+                                        from .obj_source import load_obj_source
+
+                                        visual_mesh = load_obj_source(request.path)
                                     mesh = (
-                                        mesh_loading.load_mesh(request.path)
-                                        if request.file_type is None
-                                        else mesh_loading.load_mesh(
-                                            request.path, file_type=suffix
+                                        None
+                                        if visual_mesh is not None
+                                        else (
+                                            mesh_loading.load_mesh(request.path)
+                                            if request.file_type is None
+                                            else mesh_loading.load_mesh(
+                                                request.path, file_type=suffix
+                                            )
                                         )
                                     )
                             except GeometryError as exc:

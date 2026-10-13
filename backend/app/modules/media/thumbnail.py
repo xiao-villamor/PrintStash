@@ -10,8 +10,8 @@ import warnings
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.native_settings import settings
 from app.modules.media import bgcode
 
 logger = get_logger(__name__)

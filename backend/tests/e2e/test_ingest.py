@@ -982,8 +982,10 @@ class TestStagedMeshOutputs:
         release = tmp_path / "fingerprint-release"
         worker = tmp_path / "gated_mesh_worker.py"
         worker.write_text(
-            "import sys,time\n"
+            "import json,sys,time\n"
             "from pathlib import Path\n"
+            "from app.core.native_settings import install\n"
+            "install(json.loads(sys.argv[1])[\"native_settings\"])\n"
             "from app.modules.media import thumbnail_engine,mesh_worker\n"
             f"started=Path({str(started)!r}); release=Path({str(release)!r})\n"
             "extract=thumbnail_engine.extract\n"

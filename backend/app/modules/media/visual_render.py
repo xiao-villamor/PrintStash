@@ -13,7 +13,7 @@ from printstash_core.search.point_inputs import PointRecipe
 from printstash_core.search.visual_inputs import VisualRecipe
 
 from app.core.cancellation import checkpoint
-from app.core.config import settings
+from app.core.native_settings import settings
 from app.modules.media import mesh_isolation, native_process
 from app.modules.media.geometry_analysis import VisualViews
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
