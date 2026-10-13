@@ -385,6 +385,12 @@ def _patch_engine(
     from app.modules.storage.capacity import forget_transient_claims
 
     forget_transient_claims()
+    # Held progress belongs to attempts of the test that reported it. Its
+    # flusher writes from another thread, and here every thread shares one
+    # in-memory connection: a late write would land inside the next test.
+    from app.modules.work.runner import forget_held_progress
+
+    forget_held_progress()
     _overlay["db_url"] = TEST_DB_URL
     _overlay["secrets_key"] = "printstash-test-secrets-key"
     _overlay["storage_identity"] = "a" * 64
