@@ -49,7 +49,6 @@ from app.modules.ingestion.artifact_uploads import (
 )
 from app.modules.ingestion.artifact_uploads import handoff as upload_handoff
 from app.modules.ingestion.artifact_uploads.api_chunks import CHUNK_SIZE, ApiChunkError
-from app.modules.work import nudge
 from app.modules.work import service as work_service
 from app.schemas.artifact_uploads import (
     ArtifactUploadChunkRead,
@@ -570,7 +569,7 @@ def finalize_artifact_upload(
                     "job_id": job_id,
                 },
             )
-            nudge(JobKind.INGESTION_ARTIFACT_UPLOAD)
+            work_service.dispatch(job_id, JobKind.INGESTION_ARTIFACT_UPLOAD)
             return _upload_read(manager, upload)
 
 

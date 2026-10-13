@@ -83,6 +83,29 @@ def request(
     )
 
 
+def dispatch(job_id: str, definition: JobKind) -> None:
+    """Hand a just-committed requested Job to the engine. Never raises.
+
+    The request that recorded the Job knows it is ready, so it submits it
+    itself rather than queue a reconcile pass to find it: one queue hop and
+    one pass fewer per request. The Job row stays the record of the work.
+    Anything short of an accepted submission (a lane that refuses, an engine
+    that is down, a restore holding admission) falls back to a nudge, and the
+    reconciler's repair pass submits it as it always has.
+    """
+    from .reconciler import PassResult, submit_job
+
+    if not catalog_module.bound():
+        return
+    result = PassResult()
+    try:
+        submit_job(job_id, result)
+    except Exception:  # noqa: BLE001 - the reconciler recovers the submission
+        logger.exception("job dispatch failed", extra={"job_id": job_id})
+    if result.submitted == 0:
+        nudge(definition)
+
+
 def visible_to(status: JobStatus, user: User) -> bool:
     return user.is_superuser or (
         status.owner_user_id is not None and status.owner_user_id == user.id

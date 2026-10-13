@@ -6,6 +6,12 @@ subject's intent first, so the reconciler cannot resurrect it, then stops
 whatever the engine has in flight. Retrying returns a failed or cancelled
 subject to pending and queues the same Job again, unless another Job already
 owns the subject or the subject is gone.
+
+A request that recorded a Job hands it to the engine itself (``dispatch``): the
+Job row stays the record of the work, and anything short of an accepted
+submission falls back to the nudge the reconciler has always answered. When
+this goes red, an accepted upload either waits for a reconcile pass it does not
+need, or is not submitted at all when the direct path refuses.
 """
 
 from __future__ import annotations
@@ -29,6 +35,7 @@ from app.db.models import (
     WorkPriority,
 )
 from app.modules.derivatives.source import subject_key
+from app.modules.work.contracts import PassSubmission
 from app.modules.work.jobs import status_of
 from app.modules.work.submission import execution_id
 from app.runtime.engine.inline import EngineStatus
@@ -103,6 +110,122 @@ class TestRequest:
         db_session.rollback()
 
         assert db_session.get(Job, job_id) is None
+
+
+def _passes(engine, source: JobKind) -> list:
+    return [
+        execution
+        for execution in engine.executions.values()
+        if isinstance(execution.submission, PassSubmission)
+        and execution.submission.source == source
+    ]
+
+
+class TestDispatch:
+    def test_submits_the_jobs_first_attempt_to_the_engine(
+        self, work_engine, make_job, db_session: Session
+    ) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN)
+
+        service.dispatch(job.id, JobKind.SOURCES_SCAN)
+
+        db_session.refresh(job)
+        assert (
+            execution_id(job.id, 1, job.execution_epoch) in work_engine.executions,
+            job.attempts,
+        ) == (True, 1)
+
+    def test_an_accepted_job_needs_no_reconcile_pass(
+        self, work_engine, make_job
+    ) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN)
+
+        service.dispatch(job.id, JobKind.SOURCES_SCAN)
+
+        assert _passes(work_engine, JobKind.SOURCES_SCAN) == []
+
+    def test_the_dispatched_job_runs_to_completion(
+        self, work_engine, make_job, db_session: Session
+    ) -> None:
+        job = make_job(kind=JobKind.WORK_HOUSEKEEPING)
+
+        service.dispatch(job.id, JobKind.WORK_HOUSEKEEPING)
+        work_engine.drain()
+
+        db_session.refresh(job)
+        assert job.state is JobState.COMPLETED
+
+    def test_a_job_the_engine_already_runs_for_its_subject_is_left_to_a_pass(
+        self, work_engine, make_job, db_session: Session
+    ) -> None:
+        running = make_job(kind=JobKind.SOURCES_SCAN, subject="library/1")
+        service.dispatch(running.id, JobKind.SOURCES_SCAN)
+        running.state = JobState.COMPLETED
+        db_session.add(running)
+        db_session.commit()
+        later = make_job(kind=JobKind.SOURCES_SCAN, subject="library/1")
+        later.submitted_epoch = later.execution_epoch
+        db_session.add(later)
+        db_session.commit()
+
+        service.dispatch(later.id, JobKind.SOURCES_SCAN)
+
+        db_session.refresh(later)
+        assert (later.attempts, len(_passes(work_engine, JobKind.SOURCES_SCAN))) == (
+            0,
+            1,
+        )
+
+    @pytest.mark.parametrize(
+        "state", [JobState.COMPLETED, JobState.FAILED, JobState.CANCELLED]
+    )
+    def test_a_settled_job_is_not_submitted(
+        self, work_engine, make_job, state: JobState
+    ) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN, state=state)
+
+        service.dispatch(job.id, JobKind.SOURCES_SCAN)
+
+        assert [
+            execution
+            for execution in work_engine.executions.values()
+            if not isinstance(execution.submission, PassSubmission)
+        ] == []
+
+    def test_an_engine_that_refuses_the_job_leaves_it_to_the_reconciler(
+        self, work_engine, make_job, db_session: Session, monkeypatch
+    ) -> None:
+        job = make_job(kind=JobKind.SOURCES_SCAN)
+        accept = work_engine.submit
+
+        def refuse_jobs(submission):
+            if not isinstance(submission, PassSubmission):
+                raise RuntimeError("engine down")
+            return accept(submission)
+
+        monkeypatch.setattr(work_engine, "submit", refuse_jobs)
+
+        service.dispatch(job.id, JobKind.SOURCES_SCAN)
+
+        db_session.refresh(job)
+        assert (
+            job.state,
+            job.attempts,
+            len(_passes(work_engine, JobKind.SOURCES_SCAN)),
+        ) == (JobState.QUEUED, 0, 1)
+
+    def test_does_nothing_without_a_bound_engine(
+        self, make_job, db_session: Session
+    ) -> None:
+        from app.modules.work import catalog as catalog_module
+
+        job = make_job(kind=JobKind.SOURCES_SCAN)
+        catalog_module.bind(None, None)
+
+        service.dispatch(job.id, JobKind.SOURCES_SCAN)
+
+        db_session.refresh(job)
+        assert job.attempts == 0
 
 
 class TestVisibleTo:

@@ -269,6 +269,28 @@ class TestIngestModel:
         assert response.status_code == 200, response.text
         assert response.content == original
 
+    def test_an_accepted_upload_is_handed_straight_to_the_engine(
+        self, tmp_path, client, auth_headers, work_engine
+    ):
+        from app.modules.work.contracts import JobSubmission, PassSubmission
+
+        use_local_storage(tmp_path)
+
+        response = client.post(
+            "/api/v1/ingest/model",
+            headers=auth_headers,
+            files={"file": ("cube.stl", _cube_stl_bytes(), "application/sla")},
+        )
+
+        job_id = response.json()["job_id"]
+        submissions = [
+            execution.submission for execution in work_engine.executions.values()
+        ]
+        assert (
+            [s.job_id for s in submissions if isinstance(s, JobSubmission)],
+            [s for s in submissions if isinstance(s, PassSubmission)],
+        ) == ([job_id], [])
+
     def test_ingest_model_superuser_can_target_unknown_collection(
         self, tmp_path: Path, client: TestClient, auth_headers: dict[str, str]
     ) -> None:
