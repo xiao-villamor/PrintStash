@@ -432,6 +432,51 @@ class CapacityManager:
         row.expires_at = utcnow() + timedelta(seconds=_LEASE_TTL_SECONDS)
         session.add(row)
 
+    def _with_room(
+        self,
+        claimed: Sequence[CapacityResource],
+        raised: dict[str, int],
+        held: dict[str, int],
+        others: dict[str, int],
+    ) -> dict[str, int]:
+        """``raised`` with twice the room in each domain being claimed, if it fits.
+
+        The extra is admitted like any claim, against the same free space and
+        the same other owners. Where it would be refused the lease stays at
+        what is needed: room to grow is a convenience, never a reason to deny.
+        """
+        roomy = dict(raised)
+        for item in claimed:
+            if (
+                item.domain_id in roomy
+                and roomy[item.domain_id] != raised[item.domain_id]
+            ):
+                continue
+            extra = raised[item.domain_id]
+            try:
+                self._decide(
+                    [
+                        CapacityResource(
+                            item.domain_id,
+                            raised[item.domain_id]
+                            + extra
+                            - held.get(item.domain_id, 0),
+                            item.available_bytes,
+                            item.role,
+                            item.path,
+                            item.total_bytes,
+                        )
+                    ],
+                    {
+                        domain: others.get(domain, 0) + held.get(domain, 0)
+                        for domain in {*others, *held}
+                    },
+                )
+            except OperationError:
+                continue
+            roomy[item.domain_id] = raised[item.domain_id] + extra
+        return roomy
+
     def _claim(
         self,
         operation_id: str,
@@ -487,15 +532,18 @@ class CapacityManager:
                                 for domain in {*others, *held}
                             },
                         )
-                        # Keep what the lease already covers: the high-water
-                        # mark is what lets the next claims skip this write.
+                        # Keep what the lease already covers, and ask for room
+                        # to grow: the high-water mark is what lets the next
+                        # claims skip this write, and a burst that is still
+                        # ramping up would otherwise raise it claim by claim.
+                        raised = {
+                            domain: max(lease.get(domain, 0), need.get(domain, 0))
+                            for domain in {*lease, *need}
+                        }
                         self._write_lease(
                             session,
                             lease_id,
-                            {
-                                domain: max(lease.get(domain, 0), need.get(domain, 0))
-                                for domain in {*lease, *need}
-                            },
+                            self._with_room(claimed, raised, held, others),
                         )
                         session.commit()
                 ledger.claims[operation_id] = claimed
@@ -623,12 +671,18 @@ class CapacityManager:
                     raise OperationError(
                         "capacity_operation_conflict", kind=ErrorKind.CONFLICT
                     )
-                reserved: dict[str, int] = {}
+                # This process's lease may hold room it has not claimed yet.
+                # Its own admissions count what it really holds, so that room
+                # never refuses the process that set it aside.
+                reserved = self._ledger(session).held()
+                lease_id = _lease_id()
                 for persisted in session.exec(
                     select(CapacityReservation).where(
                         CapacityReservation.operation_id != operation_id
                     )
                 ):
+                    if persisted.operation_id == lease_id:
+                        continue
                     for item in _decode(persisted.resources_json):
                         reserved[item.domain_id] = (
                             reserved.get(item.domain_id, 0) + item.required_bytes
