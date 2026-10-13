@@ -173,8 +173,13 @@ skipped, failed (with backoff) or cancelled.
 `GET /api/v1/events/ws` (one-use ticket from `POST /api/v1/events/ticket`)
 delivers them. The client follows a Model with `{"subscribe": "model:<id>"}`;
 the server checks the viewer may see it and answers
-`{"type": "subscribed", "channel": "model:<id>"}`, the cue to refetch what
-changed before the subscription took effect. Delivery is best effort: in one
+`{"type": "subscribed", "channel": "model:<id>", "revision": "<opaque>"}`, the
+cue to refetch what changed before the subscription took effect. `revision` is
+`records.model_revision`: it differs whenever a derivative of the Model's live
+Artifacts was created, removed or moved to another state, and `ModelRead`
+reports the same value as `derivatives_revision`. A client whose snapshot
+already carries the acknowledged revision missed nothing and does not refetch;
+the value orders nothing and other channels carry none. Delivery is best effort: in one
 process it is in memory, across processes it is PostgreSQL `NOTIFY`, and a
 reconnect delivers `{"type": "resync"}` so clients refetch.
 

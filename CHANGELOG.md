@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Read a Model's details once when opening it. The page no longer repeats the
+  read just to confirm that nothing changed while it was connecting to live
+  updates.
+
 - Keep one events connection and one setup admission while moving between
   application pages. Opening a Model and returning no longer hides the app
   behind a setup probe, reopens the events socket or refetches every view.
