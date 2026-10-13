@@ -219,6 +219,10 @@ class Settings(BaseSettings):
     api_runs_jobs: bool = True
     executor_id: str | None = Field(default=None, min_length=1, max_length=128)
     shared_storage: bool = False
+    # Experimental, for measurement only: let a worker process share a SQLite
+    # database with the API. Live Job notices do not cross processes on SQLite,
+    # so the UI learns of progress by asking, not by being told.
+    experimental_sqlite_workers: bool = False
     # DBOS polls each lane. This is dispatch latency, separate from the
     # recovery tick; chained ingest/reconcile/derive queues used to each wait 1s.
     jobs_queue_poll_interval_seconds: float = Field(default=0.25, ge=0.05, le=5)
