@@ -19,6 +19,7 @@ import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-quer
 import { Button } from "@/components/ui/button";
 import { parseApiError } from "@/lib/errors";
 import { sharedModelOptions } from "@/lib/queries/share";
+import { MeshPreviewGate } from "@/components/mesh-preview-gate";
 import { getPublicDerivedBlob, getPublicDerivedText } from "@/lib/api/request";
 
 const STLViewer = lazy(() =>
@@ -210,16 +211,23 @@ function ShareContent({ token }: { token: string }) {
                 </div>
               }
             >
-              <STLViewer
-                url={getAssetUrl(sharedStlUrl(token, meshFile.id))}
-                previewFetcher={getPublicDerivedBlob}
-                onControlsReady={(api) => {
-                  viewerControls.current = api;
-                }}
-                displayMode={displayMode}
-                showGrid={showGrid}
-                screenshotName={model.name}
-              />
+              <MeshPreviewGate
+                key={meshFile.id}
+                sizeBytes={meshFile.size_bytes}
+                posterUrl={null}
+                posterAlt={model.name}
+              >
+                <STLViewer
+                  url={getAssetUrl(sharedStlUrl(token, meshFile.id))}
+                  previewFetcher={getPublicDerivedBlob}
+                  onControlsReady={(api) => {
+                    viewerControls.current = api;
+                  }}
+                  displayMode={displayMode}
+                  showGrid={showGrid}
+                  screenshotName={model.name}
+                />
+              </MeshPreviewGate>
             </Suspense>
           ) : (
             <div className="h-full min-h-[60vh] flex flex-col items-center justify-center gap-2 text-on-surface-variant">
