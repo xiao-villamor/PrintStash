@@ -125,6 +125,7 @@ import {
   BulkItem,
 } from "@/lib/bulk-upload";
 import {
+  useCollectionReadme,
   useCollectionChildren,
   useCollectionLookup,
   useCollectionSearch,
@@ -927,6 +928,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     selectedLookup.data?.collection.path === selectedCollection
       ? selectedLookup.data.collection
       : null;
+  // Read alongside the folder page, before committing the destination. A
+  // description inserted after its cards would move the entire browsing surface.
+  const collectionReadme = useCollectionReadme(selectedCollectionRow?.id ?? null, {
+    enabled: selectedCollectionRow?.has_readme ?? false,
+  });
   const folderSearch = useCollectionSearch(searchQuery ?? "", "view", {
     enabled: searchQuery !== undefined,
   });
@@ -940,6 +946,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const projectionReady =
     currentLocationHref === canonicalLibraryHref &&
     (selectedCollection === null || selectedCollectionRow !== null) &&
+    (!selectedCollectionRow?.has_readme || !collectionReadme.isPending) &&
     folderPages.data !== undefined &&
     !folderPages.isPlaceholderData &&
     modelQuery.data !== undefined &&

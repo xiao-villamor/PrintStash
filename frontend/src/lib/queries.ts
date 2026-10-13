@@ -17,6 +17,7 @@ import {
   infiniteQueryOptions,
   keepPreviousData,
   queryOptions,
+  skipToken,
   useInfiniteQuery,
   useQuery,
   useQueryClient,
@@ -130,10 +131,13 @@ function useQueryApi(): QueryApi {
   return useContext(QueryApiContext);
 }
 
-function collectionReadmeOptions(api: QueryApi, collectionId: number) {
+function collectionReadmeOptions(api: QueryApi, collectionId: number | null) {
   return queryOptions<string | null>({
     queryKey: queryKeys.collectionReadme(collectionId),
-    queryFn: async ({ signal }) => (await api.getCollectionReadme(collectionId, { signal })).readme,
+    queryFn:
+      collectionId === null
+        ? skipToken
+        : async ({ signal }) => (await api.getCollectionReadme(collectionId, { signal })).readme,
   });
 }
 
@@ -229,7 +233,7 @@ export function useCollectionSearch(
  * A folder's readme, cached per folder so revisiting one costs no request.
  * Disable it for a folder whose `has_readme` is false — most have none.
  */
-export function useCollectionReadme(collectionId: number, options?: { enabled?: boolean }) {
+export function useCollectionReadme(collectionId: number | null, options?: { enabled?: boolean }) {
   const api = useQueryApi();
   return useQuery({
     ...collectionReadmeOptions(api, collectionId),

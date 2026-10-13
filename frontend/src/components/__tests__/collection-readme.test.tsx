@@ -67,6 +67,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -141,6 +142,21 @@ describe("CollectionReadme", () => {
 
       expect(await screen.findByText("Brackets.")).toBeInTheDocument();
       expect(readmeReads(requestsWithMethod, 5)).toHaveLength(1);
+    });
+
+    it("collapses the next folder even when its description has identical text", async () => {
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(400);
+      const user = userEvent.setup();
+      const { rerender } = renderReadme({
+        readme: "Tall description.",
+        routes: { "GET /api/v1/collections/6/readme": json({ readme: "Tall description." }) },
+      });
+      await user.click(await screen.findByRole("button", { name: "Show more" }));
+      expect(screen.getByRole("button", { name: "Show less" })).toBeVisible();
+
+      rerender(<CollectionReadme collectionId={6} canEdit hasReadme />);
+
+      expect(await screen.findByRole("button", { name: "Show more" })).toBeVisible();
     });
 
     it("never shows the previous folder's description on the next one", async () => {
