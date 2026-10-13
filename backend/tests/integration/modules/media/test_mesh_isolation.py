@@ -451,6 +451,27 @@ class TestGeometryMeasurements:
         assert result.geometry["volume_mm3"] == pytest.approx(1000.0)
 
 
+class TestEarlyDocumentThumbnail:
+    def test_a_3mf_publishes_its_slicer_picture_before_its_geometry(self, tmp_path):
+        from app.modules.media.mesh_contracts import ThumbnailStrategy
+        from app.modules.media.mesh_protocol import GeometryOutput, ThumbnailOutput
+        from tests.factories.content import png
+
+        path = tmp_path / "plate.3mf"
+        path.write_bytes(three_mf(extras={"Metadata/thumbnail.png": png()}))
+        outputs = []
+
+        mesh_isolation.generate(
+            _request(path, file_type="3mf", include_fingerprint=False),
+            on_output=outputs.append,
+        )
+
+        assert (
+            [type(output) for output in outputs],
+            outputs[0].strategy,
+        ) == ([ThumbnailOutput, GeometryOutput], ThumbnailStrategy.EMBEDDED)
+
+
 class TestStepCapacityOwnership:
     def test_fingerprint_worker_does_not_access_application_database(
         self, db_session, monkeypatch

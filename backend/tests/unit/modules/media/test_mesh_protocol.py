@@ -101,6 +101,22 @@ def thumbnail():
 
 
 @pytest.fixture
+def embedded_thumbnail():
+    return ThumbnailOutput(
+        b"image",
+        ThumbnailStrategy.EMBEDDED,
+        MeshCoverage(
+            SourceScanState.NOT_SCANNED,
+            GeometryNotLoaded(),
+            PreviewCoverage.DOCUMENT_SUPPLIED,
+        ),
+        None,
+        10,
+        2000,
+    )
+
+
+@pytest.fixture
 def fingerprint():
     return FingerprintResult(
         FingerprintResultState.READY,
@@ -274,6 +290,51 @@ class TestFrameDecoder:
 
         assert frames == outputs
         assert decoder.finish() == outputs[-1]
+
+    def test_accepts_a_document_supplied_thumbnail_before_geometry(
+        self, request_all, embedded_thumbnail, geometry, final
+    ):
+        decoder = FrameDecoder(request_all)
+        stream = (
+            encode_frame(embedded_thumbnail, sequence=0)
+            + encode_frame(geometry, sequence=1)
+            + encode_frame(final, sequence=2)
+        )
+
+        frames = tuple(decoder.feed(stream))
+
+        assert (frames, decoder.finish()) == (
+            (embedded_thumbnail, geometry, final),
+            final,
+        )
+
+    def test_rejects_a_second_thumbnail_after_an_early_one(
+        self, request_all, embedded_thumbnail, geometry
+    ):
+        decoder = FrameDecoder(request_all)
+        tuple(decoder.feed(encode_frame(embedded_thumbnail, sequence=0)))
+        tuple(decoder.feed(encode_frame(geometry, sequence=1)))
+
+        with pytest.raises(MeshProtocolError):
+            tuple(decoder.feed(encode_frame(embedded_thumbnail, sequence=2)))
+
+    def test_rejects_the_terminal_frame_while_geometry_is_owed(
+        self, request_all, embedded_thumbnail, final
+    ):
+        decoder = FrameDecoder(request_all)
+        tuple(decoder.feed(encode_frame(embedded_thumbnail, sequence=0)))
+
+        with pytest.raises(MeshProtocolError):
+            tuple(decoder.feed(encode_frame(final, sequence=1)))
+
+    def test_an_early_thumbnail_alone_is_an_incomplete_stream(
+        self, request_all, embedded_thumbnail
+    ):
+        decoder = FrameDecoder(request_all)
+        tuple(decoder.feed(encode_frame(embedded_thumbnail, sequence=0)))
+
+        with pytest.raises(MeshProtocolError, match="incomplete_mesh_output"):
+            decoder.finish()
 
     @pytest.mark.parametrize("which", ["thumbnail", "final"], ids=repr)
     def test_rejects_out_of_order_output(self, request_all, thumbnail, final, which):

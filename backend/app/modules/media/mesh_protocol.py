@@ -470,18 +470,24 @@ def _decode(kind: FrameKind, payload: bytes, image: bytes) -> OutputFrame:
 
 
 class FrameDecoder:
-    """Incrementally decode only the requested sequence, under one byte ceiling."""
+    """Incrementally decode only the requested outputs, under one byte ceiling.
+
+    Each requested basic output arrives exactly once, then the terminal frame.
+    Geometry comes before the thumbnail, with one exception: a picture the
+    document itself supplied needs nothing from the mesh, so an embedded
+    thumbnail may arrive first.
+    """
 
     def __init__(self, request: ThumbnailRequest, *, prepared: bool = False) -> None:
         self._prepared = _boolean(prepared)
         _boolean(request.include_geometry)
         _boolean(request.include_thumbnail)
         _boolean(request.include_fingerprint)
-        self._expected = (
+        self._pending = [
             *((FrameKind.GEOMETRY,) if request.include_geometry else ()),
             *((FrameKind.THUMBNAIL,) if request.include_thumbnail else ()),
-            FrameKind.FINAL,
-        )
+        ]
+        self._frames = len(self._pending) + 1
         self._fingerprint_requested = request.include_fingerprint
         self._buffer = bytearray()
         self._received = 0
@@ -501,18 +507,24 @@ class FrameDecoder:
                     self._buffer
                 )
                 kind = FrameKind(tag)
+                # A prepared packet stands for the thumbnail it will become.
+                slot = (
+                    FrameKind.THUMBNAIL
+                    if self._prepared and kind is FrameKind.PREPARED_THUMBNAIL
+                    else kind
+                )
                 if (
                     magic != FRAME_MAGIC
                     or sequence != self._sequence
-                    or self._sequence >= len(self._expected)
-                    or not (
-                        kind is self._expected[self._sequence]
-                        or self._prepared
-                        and kind is FrameKind.PREPARED_THUMBNAIL
-                        and self._expected[self._sequence] is FrameKind.THUMBNAIL
+                    or self._sequence >= self._frames
+                    or (
+                        slot not in self._pending
+                        if self._pending
+                        else slot is not FrameKind.FINAL
                     )
                 ):
                     raise MeshProtocolError("invalid_output_order")
+                early = slot is not self._pending[0] if self._pending else False
                 limit = (
                     MAX_STREAM_BYTES if kind is FrameKind.FINAL else MAX_CONTROL_BYTES
                 )
@@ -532,8 +544,15 @@ class FrameDecoder:
                     bytes(self._buffer[_PREFIX.size : _PREFIX.size + header_size]),
                     bytes(self._buffer[_PREFIX.size + header_size : size]),
                 )
+                if early and not (
+                    isinstance(frame, ThumbnailOutput)
+                    and frame.strategy is ThumbnailStrategy.EMBEDDED
+                ):
+                    raise MeshProtocolError("invalid_output_order")
                 del self._buffer[:size]
                 self._sequence += 1
+                if self._pending:
+                    self._pending.remove(slot)
                 if isinstance(frame, FingerprintFinal):
                     if (
                         frame.fingerprint is not None
@@ -553,6 +572,6 @@ class FrameDecoder:
             raise MeshProtocolError("invalid_mesh_output") from exc
 
     def finish(self) -> FingerprintFinal:
-        if self._final is None or self._buffer or self._sequence != len(self._expected):
+        if self._final is None or self._buffer or self._sequence != self._frames:
             raise MeshProtocolError("incomplete_mesh_output")
         return self._final

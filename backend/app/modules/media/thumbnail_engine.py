@@ -277,7 +277,10 @@ class ThumbnailEngine:
             nonlocal thumbnail_emitted, failure
             if not request.include_thumbnail or thumbnail_emitted:
                 return
-            emit_geometry()
+            if strategy is not ThumbnailStrategy.EMBEDDED:
+                # A rendered picture follows the geometry it was rendered from.
+                # One the document supplied owes the mesh nothing.
+                emit_geometry()
             if image is not None:
                 failure = None
             thumbnail_emitted = True
@@ -345,6 +348,14 @@ class ThumbnailEngine:
                     phases.finish(
                         output_bytes=len(embedded) if embedded is not None else None
                     )
+                    if embedded is not None:
+                        # The slicer's own picture is ready now. Publish it
+                        # before the mesh is read, so the Model has a thumbnail
+                        # while its geometry is still being measured.
+                        image = embedded
+                        strategy = ThumbnailStrategy.EMBEDDED
+                        preview_coverage = PreviewCoverage.DOCUMENT_SUPPLIED
+                        emit_thumbnail()
 
                 # A thumbnail-only repair can return a validated embedded image
                 # without parsing the mesh archive. Ingestion still loads safe
