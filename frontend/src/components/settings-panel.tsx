@@ -670,7 +670,7 @@ export function SettingsPanel() {
   const modelThumbnailWidth =
     preferenceIntent?.kind === "thumbnail-width"
       ? preferenceIntent.value
-      : (remoteConfigData?.model_thumbnail_width ?? 640);
+      : (remoteConfigData?.model_thumbnail_width ?? 320);
   const [previewBusy, setPreviewBusy] = useState<"rebuild" | null>(null);
   const [purgeTarget, setPurgeTarget] = useState<TrashedModelRead | null>(null);
   const [purgeExpiredOpen, setPurgeExpiredOpen] = useState(false);

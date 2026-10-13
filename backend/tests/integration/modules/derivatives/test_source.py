@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import event
 from sqlmodel import Session
 
+from app.core.config import _overlay
 from app.core.time import utcnow
 from app.db.models import (
     SENTINEL_FILE_HASH,
@@ -417,6 +418,24 @@ class TestPending:
         mesh()
 
         assert _pending(db_session, limit=0) == []
+
+
+class TestThumbnailWidth:
+    def test_a_thumbnail_made_at_another_width_is_not_made_again(
+        self, db_session: Session, mesh, make_derivative
+    ) -> None:
+        # The width is a preference for new thumbnails. Changing it, or its
+        # default, must not send the whole library back through the renderer.
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL,
+            output_json='{"width":640,"height":480}',
+        )
+        _overlay["model_thumbnail_width"] = 320
+
+        assert _pending(db_session) == []
 
 
 class TestBoundedScan:

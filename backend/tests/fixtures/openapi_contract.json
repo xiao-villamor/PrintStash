@@ -21233,7 +21233,7 @@
             "type": "boolean"
           },
           "model_thumbnail_width": {
-            "default": 640,
+            "default": 320,
             "title": "Model Thumbnail Width",
             "type": "integer"
           },

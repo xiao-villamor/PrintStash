@@ -101,6 +101,13 @@ class TestGetConfig:
         assert body["manual_local_backup_enabled"] is True
         assert body["automatic_local_backup_enabled"] is True
 
+    def test_a_fresh_install_makes_thumbnails_320_wide(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.get("/api/v1/config", headers=auth_headers)
+
+        assert response.json()["model_thumbnail_width"] == 320
+
     def test_masks_a_stored_secret(
         self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:
