@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- G-code exported by BambuStudio 2.x now shows its slicer, estimated print time,
+  filament weight and filament length. Its header block writes
+  `; BambuStudio 02.08.02.61`, `; total estimated time: 17m 21s` and
+  `; total filament weight [g] : 6.15`, none of which the parser recognised.
+  Files already in the library are re-read in the background.
+
+- **View a Model from underneath.** The 3D preview now orbits all the way
+  around a mesh, so the underside can be inspected; it previously stopped at
+  the horizon (#427).
+
 - Start with only the selected language. Each translation catalog is now its
   own asset, loaded when its language is shown, which removes about a fifth of
   the JavaScript downloaded at startup.

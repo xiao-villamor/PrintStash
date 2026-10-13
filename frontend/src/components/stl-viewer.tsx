@@ -62,6 +62,9 @@ const DEFAULT_CAMERA_POSITION: THREE.Vector3Tuple = DEFAULT_CAMERA_VECTOR.toArra
 const ZOOM_FACTOR = 0.75;
 // Mesh is normalized so its largest dimension equals this many world units.
 const NORMALIZED_SIZE = 10;
+// The orbit reaches every side of the mesh but stops short of looking straight
+// along the up axis, where the camera's heading is undefined.
+const POLE_MARGIN = 0.02;
 
 const box = new THREE.Box3();
 const sizeVec = new THREE.Vector3();
@@ -371,8 +374,8 @@ function Scene({
         enablePan
         enableZoom
         enableRotate
-        minPolarAngle={0.02}
-        maxPolarAngle={Math.PI / 2 - 0.02}
+        minPolarAngle={POLE_MARGIN}
+        maxPolarAngle={Math.PI - POLE_MARGIN}
         onChange={() => {
           invalidate();
           if (cameraRef.current && orbitRef.current) {

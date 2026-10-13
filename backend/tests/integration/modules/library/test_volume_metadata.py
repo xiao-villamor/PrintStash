@@ -200,7 +200,7 @@ class TestVolumeRecipeRefresh:
         self, db_session, stored, make_metadata, make_derivative
     ):
         from app.core.time import utcnow
-        from app.modules.derivatives.kinds import group
+        from app.modules.derivatives.kinds import GCODE_METADATA_RECIPE, group
         from app.modules.derivatives.source import DerivativeSource, subject_key
         from app.modules.library.volume_metadata import read_volume
 
@@ -226,7 +226,7 @@ class TestVolumeRecipeRefresh:
             select(ArtifactDerivative).where(
                 ArtifactDerivative.file_id == artifact.id,
                 ArtifactDerivative.kind == DerivativeKind.METADATA,
-                ArtifactDerivative.recipe_version == 2,
+                ArtifactDerivative.recipe_version == GCODE_METADATA_RECIPE,
             )
         ).one()
         assert outcome.kinds == {DerivativeKind.METADATA: DerivativeState.READY}
@@ -236,7 +236,7 @@ class TestVolumeRecipeRefresh:
         assert metadata.estimated_time_s == 3723
         assert metadata.filament_weight_g == 12.5
         assert metadata.slicer_name == "PrusaSlicer"
-        assert row.recipe_version == 2
+        assert row.recipe_version == GCODE_METADATA_RECIPE
         assert source.pending(db_session, now=utcnow(), limit=10) == []
 
     def test_discovers_mesh_metadata_from_previous_evidence_recipe(
