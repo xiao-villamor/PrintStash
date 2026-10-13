@@ -171,6 +171,7 @@ function ModelCardInner({
   onToggleSelect,
   draggable = false,
   onEditTags,
+  onIntent,
 }: {
   model: ModelListItem;
   origin?: LibraryEntry;
@@ -181,6 +182,7 @@ function ModelCardInner({
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
   onEditTags?: (model: ModelListItem) => void;
+  onIntent?: (id: number | null) => void;
 }) {
   useUiLocale();
   const [dragging, setDragging] = useState(false);
@@ -278,6 +280,10 @@ function ModelCardInner({
           href={`/models/${model.id}`}
           draggable={false}
           className="flex flex-col h-full overflow-hidden"
+          onPointerEnter={() => !selectable && onIntent?.(model.id)}
+          onFocus={() => !selectable && onIntent?.(model.id)}
+          onPointerLeave={() => onIntent?.(null)}
+          onBlur={() => onIntent?.(null)}
           onClick={(e) => {
             if (selectable) {
               e.preventDefault();
@@ -404,6 +410,7 @@ export function ModelCard({
   onToggleSelect,
   draggable,
   onEditTags,
+  onIntent,
 }: {
   model: ModelListItem;
   origin?: LibraryEntry;
@@ -413,6 +420,8 @@ export function ModelCard({
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
   onEditTags?: (model: ModelListItem) => void;
+  /** A sustained pointer or focus on the card, or `null` once it leaves. */
+  onIntent?: (id: number | null) => void;
 }) {
   useUiLocale();
   // `readCardMetrics` already falls back to the defaults when there is no stored
@@ -440,6 +449,7 @@ export function ModelCard({
         onToggleSelect={onToggleSelect}
         draggable={draggable}
         onEditTags={onEditTags}
+        onIntent={onIntent}
       />
     </Localized>
   );

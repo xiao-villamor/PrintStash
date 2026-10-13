@@ -1,9 +1,10 @@
-/** Confirmed Model publication is fenced by identity and the server edit version. */
+/** Confirmed Model publication is fenced by identity and the server edit version; a sustained intent warms the detail read. */
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   useModelDetail,
+  useModelOpenIntent,
   useModelPrintJobs,
   modelPrintJobsOptions,
   type PublishModel,
@@ -152,5 +153,74 @@ describe("useModelPrintJobs", () => {
 
     expect(await screen.findByText("100")).toBeVisible();
     expect(view.client.getQueryData(modelPrintJobsOptions(1).queryKey)).toEqual([job]);
+  });
+});
+
+function IntentProbe({
+  enabled = true,
+  ready,
+}: {
+  enabled?: boolean;
+  ready: (intend: (id: number | null) => void) => void;
+}) {
+  ready(useModelOpenIntent(enabled));
+  return null;
+}
+const detailReads = (requests: { method: string; url: string }[]) =>
+  requests.filter((request) => request.url.endsWith("/api/v1/models/7")).length;
+const sustained = () => new Promise((resolve) => setTimeout(resolve, 200));
+
+describe("useModelOpenIntent", () => {
+  it("reads the Model's detail after a sustained intent", async () => {
+    let intend!: (id: number | null) => void;
+    const view = renderApp(<IntentProbe ready={(value) => (intend = value)} />, {
+      routes: { "GET /api/v1/models/7": json(aModel({ id: 7, name: "Warmed" })) },
+    });
+
+    act(() => intend(7));
+
+    await waitFor(() =>
+      expect(view.client.getQueryData<{ name: string }>(queryKeys.model(7))?.name).toBe("Warmed"),
+    );
+  });
+
+  it("reads nothing when the intent ends first", async () => {
+    let intend!: (id: number | null) => void;
+    const view = renderApp(<IntentProbe ready={(value) => (intend = value)} />, {
+      routes: { "GET /api/v1/models/7": json(aModel({ id: 7 })) },
+    });
+
+    act(() => intend(7));
+    act(() => intend(null));
+    await act(sustained);
+
+    expect(detailReads(view.requests())).toBe(0);
+  });
+
+  it("reads nothing while it is disabled", async () => {
+    let intend!: (id: number | null) => void;
+    const view = renderApp(<IntentProbe enabled={false} ready={(value) => (intend = value)} />, {
+      routes: { "GET /api/v1/models/7": json(aModel({ id: 7 })) },
+    });
+
+    act(() => intend(7));
+    await act(sustained);
+
+    expect(detailReads(view.requests())).toBe(0);
+  });
+
+  it("reuses a detail that is still fresh", async () => {
+    let intend!: (id: number | null) => void;
+    const view = renderApp(<IntentProbe ready={(value) => (intend = value)} />, {
+      routes: { "GET /api/v1/models/7": json(aModel({ id: 7 })) },
+    });
+    act(() => intend(7));
+    await waitFor(() => expect(detailReads(view.requests())).toBe(1));
+
+    act(() => intend(null));
+    act(() => intend(7));
+    await act(sustained);
+
+    expect(detailReads(view.requests())).toBe(1);
   });
 });

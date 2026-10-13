@@ -10,6 +10,27 @@ import { test, expect } from "./helpers";
 import { modelCard, uploadGcodeModel } from "./util";
 
 test.describe("model detail", () => {
+  test("warms a Model's detail while the pointer rests on its card", async ({ page }) => {
+    const name = `e2e-open-intent-${Date.now()}`;
+    await uploadGcodeModel(page, name);
+    await page.goto("/");
+    const card = modelCard(page, name);
+    await expect(card).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    const href = await card.getAttribute("href");
+    const id = href?.match(/\/models\/(\d+)/)?.[1];
+    if (!id) throw new Error("Missing Model card destination");
+
+    const warmed = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === `/api/v1/models/${id}`,
+    );
+    await card.hover();
+
+    expect((await warmed).status()).toBe(200);
+    await expect(page).toHaveURL(/\/(\?.*)?$/);
+    expect((await page.request.delete(`/api/v1/models/${id}`)).status()).toBe(204);
+  });
+
   test("log a manual print against an ad-hoc printer; it shows in history", async ({ page }) => {
     const name = `e2e-hist-${Date.now()}`;
     const printerName = `E2E Rig ${Date.now()}`;

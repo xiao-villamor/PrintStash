@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Open Models faster from the Library: resting the pointer or keyboard focus on
+  a Model card reads its details ahead of the click.
+
 - Keep folder descriptions and model cards together when navigating, clamp long descriptions before the first paint, and avoid fading cached library thumbnails on every visit.
 
 - Enable mesh preview readiness after its first rendered frame; verify overlay alignment, display-mode pixels, and repeated resource cleanup on WebGL/WebGPU.

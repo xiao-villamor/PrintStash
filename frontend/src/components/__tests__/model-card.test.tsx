@@ -101,6 +101,51 @@ describe("ModelCard", () => {
 
     expect(requests().filter((request) => request.url.includes("/stl"))).toEqual([]);
   });
+  describe("open intent", () => {
+    it("reports the Model under the pointer", async () => {
+      const user = userEvent.setup();
+      const onIntent = vi.fn<(id: number | null) => void>();
+      renderApp(<ModelCard model={model} onIntent={onIntent} />);
+
+      await user.hover(screen.getByRole("link", { name: /Cam Holder v4/ }));
+
+      expect(onIntent).toHaveBeenLastCalledWith(1);
+    });
+
+    it("reports that the pointer left", async () => {
+      const user = userEvent.setup();
+      const onIntent = vi.fn<(id: number | null) => void>();
+      renderApp(<ModelCard model={model} onIntent={onIntent} />);
+      const link = screen.getByRole("link", { name: /Cam Holder v4/ });
+      await user.hover(link);
+
+      await user.unhover(link);
+
+      expect(onIntent).toHaveBeenLastCalledWith(null);
+    });
+
+    it("reports the Model that receives keyboard focus", async () => {
+      const user = userEvent.setup();
+      const onIntent = vi.fn<(id: number | null) => void>();
+      renderApp(<ModelCard model={model} onIntent={onIntent} />);
+
+      await user.tab();
+      while (document.activeElement?.getAttribute("href") !== "/models/1") await user.tab();
+
+      expect(onIntent).toHaveBeenCalledWith(1);
+    });
+
+    it("stays silent while cards are being selected", async () => {
+      const user = userEvent.setup();
+      const onIntent = vi.fn<(id: number | null) => void>();
+      renderApp(<ModelCard model={model} selectable onIntent={onIntent} />);
+
+      await user.hover(screen.getByRole("link", { name: /Cam Holder v4/ }));
+
+      expect(onIntent).not.toHaveBeenCalledWith(1);
+    });
+  });
+
   describe("collection badge", () => {
     it("shows the exact folder name instead of its slug", () => {
       renderApp(

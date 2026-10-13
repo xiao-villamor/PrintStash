@@ -7,6 +7,7 @@ import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
 
 import { useLibraryReadingPosition } from "@/features/library/reading-position";
 import { LibraryItemLink } from "@/features/library/navigation";
+import { useModelOpenIntent } from "@/features/library/model-detail";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
 import {
   moveLibraryModels,
@@ -1658,6 +1659,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     },
     startup.complete && browseReady && !refreshing,
   );
+  const warmModel = useModelOpenIntent(startup.complete && browseReady && !refreshing);
   const canAdminSelectedCollection =
     user?.is_superuser || selectedCollectionRow?.effective_role === "admin";
   // Whether there is anywhere this reader may upload to, without listing it.
@@ -2896,6 +2898,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           onToggleSelect={toggleSelect}
                           draggable={canUploadToVault && !selectMode}
                           onEditTags={openTagEditor}
+                          onIntent={warmModel}
                         />
                       ),
                     )}
