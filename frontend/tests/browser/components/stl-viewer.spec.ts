@@ -215,6 +215,48 @@ test.describe("STLViewer", () => {
       await page.evaluate(() => window.meshViewerCheck.close());
     });
 
+    test("orbits the " + backend + " camera beneath the mesh", async ({ page }) => {
+      await page.goto("/tests/browser-fixtures/stl-viewer.html?backend=" + backend);
+      await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+      const initial = await page.evaluate(() => window.meshViewerCheck.pose());
+      expect(initial!.position[1]).toBeGreaterThan(initial!.target[1]);
+
+      await page.mouse.move(320, 300);
+      await page.mouse.down();
+      await page.mouse.move(320, 180, { steps: 12 });
+      await page.mouse.up();
+
+      await expect
+        .poll(async () => {
+          const pose = await page.evaluate(() => window.meshViewerCheck.pose());
+          return pose!.position[1] - pose!.target[1];
+        })
+        .toBeLessThan(0);
+      await page.evaluate(() => window.meshViewerCheck.close());
+    });
+
+    test(
+      "keeps the " + backend + " camera off the vertical axis below the mesh",
+      async ({ page }) => {
+        await page.goto("/tests/browser-fixtures/stl-viewer.html?backend=" + backend);
+        await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
+
+        await page.mouse.move(320, 460);
+        await page.mouse.down();
+        await page.mouse.move(320, 20, { steps: 24 });
+        await page.mouse.up();
+
+        await expect
+          .poll(async () => {
+            const pose = await page.evaluate(() => window.meshViewerCheck.pose());
+            const [x, y, z] = pose!.position.map((value, axis) => value - pose!.target[axis]!);
+            return Math.atan2(Math.hypot(x!, z!), -y!);
+          })
+          .toBeCloseTo(0.02, 5);
+        await page.evaluate(() => window.meshViewerCheck.close());
+      },
+    );
+
     test("pans the " + backend + " camera", async ({ page }) => {
       await page.goto("/tests/browser-fixtures/stl-viewer.html?backend=" + backend);
       await expect(page.locator("body")).toHaveAttribute("data-ready", "true");
