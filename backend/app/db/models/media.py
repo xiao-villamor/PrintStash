@@ -1,7 +1,7 @@
 """Artifact derivatives and administrators' requests to regenerate them."""
 
 from datetime import datetime
-from typing import Optional
+from typing import ClassVar, Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -34,6 +34,11 @@ class ArtifactDerivative(SQLModel, table=True):
     is pending: the derivative source finds it with an anti-join, so ingestion
     never needs to know which kinds exist.
     """
+
+    # Machine bookkeeping, rewritten on every upload: what a person did is
+    # recorded explicitly, and a row-level trail of each transition only adds
+    # a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
 
     __tablename__ = "artifact_derivatives"
     __table_args__ = (

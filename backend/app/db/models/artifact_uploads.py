@@ -1,7 +1,7 @@
 """Durable ownership and progress for resumable Artifact uploads."""
 
 from datetime import datetime
-from typing import Optional
+from typing import ClassVar, Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -24,6 +24,11 @@ from .types import ArtifactUploadState
 
 class ArtifactUploadSession(SQLModel, table=True):
     """One owner-bound upload envelope, independent of its transfer adapter."""
+
+    # Machine bookkeeping, rewritten on every upload: what a person did is
+    # recorded explicitly, and a row-level trail of each transition only adds
+    # a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
 
     __tablename__ = "artifact_upload_sessions"
     __table_args__ = (
@@ -95,6 +100,11 @@ class ArtifactUploadSession(SQLModel, table=True):
 
 class ArtifactUploadPart(SQLModel, table=True):
     """A durable chunk or native-part receipt belonging to exactly one session."""
+
+    # Machine bookkeeping, rewritten on every upload: what a person did is
+    # recorded explicitly, and a row-level trail of each transition only adds
+    # a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
 
     __tablename__ = "artifact_upload_parts"
     __table_args__ = (

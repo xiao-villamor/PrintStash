@@ -176,6 +176,60 @@ class TestBookkeepingRows:
 
         assert self._audited(db_session, "capacity_reservations") == []
 
+    def test_a_derivative_write_leaves_no_row_trail(
+        self, db_session, make_model, make_file, make_derivative
+    ) -> None:
+        from app.db.models import DerivativeKind
+
+        install_audit_listeners()
+        row = make_derivative(
+            make_file(make_model(), filename="part.stl"), DerivativeKind.THUMBNAIL
+        )
+        row.duration_ms = 5
+        db_session.add(row)
+        db_session.commit()
+
+        assert self._audited(db_session, "artifact_derivatives") == []
+
+    def test_an_upload_session_write_leaves_no_row_trail(
+        self, db_session, make_user
+    ) -> None:
+        from tests.factories import build_artifact_upload
+
+        install_audit_listeners()
+        upload = build_artifact_upload(db_session, make_user())
+        upload.version += 1
+        db_session.add(upload)
+        db_session.commit()
+
+        assert self._audited(db_session, "artifact_upload_sessions") == []
+
+    def test_a_staging_lease_leaves_no_row_trail(
+        self, db_session, make_user, make_ingest_request, tmp_path
+    ) -> None:
+        from app.db.models import IngestRequestKind
+        from app.modules.ingestion import staging_leases
+
+        install_audit_listeners()
+        actor = make_user()
+        request = make_ingest_request(actor, kind=IngestRequestKind.UPLOAD)
+        staged = tmp_path / "part.stl"
+        staged.write_bytes(b"staged")
+        lease = staging_leases.create_job_lease(
+            db_session,
+            job_id=request.job_id,
+            owner_user_id=actor.id,
+            path=staged,
+            size_bytes=6,
+            sha256="a" * 64,
+            check_capacity=False,
+        )
+        db_session.commit()
+        db_session.delete(lease)
+        db_session.commit()
+
+        assert self._audited(db_session, "staging_leases") == []
+
     def test_a_library_write_is_still_recorded(self, db_session) -> None:
         install_audit_listeners()
         model = build_model(db_session, name="Kept", slug="kept", hash="9" * 64)
