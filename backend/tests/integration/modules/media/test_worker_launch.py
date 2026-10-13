@@ -283,9 +283,9 @@ class TestTemplateLifetime:
         starts: list[Path] = []
         start = worker_launch._start
 
-        def counted(cwd: Path):
+        def counted(cwd: Path, environment: dict[str, str]):
             starts.append(cwd)
-            return start(cwd)
+            return start(cwd, environment)
 
         monkeypatch.setattr(worker_launch, "_TEMPLATE_MODULE", "tests.fakes.missing")
         monkeypatch.setattr(worker_launch, "_start", counted)
@@ -294,6 +294,39 @@ class TestTemplateLifetime:
         _reply(_launch("priority"))
 
         assert len(starts) == 1
+
+    def test_a_job_with_other_import_paths_gets_its_own_template(
+        self, forkable_probe, tmp_path: Path
+    ) -> None:
+        # A fork runs what the template imported. A job told to import from
+        # somewhere else must not be handed another job's modules.
+        _reply(_launch("priority"))
+        first = _template_pid()
+        paths = os.pathsep.join((str(tmp_path), str(BACKEND_DIR)))
+
+        worker = _launch("priority", environment={"PYTHONPATH": paths})
+
+        assert (type(worker), _reply(worker), _template_pid() != first) == (
+            worker_launch.ForkedWorker,
+            "interactive\n",
+            True,
+        )
+
+    def test_a_template_refused_for_one_import_path_is_tried_for_another(
+        self, forkable_probe, tmp_path: Path
+    ) -> None:
+        (tmp_path / "trimesh.py").write_text("raise ImportError('blocked')\n")
+        blocked = os.pathsep.join((str(tmp_path), str(BACKEND_DIR)))
+        spawned = _launch("priority", environment={"PYTHONPATH": blocked})
+        _reply(spawned)
+
+        worker = _launch("priority")
+
+        assert (type(spawned), type(worker), _reply(worker)) == (
+            subprocess.Popen,
+            worker_launch.ForkedWorker,
+            "interactive\n",
+        )
 
     def test_stopping_the_template_ends_its_process(self, forkable_probe) -> None:
         _reply(_launch("priority"))

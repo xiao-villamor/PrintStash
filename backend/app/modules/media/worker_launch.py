@@ -101,16 +101,28 @@ class ForkedWorker:
                 pass
 
 
+# What decides which code an interpreter imports. A fork runs the template's
+# imports, so a job is only forked from a template started under the same ones.
+_INTERPRETER_VARIABLES = ("PYTHONPATH", "PYTHONHOME", "PYTHONSAFEPATH")
+
+
+def _interpreter(environment: dict[str, str]) -> tuple[str | None, ...]:
+    return tuple(environment.get(name) for name in _INTERPRETER_VARIABLES)
+
+
 @dataclass
 class _Template:
     process: subprocess.Popen[bytes]
     control: socket.socket
+    interpreter: tuple[str | None, ...]
     virtual_size: int
 
 
 _lock = Lock()
 _template: _Template | None = None
-_refused_until = 0.0
+# The import paths a template could not start under, and until when that is
+# taken as settled.
+_refused: tuple[tuple[str | None, ...], float] | None = None
 
 
 def _stop(template: _Template) -> None:
@@ -123,18 +135,18 @@ def _stop(template: _Template) -> None:
 
 def stop_template() -> None:
     """Stop this process's template; the next mesh worker starts another."""
-    global _template, _refused_until
+    global _template, _refused
     with _lock:
         if _template is not None:
             _stop(_template)
         _template = None
-        _refused_until = 0.0
+        _refused = None
 
 
 atexit.register(stop_template)
 
 
-def _start(cwd: Path) -> _Template:
+def _start(cwd: Path, environment: dict[str, str]) -> _Template:
     # A pair made here and inherited by the template: nothing is bound to a
     # path, and nothing but this process can ever ask the template to fork.
     control, inherited = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -146,7 +158,7 @@ def _start(cwd: Path) -> _Template:
             stderr=subprocess.DEVNULL,
             pass_fds=(inherited.fileno(),),
             env={
-                **os.environ,
+                **environment,
                 "OMP_NUM_THREADS": "1",
                 "OPENBLAS_NUM_THREADS": "1",
                 "MKL_NUM_THREADS": "1",
@@ -159,7 +171,7 @@ def _start(cwd: Path) -> _Template:
         raise
     finally:
         inherited.close()
-    template = _Template(process, control, 0)
+    template = _Template(process, control, _interpreter(environment), 0)
     assert process.stdout is not None
     deadline = time.monotonic() + _START_SECONDS
     line = b""
@@ -178,26 +190,36 @@ def _start(cwd: Path) -> _Template:
     return template
 
 
-def _current(cwd: Path) -> _Template | None:
-    """This process's live template, started on first use.
+def _current(cwd: Path, environment: dict[str, str]) -> _Template | None:
+    """This process's live template for ``environment``, started on first use.
 
     A template that cannot start is not retried for a while: every job in
-    between spawns, as it always could.
+    between spawns, as it always could. One started under different import
+    paths than this job's is replaced.
     """
-    global _template, _refused_until
+    global _template, _refused
+    wanted = _interpreter(environment)
     with _lock:
-        if _template is not None and _template.process.poll() is None:
+        if (
+            _template is not None
+            and _template.process.poll() is None
+            and _template.interpreter == wanted
+        ):
             return _template
         if _template is not None:
             _stop(_template)
             _template = None
-        if time.monotonic() < _refused_until:
+        if (
+            _refused is not None
+            and _refused[0] == wanted
+            and time.monotonic() < _refused[1]
+        ):
             return None
         try:
-            _template = _start(cwd)
+            _template = _start(cwd, environment)
         except OSError, RuntimeError, ValueError:
             logger.exception("worker template failed to start")
-            _refused_until = time.monotonic() + _RETRY_SECONDS
+            _refused = (wanted, time.monotonic() + _RETRY_SECONDS)
             return None
         return _template
 
@@ -268,7 +290,7 @@ def launch(
     request, costs that job a spawn and nothing else.
     """
     if warm and forkable(command):
-        template = _current(cwd)
+        template = _current(cwd, environment)
         if template is not None and int(command[3]) >= (
             template.virtual_size * _CEILING_FACTOR
         ):
