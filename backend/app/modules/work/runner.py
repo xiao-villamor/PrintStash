@@ -9,6 +9,9 @@ engine replays the same path on recovery.
 
 from __future__ import annotations
 
+import contextvars
+import heapq
+import threading
 import time
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -69,6 +72,8 @@ class ExecutionContext:
     # What this execution knows it has already written. Both live in memory
     # only: an execution recovered after a crash settles in full again.
     _ended: bool = field(default=False, init=False, repr=False, compare=False)
+    # Whether the flusher has been asked to write this attempt's held reports.
+    _watched: bool = field(default=False, init=False, repr=False, compare=False)
     _cleaned: bool = field(default=False, init=False, repr=False, compare=False)
 
     def _take_held(self) -> list[dict[str, Any]]:
@@ -78,10 +83,21 @@ class ExecutionContext:
 
     def update(self, **fields: Any) -> None:
         with self._lock:
-            if time.monotonic() - self.started < settings.jobs_progress_hold_seconds:
+            due = self.started + settings.jobs_progress_hold_seconds
+            if time.monotonic() < due:
                 self._held.append(fields)
-                return
-            held, self._held = self._held, []
+                watch = not self._watched
+                self._watched = True
+            else:
+                watch = None
+                held, self._held = self._held, []
+        if watch is not None:
+            if watch:
+                # Written when the hold ends even if the step never reports
+                # again: a step blocked on a slow download still shows what it
+                # had done before it blocked.
+                _flusher.watch(self, due)
+            return
         jobs.update(
             self.job_id,
             expected_attempt=self.attempt,
@@ -180,6 +196,60 @@ class ExecutionContext:
         from .submission import nudge
 
         nudge(source)
+
+
+class _HeldProgressFlusher:
+    """Writes held progress when its hold ends, for every attempt in the process.
+
+    One thread, started when something is first held and gone again after a
+    while with nothing to do. An attempt that ends inside its hold has already
+    carried its reports into its terminal write; its turn here finds nothing.
+    """
+
+    _IDLE_SECONDS = 30.0
+
+    def __init__(self) -> None:
+        self._wake = threading.Condition()
+        self._due: list[tuple[float, int, contextvars.Context, ExecutionContext]] = []
+        self._sequence = 0
+        self._thread: threading.Thread | None = None
+
+    def watch(self, context: ExecutionContext, due: float) -> None:
+        with self._wake:
+            self._sequence += 1
+            # The caller's context carries its session factory to the write.
+            heapq.heappush(
+                self._due, (due, self._sequence, contextvars.copy_context(), context)
+            )
+            if self._thread is None:
+                self._thread = threading.Thread(
+                    target=self._run, name="work-progress-flush", daemon=True
+                )
+                self._thread.start()
+            self._wake.notify()
+
+    def _run(self) -> None:
+        while True:
+            with self._wake:
+                while not self._due or self._due[0][0] > time.monotonic():
+                    timeout = (
+                        self._due[0][0] - time.monotonic()
+                        if self._due
+                        else self._IDLE_SECONDS
+                    )
+                    if not self._wake.wait(timeout) and not self._due:
+                        self._thread = None
+                        return
+                _due, _sequence, caller, context = heapq.heappop(self._due)
+            try:
+                caller.run(context.flush_due)
+            except Exception:  # noqa: BLE001 - progress is display only
+                logger.exception(
+                    "held progress was not written", extra={"job_id": context.job_id}
+                )
+
+
+_flusher = _HeldProgressFlusher()
 
 
 def _withdrawn(
