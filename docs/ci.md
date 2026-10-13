@@ -41,8 +41,8 @@ worker, 30 warm reloads and 20 fresh authenticated profiles in English/Spanish.
 Individual JSON samples and browser evidence are uploaded. Hosted runners record
 trends; `STARTUP_ENFORCE_BUDGET=1` enforces the 500 ms median / 800 ms p95 warm
 budget and 1 s fresh-profile median on the reference machine. Tracing is disabled
-for timing samples. See [the startup audit](library-startup-audit.md) for the
-procedure, exact first-visit definition, coverage and measured acceptance.
+for timing samples. Keep local measurements and acceptance reports in the
+ignored `reports/` directory.
 
 The `scale` lane runs serially within each CI job. Four separate jobs split
 budget and growth checks by administrator and granted viewer, measuring 13
@@ -87,7 +87,6 @@ The public history did not contain ten successful comparable pre-release image
 publications at the time of this baseline. Record the first nightly run under the
 new workflow, then compare subsequent hot-cache runs using the same timestamps.
 
-
 ## Mesh resource gate
 
 Deep CI builds the actual full production image on amd64 and arm64 and runs
@@ -99,6 +98,4 @@ allocation, native STEP/STP, healthy successors, original/slicer downloads,
 viewer conversion, restart and retained-input discard. Each job publishes its
 JSON measurements and cleanup evidence even on failure.
 
-See [the acceptance matrix](testing/mesh-regression.md) for the commands and
-optional local acceptance of the issue attachments. CI has no download
-dependency on those attachments.
+CI has no download dependency on private issue attachments.

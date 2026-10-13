@@ -256,34 +256,6 @@ prove which weights a remote server runs. Model aliases alone never enable MRL.
 Omitted prefixes use reviewed model defaults; explicit empty prefixes remain
 possible. This capability entry does not itself admit a new downloadable model.
 
-A deterministic numeric benchmark (seed 166, 256 vectors of 64 dimensions,
-16 independent queries, top 10 with 8× candidate overfetch) measured recall
-against a full-float baseline: int8 1.0000, binary 0.90625. Derived vector
-payload was 16,384 and 2,048 bytes respectively, compared with 65,536 bytes for
-a float derivative. The authoritative floats remain: combined vector payload
-was 81,920 and 67,584 bytes, before database/index overhead. These numeric
-checks do not measure natural-language relevance or ARM performance.
-
-## Acceptance evidence
-
-The [coverage matrix](ai-search-coverage.md) retains all 142 original acceptance
-behaviors and the detailed feature contracts. The text, visual, point-cloud and
-sparse studies use pinned real weights and frozen engineering fixtures; they do
-not establish quality on independently labelled user libraries. A separate
-[printed-photo case](ai-search-visual-study.md#printed-part-photograph) retrieves
-the matching Model in the top 10 with multiview; the thumbnail profile misses
-that target. One photograph does not establish broad photo recall. Contract VLM tests establish protocol and lifecycle behavior,
-not the quality of a particular caption or query-parsing model.
-
-The [coverage matrix](ai-search-coverage.md)
-records completed correctness, coverage and browser checks; security review is
-recorded separately against the final branch snapshot. The
-[performance report](ai-search-performance.md) separates the measured
-500,000-vector feasibility study from complete HTTP latency and concurrent ingest.
-Native acceleration remains opt-in. Release acceptance also requires physical
-ARM/Raspberry Pi runs and independent human-query/broad photo evaluation; small
-fixtures and VM measurements do not establish those hardware or quality targets.
-
 ## Local text models
 
 The `ai` and `full` extras include CPU ONNX Runtime, ONNX graph inspection and
@@ -346,35 +318,6 @@ AI_SEARCH_TEXT_ASSETS=/absolute/path/to/bge uv run pytest \
   tests/integration/modules/inference/preplaced_text.py -q -s
 ```
 
-## Current text measurements
-
-The frozen engineering corpus in `backend/tests/fixtures/search/` has 32 fictional
-designs, opaque names, keyword/paraphrase/Spanish/typo queries, and two additional
-out-of-domain probes. Labels and descriptions were written before running BGE.
-It is an original regression corpus, not a human-labelled user study. Its
-versioned vectors were generated with the exact curated BGE model and passage
-recipe; ordinary CI replays those real vectors without fetching model weights.
-
-| Metric | Measured result |
-| --- | ---: |
-| Hybrid recall@5 | 0.96875 (31/32) |
-| SQLite FTS5 BM25 recall@5 | 0.875 (28/32) |
-| Ranked ILIKE recall@5 | 0.625 (20/32) |
-| Out-of-domain probes returning results at generic floor 0.35 | 2/2 |
-
-The missed hybrid query is a Spanish stress case. BGE is advertised as English.
-The generic floor needs additional calibration for rejecting unrelated queries;
-these measurements do not establish reliable out-of-domain rejection.
-
-On this x86_64 development machine, ten short warm BGE embeddings took
-0.054–0.123 seconds after dynamic sequence sizing; cold validation took 2.44
-seconds. The separately executed native test measured 0.055-second warm
-queries. These are embedding-only observations with one ONNX thread, not the
-100,000-passage end-to-end p95 or physical Raspberry Pi acceptance benchmarks.
-Physical ARM measurements and the independent human-labelled set remain
-outstanding. The broader candidate measurements are in the
-[model study](ai-search-model-study.md).
-
 ## Search and operational UI
 
 The top bar previews lexical matches while typing. Enter opens `/search?q=…`
@@ -431,13 +374,6 @@ runs the same canary as the form. Background batch size is configurable from
 one to eight; interactive local queries wait for shared compute within their
 deadline, and new background embedding batches yield to waiting queries.
 
-The dedicated real-backend Playwright lane provisions an original tiny ONNX
-contract fixture in CI, with no downloads. The same flow was also executed with
-the pinned BGE weights locally. Tiny fixtures establish wiring and lifecycle
-behavior; real-model quality measurements are recorded separately in
-[the model study](ai-search-model-study.md).
-
-
 ## Image and geometry search
 
 The camera control opens image search. Drop one image, choose a file, or use the
@@ -451,16 +387,13 @@ A ready local CLIP generation compares the query with previews of authorized,
 live mesh Models. The curated B/32 text and image towers share an immutable
 alignment identity. Thumbnail search is the measured default. Optional canonical
 multi-view indexes reuse compatible rendered views and expose their aggregation
-recipe; their measured quality is not uniformly better than thumbnails. The
-[visual study](ai-search-visual-study.md) records this tradeoff and corpus limits.
+recipe. Quality depends on the source geometry and the chosen model.
 Missing reusable multi-view output can use the bounded thumbnail fallback.
 
 The reviewed OpenShape PointBERT profile embeds a deterministic 10,000-point
 sample from supported mesh geometry. Text/image queries use its aligned CLIP
 towers; Model-as-query uses the current authorized native vectors and excludes
 the source Model from results. Missing vectors request bounded background work.
-The [point-cloud study](ai-search-point-study.md) records the export provenance,
-canary agreement, sampling recipe, CPU measurements and physical ARM gap.
 
 Visual work shares the same inference owner, cache, compute slots and generation
 lifecycle as text. Image admission is bounded before reading the request body;
@@ -502,11 +435,6 @@ receive one automatic v2 blue/green proposal, preserving the serving v1 index;
 an administrator's explicit rollback is respected. New text proposals select v2
 when captions exist or are enabled. There is no duplicate caption vector profile.
 
-Stage evidence is in [the coverage matrix](ai-search-coverage.md). The real HTTP
-workflow uses a local contract VLM server, so it validates payloads and lifecycle,
-not generated-caption quality.
-
-
 ## Independent consumers
 
 The existing Similar Models consumer uses `search.vector_store` through its own
@@ -529,7 +457,6 @@ through the additive vector migration. Existing generations are adopted only
 after checking the stored immutable Space metadata. PostgreSQL nullable owner
 columns are typed centrally, so consumers can omit Model/File/Passage owners
 without relying on SQLite's permissive NULL typing.
-
 
 ## Editable natural-language filters
 
@@ -602,10 +529,7 @@ The separate SPLADE opt-in expands indexed text locally using a pinned English
 model. It stores up to 64 continuous weighted terms per Passage without changing
 original text. Queries need no additional AI call, and switching it off removes
 its contribution immediately while ordinary search keeps serving. Install the
-model and enable expansion in Advanced settings. The
-[sparse study](ai-search-sparse-study.md) records the immutable export, ranking
-cap, measured 2.09× lexical footprint and unchanged 87.5% recall@5 on the current
-engineering corpus.
+model and enable expansion in Advanced settings.
 
 ## Restart warm-up
 

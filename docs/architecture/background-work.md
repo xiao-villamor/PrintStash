@@ -155,8 +155,6 @@ Artifact already committed. Derivatives can run through their existing Jobs
 while later source entries are processed. This does not introduce a second
 queue, concurrent SQL writers or parallel downloads.
 
-See the [bounded batch validation matrix](../testing/bounded-batch-imports.md).
-
 ## Derivatives
 
 See [derivatives.md](../derivatives.md). In short: three producer groups
@@ -297,7 +295,6 @@ are only ever recognised by their heartbeat going stale.
 - **A notice is dropped.** Clients also refresh on a slow interval and on
   `resync`.
 
-
 ## Retained ingest input
 
 JobStatus includes a nullable staging summary (retained_bytes, lease_count,
@@ -317,7 +314,6 @@ Capture-origin inputs retain their Pending Import dismissal lifecycle.
 Tasks show retained capacity and expiry with a confirmation before discard.
 After discard, retry requires the input to be uploaded again.
 
-
 ## Producer policy admission
 
 Job Definitions may provide an engine-independent `admission(Session)` hook.
@@ -336,7 +332,6 @@ Background work exposes effective/default/override state for each derivative
 definition. Historical failures remain inspectable but disabled groups do not
 contribute to actionable failures or retry lists.
 
-
 ## Synchronous native cancellation
 
 WorkRunner scopes each synchronous step to its Job attempt. Native supervisors
@@ -347,7 +342,6 @@ is reset even when the step raises. Concurrent steps have independent probes.
 A forced check before accepting native output prevents a result finishing inside
 the normal 200 ms polling interval from publishing after observed withdrawal.
 The Job engine remains responsible for durable dispatch and settlement.
-
 
 ### Execution authority across retry
 

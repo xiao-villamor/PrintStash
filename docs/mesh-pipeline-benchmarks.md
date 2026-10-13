@@ -27,7 +27,7 @@ offline profile; `--full` also materializes grids through two million triangles.
 slicer projects. Both flags require v2. The manifest lists only materialized
 inputs, while external references and recovery contracts remain separate.
 See [v1 corpus](mesh-benchmark-corpus.md), [v2 corpus](mesh-benchmark-corpus-v2.md)
-and the [behaviour matrix](testing/mesh-pipeline-benchmark.md).
+for the frozen input contracts. Keep result files in the ignored `reports/` directory.
 
 ## Worker observations
 

@@ -170,8 +170,6 @@ the database, staging, or another source. PrintStash rejects known overlaps.
 ## Platform Recipes
 
 These recipes describe the platform interface, not appliance certification.
-The [evidence note](./research/nas-library-source-evidence.md) links the
-first-party documentation used for each one.
 
 ### Unraid
 

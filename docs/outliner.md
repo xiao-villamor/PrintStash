@@ -69,5 +69,3 @@ next traversal until revalidation.
 These additive reads leave `/collections/children`, `/models/outliner`
 and `/multipart-models` compatible. The grid, destination pickers and artifact
 processing retain their existing contracts. No schema migration is required.
-
-Validation is recorded in [outliner-validation.md](outliner-validation.md).

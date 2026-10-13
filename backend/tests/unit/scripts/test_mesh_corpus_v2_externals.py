@@ -23,9 +23,7 @@ class TestExternalFixtures:
     def test_reuses_pinned_pilot_references(self) -> None:
         refs = external_references()
         pilot = json.loads(
-            (
-                BACKEND_DIR.parent / "docs/adr/0009-3mf-pilot/external-inputs.json"
-            ).read_text()
+            (BACKEND_DIR / "benchmarks/mesh/external-inputs.json").read_text()
         )
         assert [{key: asdict(row)[key] for key in pilot[0]} for row in refs] == pilot
         assert {row.case for row in refs} == {

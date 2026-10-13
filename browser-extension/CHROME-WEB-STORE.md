@@ -34,7 +34,6 @@ dependencias de desarrollo, mapas de código ni imágenes promocionales.
 Para revisar el resultado, descomprime ese ZIP en una carpeta nueva y cárgala
 desde `chrome://extensions` → **Developer mode → Load unpacked**. Empareja el
 navegador con tu servidor y completa una captura hasta Pending Imports.
-La [matriz de pruebas](STORE-VALIDATION.md) recoge la validación automatizada.
 
 Para repetir la prueba de instalación automatizada, usa el navegador y WebDriver
 descritos en `wdio.conf.ts` y ejecuta

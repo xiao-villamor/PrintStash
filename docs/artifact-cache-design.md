@@ -90,18 +90,3 @@ keys, filenames, credentials or provider URLs.
 The same pure local cache engine serves SQLite/light and Postgres/full deployments;
 Postgres stores only optional administrative policy. No Redis or background queue
 service is required.
-
-## Reproducible measurements
-
-Run `python -m tests.fakes.benchmark_artifact_cache` from `backend/`. This standalone
-measurement has correctness assertions and no machine-dependent latency gate.
-On the shared development host, a 64 MiB representation took 0.4537 s cold and
-0.2375 s hot (the sampled hot verification read local bytes). The hot read fetched
-**zero provider bytes**. Eight simultaneous cold callers fetched **67,108,864
-provider bytes total**, finishing in 0.9465 s. Peak traced Python allocation during
-those transfers was 345,998 bytes. Populating 1,002 entries took 35.3995 s, the index
-used 307,200 bytes, and reclaiming all idle entries took 0.1970 s. These figures
-are observations under shared-host load, not throughput promises.
-
-Requirement assertions and current execution evidence are in
-[the coverage matrix](artifact-cache-validation.md).

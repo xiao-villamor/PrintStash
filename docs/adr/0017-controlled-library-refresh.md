@@ -11,5 +11,5 @@ permission loss takes precedence over retaining old content.
 
 The cost is an explicit refresh before further pagination after relevant changes.
 A keyset cursor alone cannot guarantee this policy when existing rows can move.
-See the [migration plan](../frontend-architecture/plan.md) for the incremental
-contract and the distinction between browse revisions and edit versions.
+See the [frontend architecture](../architecture/frontend.md) for the distinction
+between browse revisions and edit versions.
