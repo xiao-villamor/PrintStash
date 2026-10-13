@@ -37,8 +37,6 @@
 
 ### Performance
 
-- **New thumbnails are 320 pixels wide by default** (was 640), still rendered at twice that and reduced, so a default install encodes and stores a quarter of the pixels. Thumbnails already made are left as they are, and an install that chose a width in Settings keeps it. Choose 640 in Settings for sharper cards on high-density displays.
-
 - A 3MF's slicer picture appears as soon as the file is committed. It used to wait until the mesh had been read and measured, although it needs nothing from the mesh.
 
 - Do about 45% less database writing per uploaded file on SQLite (write transactions per file 57 → 32):

@@ -59,7 +59,7 @@ class VaultConfigRead(EditingBase):
     auto_mark_known_good: bool = True
     external_libraries_enabled: bool = False
     currency: str = "USD"
-    model_thumbnail_width: int = 320
+    model_thumbnail_width: int = 640
     oidc_enabled: bool = False
     oidc_issuer_url: str = ""
     oidc_client_id: str = ""

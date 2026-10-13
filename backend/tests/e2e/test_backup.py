@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from app.core.config import _overlay
 from app.db.models import File
 from app.modules.work.jobs import jobs
 from tests.e2e._backup_helpers import setup_and_login as _setup_and_login
@@ -44,6 +45,9 @@ class TestBackupRestore:
         self, api, tmp_path
     ):
         headers = await _setup_and_login(api, tmp_path)
+        # A backup of an empty vault ends inside the hold that keeps a short
+        # attempt's progress for its terminal write; a real one is watched.
+        _overlay["jobs_progress_hold_seconds"] = 0.0
         accepted = await api.post("/api/v1/backups", headers=headers)
         assert accepted.status_code == 202, accepted.text
         job_id = accepted.json()["job_id"]

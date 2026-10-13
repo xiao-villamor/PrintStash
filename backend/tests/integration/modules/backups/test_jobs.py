@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 from sqlmodel import select
 
+from app.core.config import _overlay
 from app.db.models import BackupRun, Job, JobKind, JobState, SystemConfig
 from app.modules.backups import jobs as backup_jobs
 from app.modules.backups.backup_destination import BackupTrigger
@@ -22,6 +23,16 @@ from app.modules.work.submission import nudge
 from app.runtime.engine.inline import InlineJobEngine
 from tests.factories import build_system_config
 from tests.integration._backup_harness import BackupEnv, seed_model_with_blob
+
+
+@pytest.fixture
+def watched() -> None:
+    """A backup long enough to be watched: each phase it reports is written.
+
+    A real backup runs for many seconds. One over a test library ends inside
+    the hold that keeps a short attempt's progress for its terminal write.
+    """
+    _overlay["jobs_progress_hold_seconds"] = 0.0
 
 
 def _config(env: BackupEnv, **fields: object) -> None:
@@ -79,7 +90,10 @@ class TestCreate:
         assert status is not None and status.completion == "partial"
 
     def test_reports_archive_phases(
-        self, backup_env: BackupEnv, work_engine: InlineJobEngine
+        self,
+        backup_env: BackupEnv,
+        work_engine: InlineJobEngine,
+        watched: None,
     ) -> None:
         seed_model_with_blob(backup_env, name="Widget", content=b"solid progress\n")
         seen = []
@@ -99,7 +113,10 @@ class TestCreate:
         ]
 
     def test_reports_archived_file_count(
-        self, backup_env: BackupEnv, work_engine: InlineJobEngine
+        self,
+        backup_env: BackupEnv,
+        work_engine: InlineJobEngine,
+        watched: None,
     ) -> None:
         seed_model_with_blob(backup_env, name="Widget", content=b"solid count\n")
         seen = []
@@ -114,7 +131,10 @@ class TestCreate:
         ]
 
     def test_reports_the_destination_being_published(
-        self, backup_env: BackupEnv, work_engine: InlineJobEngine
+        self,
+        backup_env: BackupEnv,
+        work_engine: InlineJobEngine,
+        watched: None,
     ) -> None:
         seen = []
         jobs.subscribe(lambda status: seen.append(status))
@@ -188,7 +208,10 @@ class TestAutomatic:
         ]
 
     def test_reports_the_same_progress_as_manual_backups(
-        self, backup_env: BackupEnv, work_engine: InlineJobEngine
+        self,
+        backup_env: BackupEnv,
+        work_engine: InlineJobEngine,
+        watched: None,
     ) -> None:
         _config(
             backup_env,
