@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+- Start with only the selected language. Each translation catalog is now its
+  own asset, loaded when its language is shown, which removes about a fifth of
+  the JavaScript downloaded at startup.
+
+- Read a Model's details once when opening it. The page no longer repeats the
+  read just to confirm that nothing changed while it was connecting to live
+  updates.
+
+- Keep one events connection and one setup admission while moving between
+  application pages. Opening a Model and returning no longer hides the app
+  behind a setup probe, reopens the events socket or refetches every view.
+
+- Compress 3D preview meshes between the server and the browser. Binary STL
+  previews transfer at about half their size and ASCII STL at about an eighth,
+  and a slow connection no longer makes the proxy spool a large mesh to disk.
+
+- Keep folder descriptions and model cards together when navigating, clamp long descriptions before the first paint, and avoid fading cached library thumbnails on every visit.
+
+- Open large Models on their thumbnail. A 3D preview whose source file is over
+  16 MB is no longer downloaded just by opening the Model; the page shows its
+  size and a "Load 3D preview" action instead. Shared links and the similar
+  Models comparison follow the same rule.
+
 ### Performance
 
 - A file in a bulk upload now waits when the server is busy instead of failing. Session creation was limited to 30 per minute, which held a 200-file drop to one file every two seconds and failed files that arrived faster; that limit now bounds a runaway client (600 per minute) and staging admission paces real uploads.
@@ -39,6 +62,9 @@
 - Enable mesh preview readiness after its first rendered frame; verify overlay alignment, display-mode pixels, and repeated resource cleanup on WebGL/WebGPU.
 
 - Extend native mesh preview checks for camera movement, screenshot scales, capture failures, and disposal; retain WebGPU as experimental after baseline comparison.
+
+- Open Models faster from the Library: resting the pointer or keyboard focus on
+  a Model card reads its details ahead of the click.
 
 - Release the mesh preview GPU device when renderer construction or initialization cleanup fails.
 

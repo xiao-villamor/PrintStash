@@ -5,6 +5,8 @@ import { parseSync, Visitor, type Expression } from "oxc-parser";
 import { CHANGELOG } from "@/lib/changelog";
 import { describe, expect, it } from "vitest";
 import { getMessageCatalog, isMessageKey, SUPPORTED_LOCALES } from "@/lib/locale";
+import { localeDefinitions as authoredLocales } from "@/locales/catalogs";
+import { localeMetadata } from "@/locales/registry";
 
 // Brands, protocols, sample addresses and standard units have no translated copy.
 const TECHNICAL = new Set([
@@ -204,6 +206,33 @@ describe("translationCoverage", () => {
     const release = CHANGELOG[0];
     expect([release.date, ...release.changes].filter((message) => !isMessageKey(message))).toEqual(
       [],
+    );
+  });
+  it("keeps every catalog out of the application's static imports", () => {
+    // One static import of a catalog, or of the authoring registry's values,
+    // puts every language back into the startup bundle.
+    const offenders = readdirSync("src", { recursive: true, encoding: "utf8" })
+      .filter((file) => /\.tsx?$/.test(file))
+      .filter((file) => !/__tests__|\.test\.|locales[\\/](catalogs|registry)\.ts$/.test(file))
+      .filter((file) =>
+        /^import (?!type )[^;]*from "(@\/locales\/catalogs|[^"]*locales\/[^"]+\.json)"/m.test(
+          readFileSync(join("src", file), "utf8"),
+        ),
+      );
+
+    expect(offenders).toEqual([]);
+  });
+
+  it("registers the same locales for the running app as for authoring", () => {
+    // The app reads display metadata without importing any catalog; the two
+    // registries describing the same locale must never disagree.
+    expect(localeMetadata).toEqual(
+      Object.fromEntries(
+        Object.entries(authoredLocales).map(([locale, { name, direction }]) => [
+          locale,
+          { name, direction },
+        ]),
+      ),
     );
   });
   it.each(SUPPORTED_LOCALES)("validates every key, plural form and parameter in %s", (locale) => {

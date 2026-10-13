@@ -19,6 +19,10 @@ import {
   DEFAULT_PREVIEW_PREFERENCES,
   writePreviewPreferences,
 } from "../../src/lib/preview-preferences";
+import { activateLocale } from "../../src/lib/locale";
+
+// The viewer reads its messages synchronously; the app loads a catalog before rendering.
+await activateLocale();
 
 interface ResourceSnapshot {
   workers: number;

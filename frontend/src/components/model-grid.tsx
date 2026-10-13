@@ -7,6 +7,7 @@ import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
 
 import { useLibraryReadingPosition } from "@/features/library/reading-position";
 import { LibraryItemLink } from "@/features/library/navigation";
+import { useModelOpenIntent } from "@/features/library/model-detail";
 import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
 import {
   moveLibraryModels,
@@ -125,6 +126,7 @@ import {
   BulkItem,
 } from "@/lib/bulk-upload";
 import {
+  useCollectionReadme,
   useCollectionChildren,
   useCollectionLookup,
   useCollectionSearch,
@@ -927,6 +929,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     selectedLookup.data?.collection.path === selectedCollection
       ? selectedLookup.data.collection
       : null;
+  // Read alongside the folder page, before committing the destination. A
+  // description inserted after its cards would move the entire browsing surface.
+  const collectionReadme = useCollectionReadme(selectedCollectionRow?.id ?? null, {
+    enabled: selectedCollectionRow?.has_readme ?? false,
+  });
   const folderSearch = useCollectionSearch(searchQuery ?? "", "view", {
     enabled: searchQuery !== undefined,
   });
@@ -940,6 +947,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const projectionReady =
     currentLocationHref === canonicalLibraryHref &&
     (selectedCollection === null || selectedCollectionRow !== null) &&
+    (!selectedCollectionRow?.has_readme || !collectionReadme.isPending) &&
     folderPages.data !== undefined &&
     !folderPages.isPlaceholderData &&
     modelQuery.data !== undefined &&
@@ -1651,6 +1659,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     },
     startup.complete && browseReady && !refreshing,
   );
+  const warmModel = useModelOpenIntent(startup.complete && browseReady && !refreshing);
   const canAdminSelectedCollection =
     user?.is_superuser || selectedCollectionRow?.effective_role === "admin";
   // Whether there is anywhere this reader may upload to, without listing it.
@@ -2889,6 +2898,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           onToggleSelect={toggleSelect}
                           draggable={canUploadToVault && !selectMode}
                           onEditTags={openTagEditor}
+                          onIntent={warmModel}
                         />
                       ),
                     )}

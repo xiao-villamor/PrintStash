@@ -161,8 +161,6 @@ Artifact already committed. Derivatives can run through their existing Jobs
 while later source entries are processed. This does not introduce a second
 queue, concurrent SQL writers or parallel downloads.
 
-See the [bounded batch validation matrix](../testing/bounded-batch-imports.md).
-
 ## Derivatives
 
 See [derivatives.md](../derivatives.md). In short: three producer groups
@@ -181,8 +179,13 @@ skipped, failed (with backoff) or cancelled.
 `GET /api/v1/events/ws` (one-use ticket from `POST /api/v1/events/ticket`)
 delivers them. The client follows a Model with `{"subscribe": "model:<id>"}`;
 the server checks the viewer may see it and answers
-`{"type": "subscribed", "channel": "model:<id>"}`, the cue to refetch what
-changed before the subscription took effect. Delivery is best effort: in one
+`{"type": "subscribed", "channel": "model:<id>", "revision": "<opaque>"}`, the
+cue to refetch what changed before the subscription took effect. `revision` is
+`records.model_revision`: it differs whenever a derivative of the Model's live
+Artifacts was created, removed or moved to another state, and `ModelRead`
+reports the same value as `derivatives_revision`. A client whose snapshot
+already carries the acknowledged revision missed nothing and does not refetch;
+the value orders nothing and other channels carry none. Delivery is best effort: in one
 process it is in memory, across processes it is PostgreSQL `NOTIFY`, and a
 reconnect delivers `{"type": "resync"}` so clients refetch.
 
@@ -305,7 +308,6 @@ are only ever recognised by their heartbeat going stale.
 - **A notice is dropped.** Clients also refresh on a slow interval and on
   `resync`.
 
-
 ## Retained ingest input
 
 JobStatus includes a nullable staging summary (retained_bytes, lease_count,
@@ -325,7 +327,6 @@ Capture-origin inputs retain their Pending Import dismissal lifecycle.
 Tasks show retained capacity and expiry with a confirmation before discard.
 After discard, retry requires the input to be uploaded again.
 
-
 ## Producer policy admission
 
 Job Definitions may provide an engine-independent `admission(Session)` hook.
@@ -344,7 +345,6 @@ Background work exposes effective/default/override state for each derivative
 definition. Historical failures remain inspectable but disabled groups do not
 contribute to actionable failures or retry lists.
 
-
 ## Synchronous native cancellation
 
 WorkRunner scopes each synchronous step to its Job attempt. Native supervisors
@@ -355,7 +355,6 @@ is reset even when the step raises. Concurrent steps have independent probes.
 A forced check before accepting native output prevents a result finishing inside
 the normal 200 ms polling interval from publishing after observed withdrawal.
 The Job engine remains responsible for durable dispatch and settlement.
-
 
 ### Execution authority across retry
 

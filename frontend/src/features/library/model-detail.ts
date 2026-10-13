@@ -6,6 +6,7 @@ import { getModel, getModelPrinterFiles, getModelPrintJobs } from "@/lib/api/mod
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
 import { queryKeys } from "@/lib/query-client";
+import { useIntentPrefetch } from "@/lib/use-intent-prefetch";
 import type { ModelRead, ModelPrintJobRead } from "@/types";
 
 export function modelDetailOptions(id: number | null) {
@@ -19,6 +20,27 @@ export function modelDetailOptions(id: number | null) {
     staleTime: 60_000,
     retry: false,
   });
+}
+
+/**
+ * Warm the detail read of the Model under a sustained pointer or focus, so
+ * opening it lands on data that is already there. It fills exactly the entry
+ * the detail page reads; an intent that ends first cancels a read nobody
+ * observes, and mesh bytes are never part of it.
+ */
+export function useModelOpenIntent(enabled: boolean): (id: number | null) => void {
+  const client = useQueryClient();
+  const intend = useIntentPrefetch((target, signal) => {
+    const options = modelDetailOptions(Number(target));
+    const cancel = () => {
+      const query = client.getQueryCache().find({ queryKey: options.queryKey, exact: true });
+      if (query && query.getObserversCount() === 0)
+        void client.cancelQueries({ queryKey: options.queryKey, exact: true });
+    };
+    signal.addEventListener("abort", cancel, { once: true });
+    void client.prefetchQuery(options).finally(() => signal.removeEventListener("abort", cancel));
+  }, enabled);
+  return useCallback((id) => intend(id === null ? null : String(id)), [intend]);
 }
 
 export function modelPrinterFilesOptions(id: number) {

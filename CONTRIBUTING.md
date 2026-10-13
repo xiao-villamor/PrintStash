@@ -13,6 +13,16 @@ testing, parser fixtures, and small focused PRs.
 - Do not include secrets, printer access codes, private URLs, or real API keys in
   issues, logs, screenshots, fixtures, or tests.
 
+## Documentation privacy
+
+Keep audit notes, performance measurements, raw benchmark results, implementation
+plans and validation records in the ignored `reports/` directory. These are
+private work records even when they contain no credentials. Public `docs/`
+contains maintained user guides and architecture contracts. New public documents
+require an explicit entry in `.gitignore`; the repository tests reject tracked
+private files, including files added with `git add -f`. Keep required test
+matrices in the PR description. Review its prose for private report content too.
+
 ## Development Setup
 
 Backend:

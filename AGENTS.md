@@ -40,7 +40,13 @@ Report the PR URL, final commit and verified CI result when handing off.
 - `frontend/` Vite + React + TS.
 - Domain language: read `CONTEXT.md` before touching library/trash/storage code — terms there are binding (Model, Artifact, Revision, live/trashed, storage key…).
 - Design + motion language: read `DESIGN.md` before adding or restyling UI — tokens, the motion scale, and the `components/ui/` primitives are binding. Compose the primitives; never hand-roll an overlay, and never type a raw duration, cubic-bezier, or `[var(--…)]` color into a component.
-- Public roadmap: `docs/roadmap.md`. Local-only planning (gitignored): `reports/` — start with `reports/14-implementation-plan-to-1.0.0.md` (OSS plan) and `reports/15-cloud-implementation-plan.md` (cloud). Never commit or quote `reports/` content publicly.
+- Public roadmap: `docs/roadmap.md`. Private work records (gitignored): `reports/` — start with `reports/14-implementation-plan-to-1.0.0.md` (OSS plan) and `reports/15-cloud-implementation-plan.md` (cloud). Never commit or quote `reports/` content publicly.
+  Audits, performance measurements, benchmark outputs, implementation plans,
+  review ledgers and validation reports belong in `reports/`, including when
+  they contain no credentials. Public `docs/` holds maintained user guides and
+  architecture contracts; its reviewed files are explicitly listed in
+  `.gitignore`. Keep test matrices in the response and PR, as required below.
+  Never force-add private records or copy their contents into public docs.
 
 ## Commands
 - Backend: fast loop `cd backend && ./scripts/test.sh fast -q` · full gate `./scripts/test.sh full -q` · coverage gate `./scripts/test.sh coverage` · lint `uv run ruff check app/ tests/` · run `uv run uvicorn app.main:app --reload` · migrate `uv run python -m app.db.migrate` (prepares the data root, as the container does; raw `alembic` stays for authoring)

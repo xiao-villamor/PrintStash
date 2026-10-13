@@ -1,6 +1,7 @@
 # Frontend target architecture
 
-Status: implemented frontend ownership contracts (2026-10-07), delivered for review in [PR #424](https://github.com/xiao-villamor/PrintStash/pull/424). The [plan](../frontend-architecture/plan.md) records decisions and dependency order; the [validation matrix](../frontend-architecture/validation.md), milestone records and [integration qualification](../frontend-architecture/final-review.md#integrated-source-qualification-8568aa8b) identify tested revisions and review limits. The PR records the final remote check result. This describes source behavior, not a released version.
+This document describes frontend ownership contracts and their implementation.
+It is not a release availability claim.
 
 ## Ownership and module interfaces
 
@@ -68,7 +69,6 @@ Adoption reads through the canonical query owner, keeping expired review preview
 from replacing newer observations. Receipt publication preserves newer observed
 versions, replacement histories and confirmed absence. Legacy external API writes
 remain compatible and advance versions but do not themselves detect conflicts.
-Evidence and remaining work: `docs/frontend-m9-notifications-validation.md`.
 
 ### Provider accounts and paired browsers
 
@@ -85,7 +85,7 @@ its opaque history distinguishes replacement credentials and restored databases.
 Legacy renames remain compatible. The first-party editor captures the original base with its draft, requires explicit
 review after conflicts or uncertain writes, and allows revised saves only within
 the reviewed pairing history. A replacement pairing requires adopting current
-values. Denied or missing devices retire private drafts. Evidence: `docs/frontend-m9-provider-validation.md`.
+values. Denied or missing devices retire private drafts.
 
 ### Implemented administration source seam (M9 increment)
 
@@ -135,7 +135,7 @@ changed destination fields are sent, and confirmed drafts are removed individual
 The configuration transport and command owner now require an editing base for every
 first-party write. The backend retains its documented legacy-client compatibility;
 legacy writes advance the version but remain unprotected themselves. This cutover
-covers vault configuration, not every editable aggregate. Remote connections use their own conditional version and authorized review contract; see `frontend-m9-storage-edit-validation.md`. Local-root enrollment now carries its exact
+covers vault configuration, not every editable aggregate. Remote connections use their own conditional version and authorized review contract. Local-root enrollment now carries its exact
 reviewed path through the separate enrollment command.
 
 ### Implemented backup seam (M9 increment)
@@ -262,8 +262,7 @@ signals without importing feature code; bootstrap wires cleanup and adapters.
 
 Migrated boundaries are enforced by `frontend/tests/repo/dependency-boundaries.test.ts`
 using the existing Oxc parser and a resolver for TypeScript aliases and workspace
-exports. The [boundary contract](../frontend-architecture/dependency-boundaries.md)
-names the public feature modules. Transport has no Query exception. The gate checks type-only, static, re-export, literal dynamic and worker
+exports. The boundary configuration names the public feature modules. Transport has no Query exception. The gate checks type-only, static, re-export, literal dynamic and worker
 imports, reports runtime and type-involving strongly connected components separately,
 and fails on unresolved computed imports for explicit review. Unused exceptions
 fail too. This is dependency-direction enforcement, not a claim that every legacy
@@ -338,15 +337,13 @@ before explicit retry. Permissions come from that reviewed Model. Source
 acknowledgements retire earlier reads; cover image cache identity follows the
 returned cover metadata, while all bytes still use authenticated asset leases.
 The Source endpoint clients require a version; no transport cache or generic
-form/repository layer is added. See [the Source validation record](../library-provenance-editing-validation.md).
-
+form/repository layer is added.
 
 Lightweight outliner Model/Multipart entries carry their stored editing version
 alongside name and location, including search and continuation pages. Collection
 search matches are a distinct unversioned case. A move must carry the version
 captured from its source gesture; fetching a current version just to authorize a
-stale move defeats conflict detection. The read contract is qualified in
-[the movement validation record](../library-move-validation.md); the gesture and conditional movement owner preserve that base through review.
+stale move defeats conflict detection. The gesture and conditional movement owner preserve that base through review.
 
 Multipart detail publication stays in `features/library/multipart.ts`. Composition,
 tag and cover writes use conditional versions; their endpoint clients reject a
@@ -357,11 +354,12 @@ the existing detail review flow. Auxiliary confirmation updates only its owned
 fields in an open composition draft; it advances that draft's base only when the
 command used that same base. Reviewing an auxiliary edit never silently rebases
 unrelated input. Cancelled editor signals also fence receipt publication.
-See [Multipart qualification](../library-multipart-validation.md).
 
 Events are hints to obtain authorized state. Reconnect resync must recover missed
 notices; socket generation/disposal prevents late-ticket connections from reviving
-a dead subscription. Browser focus and offline recovery are part of the same
+a dead subscription. An established connection outlives its last listener by a
+short idle window so one route handing over to the next reuses it; a notice that
+arrives while nobody listens is owed to the next listener as a `resync`. Browser focus and offline recovery are part of the same
 feature lifecycle. Preserve command-specific polling where completion controls the
 next action; consolidate duplicate remote readers rather than banning all timers.
 
@@ -409,7 +407,6 @@ including breadcrumbs and command targets, owns its origin while another route l
 refresh, route prefetch or scroll options without an actual implementation and an
 observable contract. Query options own real data prefetch; feature commands own
 invalidation; Library owns reading-position recovery.
-
 
 ## Replaced mechanisms and current owners
 
@@ -485,8 +482,7 @@ an old draft. Session retirement remains a separate, stronger fence.
 The backend projects the singleton incarnation in the aggregate SELECT; it is not
 a new persisted entity column, per-row request, cache or migration. Contributor
 changes to an editing DTO must update conditional clients, acknowledgement
-validation, factories and OpenAPI in one increment. Qualification is recorded in
-[the restoration matrix](../library-restore-editing-validation.md).
+validation, factories and OpenAPI in one increment.
 
 Own confirmed Favorites removal uses the existing navigation-position metadata.
 Card actions identify their associated item, including buttons beside its link.
@@ -494,7 +490,7 @@ The reading-position owner observes the acknowledged neighbor promotion and
 applies it to the mounted view only after the old card leaves the displayed
 snapshot. It does not scroll early when confirmation precedes rendering, and
 a queued event with unchanged offsets cannot discard the promotion. Native
-scroll bounds still apply. See [the mutation matrix](../library-mutations-validation.md).
+scroll bounds still apply.
 
 ### Interrupted Library batches
 
@@ -512,7 +508,6 @@ undoing confirmed changes never erases the original uncertainty. Session and vie
 retirement suppress delayed feedback. This state is not an entity cache and does
 not participate in Query freshness. Collection commands remain a distinct contract.
 
-
 ## Implemented protected-image ownership
 
 `acquireAssetUrl` returns a shared-download lease with an idempotent release.
@@ -529,8 +524,7 @@ budgets. Live lease bytes are reported separately and decoded image/GPU memory
 is not inferred from either counter. `ProtectedThumbnail` marks readiness after
 actual decode of its current connected image. Missing derivatives and failed
 images cannot masquerade as successfully decoded thumbnails. Native external
-covers retain their existing transport semantics. The [M6 comparison](../frontend-m6-performance.md)
-records the measured settings, extra root module requests and remaining limits.
+covers retain their existing transport semantics.
 
 Paginated outliner branches publish their own completed Query pages. Do not
 reintroduce an all-branches promise barrier for remembered expansion. A slow
@@ -575,8 +569,7 @@ Canonical Model/Multipart/printer queries supply secondary catalogs. No local
 server-response arrays or independent polling interval should return. Definitive
 read denial hides protected cached content; transient failure offers recovery.
 
-Profiles and Statistics apply the same denial distinction. Profile conditional
-editing is now qualified in the [preset matrix](../frontend-m8-profile-edit-validation.md).
+Profiles and Statistics apply the same denial distinction.
 `lib/queries/profiles.ts` owns captured-base commands, review reads and monotonic
 receipt publication. The row component owns its draft and authorized review
 snapshot; blur never resubmits a conflicted or uncertain edit. Revised save sends
@@ -597,8 +590,7 @@ review reads. The advanced form retains its original base across refetches;
 revised replacement preserves settings the user did not change. Guided setup
 stops before download/preparation after an uncertain or conflicting settings save,
 requires explicit review/adoption, and never retries a gesture automatically.
-Review snapshots remain local to the active editor. See the [Search matrix](../frontend-m8-search-edit-validation.md)
-and the [earlier M8 qualification](../frontend-m8-validation.md).
+Review snapshots remain local to the active editor.
 
 ### Static delivery recovery
 
@@ -609,15 +601,22 @@ writes and continues when Cache Storage rejects. Deferred imports get at most on
 automatic reload per tab session; an unrelated successful import cannot reset
 that budget. An eager RouteError uses the existing UI primitives and localized
 reload/back actions when a route still cannot load. No server rendering/runtime
-or routing-framework change is required. Evidence: `docs/frontend-m10-validation.md`.
+or routing-framework change is required.
 
 ### Spoolman settings
 
-`lib/queries/settings-spoolman.ts` owns the masked read and conditional command lifecycle. Connection drafts capture an editing base; status/probe refresh cannot replace typed fields. A conflict or uncertain write requires explicit current-state review. Adoption discards old secret input, and a changed database history cannot authorize replay of the old draft. Secrets remain outside MutationCache. Server claims and the independent Spoolman counter commit with all edited fields; telemetry does not advance that counter. Existing unversioned external clients remain compatible and unprotected. See [the integration correction](../frontend-m11-spoolman-validation.md).
+`lib/queries/settings-spoolman.ts` owns the masked read and conditional command lifecycle. Connection drafts capture an editing base; status/probe refresh cannot replace typed fields. A conflict or uncertain write requires explicit current-state review. Adoption discards old secret input, and a changed database history cannot authorize replay of the old draft. Secrets remain outside MutationCache. Server claims and the independent Spoolman counter commit with all edited fields; telemetry does not advance that counter. Existing unversioned external clients remain compatible and unprotected.
 
 ### Setup admission and transient route state
 
-`SetupGate` owns the setup-status decision for each pathname entry. Before the
+`SetupGate` owns the setup-status decision for each admission subject
+(`setupAdmissionSubject` in `features/setup/entry.ts`). `/setup`, `/login` and
+`/getting-started` are each their own subject, because they are where
+`configured` and `storage_choice_required` change; every other path shares one
+subject. Navigation inside the application therefore keeps the accepted
+admission: it sends no probe, and the shell's effects, event connection and
+queries stay alive. Entering or leaving a setup entry path, and any session
+change, is probed again. Before the
 first accepted response it mounts no application content. During a later probe,
 React Activity hides the admitted subtree and cleans up its effects while
 preserving transient state, such as a newly created document's editor mode. A

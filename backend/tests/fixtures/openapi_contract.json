@@ -11314,6 +11314,10 @@
             "title": "Created At",
             "type": "string"
           },
+          "derivatives_revision": {
+            "title": "Derivatives Revision",
+            "type": "string"
+          },
           "description": {
             "anyOf": [
               {
@@ -11430,7 +11434,8 @@
           "hash",
           "collection_label",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "derivatives_revision"
         ],
         "title": "ModelRead",
         "type": "object"

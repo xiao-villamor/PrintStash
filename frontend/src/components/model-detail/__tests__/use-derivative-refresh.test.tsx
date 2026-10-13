@@ -31,6 +31,13 @@ function send(frame: { type: string; model_id?: number; state?: string }) {
     socket.onmessage?.({ data: JSON.stringify({ file_id: 1, kind: "thumbnail", ...frame }) }),
   );
 }
+function acknowledge(revision: string | undefined) {
+  act(() =>
+    socket.onmessage?.({
+      data: JSON.stringify({ type: "subscribed", channel: "model:3", revision }),
+    }),
+  );
+}
 beforeEach(() => {
   socket = new FakeSocket();
   setEventSocketFactory(async () => socket);
@@ -92,12 +99,58 @@ describe("useDerivativeRefresh", () => {
     expect(await screen.findByText("Derived")).toBeVisible();
     expect(view.requests().map((request) => request.url)).toEqual(["/api/v1/models/3"]);
   });
+  it("reads nothing when the subscription starts from the revision on screen", async () => {
+    const view = renderApp(<Probe />);
+    await subscribed();
+
+    acknowledge(initialModel.derivatives_revision);
+
+    expect(view.requests()).toEqual([]);
+  });
+  it("refetches when the subscription starts from a later revision", async () => {
+    renderApp(<Probe />, {
+      routes: {
+        "GET /api/v1/models/3": json(
+          aModel({ id: 3, name: "Caught up", edit_version: 2, derivatives_revision: "1:7.5" }),
+        ),
+      },
+    });
+    await subscribed();
+
+    acknowledge("1:7.5");
+
+    expect(await screen.findByText("Caught up")).toBeVisible();
+  });
+  it("refetches when the acknowledgement names no revision", async () => {
+    renderApp(<Probe />, {
+      routes: {
+        "GET /api/v1/models/3": json(aModel({ id: 3, name: "Older server", edit_version: 2 })),
+      },
+    });
+    await subscribed();
+
+    acknowledge(undefined);
+
+    expect(await screen.findByText("Older server")).toBeVisible();
+  });
+  it("ignores another Model's acknowledgement", async () => {
+    const view = renderApp(<Probe />);
+    await subscribed();
+
+    act(() =>
+      socket.onmessage?.({
+        data: JSON.stringify({ type: "subscribed", channel: "model:4", revision: "9:9.9" }),
+      }),
+    );
+
+    expect(view.requests()).toEqual([]);
+  });
   it("stops following when the view closes", async () => {
     const { unmount } = renderApp(<Probe />);
     await subscribed();
 
     unmount();
 
-    expect(socket.close).toHaveBeenCalled();
+    expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ unsubscribe: "model:3" }));
   });
 });

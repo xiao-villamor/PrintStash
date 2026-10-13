@@ -30,6 +30,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from app.api.v1.jobs import _may_subscribe, events_ws
 from app.core.time import utcnow
 from app.db.models import (
+    DerivativeKind,
     IngestRequest,
     IngestRequestKind,
     Job,
@@ -42,7 +43,12 @@ from app.modules.identity import ws_tickets
 from app.modules.identity.auth import create_access_token
 from app.modules.work.catalog import get_engine
 from app.runtime.realtime import InProcessBus
-from tests.factories import build_collection, build_user, grant_collection_role
+from tests.factories import (
+    build_collection,
+    build_derivative,
+    build_user,
+    grant_collection_role,
+)
 
 
 def _headers(user: User, scope: str = "write") -> dict[str, str]:
@@ -600,6 +606,7 @@ class TestEventsSocket:
             assert ws.receive_json() == {
                 "type": "subscribed",
                 "channel": f"model:{model.id}",
+                "revision": "0",
             }
             _wait_subscribed(bus, f"model:{model.id}")
             notice = {"type": "derivative", "model_id": model.id, "state": "ready"}
@@ -632,8 +639,75 @@ class TestEventsSocket:
             assert ws.receive_json() == {
                 "type": "subscribed",
                 "channel": f"model:{visible.id}",
+                "revision": "0",
             }
             assert not bus._subscribers.get(f"model:{hidden.id}")
+
+    def test_acknowledges_a_model_with_the_revision_its_detail_reports(
+        self,
+        client: TestClient,
+        db_session: Session,
+        owner: User,
+        make_model,
+        make_file,
+    ) -> None:
+        """Equal values let a client that just read the Model skip a refetch."""
+        shelf = build_collection(db_session, "Shared shelf")
+        grant_collection_role(db_session, owner, shelf)
+        model = make_model(collection=shelf)
+        build_derivative(
+            db_session, make_file(model, filename="part.stl"), DerivativeKind.THUMBNAIL
+        )
+        detail = client.get(f"/api/v1/models/{model.id}", headers=_headers(owner))
+        assert detail.status_code == 200, detail.text
+
+        with client.websocket_connect(
+            f"/api/v1/events/ws?ticket={_ticket(client, owner)}"
+        ) as ws:
+            ws.receive_json()
+            ws.send_json({"subscribe": f"model:{model.id}"})
+
+            assert (
+                ws.receive_json()["revision"] == detail.json()["derivatives_revision"]
+            )
+
+    def test_acknowledges_a_changed_model_with_a_different_revision(
+        self,
+        client: TestClient,
+        db_session: Session,
+        owner: User,
+        make_model,
+        make_file,
+    ) -> None:
+        """A derivative that settled after the read is what the client must not miss."""
+        shelf = build_collection(db_session, "Shared shelf")
+        grant_collection_role(db_session, owner, shelf)
+        model = make_model(collection=shelf)
+        artifact = make_file(model, filename="part.stl")
+        stale = client.get(f"/api/v1/models/{model.id}", headers=_headers(owner)).json()
+        build_derivative(db_session, artifact, DerivativeKind.THUMBNAIL)
+
+        with client.websocket_connect(
+            f"/api/v1/events/ws?ticket={_ticket(client, owner)}"
+        ) as ws:
+            ws.receive_json()
+            ws.send_json({"subscribe": f"model:{model.id}"})
+
+            assert ws.receive_json()["revision"] != stale["derivatives_revision"]
+
+    def test_acknowledges_a_job_channel_without_a_revision(
+        self, client: TestClient, owner: User
+    ) -> None:
+        with client.websocket_connect(
+            f"/api/v1/events/ws?ticket={_ticket(client, owner)}"
+        ) as ws:
+            ws.receive_json()
+            ws.send_json({"subscribe": f"jobs:{owner.id}"})
+
+            assert ws.receive_json() == {
+                "type": "subscribed",
+                "channel": f"jobs:{owner.id}",
+            }
 
     def test_leaves_every_channel_on_disconnect(
         self, client: TestClient, app, owner: User

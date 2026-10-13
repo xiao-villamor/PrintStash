@@ -25,9 +25,6 @@ when the server cancels its native request task, preserving capacity and exact
 callable failures. This is awaited request execution; background processing
 continues through Job Definitions after durable intent is committed.
 
-The [request command matrix](../testing/api-command-execution.md) covers real
-Session ownership, streamed body waiting, credential changes and responsiveness.
-
 | Owner | Responsibilities | Public operations and contracts |
 | --- | --- | --- |
 | `library` | Models, Artifacts, G-code Revisions, taxonomy, multipart sets, provenance and trash | `commands`, `revisions`, `model_views.{listing,pagination,detail,facets,exports,statistics,trash}`, `multipart_models`, `part_options`, `provenance`, `source_covers`, `taxonomy`, `saved_views`, `trash` |
@@ -116,9 +113,8 @@ The explicit historical path map is `backend/module-map.json`.
 
 ## Shared business and product adapters
 
-`backend/packages/printstash-core` is canonical. Cloud adoption is deferred to
-[the separate implementation guide](cloud-adoption.md). Its adapter must adopt an exact upstream
-revision through its existing pinned-source workflow. Matching interface names
+`backend/packages/printstash-core` is canonical. A product adapter must adopt an
+exact upstream revision through its existing pinned-source workflow. Matching interface names
 alone are not a compatibility claim. A pin must identify the entire copied
 package, including contract examples and tests.
 
@@ -194,7 +190,6 @@ Moving a seam includes moving its test and updating fault injection to the
 lookup actually used by production. Retain assertions about failure outcomes,
 not just successful imports. Run query budgets, OpenAPI, schema parity,
 migration upgrades and publication/restore failure cases throughout extraction.
-See `docs/backend-refactor-validation.md` for the behavior matrix and evidence.
 
 Similarity analysis is an optional derivative of committed Artifacts. Each
 unfinished `SimilarityRun` is the subject of `similarity.analyze` Jobs in the

@@ -31,6 +31,7 @@ from app.db.models import (
 from app.modules.derivatives import records
 from app.modules.derivatives.kinds import VIEWER_STL_RECIPE, group, recipes_for
 from app.modules.derivatives.source import DerivativeSource, subject_key
+from tests.factories import build_derivative
 
 
 @pytest.fixture
@@ -1000,3 +1001,92 @@ class TestCommittedContext:
             records.rows_for(db_session, mesh)[DerivativeKind.METADATA].state
             is DerivativeState.READY
         )
+
+
+class TestModelRevision:
+    """What a Model snapshot and a later subscription compare to rule out a missed change."""
+
+    def test_a_model_without_derivatives_has_a_revision(
+        self, db_session: Session, mesh: File
+    ) -> None:
+        assert records.model_revision(db_session, mesh.model_id) == "0"
+
+    def test_is_stable_while_nothing_changes(
+        self, db_session: Session, mesh: File
+    ) -> None:
+        build_derivative(db_session, mesh, DerivativeKind.THUMBNAIL)
+
+        assert records.model_revision(
+            db_session, mesh.model_id
+        ) == records.model_revision(db_session, mesh.model_id)
+
+    def test_changes_when_a_derivative_appears(
+        self, db_session: Session, mesh: File
+    ) -> None:
+        before = records.model_revision(db_session, mesh.model_id)
+
+        build_derivative(db_session, mesh, DerivativeKind.THUMBNAIL)
+
+        assert records.model_revision(db_session, mesh.model_id) != before
+
+    def test_changes_when_a_derivative_settles(
+        self, db_session: Session, mesh: File
+    ) -> None:
+        row = build_derivative(
+            db_session,
+            mesh,
+            DerivativeKind.THUMBNAIL,
+            state=DerivativeState.QUEUED,
+            updated_at=utcnow() - timedelta(minutes=5),
+        )
+        before = records.model_revision(db_session, mesh.model_id)
+
+        row.state = DerivativeState.READY
+        row.updated_at = utcnow()
+        db_session.add(row)
+        db_session.commit()
+
+        assert records.model_revision(db_session, mesh.model_id) != before
+
+    def test_changes_when_a_derivative_is_removed(
+        self, db_session: Session, mesh: File
+    ) -> None:
+        build_derivative(
+            db_session,
+            mesh,
+            DerivativeKind.METADATA,
+            updated_at=utcnow() - timedelta(minutes=5),
+        )
+        older = build_derivative(
+            db_session,
+            mesh,
+            DerivativeKind.THUMBNAIL,
+            updated_at=utcnow() - timedelta(minutes=9),
+        )
+        before = records.model_revision(db_session, mesh.model_id)
+
+        db_session.delete(older)
+        db_session.commit()
+
+        assert records.model_revision(db_session, mesh.model_id) != before
+
+    def test_ignores_another_model(
+        self, db_session: Session, mesh: File, make_model, make_file
+    ) -> None:
+        before = records.model_revision(db_session, mesh.model_id)
+
+        build_derivative(
+            db_session,
+            make_file(make_model(), filename="other.stl"),
+            DerivativeKind.THUMBNAIL,
+        )
+
+        assert records.model_revision(db_session, mesh.model_id) == before
+
+    def test_ignores_a_trashed_artifact(self, db_session: Session, mesh: File) -> None:
+        build_derivative(db_session, mesh, DerivativeKind.THUMBNAIL)
+        mesh.deleted_at = utcnow()
+        db_session.add(mesh)
+        db_session.commit()
+
+        assert records.model_revision(db_session, mesh.model_id) == "0"

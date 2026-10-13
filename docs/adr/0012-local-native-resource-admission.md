@@ -94,47 +94,6 @@ resource configuration; their native descendants are observed in their own PID
 namespace while file-description locks coordinate the common resource domain.
 The ledger and prepared workspaces are runtime state, not backup payloads.
 
-Weights are conservative estimates, not measured allocations. The current
-Python 3.14.8 numeric stack measured approximately 754 MB peak virtual memory
-for a real 300,000-facet STL, while RSS peaked around 473 MB. Its former 660 MB
-claim refused valid measurement under RLIMIT_AS. Known-source weights now use
-3000 bytes per face with a 512 MiB startup floor; this source claims 900 MB.
-
-Callers also declare a typed work profile. The following peaks were measured
-before reducing raster allocation batches; they remain conservative calibration
-inputs rather than claimed peaks after that change. Geometry and PNG/RGB work keep that
-coefficient. WebP uses 4000 bytes per face and a 640 MiB floor: a 640×480 cube
-measured 548,909,056 bytes of virtual memory, while the 225,706-facet Benchy
-measured 714,731,520 bytes without fingerprints. Benchy therefore claims
-902,824,000 bytes for WebP. Optional analysis has a 1 GiB minimum; Benchy with
-WebP and fingerprints measured 746,389,504 bytes. These are whole-process
-estimates, so the startup floor is not added again to the source estimate.
-Additional raster workspace contributes 64 bytes per pixel beyond the qualified
-640×480 frame, including retained views. Every claim is capped by the available
-pool; nested work retains its existing allowance. The estimates describe the
-qualified workloads, not a memory guarantee for every input topology.
-
-Qualification checks both measured RSS and virtual-memory peaks against claims. Tree RSS sampling
-can miss transient peaks; RLIMIT_AS additionally constrains virtual mappings.
-The startup floor was measured on Linux x86-64 and needs continued qualification
-on supported images. CPU thread defaults remain one BLAS/OpenMP thread per
-worker. A separately measured thread policy may change them later.
-
 Queue telemetry is parent-owned and records wait time independently of startup,
 execution and cleanup. It uses bounded outcome labels and carries no source
 path or Artifact identity in metric labels.
-
-Focused mixed-size native execution, cancellation, configuration draining,
-actual PID namespaces and source-workspace recovery are covered by the acceptance
-matrix. The measured mixed-STL workload overlaps two real supervised workers,
-checks RSS and peak virtual memory against claims, preserves original bytes and
-returns complete geometry plus PNGs. It establishes bounded concurrency, not a
-throughput speedup or a general memory calibration for every topology or image.
-Raster allocation batches now retain at most 125,000 candidate pixels while the
-cumulative work allowance remains unchanged. A real tiny 3MF that failed while
-allocating winner normals at 250,000 candidates renders complete PNG and WebP
-under the same 512 MiB ceiling. Exact pixel and depth comparisons against the
-prior batch size protect coverage and output identity.
-
-Extended soak, coverage and supported-image compatibility remain release-gate
-work; the focused qualification does not claim those broader checks.

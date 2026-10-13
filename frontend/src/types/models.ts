@@ -137,6 +137,8 @@ export interface ModelRead {
   files: FileRead[];
   trashed_source_files?: TrashedSourceFileRead[];
   starred: boolean;
+  /** Opaque; equal to a later `subscribed` acknowledgement's `revision` when no derivative changed. */
+  derivatives_revision: string;
 }
 
 export interface ModelPrinterFileRead {

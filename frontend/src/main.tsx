@@ -5,6 +5,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 
 import { queryClient } from "@/lib/query-client";
 import { I18nProvider } from "@/lib/i18n";
+import { activateLocale } from "@/lib/locale";
 import { registerPwa } from "@/lib/pwa";
 import { startTaskCenterSessionScope } from "@/lib/task-center";
 
@@ -23,19 +24,23 @@ const ReactQueryDevtools = import.meta.env.DEV
 const stopTaskScope = startTaskCenterSessionScope();
 import.meta.hot?.dispose(stopTaskScope);
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <I18nProvider>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-        {ReactQueryDevtools ? (
-          <Suspense fallback={null}>
-            <ReactQueryDevtools initialIsOpen={false} />
-          </Suspense>
-        ) : null}
-      </QueryClientProvider>
-    </I18nProvider>
-  </StrictMode>,
-);
+// Every screen reads its text synchronously, so the one catalog the app starts
+// in must be present before the first render.
+void activateLocale().then(() => {
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <I18nProvider>
+        <QueryClientProvider client={queryClient}>
+          <RouterProvider router={router} />
+          {ReactQueryDevtools ? (
+            <Suspense fallback={null}>
+              <ReactQueryDevtools initialIsOpen={false} />
+            </Suspense>
+          ) : null}
+        </QueryClientProvider>
+      </I18nProvider>
+    </StrictMode>,
+  );
+});
 
 registerPwa();

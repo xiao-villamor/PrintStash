@@ -154,7 +154,7 @@ AI Search settings: the Settings browser flow waits for loaded AI data, visits g
 
 - ZIP uploads: a failed preparation retains input capacity; Tasks confirms and discards it safely.
 
-`viewer-stl.spec.ts`: an adversarial 3MF displays a persisted memory refusal across browser reloads while its original remains downloadable.
+`viewer-stl.spec.ts`: an adversarial 3MF displays a persisted memory refusal across browser reloads while its original remains downloadable. A 17 MB STL opens on its thumbnail with no mesh request until the viewer asks for the 3D preview.
 
 `provenance.spec.ts` imports an actual browser capture, edits its Source metadata,
 creates a competing conditional edit, and verifies that the retained draft is
@@ -162,7 +162,9 @@ persisted only after reviewing the current source version and explicitly retryin
 
 `library-navigation.spec.ts` returns from real Model detail to a paginated Library,
 checking entry identity and scroll geometry in desktop grid and mobile list layouts,
-including browser Forward/Back. It seeds and cleans up a unique scale fixture.
+including browser Forward/Back. It seeds and cleans up a unique scale fixture. It also
+opens a Model and returns, checking that the page keeps one events connection and
+sends no further setup probe.
 
 - `sso-settings.spec.ts`: conditional edits across two tabs preserve the losing
   draft and require explicit review before saving against the latest version;

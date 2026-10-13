@@ -10,6 +10,7 @@ import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import type { FileRead, ModelRead } from "@/types/models";
 import type { SimilarityCandidate, SimilaritySource } from "@/types/similarity";
+import { MeshPreviewGate } from "@/components/mesh-preview-gate";
 
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((module) => ({ default: module.STLViewer })),
@@ -222,21 +223,33 @@ export function SimilarityComparison({
                     </p>
                   }
                 >
-                  <STLViewer
-                    url={getAssetUrl(`/api/v1/files/${file.id}/stl`)}
-                    modelId={modelRefs[index].id}
-                    comparison={index === 0 ? left : right}
-                    comparisonCamera={camera}
-                    showGrid={false}
-                    overlay={
+                  <MeshPreviewGate
+                    key={file.id}
+                    // The overlay draws the other Model's mesh in this pane too.
+                    sizeBytes={
                       index === 0 && overlay && files[1]
-                        ? {
-                            url: getAssetUrl(`/api/v1/files/${files[1].id}/stl`),
-                            comparison: right,
-                          }
-                        : undefined
+                        ? Math.max(file.size_bytes, files[1].size_bytes)
+                        : file.size_bytes
                     }
-                  />
+                    posterUrl={null}
+                    posterAlt={modelRefs[index].name}
+                  >
+                    <STLViewer
+                      url={getAssetUrl(`/api/v1/files/${file.id}/stl`)}
+                      modelId={modelRefs[index].id}
+                      comparison={index === 0 ? left : right}
+                      comparisonCamera={camera}
+                      showGrid={false}
+                      overlay={
+                        index === 0 && overlay && files[1]
+                          ? {
+                              url: getAssetUrl(`/api/v1/files/${files[1].id}/stl`),
+                              comparison: right,
+                            }
+                          : undefined
+                      }
+                    />
+                  </MeshPreviewGate>
                 </Suspense>
               ) : (
                 <p className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">

@@ -39,11 +39,13 @@ class TestFrontendNginxConf:
 
         assert "client_max_body_size ${NGINX_CLIENT_MAX_BODY_SIZE};" in conf
 
-    def test_archive_upload_streams_to_the_api_without_proxy_body_buffering(self) -> None:
+    def test_archive_upload_streams_to_the_api_without_proxy_body_buffering(
+        self,
+    ) -> None:
         conf = (_root() / "frontend" / "nginx.conf").read_text()
-        archive_location = conf.split(
-            "location = /api/v1/ingest/archive/inspect {", 1
-        )[1].split("}", 1)[0]
+        archive_location = conf.split("location = /api/v1/ingest/archive/inspect {", 1)[
+            1
+        ].split("}", 1)[0]
 
         assert "proxy_request_buffering off;" in archive_location
         assert "proxy_http_version 1.1;" in archive_location
@@ -59,6 +61,36 @@ class TestFrontendNginxConf:
         assert "font/woff2" not in conf
         api_location = conf.split("location /api/v1/ {", 1)[1].split("}", 1)[0]
         assert "gzip off;" in api_location
+
+    def test_viewer_meshes_are_compressed_at_the_proxy(self) -> None:
+        """STL bytes halve or better under gzip; the JSON API stays uncompressed."""
+        conf = (_root() / "frontend" / "nginx.conf").read_text()
+        mesh_location = conf.split(
+            r"location ~ ^/api/v1/(files/\d+|share/[^/]+/files/\d+)/stl$ {", 1
+        )[1].split("}", 1)[0]
+
+        assert "gzip on;" in mesh_location
+        assert "gzip_types application/sla;" in mesh_location
+        assert "gzip_proxied any;" in mesh_location
+
+    def test_viewer_meshes_stream_without_proxy_temp_files(self) -> None:
+        """A slow client must not make nginx spool a large mesh to disk."""
+        conf = (_root() / "frontend" / "nginx.conf").read_text()
+        mesh_location = conf.split(
+            r"location ~ ^/api/v1/(files/\d+|share/[^/]+/files/\d+)/stl$ {", 1
+        )[1].split("}", 1)[0]
+
+        assert "proxy_buffering off;" in mesh_location
+        assert "proxy_pass http://api:8000;" in mesh_location
+        assert (
+            "proxy_set_header X-Forwarded-Proto $ps_forwarded_proto;" in mesh_location
+        )
+
+    def test_viewer_mesh_location_precedes_the_general_api_proxy(self) -> None:
+        """Both are matched for a mesh path; the regex must be the one declared."""
+        conf = (_root() / "frontend" / "nginx.conf").read_text()
+
+        assert conf.index("/stl$ {") < conf.index("location /api/v1/ {")
 
     def test_pdf_worker_modules_revalidate_their_response_headers(self) -> None:
         """A corrected module MIME type must not stay stale in browser caches."""

@@ -1,7 +1,8 @@
 /** Installation metadata and offline copy share the application's locale registry. */
 import { describe, expect, it } from "vitest";
 import { createLocalizationAssets } from "../../scripts/localization-assets";
-import { SUPPORTED_LOCALES, localeDefinitions } from "@/lib/locale";
+import { SUPPORTED_LOCALES } from "@/lib/locale";
+import { localeDefinitions } from "@/locales/catalogs";
 
 describe("localization assets", () => {
   it.each(SUPPORTED_LOCALES)("provides installation metadata in %s", (locale) => {

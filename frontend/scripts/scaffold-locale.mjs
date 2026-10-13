@@ -62,10 +62,19 @@ export function scaffoldLocale({ rootDir, locale: rawLocale, name, direction }) 
   if (!withImport.includes("} satisfies Record"))
     throw new Error("Could not find localeDefinitions in catalogs.ts.");
   const nextRegistry = withImport.replace("} satisfies Record", `${definition}} satisfies Record`);
+  // The running app reads display metadata from its own registry, which never
+  // imports a catalog; a locale missing there cannot be selected.
+  const runtimePath = join(localesDir, "registry.ts");
+  const runtime = readFileSync(runtimePath, "utf8");
+  if (!runtime.includes("} satisfies Record"))
+    throw new Error("Could not find localeMetadata in registry.ts.");
+  const metadata = `  ${key}: { name: ${JSON.stringify(name.trim())}, direction: ${JSON.stringify(direction)} },\n`;
+  const nextRuntime = runtime.replace("} satisfies Record", `${metadata}} satisfies Record`);
 
   writeFileSync(catalogPath, `${JSON.stringify(draft, null, 2)}\n`);
   writeFileSync(registryPath, nextRegistry);
-  return { locale, catalogPath, registryPath };
+  writeFileSync(runtimePath, nextRuntime);
+  return { locale, catalogPath, registryPath, runtimePath };
 }
 
 const invokedPath = process.argv[1];

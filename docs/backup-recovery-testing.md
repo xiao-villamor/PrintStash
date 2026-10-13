@@ -79,23 +79,3 @@ cd backend
 This includes the real PostgreSQL, S3-compatible, SFTP and WebDAV recovery cases.
 Missing service prerequisites fail the selected lane rather than skipping it.
 The browser recovery flow is `frontend/tests/e2e-real/backup-recovery.spec.ts`.
-
-## Coverage matrix
-
-| # | Behaviour (test name) | Category | Precondition / input | Observable outcome asserted | Tier | Status |
-|---|----------------------|----------|----------------------|-----------------------------|------|--------|
-| 1 | restores after unused archive inspection | Happy | ZIP inspection completed after backup; Model purged | Original Model and exact Artifact bytes recovered | E2E | ✅ `e2e/test_backup.py::TestBackupRestore::test_restores_after_unused_archive_inspection` |
-| 2 | retains backed-up archive selection | Edge | Inspected ZIP in snapshot, staging retained | Selecting the archive after restore imports the original bytes | E2E | ✅ `e2e/test_backup.py::TestBackupRestore::test_retains_backed_up_archive_selection` |
-| 3 | refuses while an import owns staged bytes | Error | Upload/selection Jobs in every state; inspection in every state except completed; separate completed inspection coexists | 409 for the blocking lease, both staged files untouched | Integration | ✅ `integration/api/v1/test_backup.py::TestRestoreBackup::test_refuses_while_an_import_owns_staged_bytes` |
-| 4 | restores a purged Model with its Artifact bytes | Happy | Real browser, unused ZIP inspection | Settings restore returns 200; exact bytes downloadable | Playwright | ✅ `e2e-real/backup-recovery.spec.ts` |
-| 5 | refuses to overwrite a historical fixture | Error | Existing archive or oracle | Error; existing contents unchanged | Unit | ✅ `unit/scripts/test_backup_compatibility.py::TestCreate::test_refuses_to_overwrite_a_historical_fixture` |
-| 6 | rejects an empty testdata corpus | Error | No supported source files | Error before Docker starts | Unit | ✅ `unit/scripts/test_backup_compatibility.py::TestCreate::test_rejects_an_empty_testdata_corpus` |
-| 7 | rejects mismatched fixture evidence | Error | Wrong format/version/archive checksum | Error before Docker starts | Unit | ✅ `unit/scripts/test_backup_compatibility.py::TestVerify::test_rejects_mismatched_fixture_evidence` |
-| 8 | fails when the historical archive is missing | Error | Oracle without archive | Missing-file error | Unit | ✅ `unit/scripts/test_backup_compatibility.py::TestVerify::test_fails_when_the_historical_archive_is_missing` |
-| 9 | rejects a fixture without the documented demo key | Error | Wrong demo key | Error before Docker starts | Unit | ✅ `unit/scripts/test_backup_compatibility.py::TestVerify::test_rejects_a_fixture_without_the_documented_demo_key` |
-| 10 | names assets for the exact release | Happy | Version 0.14.0 | Stable archive/oracle names | Unit | ✅ `unit/scripts/test_backup_compatibility.py::TestAssetNames::test_names_assets_for_the_exact_release` |
-| 11 | rejects non-release versions | Error | Path, tag, incomplete version, prerelease | Explicit error | Unit | ✅ `unit/scripts/test_backup_compatibility.py::TestAssetNames::test_rejects_non_release_versions` |
-| 12 | missing historical fixture fails before starting a candidate | Error | Empty fixture root for 0.14.1 | Nonzero exit naming 0.14.0 archive | Integration | ✅ `repo/test_backup_compatibility.py::TestHistoricalBackupJobs::test_missing_historical_fixture_fails_before_starting_a_candidate` |
-| 13 | refuses replacing an existing version | Error | Version directory exists | Nonzero exit; evidence unchanged | Integration | ✅ `repo/test_backup_compatibility.py::TestHistoricalBackupJobs::test_refuses_replacing_an_existing_version` |
-| 14 | creates an authentic released demo backup | Happy | Released 0.14.0 image; all nine testdata files | Every input hash represented in downloaded Artifacts; verified archive and digest/oracle files created | E2E | ✅ `scripts/backup_compatibility.py::create` |
-| 15 | recovers a historical fixture on a fresh installation | Happy | Retained 0.14.0 archive and original demo key; disposable empty volume | Exact catalog and file hashes, identical reads after restart, subsequent backup completes | E2E | ✅ `scripts/backup_compatibility.py::verify` |

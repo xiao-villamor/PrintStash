@@ -291,8 +291,7 @@ approval. Historical backups remain listable and recoverable; upgrading does not
 backfill independence claims or change ownership and archive locators.
 
 The [Library Sources guide](./library-sources.md) gives platform recipes and a
-disposable-data validation checklist. First-party platform citations are
-recorded in [the NAS evidence note](./research/nas-library-source-evidence.md).
+disposable-data validation checklist.
 
 ### Storage validation log
 
@@ -305,7 +304,6 @@ filesystem, protocol, auth mode and the release-validation checklist result.
 | Nextcloud contract container | Pinned CI image | WebDAV | 2026-08-31 | Automated contract | Pass | Production OpenDAL adapter, including discovery cursor |
 | OpenSSH contract container | Pinned CI image | SFTP | 2026-08-31 | Automated contract | Pass | Production adapter and pinned-host-key rejection |
 | _(no physical NAS validation yet)_ | | | | | | |
-
 
 ### Backup deletion and retention
 
@@ -354,17 +352,13 @@ transport cannot prove that equal-size bytes remained unchanged during a read.
 All available markers and exact lengths are checked; markerless sources are
 hashed on every scan. Connection pooling is not introduced.
 
-See [directory benchmark results](remote-discovery-benchmarks.md) for measured
-requests, connections, transferred bytes, temporary storage and memory.
-
-
 ### WebDAV cleanup evidence
 
 Pinned Nextcloud and WsgiDAV contracts exercise conditional deletion, quarantine
 moves, replacement races, lost-client-response recovery and lock expiry.
 WsgiDAV's filesystem ETag can collide across equal-size rapid replacements, and
 Nextcloud's tested configuration does not implement LOCK. Physical deletion and
-automatic retention remain disabled; see the [measured cleanup evidence](webdav-cleanup-evidence.md).
+automatic retention remain disabled. See [storage safety](storage-data-safety.md).
 
 ## Storage product presets
 

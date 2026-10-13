@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import delete, update
+from sqlalchemy import delete, func, update
 from sqlmodel import Session, col, select
 
 from app.core.config import settings
@@ -95,6 +95,26 @@ def satisfied(
     return (
         regenerated_at is None or updated >= regenerated_at
     ) and now - updated < STALE_IN_FLIGHT
+
+
+def model_revision(session: Session, model_id: int) -> str:
+    """An opaque value that differs whenever a derivative of the Model changed.
+
+    A reader that holds a Model snapshot and a later observer of the same Model
+    compare their revisions: equal means no derivative of its live Artifacts was
+    created, removed or moved to another state in between. It orders nothing.
+    """
+    count, latest = session.exec(
+        select(
+            func.count(col(ArtifactDerivative.id)),
+            func.max(col(ArtifactDerivative.updated_at)),
+        )
+        .join(File, col(File.id) == col(ArtifactDerivative.file_id))
+        .where(col(File.model_id) == model_id, live(File))
+    ).one()
+    if latest is None:
+        return "0"
+    return f"{count}:{ensure_utc(latest).timestamp():.6f}"
 
 
 def rows_for(session: Session, file: File) -> dict[DerivativeKind, ArtifactDerivative]:

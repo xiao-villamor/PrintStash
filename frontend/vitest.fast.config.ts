@@ -25,6 +25,8 @@ export default defineConfig({
     environment: "node",
     pool: "threads",
     isolate: false,
+    // Catalogs are fetched per locale at runtime; these files read messages directly.
+    setupFiles: ["./vitest.locale.ts"],
     include: [
       "src/components/model-detail/__tests__/presentation.test.ts",
       "src/generated/__tests__/printer-contracts.test.ts",

@@ -24,7 +24,9 @@ import type { DerivativeState, JobState } from "@/types";
 export type EventNotice =
   | { type: "resync" }
   | { type: "derivative_policy" }
-  | { type: "subscribed"; channel: string }
+  // `revision` is present on Model channels only: the Model's derivative
+  // revision when the subscription took effect (`ModelRead.derivatives_revision`).
+  | { type: "subscribed"; channel: string; revision?: string }
   | {
       type: "job";
       job_id: string;
@@ -56,6 +58,7 @@ export type EventSocketFactory = (signal: AbortSignal) => Promise<EventSocket>;
 
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+const IDLE_CLOSE_MS = 10_000;
 
 async function openEventSocket(signal: AbortSignal): Promise<EventSocket> {
   let closeOpened = () => {};
@@ -99,6 +102,9 @@ let generation = 0;
 let ticketController: AbortController | null = null;
 let stopAuth: (() => void) | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+// A notice arrived while nobody listened; the next listener is owed a resync.
+let missed = false;
 let failures = 0;
 
 /** Point the client at a different socket (tests); resets any live connection. */
@@ -184,7 +190,9 @@ async function connect(): Promise<void> {
   next.onmessage = (event) => {
     if (!current()) return;
     const notice = parse(event.data);
-    if (notice) deliver(notice, current);
+    if (!notice) return;
+    if (listeners.size === 0) missed = true;
+    else deliver(notice, current);
   };
   next.onclose = () => {
     if (!current()) return;
@@ -197,8 +205,23 @@ async function connect(): Promise<void> {
   };
 }
 
+function cancelIdleClose(): void {
+  if (idleTimer === null) return;
+  clearTimeout(idleTimer);
+  idleTimer = null;
+}
+
+/** Stop listening for session changes and drop the connection. */
+function retire(): void {
+  disconnect();
+  stopAuth?.();
+  stopAuth = null;
+}
+
 function disconnect(): void {
   generation += 1;
+  cancelIdleClose();
+  missed = false;
   ticketController?.abort();
   ticketController = null;
   connecting = false;
@@ -217,11 +240,27 @@ function disconnect(): void {
   }
 }
 
-/** Hear every notice this tab receives; the socket lives while anyone listens. */
+/**
+ * Hear every notice this tab receives. The socket lives while anyone listens
+ * and for `IDLE_CLOSE_MS` after the last listener leaves, so one view handing
+ * over to the next (a route change) keeps the connection instead of paying for
+ * a ticket, a handshake and the server's `resync`. A notice that arrived in
+ * such a gap reached nobody, so the next listener hears a `resync` for it.
+ */
 export function subscribeEvents(listener: EventListener): () => void {
   if (!isBrowser()) return () => {};
+  cancelIdleClose();
   listeners.add(listener);
+  if (missed) {
+    missed = false;
+    const version = generation;
+    queueMicrotask(() => deliver({ type: "resync" }, () => version === generation));
+  }
   stopAuth ??= onAuthChange(() => {
+    if (listeners.size === 0) {
+      retire();
+      return;
+    }
     disconnect();
     failures = 0;
     void connect();
@@ -232,11 +271,11 @@ export function subscribeEvents(listener: EventListener): () => void {
     if (!active) return;
     active = false;
     listeners.delete(listener);
-    if (listeners.size === 0) {
-      disconnect();
-      stopAuth?.();
-      stopAuth = null;
-    }
+    if (listeners.size > 0) return;
+    // Only an established connection is worth keeping; a pending ticket or a
+    // reconnect timer has nothing to hand over.
+    if (socket === null) retire();
+    else idleTimer = setTimeout(retire, IDLE_CLOSE_MS);
   };
 }
 
@@ -245,7 +284,8 @@ export function subscribeEvents(listener: EventListener): () => void {
  * every `resync`, and the server's `subscribed` acknowledgement of this
  * Model's channel: a derivative that settled before the subscription took
  * effect was announced to nobody, so a follower refetches on that
- * acknowledgement. The server checks the viewer may see the Model.
+ * acknowledgement unless it already holds the revision the acknowledgement
+ * names. The server checks the viewer may see the Model.
  */
 export function followModel(modelId: number, listener: EventListener): () => void {
   const channel = `model:${modelId}`;

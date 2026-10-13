@@ -16,14 +16,12 @@ FETCH_CHUNK_BYTES = 64 * 1024
 
 
 def external_references() -> tuple[ExternalReference, ...]:
-    """Reuse the historical ADR pins, with their recorded exact input lengths."""
-    source = Path(__file__).resolve().parents[2] / "docs/adr/0009-3mf-pilot"
-    refs = json.loads((source / "external-inputs.json").read_text())
-    cases = json.loads((source / "cases.json").read_text())
+    """Load the pinned public slicer sources with their exact input lengths."""
+    source = Path(__file__).resolve().parents[1] / "benchmarks/mesh/external-inputs.json"
+    refs = json.loads(source.read_text())
     return tuple(
         ExternalReference(
             filename=f"real-{row['case'].lower()}.3mf",
-            input_bytes=cases[row["case"]]["input_bytes"],
             **row,
         )
         for row in refs

@@ -624,6 +624,13 @@ describe("folder navigation", () => {
     expect(stubs.getCollectionReadme).toHaveBeenCalledWith(5, { signal: expect.any(AbortSignal) });
   });
 
+  it("does not request a description without a selected folder", () => {
+    const { result } = renderHook(() => useCollectionReadme(null), { wrapper: wrapper() });
+
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(stubs.getCollectionReadme).not.toHaveBeenCalled();
+  });
+
   it("does not request a readme while disabled", async () => {
     const { result } = renderHook(() => useCollectionReadme(5, { enabled: false }), {
       wrapper: wrapper(),
