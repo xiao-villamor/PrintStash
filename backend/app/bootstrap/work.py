@@ -119,9 +119,7 @@ def validate_topology() -> None:
     if not split:
         return
     backend = make_url(settings.db_url).get_backend_name()
-    if backend != "postgresql" and not (
-        backend == "sqlite" and settings.experimental_sqlite_workers
-    ):
+    if backend != "postgresql":
         raise RuntimeError(
             f"VAULT_PROCESS_ROLE={role} splits work across processes and requires "
             "PostgreSQL (VAULT_DB_URL); SQLite supports the unified and api roles"
