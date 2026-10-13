@@ -104,7 +104,22 @@ Tried and not kept:
 
 ## Memory under a limit
 
-MEMORY_SECTION
+The same 200 models, web UI protocol, product default settings (one render
+slot), container memory limit as shown.
+
+| Image | Limit | All done | Models visible | Peak memory | OOM kills | Outputs |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| `main` | 2 GiB | 769 s | 404 s | 1,490 MiB | 0 | 192 thumbnails, 8 expected failures |
+| Now, GPU auto | 2 GiB | 410 s | 146 s | 1,591 MiB | 0 | 192 thumbnails, 8 expected failures |
+
+Neither image reaches a 2 GiB limit on this corpus (largest source 60.5 MiB).
+With default settings the thumbnails trail the uploads because one render slot
+serves them; the models themselves are visible in 146 s.
+
+The worker memory budget is half of the container limit
+(`VAULT_MESH_MEMORY_BUDGET_FRACTION`) and does not account for what the API
+process (about 360 MiB high-water) and, with GPU enabled, the compute broker
+(about 290 MiB) already hold.
 
 ## Why the earlier audit could not move
 
