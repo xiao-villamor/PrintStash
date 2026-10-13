@@ -476,7 +476,7 @@ def persist_artifact(
             else vault_allocation(staged_path.stat().st_size)
         )
         reservation = CapacityManager(session_factory or get_session_factory()).reserve(
-            f"artifact:{model_id}:{version}", [allocation]
+            f"artifact:{model_id}:{version}", [allocation], transient=True
         )
     blob_receipt = None
     blob_publication = None

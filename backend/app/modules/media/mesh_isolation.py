@@ -935,6 +935,7 @@ def generate(
                         role="STEP tessellation",
                     )
                 ],
+                transient=True,
             )
             resources.callback(reservation.release)
         run_options = {"deadline": handoff.deadline} if handoff is not None else {}

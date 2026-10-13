@@ -413,8 +413,7 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
             width = int(settings.model_thumbnail_width)
             handoff_plan = (
                 thumbnail_handoff.plan(width, round(width * 3 / 4), file_row.size_bytes)
-                if DerivativeKind.THUMBNAIL in attempts
-                and plan is None
+                if DerivativeKind.THUMBNAIL in attempts and plan is None
                 else None
             )
             output_bytes = MAX_PACKET_BYTES if handoff_plan is not None else 0
@@ -435,6 +434,7 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
                         role="thumbnail rendering",
                     ),
                 ],
+                transient=True,
             )
             stack.callback(claim.release)
             (source,) = stack.enter_context(prepared.materialize(capacity_claimed=True))
@@ -796,6 +796,7 @@ def _derive_viewer_stl(
                     ),
                     vault_allocation(output_limit, role="derived STL publication"),
                 ],
+                transient=True,
             ),
             prepared.materialize(capacity_claimed=True) as sources,
         ):

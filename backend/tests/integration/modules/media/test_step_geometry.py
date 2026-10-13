@@ -243,7 +243,8 @@ class TestStepWorkerContainment:
         from sqlmodel import select
 
         from app.core.config import _overlay
-        from app.db.models import CapacityReservation
+        from app.db.session import get_session_factory
+        from app.modules.storage.capacity import CapacityManager
 
         native_popen = mesh_isolation.subprocess.Popen
         processes, directories = [], []
@@ -284,5 +285,5 @@ class TestStepWorkerContainment:
             mesh_loading.load_step_mesh(ocp_box, include_brep=True)
         assert all(process.poll() is not None for process in processes)
         assert all(not path.exists() for path in directories)
-        assert db_session.exec(select(CapacityReservation)).all() == []
+        assert CapacityManager(get_session_factory()).transient_claims() == {}
         assert db_session.exec(select(1)).one() == 1

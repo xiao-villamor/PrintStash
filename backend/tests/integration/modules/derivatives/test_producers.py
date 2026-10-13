@@ -43,6 +43,7 @@ from app.db.models import (
     Metadata,
     Model,
 )
+from app.db.session import get_session_factory
 from app.modules.derivatives import kinds, producers
 from app.modules.ingestion import extensions
 from app.modules.library.volume_metadata import apply_volume, read_volume
@@ -63,7 +64,7 @@ from app.modules.media.mesh_protocol import BasicOutput, GeometryOutput, Thumbna
 from app.modules.media.thumbnail_publication import ThumbnailPublicationError
 from app.modules.media.worker_bootstrap import command
 from app.modules.similarity import ingestion as similarity_ingestion
-from app.modules.storage.capacity import CapacityReservation
+from app.modules.storage.capacity import CapacityManager
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.work import events, runner, service
 from app.modules.work.jobs import jobs
@@ -1347,7 +1348,7 @@ class TestMeshCancellation:
         for pid in json.loads(pids.read_text()):
             assert not Path(f"/proc/{pid}").exists()
         assert not Path(ready.read_text()).exists()
-        assert db_session.exec(select(CapacityReservation)).all() == []
+        assert CapacityManager(get_session_factory()).transient_claims() == {}
         db_session.expire_all()
         rows = db_session.exec(
             select(ArtifactDerivative).where(ArtifactDerivative.file_id == artifact.id)
@@ -1937,7 +1938,7 @@ class TestDeriveViewerStl:
         assert proof.state is StorageObjectState.PENDING
         assert not backend.exists(proof.key)
         assert backend.read_bytes(artifact.path) == original
-        assert db_session.exec(select(CapacityReservation)).all() == []
+        assert CapacityManager(get_session_factory()).transient_claims() == {}
 
     def test_cancelled_conversion_retains_only_pending_ownership(
         self, db_session, stored, monkeypatch, viewer_conversion

@@ -71,6 +71,7 @@ class ArtifactHandle:
                     role=f"Artifact {operation}",
                 )
             ],
+            transient=True,
         )
 
     def _verified_remote_copy(self, directory: Path | None = None) -> Path:

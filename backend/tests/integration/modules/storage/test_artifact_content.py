@@ -579,10 +579,10 @@ class TestManagedCacheContent:
         with handle.materialize() as path:
             assert path.read_bytes() == source.read_bytes()
             assert path.parent != cache.root
-            assert manager.reserved_bytes()
+            assert manager.transient_claims()
         assert backend.bytes_read == source.stat().st_size
         assert cache.status()["entries"] == 0
-        assert manager.reserved_bytes() == {}
+        assert manager.transient_claims() == {}
 
     def test_noncapacity_admission_error_remains_visible(self, managed_cache_content):
         from app.core.errors import ErrorKind, OperationError

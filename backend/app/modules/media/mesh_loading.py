@@ -61,6 +61,7 @@ def load_step_mesh(
                         Path(tmp), result_limit + 64 * 1024, role="STEP tessellation"
                     )
                 ],
+                transient=True,
             )
             resources.callback(reservation.release)
         output = Path(tmp) / ("mesh.npz" if include_brep else "mesh.glb")

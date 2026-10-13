@@ -4,6 +4,11 @@ Reservations are budget claims, never ownership receipts. Expiry does not free
 budget until the workflow owner proves that an operation has stopped writing.
 A caller must renew before increasing its peak allocation and release after its
 last allocation. Actual free space is re-probed under the admission lock.
+
+A transient claim (scratch space one operation holds for seconds) is kept in
+this process and published as part of one lease row per process. The lease is
+never below what the process holds, so every other admission still counts it;
+a claim that fits inside the lease is decided from a read and writes nothing.
 """
 
 from __future__ import annotations
@@ -12,10 +17,12 @@ import json
 import os
 import socket
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from pathlib import Path
+from threading import Lock
 from typing import Callable, Iterator, Sequence
+from weakref import WeakKeyDictionary
 
 from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -136,7 +143,7 @@ def _process_identity() -> dict[str, str | int]:
             .rsplit(")", 1)[1]
             .split()[19],
         }
-    except (OSError, IndexError):
+    except OSError, IndexError:
         return {}
 
 
@@ -157,12 +164,61 @@ def _owner_stopped(payload: str) -> bool:
         return start != identity.get("start")
     except FileNotFoundError:
         return True
-    except (OSError, IndexError):
+    except OSError, IndexError:
         return False
 
 
 def _decode(payload: str) -> list[CapacityResource]:
     return [CapacityResource(**item) for item in json.loads(payload)]
+
+
+_LEASE_PREFIX = "process:"
+_LEASE_ROLE = "process claims"
+_LEASE_TTL_SECONDS = 900
+
+
+def _lease_id() -> str:
+    """This process's lease row: one per process lifetime, never reused."""
+    identity = _process_identity()
+    if not identity:
+        return f"{_LEASE_PREFIX}{os.getpid()}"
+    # The boot id keeps a restarted container, where the same pid can start at
+    # the same tick, from adopting the row of the process it replaced.
+    return f"{_LEASE_PREFIX}{identity['boot']}:{identity['pid']}:{identity['start']}"
+
+
+def _totals(resources: Sequence[CapacityResource]) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for item in resources:
+        totals[item.domain_id] = totals.get(item.domain_id, 0) + item.required_bytes
+    return totals
+
+
+@dataclass
+class _Ledger:
+    """The transient claims this process holds against one database."""
+
+    lock: Lock = field(default_factory=Lock)
+    claims: dict[str, tuple[CapacityResource, ...]] = field(default_factory=dict)
+
+    def held(self, *, without: str | None = None) -> dict[str, int]:
+        totals: dict[str, int] = {}
+        for operation_id, resources in self.claims.items():
+            if operation_id == without:
+                continue
+            for domain, required in _totals(resources).items():
+                totals[domain] = totals.get(domain, 0) + required
+        return totals
+
+
+_ledgers: WeakKeyDictionary[object, _Ledger] = WeakKeyDictionary()
+_ledgers_lock = Lock()
+
+
+def forget_transient_claims() -> None:
+    """Drop every in-process claim. For a process whose database was replaced."""
+    with _ledgers_lock:
+        _ledgers.clear()
 
 
 @dataclass
@@ -171,6 +227,7 @@ class CapacityReservationHandle:
     operation_id: str
     resources: Sequence[CapacityResource]
     warnings: tuple[str, ...]
+    transient: bool = False
 
     def renew(
         self,
@@ -179,13 +236,20 @@ class CapacityReservationHandle:
         ttl_seconds: int = 900,
     ) -> None:
         replacement = self.resources if resources is None else resources
-        renewed = self.manager._reserve(
-            self.operation_id, replacement, ttl_seconds=ttl_seconds, renew=True
+        renewed = (
+            self.manager._claim(self.operation_id, replacement, renew=True)
+            if self.transient
+            else self.manager._reserve(
+                self.operation_id, replacement, ttl_seconds=ttl_seconds, renew=True
+            )
         )
         self.resources, self.warnings = renewed.resources, renewed.warnings
 
     def release(self) -> None:
-        self.manager.release(self.operation_id)
+        if self.transient:
+            self.manager._release_claim(self.operation_id)
+        else:
+            self.manager.release(self.operation_id)
 
 
 class CapacityManager:
@@ -240,7 +304,20 @@ class CapacityManager:
         *,
         ttl_seconds: int = 900,
         durable: bool = False,
+        transient: bool = False,
     ) -> CapacityReservationHandle:
+        """Admit one operation's peak allocation.
+
+        ``transient`` is for scratch space held for the length of one call and
+        released by the same process: it is admitted against the same budget
+        but recorded in this process's lease instead of a row of its own. A
+        claim that outlives the process, or that another process reads back by
+        its operation id, is not transient.
+        """
+        if transient:
+            if durable:
+                raise ValueError("invalid capacity reservation")
+            return self._claim(operation_id, resources, renew=False)
         return self._reserve(
             operation_id,
             resources,
@@ -248,6 +325,237 @@ class CapacityManager:
             renew=False,
             durable=durable,
         )
+
+    def _ledger(self, session: Session) -> _Ledger:
+        bind = session.get_bind()
+        with _ledgers_lock:
+            ledger = _ledgers.get(bind)
+            if ledger is None:
+                ledger = _ledgers[bind] = _Ledger()
+            return ledger
+
+    def _decide(
+        self, resources: Sequence[CapacityResource], reserved: dict[str, int]
+    ) -> list[str]:
+        """Warnings for admitting ``resources`` beside ``reserved`` bytes.
+
+        ``reserved`` is every other claim per domain. Raises the denial.
+        """
+        requested = _totals(resources)
+        free: dict[str, int | None] = {}
+        volume_totals: dict[str, int | None] = {}
+        for item in resources:
+            measured, total = item.measure()
+            previous_total = volume_totals.get(item.domain_id)
+            volume_totals[item.domain_id] = (
+                total if previous_total is None else max(previous_total, total or 0)
+            )
+            previous = free.get(item.domain_id)
+            free[item.domain_id] = (
+                measured
+                if previous is None
+                else previous
+                if measured is None
+                else min(previous, measured)
+            )
+        warnings = []
+        for domain, available in free.items():
+            policy = CapacityPolicy() if domain.startswith("budget:") else self.policy
+            decision = policy.evaluate(
+                requested[domain],
+                available_bytes=available,
+                reserved_bytes=reserved.get(domain, 0),
+                total_bytes=volume_totals[domain],
+            )
+            if decision.outcome == "warn":
+                warnings.append(f"{decision.reason}:{domain}")
+            elif decision.outcome == "deny":
+                raise OperationError(
+                    "storage_capacity_exceeded",
+                    kind=ErrorKind.CAPACITY,
+                    retry_after_seconds=decision.refresh_after_seconds,
+                    capacity={
+                        "required_bytes": decision.required_bytes,
+                        "available_bytes": decision.available_bytes,
+                        "reserved_bytes": decision.reserved_bytes,
+                        "headroom_bytes": decision.headroom_bytes,
+                    },
+                )
+        return warnings
+
+    @staticmethod
+    def _others(
+        session: Session, lease_id: str
+    ) -> tuple[dict[str, int], dict[str, int]]:
+        """(bytes every other row reserves, bytes this process's lease holds)."""
+        others: dict[str, int] = {}
+        lease: dict[str, int] = {}
+        for row in session.exec(select(CapacityReservation)):
+            target = lease if row.operation_id == lease_id else others
+            for item in _decode(row.resources_json):
+                target[item.domain_id] = (
+                    target.get(item.domain_id, 0) + item.required_bytes
+                )
+        return others, lease
+
+    @staticmethod
+    def _write_lease(session: Session, lease_id: str, lease: dict[str, int]) -> None:
+        row = session.get(CapacityReservation, lease_id)
+        held = {domain: size for domain, size in lease.items() if size > 0}
+        if not held:
+            if row is not None:
+                session.delete(row)
+            return
+        payload = json.dumps(
+            [
+                asdict(CapacityResource(domain, size, None, _LEASE_ROLE))
+                for domain, size in sorted(held.items())
+            ],
+            sort_keys=True,
+        )
+        if row is None:
+            row = CapacityReservation(
+                operation_id=lease_id,
+                resources_json=payload,
+                expires_at=utcnow(),
+                owner_identity_json=json.dumps(
+                    {**_process_identity(), "lifetime": "process"}
+                ),
+            )
+        row.resources_json = payload
+        row.expires_at = utcnow() + timedelta(seconds=_LEASE_TTL_SECONDS)
+        session.add(row)
+
+    def _claim(
+        self,
+        operation_id: str,
+        resources: Sequence[CapacityResource],
+        *,
+        renew: bool,
+    ) -> CapacityReservationHandle:
+        if not operation_id or len(operation_id) > 200 or not resources:
+            raise ValueError("invalid capacity reservation")
+        claimed = tuple(resources)
+        lease_id = _lease_id()
+        with self.session_factory.scoped_session() as session:
+            ledger = self._ledger(session)
+        try:
+            with ledger.lock:
+                existing = ledger.claims.get(operation_id)
+                if renew and existing is None:
+                    raise OperationError(
+                        "capacity_reservation_lost", kind=ErrorKind.CONFLICT
+                    )
+                if existing is not None and not renew and existing != claimed:
+                    raise OperationError(
+                        "capacity_operation_conflict", kind=ErrorKind.CONFLICT
+                    )
+                held = ledger.held(without=operation_id)
+                need = dict(held)
+                for domain, required in _totals(claimed).items():
+                    need[domain] = need.get(domain, 0) + required
+                with self.session_factory.scoped_session() as session:
+                    others, lease = self._others(session, lease_id)
+                covered = all(
+                    size <= lease.get(domain, 0) for domain, size in need.items()
+                )
+                if covered:
+                    # The published lease already tells every other admission
+                    # about these bytes: deciding needs no write.
+                    warnings = self._decide(
+                        claimed,
+                        {
+                            domain: others.get(domain, 0) + held.get(domain, 0)
+                            for domain in {*others, *held}
+                        },
+                    )
+                else:
+                    with self.session_factory.scoped_session() as session:
+                        self.serialize_admission(session)
+                        self._reconcile_stopped(session)
+                        others, lease = self._others(session, lease_id)
+                        warnings = self._decide(
+                            claimed,
+                            {
+                                domain: others.get(domain, 0) + held.get(domain, 0)
+                                for domain in {*others, *held}
+                            },
+                        )
+                        # Keep what the lease already covers: the high-water
+                        # mark is what lets the next claims skip this write.
+                        self._write_lease(
+                            session,
+                            lease_id,
+                            {
+                                domain: max(lease.get(domain, 0), need.get(domain, 0))
+                                for domain in {*lease, *need}
+                            },
+                        )
+                        session.commit()
+                ledger.claims[operation_id] = claimed
+        except OperationError as exc:
+            if exc.kind is ErrorKind.CAPACITY and exc.capacity is not None:
+                self._record_admission_event(operation_id, exc.detail, exc.capacity)
+                from app.modules.storage.capacity_observability import record_decision
+
+                record_decision(operation_id, "deny", exc.detail)
+            raise
+        from app.modules.storage.capacity_observability import (
+            change_reservations,
+            record_decision,
+        )
+
+        record_decision(
+            operation_id,
+            "warn" if warnings else "allow",
+            warnings[0].partition(":")[0] if warnings else "capacity_available",
+        )
+        if existing is None:
+            change_reservations(operation_id, 1)
+        return CapacityReservationHandle(
+            self, operation_id, claimed, tuple(warnings), transient=True
+        )
+
+    def _release_claim(self, operation_id: str) -> None:
+        with self.session_factory.scoped_session() as session:
+            ledger = self._ledger(session)
+        with ledger.lock:
+            released = ledger.claims.pop(operation_id, None) is not None
+        if released:
+            from app.modules.storage.capacity_observability import change_reservations
+
+            change_reservations(operation_id, -1)
+
+    def transient_claims(self) -> dict[str, dict[str, int]]:
+        """Bytes per domain each transient operation of this process holds now."""
+        with self.session_factory.scoped_session() as session:
+            ledger = self._ledger(session)
+        with ledger.lock:
+            return {
+                operation_id: _totals(resources)
+                for operation_id, resources in ledger.claims.items()
+            }
+
+    def trim_lease(self) -> bool:
+        """Lower this process's lease to what it holds now; whether it wrote.
+
+        Called on a timer: the lease is a high-water mark, and once the burst
+        that raised it has passed, the bytes go back to everyone else.
+        """
+        lease_id = _lease_id()
+        with self.session_factory.scoped_session() as session:
+            ledger = self._ledger(session)
+        with ledger.lock:
+            held = ledger.held()
+            with self.session_factory.scoped_session() as session:
+                _others, lease = self._others(session, lease_id)
+            if all(lease.get(domain, 0) <= held.get(domain, 0) for domain in lease):
+                return False
+            with self.session_factory.scoped_session() as session:
+                self.serialize_admission(session)
+                self._write_lease(session, lease_id, held)
+                session.commit()
+        return True
 
     def _reserve(
         self,
@@ -287,68 +595,17 @@ class CapacityManager:
                     raise OperationError(
                         "capacity_operation_conflict", kind=ErrorKind.CONFLICT
                     )
-                totals: dict[str, int] = {}
+                reserved: dict[str, int] = {}
                 for persisted in session.exec(
                     select(CapacityReservation).where(
                         CapacityReservation.operation_id != operation_id
                     )
                 ):
                     for item in _decode(persisted.resources_json):
-                        totals[item.domain_id] = (
-                            totals.get(item.domain_id, 0) + item.required_bytes
+                        reserved[item.domain_id] = (
+                            reserved.get(item.domain_id, 0) + item.required_bytes
                         )
-                free: dict[str, int | None] = {}
-                volume_totals: dict[str, int | None] = {}
-                requested: dict[str, int] = {}
-                for item in resources:
-                    totals[item.domain_id] = (
-                        totals.get(item.domain_id, 0) + item.required_bytes
-                    )
-                    requested[item.domain_id] = (
-                        requested.get(item.domain_id, 0) + item.required_bytes
-                    )
-                    measured, total = item.measure()
-                    previous_total = volume_totals.get(item.domain_id)
-                    volume_totals[item.domain_id] = (
-                        total
-                        if previous_total is None
-                        else max(previous_total, total or 0)
-                    )
-                    previous = free.get(item.domain_id)
-                    free[item.domain_id] = (
-                        measured
-                        if previous is None
-                        else previous
-                        if measured is None
-                        else min(previous, measured)
-                    )
-                warnings = []
-                for domain, available in free.items():
-                    policy = (
-                        CapacityPolicy()
-                        if domain.startswith("budget:")
-                        else self.policy
-                    )
-                    decision = policy.evaluate(
-                        requested[domain],
-                        available_bytes=available,
-                        reserved_bytes=totals[domain] - requested[domain],
-                        total_bytes=volume_totals[domain],
-                    )
-                    if decision.outcome == "warn":
-                        warnings.append(f"{decision.reason}:{domain}")
-                    elif decision.outcome == "deny":
-                        raise OperationError(
-                            "storage_capacity_exceeded",
-                            kind=ErrorKind.CAPACITY,
-                            retry_after_seconds=decision.refresh_after_seconds,
-                            capacity={
-                                "required_bytes": decision.required_bytes,
-                                "available_bytes": decision.available_bytes,
-                                "reserved_bytes": decision.reserved_bytes,
-                                "headroom_bytes": decision.headroom_bytes,
-                            },
-                        )
+                warnings = self._decide(resources, reserved)
                 row = existing or CapacityReservation(
                     operation_id=operation_id,
                     resources_json=payload,
@@ -435,8 +692,11 @@ class CapacityManager:
         resources: Sequence[CapacityResource],
         *,
         ttl_seconds: int = 900,
+        transient: bool = False,
     ) -> Iterator[CapacityReservationHandle]:
-        handle = self.reserve(operation_id, resources, ttl_seconds=ttl_seconds)
+        handle = self.reserve(
+            operation_id, resources, ttl_seconds=ttl_seconds, transient=transient
+        )
         try:
             yield handle
         finally:
@@ -469,7 +729,11 @@ class CapacityManager:
     @staticmethod
     def _reconcile_stopped(session: Session) -> int:
         released = 0
-        for row in session.exec(select(CapacityReservation)):
+        for row in session.exec(
+            select(CapacityReservation).where(
+                col(CapacityReservation.expires_at) <= utcnow()
+            )
+        ):
             # Older persisted workflow claims predate the explicit lifetime flag.
             # Their surviving staging/shadow/candidate objects still spend space.
             if row.operation_id.startswith(

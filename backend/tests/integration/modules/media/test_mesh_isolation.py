@@ -455,9 +455,9 @@ class TestStepCapacityOwnership:
     def test_fingerprint_worker_does_not_access_application_database(
         self, db_session, monkeypatch
     ):
-        from sqlmodel import select
 
-        from app.db.models import CapacityReservation
+        from app.db.session import get_session_factory
+        from app.modules.storage.capacity import CapacityManager
         from tests.paths import FIXTURES_DIR
 
         monkeypatch.setitem(
@@ -469,23 +469,21 @@ class TestStepCapacityOwnership:
         assert result.geometry["triangle_count"] > 0
         assert result.fingerprint_result is not None
         assert result.fingerprint_result.state is FingerprintResultState.READY
-        assert db_session.exec(select(CapacityReservation)).all() == []
+        assert CapacityManager(get_session_factory()).transient_claims() == {}
 
     def test_parent_releases_capacity_after_worker_refusal(
         self, db_session, monkeypatch
     ):
-        from sqlmodel import select
 
-        from app.db.models import CapacityReservation
+        from app.db.session import get_session_factory
+        from app.modules.storage.capacity import CapacityManager
         from tests.paths import FIXTURES_DIR
 
         admitted = []
         original = mesh_isolation.subprocess.Popen
 
         def spawn(*args, **kwargs):
-            admitted.extend(
-                row.operation_id for row in db_session.exec(select(CapacityReservation))
-            )
+            admitted.extend(CapacityManager(get_session_factory()).transient_claims())
             return original(*args, **kwargs)
 
         monkeypatch.setattr(mesh_isolation.subprocess, "Popen", spawn)
@@ -495,7 +493,7 @@ class TestStepCapacityOwnership:
                 _request(FIXTURES_DIR / "cascadio_material.stp", file_type="step")
             )
         db_session.expire_all()
-        assert db_session.exec(select(CapacityReservation)).all() == []
+        assert CapacityManager(get_session_factory()).transient_claims() == {}
         assert len(admitted) == 1
         assert admitted[0].startswith("step-tessellation:")
 

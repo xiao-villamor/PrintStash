@@ -162,6 +162,8 @@ _held_lock = threading.Lock()
 
 def _heartbeat_loop(stop: threading.Event) -> None:
     """Renew this executor's row and fences until the process stops."""
+    from app.db.session import get_session_factory
+    from app.modules.storage.capacity import CapacityManager
     from app.runtime.maintenance import active_mutations
 
     interval = max(1, settings.fence_heartbeat_seconds)
@@ -169,6 +171,9 @@ def _heartbeat_loop(stop: threading.Event) -> None:
         try:
             executors.heartbeat(active_mutations=active_mutations())
             fences.heartbeat(executors.executor_id())
+            # The burst that raised this process's capacity lease has passed
+            # by the next beat: hand back what it no longer holds.
+            CapacityManager(get_session_factory()).trim_lease()
         except Exception:  # noqa: BLE001 - the next beat retries
             logger.warning("work heartbeat failed")
 

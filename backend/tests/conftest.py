@@ -380,6 +380,11 @@ def _patch_engine(
     _endpoint_queries.cache_clear()
     _evidence_predicate.cache_clear()
     _overlay.clear()
+    # The tables are emptied between tests; so is what this process believes
+    # it still holds against them.
+    from app.modules.storage.capacity import forget_transient_claims
+
+    forget_transient_claims()
     _overlay["db_url"] = TEST_DB_URL
     _overlay["secrets_key"] = "printstash-test-secrets-key"
     _overlay["storage_identity"] = "a" * 64

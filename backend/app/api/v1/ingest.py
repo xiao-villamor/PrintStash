@@ -122,6 +122,7 @@ def _stage_upload(upload: UploadFile, suffix: str) -> tuple[Path, int, str]:
         with CapacityManager(get_session_factory()).hold(
             f"upload:{staged.name}",
             [CapacityResource.for_path(staged.parent, estimate, role="upload staging")],
+            transient=True,
         ):
             size = storage.stream_to_path(
                 upload.file,
