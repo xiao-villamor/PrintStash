@@ -350,7 +350,7 @@ class Settings(BaseSettings):
     # Width of generated Model preview images. Height keeps the renderer's 4:3
     # aspect ratio. The Settings UI offers bounded presets so higher fidelity is
     # an explicit CPU/RAM/storage tradeoff on self-hosted machines.
-    model_thumbnail_width: int = Field(default=320, ge=320, le=1280)
+    model_thumbnail_width: int = Field(default=640, ge=320, le=1280)
 
     # Similar Models remains opt-in. Its geometry budget is bounded by the
     # renderer's adaptive budget and the descriptor implementation's own cap.

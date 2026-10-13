@@ -126,14 +126,24 @@ def png(*, width: int = 8, height: int = 8) -> bytes:
 
 def rendered_thumbnail(
     *,
-    width: int = 640,
-    height: int = 480,
+    width: int | None = None,
+    height: int | None = None,
     color: tuple[int, int, int, int] = (90, 140, 210, 255),
     output_format: str = "WEBP",
 ) -> bytes:
-    """Generated frame with intentional 50% extent and a transparent border."""
+    """Generated frame with intentional 50% extent and a transparent border.
+
+    At the configured thumbnail width unless told otherwise: a frame the
+    renderer hands over is accepted only at exactly that size.
+    """
     from PIL import Image, ImageDraw
 
+    from app.core.config import settings
+
+    if width is None:
+        width = int(settings.model_thumbnail_width)
+    if height is None:
+        height = round(width * 3 / 4)
     image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     ImageDraw.Draw(image).rectangle(
         (width // 4, height // 4, 3 * width // 4 - 1, 3 * height // 4 - 1), fill=color

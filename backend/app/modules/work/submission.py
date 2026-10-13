@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 
-from sqlalchemy import update
+from sqlalchemy import event, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlmodel import Session, col, select
@@ -31,7 +31,6 @@ from app.db.models import (
     WorkPriority,
 )
 from app.db.session import get_session_factory
-from app.db.transactions import begin_write
 
 from . import catalog as catalog_module
 from .contracts import (
@@ -314,70 +313,62 @@ def nudge_after_commit(session: Session, source: JobKind) -> None:
 
     For intent recorded inside a caller's transaction (a transactional
     outbox): nudging before the commit could run a pass that cannot see the
-    row yet, and nudging after a rollback would be noise. The dirty stamp is
-    written as that transaction commits, so the nudge costs it no transaction
-    of its own; only the pass is queued afterwards.
+    row yet, and nudging after a rollback would be noise.
+
+    On SQLite the dirty mark is written as that transaction commits, so the
+    nudge costs its caller no second turn at the single writer; only the pass
+    is queued afterwards. It is written at the commit and not here, because a
+    write here would take the writer from this call until whenever the caller
+    commits. Elsewhere writers do not queue behind one another and the whole
+    nudge happens after the commit.
     """
-    from sqlalchemy import event
-
-    # One nudge per source per transaction, however many rows it recorded, and
-    # one set of listeners per session, however many transactions it runs.
-    pending: set[JobKind] | None = session.info.get(_PENDING_NUDGES)
-    if pending is None:
-        pending = session.info[_PENDING_NUDGES] = set()
-        session.info[_STAMPED_NUDGES] = {}
-        event.listen(session, "before_commit", _stamp_committing)
-        event.listen(session, "after_commit", _nudge_committed)
-        event.listen(session, "after_soft_rollback", _forget_rolled_back)
-    pending.add(source)
+    # One nudge per source per transaction, however many rows it recorded.
+    session.info.setdefault(_PENDING_NUDGES, {}).setdefault(source, None)
 
 
+# source -> whether its pass must be queued once the transaction commits;
+# ``None`` while no mark has been written with it, in which case the nudge
+# runs on its own after the commit.
 _PENDING_NUDGES = "work_nudges_after_commit"
-# source -> whether its pass must be queued; ``None`` when the stamp could not
-# be written with the transaction and the nudge runs on its own afterwards.
-_STAMPED_NUDGES = "work_nudges_stamped"
 
 
-def _pending_nudges(session: Session) -> set[JobKind]:
-    return session.info[_PENDING_NUDGES]
-
-
-def _stamped_nudges(session: Session) -> dict[JobKind, bool | None]:
-    return session.info[_STAMPED_NUDGES]
+def _pending_nudges(session: Session) -> dict[JobKind, bool | None]:
+    return session.info.get(_PENDING_NUDGES) or {}
 
 
 def _stamp_committing(session: Session) -> None:
+    """Write the dirty marks of a committing transaction's nudges, on SQLite.
+
+    A nudge never fails the commit it rides on: a mark that cannot be written
+    is left for the nudge after the commit. No savepoint guards it, because a
+    session that is committing cannot open one; on SQLite a statement that
+    fails undoes only itself.
+    """
+    pending = _pending_nudges(session)
     # A released savepoint is reported as a commit too; only the outermost
     # commit makes the intent durable.
-    if session.get_nested_transaction() is not None:
+    if not pending or session.get_nested_transaction() is not None:
         return
-    pending = _pending_nudges(session)
-    if not pending or not catalog_module.bound():
+    if session.get_bind().dialect.name != "sqlite" or not catalog_module.bound():
         return
-    stamped = _stamped_nudges(session)
     now = utcnow()
-    # Sorted, so two transactions stamping the same sources take the cursor
-    # rows in one order.
     for source in sorted(pending):
         try:
             catalog_module.get_catalog().definition(source)
-            begin_write(session)
-            with session.begin_nested():
-                stamped[source] = stamp(session, source, now=now)
-        except Exception:  # noqa: BLE001 - a nudge never fails the caller's commit
+            pending[source] = stamp(session, source, now=now)
+        except Exception:  # noqa: BLE001 - the nudge after the commit still happens
             logger.exception("reconciler nudge failed", extra={"source": source.value})
-            stamped[source] = None
-    pending.clear()
+            pending[source] = None
 
 
 def _nudge_committed(session: Session) -> None:
     # A released savepoint is reported as a commit too. Its transaction still
     # holds the write lock that the nudge's own session would wait on.
-    if session.get_nested_transaction() is not None:
+    pending = _pending_nudges(session)
+    if not pending or session.get_nested_transaction() is not None:
         return
-    stamped = _stamped_nudges(session)
-    outcomes = sorted(stamped.items())
-    stamped.clear()
+    outcomes = sorted(pending.items())
+    pending.clear()
     queue_stamped(source for source, needed in outcomes if needed)
     for source, needed in outcomes:
         if needed is None:
@@ -388,7 +379,13 @@ def _forget_rolled_back(session: Session, previous_transaction) -> None:
     if previous_transaction.nested:
         return
     _pending_nudges(session).clear()
-    _stamped_nudges(session).clear()
+
+
+# Registered once, for every session: a listener added to one session while
+# that session is dispatching an event would change the list being walked.
+event.listen(Session, "before_commit", _stamp_committing)
+event.listen(Session, "after_commit", _nudge_committed)
+event.listen(Session, "after_soft_rollback", _forget_rolled_back)
 
 
 def forget_queued_passes() -> int:

@@ -878,7 +878,9 @@ class TestDeriveMesh:
         self, db_session: Session, stored, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # Slowness may be the machine, not the file, so it keeps its backoff.
-        monkeypatch.setitem(_overlay, "mesh_worker_timeout_seconds", 0.2)
+        # A deadline no worker can meet, however it is started: a warm one
+        # answers a small file well inside a fifth of a second.
+        monkeypatch.setitem(_overlay, "mesh_worker_timeout_seconds", 0.001)
         artifact = stored("cube.stl", content.binary_stl())
 
         outcome = producers.derive_mesh(artifact.id)
