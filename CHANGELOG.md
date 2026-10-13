@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **View a Model from underneath.** The 3D preview now orbits all the way
+  around a mesh, so the underside can be inspected; it previously stopped at
+  the horizon (#427).
+
 - Start with only the selected language. Each translation catalog is now its
   own asset, loaded when its language is shown, which removes about a fifth of
   the JavaScript downloaded at startup.
