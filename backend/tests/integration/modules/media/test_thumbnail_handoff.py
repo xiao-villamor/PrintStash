@@ -107,7 +107,7 @@ from app.modules.media.mesh_worker import ThumbnailEngine
 from app.modules.media.mesh_contracts import PreparedThumbnailResult, ThumbnailRequest
 from app.modules.media.thumbnail_packet import read_packet, validate_payload
 result = ThumbnailEngine().prepare(
-    ThumbnailRequest(Path(sys.argv[1]), include_fingerprint=False, output_format='WEBP'),
+    ThumbnailRequest(Path(sys.argv[1]), width=640, height=480, include_fingerprint=False, output_format='WEBP'),
     Path(sys.argv[2]), deadline=time.monotonic() + 30,
 )
 assert isinstance(result, PreparedThumbnailResult)
@@ -187,7 +187,13 @@ class TestPreparedEligibility:
         monkeypatch.setattr(client, "render_ready", lambda **kwargs: False)
 
         result = ThumbnailEngine().prepare(
-            ThumbnailRequest(source, include_fingerprint=False, output_format="WEBP"),
+            ThumbnailRequest(
+                source,
+                width=640,
+                height=480,
+                include_fingerprint=False,
+                output_format="WEBP",
+            ),
             output,
             deadline=time.monotonic() + 30,
             on_output=frames.append,

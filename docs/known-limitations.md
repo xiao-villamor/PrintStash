@@ -129,6 +129,15 @@ manufacturing platform.
   budget is stored without geometry or a generated preview, is not retried, and
   does not affect other requests; other failures are retried a bounded number of
   times.
+- On Linux the geometry and thumbnail child is forked from a template process
+  that has already imported the application and its geometry libraries, rather
+  than started as a fresh interpreter for each file. The fork has the same
+  session, memory ceiling, deadline and descriptors a fresh child has. Children
+  forked from one template share its address-space layout until the server
+  restarts; set `VAULT_MESH_WORKER_TEMPLATE_ENABLED=false` to start a fresh
+  interpreter per file instead, at about half a second of CPU each. A child
+  whose memory ceiling is below one and a half times the template's size
+  (about 600 MB) is started fresh regardless.
 - STEP tessellation runs in a disposable child process. Its resident-memory
   ceiling uses the existing cgroup-aware mesh memory budget and it has a 90 s
   timeout; an over-budget or overly complex file is stored without geometry or

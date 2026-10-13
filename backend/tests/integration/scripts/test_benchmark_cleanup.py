@@ -78,7 +78,7 @@ class TestCleanupPrivateJobs:
             spawned.set()
             return process
 
-        monkeypatch.setattr(mesh_isolation.subprocess, "Popen", observed_spawn)
+        monkeypatch.setattr(mesh_isolation.worker_launch.subprocess, "Popen", observed_spawn)
 
         def native_step(_context):
             with generations.use(generations.pin()):

@@ -25,7 +25,6 @@ import shutil
 import signal
 import stat
 import struct
-import subprocess  # nosec B404 - fixed interpreter/module invocation only
 import sys
 import tempfile
 import time
@@ -42,7 +41,7 @@ from printstash_core.mesh.similarity import GeometryError
 from app import __file__ as application_file
 from app.core.cancellation import OperationCancelled, checkpoint
 from app.core.native_settings import settings
-from app.modules.media import mesh_policy, native_process
+from app.modules.media import mesh_policy, native_process, worker_launch
 from app.modules.media.fingerprints import (
     FingerprintRecord,
     FingerprintResult,
@@ -355,7 +354,7 @@ class _CallbackWatchdog:
         with self.lifecycle:
             return self.failure
 
-    def poll(self, process: subprocess.Popen[bytes]) -> int | None:
+    def poll(self, process: worker_launch.Worker) -> int | None:
         with self.lifecycle:
             code = process.poll()
             if code is not None:
@@ -434,7 +433,7 @@ def supervise_result(
     cause = WorkerExitCause.SPAWN_FAILED
     error: MeshWorkerError | None = None
     cancelled: OperationCancelled | None = None
-    process: subprocess.Popen[bytes] | None = None
+    process: worker_launch.Worker | None = None
     exit_descriptor: int | None = None
     watchdog: _CallbackWatchdog | None = None
     temporary = (
@@ -453,14 +452,9 @@ def supervise_result(
     inherited = launch_resources(permit) if permit is not None else None
     try:
         try:
-            process = subprocess.Popen(  # nosec B603 - fixed argv; no shell
+            process = worker_launch.launch(
                 command,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-                pass_fds=inherited.descriptors if inherited is not None else (),
-                env={
+                environment={
                     **os.environ,
                     **(environment if environment is not None else {}),
                     "OMP_NUM_THREADS": "1",
@@ -471,7 +465,9 @@ def supervise_result(
                     PRIORITY_ENV: current_priority().value,
                     **(inherited.environment if inherited is not None else {}),
                 },
+                descriptors=inherited.descriptors if inherited is not None else (),
                 cwd=Path(application_file).resolve().parent.parent,
+                warm=settings.mesh_worker_template_enabled,
             )
         except OSError as exc:
             raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc

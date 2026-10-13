@@ -17,7 +17,7 @@ class TestStreamingCancellation:
         source = tmp_path / "part.stl"
         source.write_bytes(content.binary_stl())
         pids = tmp_path / "pids"
-        original = mesh_isolation.subprocess.Popen
+        original = mesh_isolation.worker_launch.subprocess.Popen
         processes = []
 
         def waiting(_argv, **kwargs):
@@ -32,7 +32,7 @@ class TestStreamingCancellation:
             processes.append(process)
             return process
 
-        monkeypatch.setattr(mesh_isolation.subprocess, "Popen", waiting)
+        monkeypatch.setattr(mesh_isolation.worker_launch.subprocess, "Popen", waiting)
         with cancellation_scope(pids.exists), pytest.raises(OperationCancelled):
             stl_streaming.render_stl_preview_isolated(source)
         assert processes[0].poll() is not None

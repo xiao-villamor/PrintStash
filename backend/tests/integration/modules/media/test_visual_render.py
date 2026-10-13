@@ -21,14 +21,14 @@ def render_case(tmp_path, monkeypatch):
         )
     )
     processes = []
-    original = mesh_isolation.subprocess.Popen
+    original = mesh_isolation.worker_launch.subprocess.Popen
 
     def spawn(*args, **kwargs):
         process = original(*args, **kwargs)
         processes.append(process)
         return process
 
-    monkeypatch.setattr(mesh_isolation.subprocess, "Popen", spawn)
+    monkeypatch.setattr(mesh_isolation.worker_launch.subprocess, "Popen", spawn)
     return source, recipe, processes
 
 

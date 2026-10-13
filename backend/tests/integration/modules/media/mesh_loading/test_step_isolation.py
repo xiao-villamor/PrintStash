@@ -21,7 +21,7 @@ def step_fault_worker_factory(tmp_path, monkeypatch):
     monkeypatch.setattr(native_process, "native_capacity", lambda: Resources(1, budget))
     monkeypatch.setattr(native_process, "native_memory_budget_bytes", lambda: budget)
     monkeypatch.setitem(_overlay, "mesh_step_timeout_seconds", 1.5)
-    original = mesh_isolation.subprocess.Popen
+    original = mesh_isolation.worker_launch.subprocess.Popen
     pids = tmp_path / "pids.json"
     scripts = {
         "face-cap": "raise SystemExit(3)",
@@ -42,7 +42,7 @@ def step_fault_worker_factory(tmp_path, monkeypatch):
             )
             return original(argv, **kwargs)
 
-        monkeypatch.setattr(mesh_isolation.subprocess, "Popen", spawn)
+        monkeypatch.setattr(mesh_isolation.worker_launch.subprocess, "Popen", spawn)
         return pids
 
     return configure

@@ -67,6 +67,37 @@ def main():
     elif case == "wait":
         _publish_readiness(Path(sys.argv[2]), str(os.getpid()))
         time.sleep(60)
+    elif case == "identity":
+        import json
+
+        print(
+            json.dumps(
+                {"pid": os.getpid(), "parent": os.getppid(), "session": os.getsid(0)}
+            ),
+            flush=True,
+        )
+    elif case == "environment":
+        import json
+        import tempfile
+
+        print(
+            json.dumps(
+                {"value": os.environ.get(sys.argv[2]), "temp": tempfile.gettempdir()}
+            ),
+            flush=True,
+        )
+    elif case == "descriptor":
+        print(os.read(int(sys.argv[2]), 64).decode(), flush=True)
+    elif case == "descriptors":
+        import json
+
+        print(json.dumps(sorted(int(name) for name in os.listdir("/proc/self/fd"))))
+    elif case == "loaded":
+        print(sys.argv[2] in sys.modules, flush=True)
+    elif case == "unflushed":
+        sys.stdout.write("buffered")
+    elif case == "exit":
+        raise SystemExit(int(sys.argv[2]))
     else:
         raise ValueError(case)
 

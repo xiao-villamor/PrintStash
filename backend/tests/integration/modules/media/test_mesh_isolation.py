@@ -472,6 +472,75 @@ class TestEarlyDocumentThumbnail:
         ) == ([ThumbnailOutput, GeometryOutput], ThumbnailStrategy.EMBEDDED)
 
 
+class TestWarmLaunch:
+    @staticmethod
+    def _launched(monkeypatch) -> list[type]:
+        kinds: list[type] = []
+        launch = mesh_isolation.worker_launch.launch
+
+        def recorded(*args, **kwargs):
+            worker = launch(*args, **kwargs)
+            kinds.append(type(worker))
+            return worker
+
+        monkeypatch.setattr(mesh_isolation.worker_launch, "launch", recorded)
+        return kinds
+
+    def test_a_mesh_worker_is_forked_from_the_template(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            mesh_isolation, "memory_budget_bytes", lambda: 2048 * 1024**2
+        )
+        path = tmp_path / "part.3mf"
+        path.write_bytes(three_mf())
+        kinds = self._launched(monkeypatch)
+
+        result = mesh_isolation.generate(
+            _request(path, file_type="3mf", include_fingerprint=False)
+        )
+
+        assert (kinds, result.geometry["triangle_count"]) == (
+            [mesh_isolation.worker_launch.ForkedWorker],
+            4,
+        )
+
+    def test_a_forked_worker_produces_what_a_spawned_one_does(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(
+            mesh_isolation, "memory_budget_bytes", lambda: 2048 * 1024**2
+        )
+        path = tmp_path / "part.3mf"
+        path.write_bytes(three_mf())
+        request = _request(path, file_type="3mf", include_fingerprint=False)
+        forked = mesh_isolation.generate(request)
+        monkeypatch.setitem(_overlay, "mesh_worker_template_enabled", False)
+
+        spawned = mesh_isolation.generate(request)
+
+        assert (forked.image, forked.geometry, forked.volume) == (
+            spawned.image,
+            spawned.geometry,
+            spawned.volume,
+        )
+
+    def test_the_template_can_be_turned_off(self, tmp_path, monkeypatch):
+        import subprocess
+
+        monkeypatch.setattr(
+            mesh_isolation, "memory_budget_bytes", lambda: 2048 * 1024**2
+        )
+        monkeypatch.setitem(_overlay, "mesh_worker_template_enabled", False)
+        path = tmp_path / "part.3mf"
+        path.write_bytes(three_mf())
+        kinds = self._launched(monkeypatch)
+
+        mesh_isolation.generate(
+            _request(path, file_type="3mf", include_fingerprint=False)
+        )
+
+        assert kinds == [subprocess.Popen]
+
+
 class TestStepCapacityOwnership:
     def test_fingerprint_worker_does_not_access_application_database(
         self, db_session, monkeypatch
@@ -501,13 +570,13 @@ class TestStepCapacityOwnership:
         from tests.paths import FIXTURES_DIR
 
         admitted = []
-        original = mesh_isolation.subprocess.Popen
+        original = mesh_isolation.worker_launch.launch
 
-        def spawn(*args, **kwargs):
+        def launch(*args, **kwargs):
             admitted.extend(CapacityManager(get_session_factory()).transient_claims())
             return original(*args, **kwargs)
 
-        monkeypatch.setattr(mesh_isolation.subprocess, "Popen", spawn)
+        monkeypatch.setattr(mesh_isolation.worker_launch, "launch", launch)
         monkeypatch.setattr(mesh_isolation, "memory_budget_bytes", lambda: 8 * 1024**2)
         with pytest.raises(mesh_isolation.MeshWorkerError):
             mesh_isolation.generate(

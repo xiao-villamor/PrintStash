@@ -33,6 +33,7 @@ _NAMES = frozenset(
         "mesh_render_face_chunk_size",
         "mesh_source_io_jobs",
         "mesh_step_timeout_seconds",
+        "mesh_worker_template_enabled",
         "mesh_worker_timeout_seconds",
         "model_thumbnail_width",
         "three_mf_preview_max_archive_mb",
