@@ -431,22 +431,50 @@ class TestTransientClaims:
 
 
 class TestTrimLease:
-    def test_hands_back_what_the_process_no_longer_holds(self, db_session):
+    def test_keeps_the_lease_a_burst_in_progress_fits_in(
+        self, db_session, commits: list[bool]
+    ):
+        # The claim that raised the lease has been released, but only just: the
+        # next one of the same burst must not have to raise it again.
         manager = CapacityManager(get_session_factory(), headroom_bytes=0)
         manager.reserve("thumbnail:1", [_quota(60)], transient=True).release()
+        commits.clear()
+
+        trimmed = manager.trim_lease()
+
+        assert (trimmed, commits, manager.reserved_bytes()) == (
+            False,
+            [],
+            {"quota:one": 60},
+        )
+
+    def test_hands_back_what_a_passed_burst_no_longer_holds(self, db_session):
+        manager = CapacityManager(get_session_factory(), headroom_bytes=0)
+        manager.reserve("thumbnail:1", [_quota(60)], transient=True).release()
+        manager.trim_lease()
 
         trimmed = manager.trim_lease()
 
         assert (trimmed, manager.reserved_bytes()) == (True, {})
 
-    def test_keeps_what_is_still_held(self, db_session):
+    def test_lowers_the_lease_to_the_recent_peak(self, db_session):
         manager = CapacityManager(get_session_factory(), headroom_bytes=0)
         manager.reserve("thumbnail:1", [_quota(60)], transient=True).release()
-        manager.reserve("thumbnail:2", [_quota(20)], transient=True)
+        manager.trim_lease()
+        manager.reserve("thumbnail:2", [_quota(20)], transient=True).release()
 
         manager.trim_lease()
 
         assert manager.reserved_bytes() == {"quota:one": 20}
+
+    def test_never_lowers_the_lease_below_what_is_held(self, db_session):
+        manager = CapacityManager(get_session_factory(), headroom_bytes=0)
+        manager.reserve("thumbnail:1", [_quota(60)], transient=True)
+        manager.trim_lease()
+
+        manager.trim_lease()
+
+        assert manager.reserved_bytes() == {"quota:one": 60}
 
     def test_a_lease_already_exact_commits_nothing(
         self, db_session, commits: list[bool]
@@ -470,6 +498,7 @@ class TestTrimLease:
         manager = CapacityManager(get_session_factory(), headroom_bytes=0)
         manager.reserve("upload", [_quota(30)])
         manager.reserve("thumbnail:1", [_quota(40)], transient=True).release()
+        manager.trim_lease()
 
         manager.trim_lease()
 

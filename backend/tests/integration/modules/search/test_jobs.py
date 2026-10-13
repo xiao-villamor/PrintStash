@@ -633,7 +633,8 @@ class TestDrain:
         def cancelled(self) -> bool:
             return False
 
-        def update(self, **fields) -> None:
+        def settle(self, outcome, **fields) -> None:
+            self.outcome = outcome
             self.fields.update(fields)
 
     def test_stops_at_its_unit_budget(self) -> None:
@@ -642,7 +643,19 @@ class TestDrain:
         done = jobs._drain(context, lambda: True)  # type: ignore[arg-type]
 
         assert done == jobs._DRAIN_UNITS
-        assert context.fields == {"processed": jobs._DRAIN_UNITS}
+
+    def test_ends_its_job_with_what_it_processed(self) -> None:
+        # The count rides on the Job's terminal write: a drain is the whole of
+        # its step, so a progress write just before the end would be a second
+        # transaction for the same fact.
+        context = self._Context()
+
+        jobs._drain(context, lambda: True)  # type: ignore[arg-type]
+
+        assert (context.outcome, context.fields) == (
+            JobOutcome.COMPLETED,
+            {"processed": jobs._DRAIN_UNITS},
+        )
 
     def test_stops_when_there_is_nothing_left(self) -> None:
         calls = []

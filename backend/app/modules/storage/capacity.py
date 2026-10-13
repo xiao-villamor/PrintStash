@@ -200,6 +200,12 @@ class _Ledger:
 
     lock: Lock = field(default_factory=Lock)
     claims: dict[str, tuple[CapacityResource, ...]] = field(default_factory=dict)
+    # The most the process held at once since its lease was last trimmed.
+    peak: dict[str, int] = field(default_factory=dict)
+
+    def note_peak(self) -> None:
+        for domain, size in self.held().items():
+            self.peak[domain] = max(self.peak.get(domain, 0), size)
 
     def held(self, *, without: str | None = None) -> dict[str, int]:
         totals: dict[str, int] = {}
@@ -493,6 +499,7 @@ class CapacityManager:
                         )
                         session.commit()
                 ledger.claims[operation_id] = claimed
+                ledger.note_peak()
         except OperationError as exc:
             if exc.kind is ErrorKind.CAPACITY and exc.capacity is not None:
                 self._record_admission_event(operation_id, exc.detail, exc.capacity)
@@ -526,6 +533,23 @@ class CapacityManager:
 
             change_reservations(operation_id, -1)
 
+    def operation_reservations(self) -> list[str]:
+        """Operations that hold a reservation row of their own, by id.
+
+        A process's lease is not one of them: it stands for the transient
+        claims of that process, which ``transient_claims`` reports.
+        """
+        with self.session_factory.scoped_session() as session:
+            return [
+                operation_id
+                for operation_id in session.exec(
+                    select(CapacityReservation.operation_id).order_by(
+                        col(CapacityReservation.operation_id)
+                    )
+                )
+                if not operation_id.startswith(_LEASE_PREFIX)
+            ]
+
     def transient_claims(self) -> dict[str, dict[str, int]]:
         """Bytes per domain each transient operation of this process holds now."""
         with self.session_factory.scoped_session() as session:
@@ -537,23 +561,27 @@ class CapacityManager:
             }
 
     def trim_lease(self) -> bool:
-        """Lower this process's lease to what it holds now; whether it wrote.
+        """Lower this process's lease to what it has needed lately; whether it wrote.
 
-        Called on a timer: the lease is a high-water mark, and once the burst
-        that raised it has passed, the bytes go back to everyone else.
+        Called on a timer. The lease is a high-water mark, and it is lowered
+        to the most the process held at once since the previous call, not to
+        what it holds this instant: a burst in progress keeps the lease its
+        claims fit in, and one that has passed gives its bytes back a call
+        later.
         """
         lease_id = _lease_id()
         with self.session_factory.scoped_session() as session:
             ledger = self._ledger(session)
         with ledger.lock:
-            held = ledger.held()
+            ledger.note_peak()
+            needed, ledger.peak = ledger.peak, ledger.held()
             with self.session_factory.scoped_session() as session:
                 _others, lease = self._others(session, lease_id)
-            if all(lease.get(domain, 0) <= held.get(domain, 0) for domain in lease):
+            if all(lease.get(domain, 0) <= needed.get(domain, 0) for domain in lease):
                 return False
             with self.session_factory.scoped_session() as session:
                 self.serialize_admission(session)
-                self._write_lease(session, lease_id, held)
+                self._write_lease(session, lease_id, needed)
                 session.commit()
         return True
 

@@ -146,7 +146,9 @@ def _drain(ctx: JobContext, unit) -> int:
         ):
             break
         done += 1
-    ctx.update(processed=done)
+    # A drain is the whole of its step: what it processed is recorded by the
+    # write that ends the Job, not by a progress write just before it.
+    ctx.settle(JobOutcome.COMPLETED, processed=done)
     return done
 
 

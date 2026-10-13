@@ -30,7 +30,6 @@ from sqlmodel import select
 
 from app.core.config import _overlay
 from app.db.models import (
-    CapacityReservation,
     File,
     InboxItem,
     InboxItemState,
@@ -40,6 +39,7 @@ from app.db.models import (
 )
 from app.db.session import SessionFactory, get_session_factory
 from app.modules.ingestion import inbox, scratch_windows
+from app.modules.storage.capacity import CapacityManager
 from tests.factories.ops import build_job_context
 
 STL = b"solid cube\nendsolid cube\n"
@@ -624,6 +624,10 @@ class TestStageCaptureUploadSlotAssets:
                 == 2
             )
             assert session.exec(select(IngestionScratchWindow)).all() == []
-            assert session.exec(select(CapacityReservation)).all() == []
+            capacity = CapacityManager(get_session_factory())
+            assert (
+                capacity.operation_reservations(),
+                capacity.transient_claims(),
+            ) == ([], {})
         root = inbox.settings.incoming_dir / "scratch-windows"
         assert not root.exists() or list(root.iterdir()) == []
