@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi import APIRouter, Depends, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session
 
@@ -27,9 +27,8 @@ class RunCreate(BaseModel):
     )
 
 
-async def _wake(request: Request, run_id: int) -> None:
+def _wake() -> None:
     """A run was created or changed: its analysis Job should run now."""
-    del request, run_id
     from app.db.models import JobKind
     from app.modules.work import nudge
 
@@ -62,14 +61,13 @@ def preview_selection(
 
 
 @router.post("/similarity/runs", status_code=202, dependencies=[Depends(require_auth)])
-async def start_run(
+def start_run(
     payload: RunCreate,
-    request: Request,
     actor: User = Depends(require_user),
     session: Session = Depends(get_session),
 ):
     run = runs.start(session, actor, scope=payload.scope, ids=payload.ids)
-    await _wake(request, run.id)
+    _wake()
     return service.project_run(run)
 
 
@@ -93,14 +91,13 @@ def read_run(
 
 
 @router.post("/similarity/runs/{run_id}/cancel", dependencies=[Depends(require_auth)])
-async def cancel_run(
+def cancel_run(
     run_id: PathId,
-    request: Request,
     actor: User = Depends(require_user),
     session: Session = Depends(get_session),
 ):
     run = runs.cancel(session, actor, run_id)
-    await _wake(request, run_id)
+    _wake()
     return service.project_run(run)
 
 
@@ -188,14 +185,13 @@ def model_similar(
 
 
 @router.post("/models/{model_id}/similar/query", dependencies=[Depends(require_auth)])
-async def query_model(
+def query_model(
     model_id: PathId,
-    request: Request,
     actor: User = Depends(require_user),
     session: Session = Depends(get_session),
 ):
     result = service.query_model(session, actor, model_id)
-    await _wake(request, result["run"]["id"])
+    _wake()
     return result
 
 

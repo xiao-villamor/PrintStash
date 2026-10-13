@@ -32,7 +32,7 @@
     "app/schemas/jobs.py",
     "app/modules/search/subjects.py"
   ],
-  "pythonVersion": "3.11",
+  "pythonVersion": "3.14",
   "venvPath": ".",
   "venv": ".venv",
   "typeCheckingMode": "basic",

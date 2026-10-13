@@ -1,0 +1,16 @@
+{
+  "algorithm_version": "geometry-v6-sh5f4577c4",
+  "fixture": "trimesh.icosphere(subdivisions=3,radius=10), binary STL",
+  "source_faces": 1280,
+  "sample_faces": 100,
+  "source_sha256": "4c4152f6268d44b004f22d096e61d7cd8050acee02b13c744d3a2897b72321c6",
+  "retained_sha256": "19e83891cea0ad41d0a2f7cc211bf72d35357b113c431b0adec8ca88d2d6bfab",
+  "d2_sha256": "b57a7dfdd2e4837c1f158a1b9b53b22a40f1fc78b84ae23e54e86b52a5bb9fdb",
+  "surface_eigenvalue_ratios": [
+    0.6688736181316574,
+    0.8450997759092538,
+    1.0
+  ],
+  "eigen_ratio_0": 0.6688736181316574,
+  "radius": 9.93202322272779
+}

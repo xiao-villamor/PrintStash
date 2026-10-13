@@ -33,8 +33,9 @@ from app.modules.storage.capacity import CapacityManager, CapacityResource
 from app.modules.storage.storage_backend.contracts import CreationReceipt
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_ownership import (
+    adopt_publication,
+    prepare_file,
     provider_ref_for_backend,
-    publish_file,
     record_creation,
 )
 from app.runtime.maintenance import exclusive_backup_operation
@@ -737,7 +738,7 @@ def _upload_backup_archive(
         meta = _validate_archive_for_adoption(staged)
         backend = LocalStorageBackend()
         with get_session_factory().session() as session:
-            receipt = publish_file(
+            publication = prepare_file(
                 session,
                 backend,
                 str(archive_path),
@@ -746,12 +747,15 @@ def _upload_backup_archive(
                 sha256=digest.hexdigest(),
                 move=True,
             )
+            receipt = publication.receipt
             audit.record(
                 session,
                 action="backup.upload",
                 resource_type="backup",
                 diff={"backup_id": backup_id, "size_bytes": receipt.size},
             )
+            session.flush()
+            adopt_publication(session, publication)
             session.commit()
         namespace = backend.namespace_for(str(archive_path))
         provider_ref = provider_ref_for_backend(backend, namespace=namespace)

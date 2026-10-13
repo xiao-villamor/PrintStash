@@ -1,11 +1,15 @@
 "use client";
 
+import { useTaxonomyCommands } from "@/features/library/taxonomy";
+
 import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
-import { collectionDisplayPath } from "@/lib/collection-display";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { vaultConfigOptions } from "@/lib/queries/settings-config";
+import { librarySourcesOptions } from "@/lib/queries/settings-library-sources";
 import {
   ChevronDown,
   File as FileIcon,
@@ -17,16 +21,11 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import {
-  createTag,
-  capturePendingImport,
-  getModel,
-  getVaultConfig,
-  listExternalLibraries,
-} from "@/lib/api";
-import { useCollections, useTags } from "@/lib/queries";
+import { capturePendingImport } from "@/lib/api";
+import { useCollectionLookup, useCollectionSearch, useTags } from "@/lib/queries";
+import { CollectionPicker } from "@/components/collection-picker";
 import { toast } from "@/lib/toast";
-import { createTask, linkTaskToJob, updateTask, waitForImportJob } from "@/lib/task-center";
+import { createTask } from "@/lib/task-center";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { useAuth } from "@/lib/auth-context";
 import { formatBytes } from "@/lib/format";
@@ -35,7 +34,6 @@ import { ModalShell } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
 import {
-  bulkTargetCollection,
   entriesFromDataTransfer,
   extensionOf,
   fileListToItems,
@@ -47,10 +45,14 @@ import {
   MESH_ACCEPT,
   type BulkItem,
 } from "@/lib/bulk-upload";
-import { CollectionRead, ExternalLibrary, JobStatus } from "@/types";
+import { CollectionNodeRead } from "@/types";
 import { ApiError } from "@/lib/errors";
 import { useRouter } from "@/lib/navigation";
-import { uploadArtifact, type ArtifactUploadProgress } from "@/lib/artifact-upload";
+import {
+  runModelUpload,
+  runBulkModelUpload,
+  type ModelUploadFiles,
+} from "@/lib/model-upload-workflow";
 import { startArchiveTransfer } from "@/lib/archive-upload";
 
 // `webkitdirectory` enables folder selection on a file input but isn't in the
@@ -100,10 +102,6 @@ function stemName(filename: string): string {
   return filename.replace(/\.[^/.]+$/, "");
 }
 
-function canWriteCollection(collection: CollectionRead): boolean {
-  return collection.effective_role === "edit" || collection.effective_role === "admin";
-}
-
 export function UploadModal({
   open,
   onClose,
@@ -127,6 +125,7 @@ export function UploadModal({
 }) {
   useUiLocale();
   const { t } = useI18n();
+  const { createTag } = useTaxonomyCommands();
   const router = useRouter();
   const auth = useRequireAuth();
   const { user } = useAuth();
@@ -151,14 +150,49 @@ export function UploadModal({
   // Mounted-source write-back: when library sources are enabled, new uploads can target a
   // writable mounted source.
   // instead of vault storage. Empty string = vault.
-  const [libraries, setLibraries] = useState<ExternalLibrary[]>([]);
+  const config = useQuery({
+    ...vaultConfigOptions(),
+    enabled: open && !!user?.is_superuser,
+    staleTime: 0,
+  });
+  const sources = useQuery({
+    ...librarySourcesOptions(),
+    enabled:
+      open && !!user?.is_superuser && !!config.data?.external_libraries_enabled && !config.isError,
+    staleTime: 0,
+  });
+  const libraries =
+    user?.is_superuser &&
+    config.data?.external_libraries_enabled &&
+    !config.isError &&
+    !sources.isError &&
+    sources.data?.kind === "enabled"
+      ? sources.data.items.filter(
+          (library) =>
+            library.enabled &&
+            library.binding_state === "bound" &&
+            (library.source_kind ?? "mounted") === "mounted",
+        )
+      : [];
   const [targetLibraryId, setTargetLibraryId] = useState<number | "">("");
+  const sourceSelected = targetLibraryId !== "";
+  const selectedAvailable = libraries.some((library) => library.id === targetLibraryId);
+  const destinationBlocked =
+    sourceSelected && (!selectedAvailable || config.isFetching || sources.isFetching);
+  const sourceMode = mode === "files" || mode === "bulk";
+  const catalogFailed =
+    !!user?.is_superuser &&
+    (config.isError || (!!config.data?.external_libraries_enabled && sources.isError));
   // Shared taxonomy lists from the TanStack Query cache (deduped with the grid
   // and detail views; refetched after any create/delete).
-  const { data: collections = [] } = useCollections();
   const { data: tags = [] } = useTags();
   const [catOpen, setCatOpen] = useState(false);
-  const writableCollections = useMemo(() => collections.filter(canWriteCollection), [collections]);
+  // A non-administrator's upload lands in the first folder they may write to,
+  // found without listing the library (#295).
+  const writableProbe = useCollectionSearch("", "edit", {
+    enabled: open && !user?.is_superuser && !defaultCollection,
+  });
+  const firstWritable = writableProbe.data?.pages[0]?.items[0] ?? null;
 
   function sortIntoSlots(files: File[]) {
     for (const f of files) {
@@ -189,11 +223,28 @@ export function UploadModal({
   // the first frame and still right when the writable-collection list arrives
   // after the modal is already open — without overwriting a pick made since.
   const suggestedCollection =
-    defaultCollection ||
-    (!user?.is_superuser && writableCollections.length > 0 ? writableCollections[0].path : "");
-  const [pickedCollection, setPickedCollection] = useState<string | null>(null);
-  const collectionPath = pickedCollection ?? suggestedCollection;
-  const selectedCollectionLabel = collectionDisplayPath(collections, collectionPath);
+    defaultCollection || (!user?.is_superuser && firstWritable ? firstWritable.path : "");
+  // A pick is the collection itself, "none" for no collection, or null for no pick yet.
+  const [pickedCollection, setPickedCollection] = useState<CollectionNodeRead | "none" | null>(
+    null,
+  );
+  const collectionPath =
+    pickedCollection === null
+      ? suggestedCollection
+      : pickedCollection === "none"
+        ? ""
+        : pickedCollection.path;
+  // A suggested path still needs its names and id; a picked one came with them.
+  const suggestedLookup = useCollectionLookup(
+    open && pickedCollection === null && suggestedCollection !== "" ? suggestedCollection : null,
+  );
+  const chosenCollection: CollectionNodeRead | null =
+    pickedCollection !== null && pickedCollection !== "none"
+      ? pickedCollection
+      : suggestedLookup.data?.collection.path === collectionPath
+        ? suggestedLookup.data.collection
+        : null;
+  const selectedCollectionLabel = chosenCollection?.display_path ?? "";
 
   // Seeding the form from the props above is an adjustment to changed props,
   // not synchronization with an external system, so it happens during render:
@@ -211,38 +262,6 @@ export function UploadModal({
     setPickedCollection(null);
     applySeed(seed);
   }
-
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    getVaultConfig()
-      .then((cfg) => {
-        if (cancelled || !cfg.external_libraries_enabled) {
-          setLibraries([]);
-          return;
-        }
-        return listExternalLibraries().then((libs) => {
-          if (cancelled) return;
-          const writableLibraries = libs.filter(
-            (library) =>
-              library.enabled &&
-              library.binding_state === "bound" &&
-              (library.source_kind ?? "mounted") === "mounted",
-          );
-          setLibraries(writableLibraries);
-          setTargetLibraryId((selectedId) => {
-            if (selectedId === "") return selectedId;
-            return writableLibraries.some((library) => library.id === selectedId) ? selectedId : "";
-          });
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setLibraries([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
 
   const filteredTags = useMemo(() => {
     const q = tagInput.toLowerCase().trim();
@@ -315,242 +334,6 @@ export function UploadModal({
     onClose();
   }
 
-  async function waitForJob(
-    jid: string,
-    taskId: string,
-    {
-      progressStart,
-      progressEnd,
-      pendingDetail,
-      runningDetail,
-      completedDetail,
-      completeTask,
-    }: {
-      progressStart: number;
-      progressEnd: number;
-      pendingDetail: string;
-      runningDetail: string;
-      completedDetail: string;
-      completeTask: boolean;
-    },
-  ): Promise<JobStatus> {
-    void progressStart;
-    void pendingDetail;
-    void runningDetail;
-    const status = await waitForImportJob(jid);
-    if (status.state === "failed" || status.state === "cancelled") {
-      throw new Error(status.error || "Ingestion job failed");
-    }
-    updateTask(taskId, {
-      status: completeTask ? "completed" : "running",
-      progress: completeTask ? 100 : progressEnd,
-      detail: completedDetail,
-    });
-    return status;
-  }
-
-  async function runUploadTask({
-    taskId,
-    mesh,
-    gcode,
-    name,
-    collection,
-    tagsForUpload,
-    libraryId,
-    refreshAfter = true,
-  }: {
-    taskId: string;
-    mesh: File | null;
-    gcode: File | null;
-    name: string;
-    collection: string;
-    tagsForUpload: string[];
-    libraryId: number | "";
-    refreshAfter?: boolean;
-  }) {
-    const reportProgress = (progress: ArtifactUploadProgress) => {
-      const ratio = progress.totalBytes ? progress.transferredBytes / progress.totalBytes : 0;
-      const phase = {
-        hashing: { detail: uiText("Hashing file"), progress: 8 },
-        transferring: {
-          detail: uiText("Transferring file"),
-          progress: 10 + Math.round(ratio * 55),
-        },
-        verifying: { detail: uiText("Verifying upload"), progress: 72 },
-        ingesting: { detail: uiText("Processing upload"), progress: 80 },
-        completed: { detail: uiText("Upload processed"), progress: 100 },
-      }[progress.phase];
-      updateTask(taskId, { ...phase, status: phase.progress === 100 ? "completed" : "running" });
-    };
-    const durableUpload = (file: File, purpose: "model" | "gcode", sourceHash?: string) =>
-      uploadArtifact(
-        file,
-        {
-          purpose,
-          target_role: "new_model",
-          model_name: name || file.name,
-          collection: collection || undefined,
-          tags: tagsForUpload.length ? tagsForUpload.join(",") : undefined,
-          source_hash: sourceHash,
-          target_library_id: libraryId === "" ? undefined : libraryId,
-        },
-        {
-          onProgress: reportProgress,
-          onSession: (uploadSessionId) =>
-            updateTask(taskId, {
-              uploadSessionId,
-              uploadPaused: false,
-              retryable: true,
-            }),
-        },
-      );
-    try {
-      if (mesh) {
-        updateTask(taskId, {
-          detail: uiMessage("Uploading {value1}", { value1: String(mesh.name) }),
-          status: "running",
-          progress: 15,
-        });
-        const meshRes = await durableUpload(mesh, "model");
-        if (!meshRes.job_id) throw new Error("Upload completed without an ingestion job");
-        linkTaskToJob(taskId, meshRes.job_id);
-
-        updateTask(taskId, {
-          detail: uiMessage("Processing mesh and thumbnail"),
-          status: "running",
-          progress: 35,
-        });
-        const meshStatus = await waitForJob(meshRes.job_id, taskId, {
-          progressStart: 35,
-          progressEnd: gcode ? 55 : 100,
-          pendingDetail: "Waiting for the vault to start processing",
-          runningDetail: "Extracting mesh metadata and thumbnail",
-          completedDetail: gcode ? "Mesh processed; linking G-code" : "Upload processed",
-          completeTask: !gcode,
-        });
-
-        if (!gcode) {
-          if (refreshAfter) await onUploaded();
-          return;
-        }
-
-        if (meshStatus.model_id == null) {
-          throw new Error("Mesh job completed but no model_id returned");
-        }
-
-        const full = await getModel(meshStatus.model_id);
-        updateTask(taskId, {
-          detail: uiMessage("Uploading {value1}", { value1: String(gcode.name) }),
-          status: "running",
-          progress: 60,
-        });
-        const gcodeRes = await durableUpload(gcode, "gcode", full.hash);
-        if (!gcodeRes.job_id) throw new Error("Upload completed without an ingestion job");
-        linkTaskToJob(taskId, gcodeRes.job_id);
-        await waitForJob(gcodeRes.job_id, taskId, {
-          progressStart: 70,
-          progressEnd: 100,
-          pendingDetail: "Waiting for the vault to start processing G-code",
-          runningDetail: "Parsing slicer metadata and thumbnail",
-          completedDetail: "Upload processed",
-          completeTask: true,
-        });
-        if (refreshAfter) await onUploaded();
-        return;
-      }
-
-      if (gcode) {
-        updateTask(taskId, {
-          detail: uiMessage("Uploading {value1}", { value1: String(gcode.name) }),
-          status: "running",
-          progress: 25,
-        });
-        const res = await durableUpload(gcode, "gcode");
-        if (!res.job_id) throw new Error("Upload completed without an ingestion job");
-        linkTaskToJob(taskId, res.job_id);
-        await waitForJob(res.job_id, taskId, {
-          progressStart: 45,
-          progressEnd: 100,
-          pendingDetail: "Waiting for the vault to start processing",
-          runningDetail: "Parsing slicer metadata and thumbnail",
-          completedDetail: "Upload processed",
-          completeTask: true,
-        });
-        if (refreshAfter) await onUploaded();
-      }
-    } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === "AbortError") {
-        updateTask(taskId, {
-          status: "running",
-          uploadPaused: true,
-          retryable: true,
-          detail: uiText("Paused"),
-        });
-        return;
-      }
-      const msg =
-        err instanceof ApiError ? err.code : err instanceof Error ? err.message : String(err);
-      updateTask(taskId, {
-        status: "failed",
-        progress: 100,
-        detail: msg,
-      });
-      toast.error(err);
-    }
-  }
-
-  // Bulk: create one task per mesh upfront (so the whole queue is visible in
-  // the task center), then process sequentially to avoid hammering the vault
-  // with concurrent uploads. Each file becomes its own model — no G-code
-  // linking, which is what keeps this distinct from the "Files" tab.
-  async function runBulkUpload({
-    files,
-    collection,
-    tagsForUpload,
-    libraryId,
-  }: {
-    files: BulkItem[];
-    collection: string;
-    tagsForUpload: string[];
-    libraryId: number | "";
-  }) {
-    const queue = files.map((item) => ({
-      item,
-      taskId: createTask({
-        title: uiMessage("Upload {value1}{value2}", {
-          value1: String(item.relPath ? `${item.relPath}/` : ""),
-          value2: String(item.file.name),
-        }),
-        detail: uiMessage("Queued"),
-        status: "pending" as const,
-        progress: 0,
-        expectedJobCount: 1,
-      }),
-    }));
-    try {
-      for (const { item, taskId } of queue) {
-        // Mirror the file's source folder into a nested collection under the
-        // chosen base — the backend auto-creates intermediate collections.
-        const targetCollection = bulkTargetCollection(collection, item.relPath);
-        // runUploadTask owns its own error handling and marks the task failed,
-        // so one bad file doesn't abort the rest of the queue.
-        await runUploadTask({
-          taskId,
-          mesh: item.file,
-          gcode: null,
-          name: stemName(item.file.name),
-          collection: targetCollection,
-          tagsForUpload,
-          libraryId,
-          refreshAfter: false,
-        });
-      }
-    } finally {
-      // One invalidation after the entire queue, including partial failures.
-      await onUploaded();
-    }
-  }
-
   function collectionGate(): boolean {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
@@ -572,9 +355,7 @@ export function UploadModal({
     try {
       const item = await capturePendingImport({
         url: urlValue.trim(),
-        collection_id: collectionPath
-          ? (collections.find((collection) => collection.path === collectionPath)?.id ?? null)
-          : null,
+        collection_id: chosenCollection?.id ?? null,
         tags: selectedTags,
       });
       toast.success(uiText("Captured URL. Review it before importing."));
@@ -606,7 +387,7 @@ export function UploadModal({
 
   function doSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || (sourceMode && destinationBlocked)) return;
     if (mode === "url") {
       if (!urlValue.trim()) return;
       void runUrlImport();
@@ -620,12 +401,15 @@ export function UploadModal({
     if (mode === "bulk") {
       if (bulkFiles.length === 0) return;
       if (!collectionGate()) return;
-      void runBulkUpload({
-        files: bulkFiles,
-        collection: collectionPath,
-        tagsForUpload: [...selectedTags],
-        libraryId: targetLibraryId,
-      });
+      void runBulkModelUpload(
+        {
+          files: bulkFiles,
+          collection: collectionPath,
+          tagsForUpload: [...selectedTags],
+          libraryId: targetLibraryId,
+        },
+        onUploaded,
+      );
       toast.success(
         uiText("uploads.queued", {
           value1: String(bulkFiles.length),
@@ -636,7 +420,12 @@ export function UploadModal({
       onClose();
       return;
     }
-    if (!meshFile && !gcodeFile) return;
+    const files: ModelUploadFiles | null = meshFile
+      ? { mesh: meshFile, gcode: gcodeFile }
+      : gcodeFile
+        ? { mesh: null, gcode: gcodeFile }
+        : null;
+    if (!files) return;
     if (!collectionGate()) return;
     const taskId = createTask({
       title: uiMessage("Upload {value1}", {
@@ -649,15 +438,17 @@ export function UploadModal({
     });
     setSubmitting(true);
     onTaskStarted?.(taskId);
-    void runUploadTask({
-      taskId,
-      mesh: meshFile,
-      gcode: gcodeFile,
-      name: modelName,
-      collection: collectionPath,
-      tagsForUpload: [...selectedTags],
-      libraryId: targetLibraryId,
-    });
+    void runModelUpload(
+      {
+        taskId,
+        ...files,
+        name: modelName,
+        collection: collectionPath,
+        tagsForUpload: [...selectedTags],
+        libraryId: targetLibraryId,
+      },
+      onUploaded,
+    );
     reset();
     onClose();
   }
@@ -889,14 +680,14 @@ export function UploadModal({
                   open={catOpen}
                   onOpenChange={setCatOpen}
                   align="start"
-                  role="listbox"
-                  contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-56 overflow-y-auto"
+                  role="dialog"
+                  contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg"
                   trigger={
                     <button
                       type="button"
                       data-menu-trigger
                       onClick={() => setCatOpen((v) => !v)}
-                      aria-haspopup="listbox"
+                      aria-haspopup="dialog"
                       aria-expanded={catOpen}
                       title={selectedCollectionLabel || undefined}
                       className="w-full h-10 flex min-w-0 items-center gap-2 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
@@ -911,56 +702,29 @@ export function UploadModal({
                     </button>
                   }
                 >
-                  {user?.is_superuser && (
-                    <button
-                      type="button"
-                      role="option"
-                      aria-selected={collectionPath === ""}
-                      onClick={() => {
-                        setPickedCollection("");
+                  <div className="p-2">
+                    <CollectionPicker
+                      minRole="edit"
+                      selectedPath={collectionPath}
+                      onSelect={(collection) => {
+                        setPickedCollection(collection ?? "none");
                         setCatOpen(false);
                       }}
-                      className="w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low"
-                    >
-                      {uiText("None")}
-                    </button>
-                  )}
-                  {writableCollections.length === 0 ? (
-                    <div className="px-3 py-2 font-mono text-2xs text-on-surface-variant/70">
-                      {uiText("No editable collections.")}
-                    </div>
-                  ) : (
-                    writableCollections.map((c) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        role="option"
-                        aria-selected={collectionPath === c.path}
-                        onClick={() => {
-                          setPickedCollection(c.path);
-                          setCatOpen(false);
-                        }}
-                        className={`w-full text-left px-3 py-1.5 font-mono text-xs transition-colors ${
-                          collectionPath === c.path
-                            ? "text-primary bg-secondary-container"
-                            : "text-on-surface-variant hover:bg-surface-container-low"
-                        }`}
-                      >
-                        {collectionDisplayPath(collections, c.path)}{" "}
-                        <span className="opacity-50">({c.model_count})</span>
-                      </button>
-                    ))
-                  )}
+                      noneLabel={user?.is_superuser ? uiText("None") : undefined}
+                      emptyLabel={uiText("No editable collections.")}
+                    />
+                  </div>
                 </DropdownMenu>
               </div>
 
               {/* Destination (mounted-source write-back) — only when an eligible source exists */}
-              {(mode === "files" || mode === "bulk") && libraries.length > 0 && (
+              {sourceMode && (libraries.length > 0 || sourceSelected) && (
                 <div>
                   <label className="block font-mono text-xs text-on-surface-variant tracking-wider uppercase mb-2">
                     {uiText("Store in")}
                   </label>
                   <select
+                    aria-label={uiText("Store in")}
                     value={targetLibraryId}
                     onChange={(e) =>
                       setTargetLibraryId(e.target.value === "" ? "" : Number(e.target.value))
@@ -968,6 +732,11 @@ export function UploadModal({
                     className="w-full h-10 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   >
                     <option value="">{uiText("Vault storage")}</option>
+                    {sourceSelected && !selectedAvailable && (
+                      <option value={targetLibraryId} disabled>
+                        {uiText("Selected source unavailable")}
+                      </option>
+                    )}
                     {libraries.map((lib) => (
                       <option key={lib.id} value={lib.id}>
                         {uiText("{value1} (library source)", { value1: String(lib.name ?? "") })}
@@ -1077,6 +846,26 @@ export function UploadModal({
               </div>
             </>
           )}
+          {sourceMode && (catalogFailed || (sourceSelected && !selectedAvailable)) && (
+            <div role="alert" className="space-y-2 text-sm text-destructive">
+              {catalogFailed && <p>{uiText("Could not load upload destinations.")}</p>}
+              {sourceSelected && !selectedAvailable && (
+                <p>{uiText("Choose an available destination before uploading.")}</p>
+              )}
+              {catalogFailed && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    if (config.isError) void config.refetch();
+                    else void sources.refetch();
+                  }}
+                >
+                  {uiText("Retry")}
+                </Button>
+              )}
+            </div>
+          )}
           <div className="flex justify-end gap-3 pt-2">
             <Button type="button" variant="outline" onClick={close} className="min-h-11">
               {uiText("Cancel")}
@@ -1085,7 +874,10 @@ export function UploadModal({
               type="submit"
               disabled={
                 submitting ||
+                (sourceMode && destinationBlocked) ||
                 (!user?.is_superuser && !collectionPath) ||
+                // A destination that has not resolved yet would land at the root.
+                (collectionPath !== "" && chosenCollection === null) ||
                 (mode === "files"
                   ? !meshFile && !gcodeFile
                   : mode === "bulk"

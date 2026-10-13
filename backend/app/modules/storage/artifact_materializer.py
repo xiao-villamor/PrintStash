@@ -26,6 +26,8 @@ from typing import ContextManager
 
 from printstash_core.files import publish_staged_file
 
+from app.core.cancellation import checkpoint
+
 
 class CacheUnavailable(RuntimeError):
     """Caching cannot safely admit this representation; use normal delivery."""
@@ -610,16 +612,25 @@ class ArtifactMaterializer:
         # Wait only on the same representation, never hold a database lock over IO.
         deadline = time.monotonic() + self.policy().fill_wait_seconds
         while True:
+            checkpoint()
             lease = self.acquire(representation)
             if lease:
                 with lease as path:
+                    checkpoint(force=True)
                     yield path
                 return
             fill = self.begin_fill(representation)
             if fill:
                 try:
-                    for chunk in chunks():
+                    source = chunks()
+                    while True:
+                        checkpoint()
+                        try:
+                            chunk = next(source)
+                        except StopIteration:
+                            break
                         fill.write(chunk)
+                    checkpoint(force=True)
                     try:
                         lease = fill.complete()
                     except (CacheUnavailable, OSError, sqlite3.Error):
@@ -629,11 +640,13 @@ class ArtifactMaterializer:
                         lease = None
                     if lease is not None:
                         with lease as path:
+                            checkpoint(force=True)
                             yield path
                     else:
                         # The exact verified download is usable even if optional
                         # publication fails. Keep its claim and reservation until
                         # this consumer closes, including during clear-cache.
+                        checkpoint(force=True)
                         yield fill.path
                 finally:
                     fill.close()
@@ -644,6 +657,7 @@ class ArtifactMaterializer:
                 lease = self.acquire(representation)
                 if lease:
                     with lease as path:
+                        checkpoint(force=True)
                         yield path
                     return
                 raise CacheUnavailable("cache admission refused")

@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from time import monotonic
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from urllib.parse import urlsplit, urlunsplit
 
 from printstash_core.imports import (
@@ -120,7 +120,7 @@ def _canonical_provider_page(provider: str, url: str) -> tuple[str, str]:
         if not parts:
             raise ValueError
         return canonical, parts[-1]
-    except (AttributeError, TypeError, ValueError, CaptureContractError):
+    except AttributeError, TypeError, ValueError, CaptureContractError:
         raise ImportError_("provider_contract_changed") from None
 
 
@@ -313,6 +313,39 @@ _PRINTABLES_ALLOWED_HOSTS = frozenset({"api.printables.com"})
 # patch points while delegating deterministic rules to the shared core.
 ModelFile = _resolver_rules.ModelFile
 CollectionMember = _resolver_rules.CollectionMember
+
+
+@dataclass(frozen=True)
+class SelectedFileDownload:
+    file: ModelFile
+    url: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.file, ModelFile) or not self.file.file_id:
+            raise ValueError("selected_file_required")
+        if not isinstance(self.url, str) or not self.url:
+            raise ValueError("selected_download_url_required")
+
+
+@dataclass(frozen=True)
+class SelectedArchiveDownload:
+    files: tuple[ModelFile, ...]
+    url: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.files, tuple) or not self.files:
+            raise ValueError("selected_files_required")
+        if any(
+            not isinstance(file, ModelFile) or not file.file_id for file in self.files
+        ):
+            raise ValueError("selected_file_required")
+        if len({file.file_id for file in self.files}) != len(self.files):
+            raise ValueError("duplicate_selected_file")
+        if not isinstance(self.url, str) or not self.url:
+            raise ValueError("selected_download_url_required")
+
+
+SelectedDownload = SelectedFileDownload | SelectedArchiveDownload
 _MODEL_EXTS = _resolver_rules.MODEL_EXTENSIONS
 _PRINTABLES_HOSTS = _resolver_rules.PRINTABLES_HOSTS
 _THINGIVERSE_HOSTS = _resolver_rules.THINGIVERSE_HOSTS
@@ -539,14 +572,16 @@ async def _list_printables_files(url: str) -> Optional[tuple[str, list[ModelFile
     return title, _printables_files_from_print(print_obj)
 
 
-async def _printables_download_links(url: str, files: list[ModelFile]) -> list[str]:
-    """Resolve direct download links for a chosen subset of a model's files."""
+async def _printables_download_output(
+    url: str, files: list[ModelFile]
+) -> dict[str, object] | None:
+    """Resolve one selected set in one mutation without discarding provider IDs."""
     print_id = _printables_id(url)
     if not print_id or not files:
-        return []
+        return None
     grouped: dict[str, list[str]] = {}
-    for f in files:
-        grouped.setdefault(f.file_type, []).append(f.file_id)
+    for file in files:
+        grouped.setdefault(file.file_type, []).append(file.file_id)
     files_arg = [
         {"fileType": file_type, "ids": ids} for file_type, ids in grouped.items()
     ]
@@ -555,7 +590,82 @@ async def _printables_download_links(url: str, files: list[ModelFile]) -> list[s
         {"printId": print_id, "source": "model_detail", "files": files_arg},
         url,
     )
-    return _printables_links_from_output(payload)
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    result = data.get("getDownloadLink")
+    if not isinstance(result, dict):
+        return None
+    output = result.get("output")
+    return cast(dict[str, object], output) if isinstance(output, dict) else None
+
+
+async def _printables_download_links(url: str, files: list[ModelFile]) -> list[str]:
+    """Legacy link-only adapter retaining the existing provider response policy."""
+    output = await _printables_download_output(url, files)
+    if output is None:
+        return []
+    return _printables_links_from_output(
+        {"data": {"getDownloadLink": {"output": output}}}
+    )
+
+
+def _selected_downloads(
+    output: dict[str, object], files: list[ModelFile]
+) -> tuple[SelectedDownload, ...]:
+    selected = {file.file_id: file for file in files}
+    if not files or len(selected) != len(files) or any(not key for key in selected):
+        raise ImportError_("printables_file_selection_mismatch")
+    entries = output.get("files")
+    if entries is not None and not isinstance(entries, list):
+        raise ImportError_("printables_file_selection_mismatch")
+    if entries:
+        links: dict[str, str] = {}
+        for entry in entries:
+            if not isinstance(entry, dict):
+                raise ImportError_("printables_file_selection_mismatch")
+            identity = entry.get("id")
+            if (
+                not isinstance(identity, str)
+                or identity not in selected
+                or identity in links
+            ):
+                raise ImportError_("printables_file_selection_mismatch")
+            link = entry.get("link")
+            if not isinstance(link, str) or not link:
+                raise ImportError_("printables_resolve_failed")
+            links[identity] = link
+        if links.keys() != selected.keys():
+            raise ImportError_("printables_file_selection_mismatch")
+        return tuple(SelectedFileDownload(file, links[file.file_id]) for file in files)
+    link = output.get("link")
+    if isinstance(link, str) and link:
+        return (SelectedArchiveDownload(tuple(files), link),)
+    raise ImportError_("printables_file_selection_mismatch")
+
+
+async def resolve_selected_sources(
+    url: str, files: list[ModelFile]
+) -> tuple[SelectedDownload, ...]:
+    """Bind downloads to provider identities; transient URLs never become identity."""
+    if classify_page(url) != "printables":
+        raise ImportError_("file_selection_unsupported")
+    try:
+        output = await _printables_download_output(url, files)
+        if output is None:
+            raise ImportError_("printables_resolve_failed")
+        return _selected_downloads(output, files)
+    except ImportError_:
+        raise
+    except Exception as exc:  # noqa: BLE001 — provider response boundary
+        logger.warning(
+            "selected source resolution errored for %s: %s",
+            redact_url(url),
+            redact_exception(exc),
+        )
+        raise ImportError_("printables_resolve_failed") from exc
 
 
 # Collection name + paginated member list. `moreCollectionModels` requires an

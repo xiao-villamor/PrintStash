@@ -1,17 +1,64 @@
 "use client";
 
+import { StorageConnectionReview } from "@/components/storage-connection-review";
+
+import { captureEditingBase } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
+import type { PreferenceIntent } from "@/lib/queries/settings-preferences";
+
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 
 import { knownUiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
-import { ApiError } from "@/lib/errors";
+import { parseApiError } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
-import { collectionDisplayPath } from "@/lib/collection-display";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  backupSourceKey,
+  backupSourcesOptions,
+  unownedLocalBackupsOptions,
+  unownedS3BackupsOptions,
+  unownedRemoteBackupsOptions,
+} from "@/lib/queries/settings-backup-catalog";
+import { useBackupCommand } from "@/lib/queries/settings-backup-commands";
+import {
+  storageConnectionsOptions,
+  useStorageConnectionCommand,
+} from "@/lib/queries/settings-storage";
+import {
+  apiKeysOptions,
+  adminUsersOptions,
+  useApiKeyCommand,
+  useAdminUserCommand,
+  type ApiKeyReceipt,
+} from "@/lib/queries/settings-account";
+import { savedPreference, useSettingsPreferenceCommand } from "@/lib/queries/settings-preferences";
+import {
+  settingsHealthOptions,
+  settingsReleaseOptions,
+  settingsSystemKeys,
+} from "@/lib/queries/settings-system";
+import {
+  settingsTrashOptions,
+  settingsGcOptions,
+  useSettingsTrashCommand,
+} from "@/lib/queries/settings-trash";
+import { useBackupPolicyDraft } from "@/lib/queries/settings-backup-policy";
+import { getSessionVersion } from "@/lib/session-transport";
+import {
+  collectionAccessOptions,
+  useCollectionAccessCommand,
+  usePrinterAccessCommand,
+  usePrinterAccess,
+  accessDenied,
+} from "@/lib/queries/settings-access";
+import { onAuthChange } from "@/lib/auth-store";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BackupRunHistory } from "@/components/backup-run-history";
+import { CollectionPicker } from "@/components/collection-picker";
 import {
   Bell,
   Boxes,
@@ -24,6 +71,7 @@ import {
   Eraser,
   Eye,
   EyeOff,
+  Gpu,
   Files,
   FolderSync,
   Coins,
@@ -51,6 +99,7 @@ import {
   Upload,
 } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -79,66 +128,21 @@ import { MaintenancePanel } from "@/components/maintenance-panel";
 import { BackgroundWorkPanel } from "@/components/background-work-panel";
 import { BrandMark } from "@/components/brand-mark";
 import {
-  createApiKey,
-  createAdminUser,
-  createBackup,
-  createGcPlan,
-  approveGcPlan,
-  abortGcPlan,
-  finalizeGcPlan,
-  adoptLocalBackup,
-  adoptRemoteBackup,
-  adoptS3Backup,
-  deactivateAdminUser,
-  deleteBackup,
-  deleteCollectionPermission,
-  deletePrinterPermission,
-  downloadBackup,
   downloadModelExport,
   downloadLibraryArchive,
   importLibraryArchive,
   regenerateDerivatives,
-  backupFromJob,
-  getHealthDetails,
-  getActiveGcPlan,
-  getLatestRelease,
-  getVaultConfig,
-  listBackupSources,
-  listUnownedS3Backups,
-  listUnownedLocalBackups,
-  listUnownedRemoteBackups,
-  listCollectionPermissions,
-  listCollections,
-  listPrinterPermissions,
-  listPrinters,
-  listApiKeys,
-  listAdminUsers,
-  listTrash,
-  listStorageConnections,
-  purgeModel,
-  resetAdminUserPassword,
-  restoreBackup,
-  restoreModel,
   restartPrintStash,
-  revokeApiKey,
-  updateCollectionPermission,
-  updatePrinterPermission,
-  updateAdminUser,
-  updateVaultConfig,
-  updateStorageConnection,
-  uploadBackup,
 } from "@/lib/api";
 import type {
   BackupMeta,
-  GcPlan,
-  ReleaseStatus,
   UnownedBackupCandidate,
   UnownedRemoteBackupCandidate,
   UnownedS3BackupCandidate,
 } from "@/lib/api";
 import type { StorageConnection } from "@/types";
 import { useAuth } from "@/lib/auth-context";
-import { useVaultStats } from "@/lib/queries";
+import { usePrinters, useVaultStats, useVaultConfig } from "@/lib/queries";
 import {
   DEFAULT_METADATA_PREFERENCES,
   METADATA_FIELDS,
@@ -167,25 +171,25 @@ import {
   writePreviewPreferences,
   type PreviewPreferences,
   type PreviewQuality,
+  type MeshRendererPreference,
   type ScreenshotScale,
 } from "@/lib/preview-preferences";
-import { waitForImportJob } from "@/lib/task-center";
-import { prepareBrowserExtensionSetup } from "@/lib/browser-extension-setup";
+import {
+  prepareBrowserExtensionSetup,
+  discardBrowserExtensionSetup,
+  type BrowserExtensionSetup,
+} from "@/lib/browser-extension-setup";
 import type {
-  ApiKeyRead,
-  CollectionPermissionRead,
-  CollectionRead,
+  CollectionNodeRead,
   CollectionRole,
-  PrinterPermissionRead,
-  PrinterRead,
   PrinterRole,
   StorageCleanupStatus,
   StorageHealthRead,
-  StorageOperations,
   HealthResponse,
   TrashPurgeRead,
   TrashedModelRead,
-  UserRead,
+  VaultConfigRead,
+  UserUpdate,
 } from "@/types";
 
 type SettingsSection =
@@ -204,6 +208,7 @@ type SettingsSection =
   | "spoolman"
   | "design"
   | "previews"
+  | "gpu"
   | "trash"
   | "about";
 
@@ -227,6 +232,7 @@ const SETTINGS_SECTIONS: {
   { id: "spoolman", labelKey: "settings.spoolman", icon: Boxes },
   { id: "design", labelKey: "settings.design", icon: Palette },
   { id: "previews", labelKey: "settings.previews", icon: Images },
+  { id: "gpu", labelKey: "settings.gpu", icon: Gpu },
   { id: "trash", labelKey: "settings.trash", icon: Trash2 },
   { id: "about", labelKey: "settings.about", icon: Info },
 ];
@@ -265,6 +271,11 @@ const PREVIEW_QUALITIES = [
   "balanced",
   "detail",
 ] as const satisfies readonly PreviewQuality[];
+const MESH_RENDERERS = [
+  "webgl",
+  "auto",
+  "webgpu",
+] as const satisfies readonly MeshRendererPreference[];
 const SCREENSHOT_SCALES = [1, 2, 3] as const satisfies readonly ScreenshotScale[];
 /** Widths the vault offers; a legacy config value outside this list shows as "Custom". */
 const MODEL_THUMBNAIL_WIDTHS = [320, 640, 1280] as const;
@@ -274,13 +285,11 @@ type ModelThumbnailWidth = (typeof MODEL_THUMBNAIL_WIDTHS)[number];
  * What the trash panel is busy with: the id of the single model being purged, or a
  * label for one of the bulk retention actions.
  */
-type TrashOperation = number | "expired" | "settings" | "gc";
+type TrashOperation = number | "expired" | "gc";
 
 /** Only a per-model purge carries an id; the bulk actions carry their label instead. */
 function isModelPurge(operation: TrashOperation | null): operation is number {
-  return (
-    operation !== null && operation !== "expired" && operation !== "settings" && operation !== "gc"
-  );
+  return operation !== null && operation !== "expired" && operation !== "gc";
 }
 
 // Shared button styles — keep settings actions visually uniform and theme-aware.
@@ -317,13 +326,29 @@ function formatDateTime(value: string): string {
   }).format(new Date(value));
 }
 
-function backupSourceKey(backup: BackupMeta): string {
-  return (
-    backup.source_ref ??
-    `${backup.location}:${backup.namespace ?? ""}:${backup.key ?? ""}:${backup.backup_id}`
-  );
+interface RetentionDraft {
+  text: string;
+  base: EditingBase;
 }
-
+function parseTrashRetentionDays(value: string): number | null {
+  if (!/^(?:-1|\d+)$/.test(value)) return null;
+  const days = Number(value);
+  return Number.isSafeInteger(days) ? days : null;
+}
+function preferenceLabel(intent: PreferenceIntent): string {
+  switch (intent.kind) {
+    case "auto-mark":
+      return uiText("Auto-mark known good on successful print");
+    case "currency":
+      return uiText("Display currency");
+    case "thumbnail-width":
+      return uiText("Model image quality");
+    case "backup-retention":
+      return uiText("settings.backupRetentionTitle");
+    case "trash-retention":
+      return uiText("Trash retention");
+  }
+}
 function parseBackupRetentionDays(value: string): number | null {
   if (!/^\d+$/.test(value)) return null;
   const days = Number(value);
@@ -469,84 +494,248 @@ export function SettingsPanel() {
       tabs.scrollLeft = selected.offsetLeft - (tabs.clientWidth - selected.clientWidth) / 2;
     }
   }, [activeSection, user?.is_superuser]);
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [releaseStatus, setReleaseStatus] = useState<ReleaseStatus | null>(null);
-  const [releaseChecking, setReleaseChecking] = useState(false);
+  const client = useQueryClient();
+  const healthRead = useQuery({ ...settingsHealthOptions(), enabled: !!user?.is_superuser });
+  const releaseRead = useQuery({ ...settingsReleaseOptions(), enabled: !!user?.is_superuser });
+  const health =
+    user?.is_superuser && !(healthRead.isError && accessDenied(healthRead.error))
+      ? (healthRead.data ?? null)
+      : null;
+  const releaseStatus =
+    user?.is_superuser && !(releaseRead.isError && accessDenied(releaseRead.error))
+      ? (releaseRead.data ?? null)
+      : null;
+  const releaseChecking = releaseRead.isFetching;
   // Vault totals refresh automatically when models change (model writes
   // invalidate queryKeys.vaultStats), so no manual refetch on this screen.
   const stats = useVaultStats().data ?? null;
   const [exporting, setExporting] = useState<"json" | "csv" | null>(null);
   const [archiveBusy, setArchiveBusy] = useState<"export" | "import" | null>(null);
-  const [loadedApiKeys, setApiKeys] = useState<ApiKeyRead[]>([]);
-  // A signed-out visitor has no keys to list, so that is derived rather than cleared
-  // from an effect on sign-out.
-  const apiKeys = user ? loadedApiKeys : [];
-  const [users, setUsers] = useState<UserRead[]>([]);
-  const [usersBusy, setUsersBusy] = useState<number | "create" | null>(null);
-  const [newUsername, setNewUsername] = useState("");
-  const [newUserEmail, setNewUserEmail] = useState("");
-  const [newUserPassword, setNewUserPassword] = useState("");
+  const apiKeysQuery = useQuery({
+    ...apiKeysOptions(user?.id ?? null),
+    enabled: user !== null && activeSection === "access",
+  });
+  const usersQuery = useQuery({
+    ...adminUsersOptions(user?.is_superuser ? user.id : null),
+    enabled: !!user?.is_superuser && activeSection === "access",
+  });
+  const keyCommand = useApiKeyCommand();
+  const userCommand = useAdminUserCommand();
+  const keysDenied =
+    apiKeysQuery.isError && [401, 403, 404].includes(parseApiError(apiKeysQuery.error).status);
+  const usersDenied =
+    usersQuery.isError && [401, 403, 404].includes(parseApiError(usersQuery.error).status);
+  const apiKeys = user && !keysDenied ? (apiKeysQuery.data ?? []) : [];
+  const users = user?.is_superuser && !usersDenied ? (usersQuery.data ?? []) : [];
+  const usersBusy = userCommand.isPending
+    ? userCommand.variables.kind === "create"
+      ? "create"
+      : userCommand.variables.id
+    : null;
+  const [createUserDraft, setCreateUserDraft] = useState({ username: "", email: "", password: "" });
+  const { username: newUsername, email: newUserEmail, password: newUserPassword } = createUserDraft;
   const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>({});
-  const [accessCollections, setAccessCollections] = useState<CollectionRead[]>([]);
-  const [collectionPermissions, setCollectionPermissions] = useState<CollectionPermissionRead[]>(
-    [],
-  );
-  const [accessUserId, setAccessUserId] = useState<number | "">("");
-  const [accessCollectionId, setAccessCollectionId] = useState<number | "">("");
+  const [accessCollection, setAccessCollection] = useState<CollectionNodeRead | null>(null);
+  const [accessPickerOpen, setAccessPickerOpen] = useState(false);
+  const [chosenAccessUserId, setAccessUserId] = useState<number | "">("");
+  const accessUserId = users.some((row) => row.id === chosenAccessUserId && !row.is_superuser)
+    ? chosenAccessUserId
+    : "";
   const [accessRole, setAccessRole] = useState<CollectionRole>("view");
-  const [accessBusy, setAccessBusy] = useState<"load" | "save" | string | null>(null);
-  const [accessPrinters, setAccessPrinters] = useState<PrinterRead[]>([]);
-  const [printerPermissions, setPrinterPermissions] = useState<PrinterPermissionRead[]>([]);
-  const [printerAccessUserId, setPrinterAccessUserId] = useState<number | "">("");
+  const collectionCommand = useCollectionAccessCommand();
+  const printerCommand = usePrinterAccessCommand();
+  const accessBusy = collectionCommand.isPending
+    ? collectionCommand.variables.kind === "grant"
+      ? "save"
+      : `${collectionCommand.variables.collectionId}:${collectionCommand.variables.targetUserId}`
+    : null;
+  const accessCollectionId = accessCollection?.id ?? null;
+  const accessActorId = user?.is_superuser ? user.id : null;
+  const collectionPermissionsQuery = useQuery({
+    ...collectionAccessOptions(accessActorId, accessCollectionId),
+    enabled: accessActorId !== null && accessCollectionId !== null && activeSection === "access",
+  });
+  const collectionPermissions =
+    collectionPermissionsQuery.isError && accessDenied(collectionPermissionsQuery.error)
+      ? []
+      : (collectionPermissionsQuery.data ?? []);
+  const accessPrintersQuery = usePrinters({
+    enabled: accessActorId !== null && activeSection === "access",
+  });
+  const accessPrinters =
+    accessPrintersQuery.isError && accessDenied(accessPrintersQuery.error)
+      ? []
+      : (accessPrintersQuery.data ?? []);
+  const [chosenPrinterAccessUserId, setPrinterAccessUserId] = useState<number | "">("");
+  const printerAccessUserId = users.some(
+    (row) => row.id === chosenPrinterAccessUserId && !row.is_superuser,
+  )
+    ? chosenPrinterAccessUserId
+    : "";
   const [accessPrinterId, setAccessPrinterId] = useState<number | "">("");
   const [printerAccessRole, setPrinterAccessRole] = useState<PrinterRole>("view");
-  const [printerAccessBusy, setPrinterAccessBusy] = useState<"load" | "save" | string | null>(null);
-  const [mintedApiKey, setNewApiKey] = useState<string | null>(null);
-  // Likewise the one-time secret: signing out hides it without a reset effect.
-  const newApiKey = user ? mintedApiKey : null;
+  const printerAccess = usePrinterAccess(
+    accessActorId,
+    accessPrinters,
+    activeSection === "access" &&
+      !!printerAccessUserId &&
+      !usersQuery.isError &&
+      !usersQuery.isPending &&
+      !accessPrintersQuery.isError,
+  );
+  const printerPermissions = printerAccess.flatMap(({ query }) =>
+    query.isError && accessDenied(query.error) ? [] : (query.data ?? []),
+  );
+  const selectedPrinterRead = printerAccess.find(
+    ({ printer }) => printer.id === accessPrinterId,
+  )?.query;
+  const printerAccessBusy = printerCommand.isPending
+    ? printerCommand.variables.kind === "grant"
+      ? "save"
+      : `${printerCommand.variables.printerId}:${printerCommand.variables.targetUserId}`
+    : null;
+  const [ownedReceipt, setOwnedReceipt] = useState<
+    (ApiKeyReceipt & { handoff: BrowserExtensionSetup | null }) | null
+  >(null);
+  const receipt =
+    user &&
+    !keysDenied &&
+    ownedReceipt?.userId === user.id &&
+    ownedReceipt.session === getSessionVersion()
+      ? ownedReceipt
+      : null;
+  const newApiKey = receipt?.secret ?? null;
   const [keyName, setKeyName] = useState("Programmatic access");
-  const [keyBusy, setKeyBusy] = useState(false);
-  const [extensionSetupReady, setExtensionSetupReady] = useState(false);
-  const [trashItems, setTrashItems] = useState<TrashedModelRead[]>([]);
-  const [trashLoading, setTrashLoading] = useState(false);
+  const keyBusy = keyCommand.isPending;
+  const extensionSetupReady = receipt?.handoff !== null && receipt?.handoff !== undefined;
+  const accountLive = useRef(true);
+  const accountIdentity = useRef(user?.id ?? null);
+  useEffect(() => {
+    accountIdentity.current = user?.id ?? null;
+  }, [user?.id]);
+  function accountCurrent(session: number) {
+    return (
+      accountLive.current && session === getSessionVersion() && accountIdentity.current === user?.id
+    );
+  }
+  function dismissReceipt() {
+    if (receipt?.handoff) discardBrowserExtensionSetup(receipt.handoff);
+    setOwnedReceipt(null);
+  }
+  const trashRead = useQuery({
+    ...settingsTrashOptions(),
+    enabled: !!user && activeSection === "trash",
+  });
+  const gcRead = useQuery({
+    ...settingsGcOptions(),
+    enabled: !!user?.is_superuser && activeSection === "trash",
+  });
+  const trashCommand = useSettingsTrashCommand();
+  const trashItems =
+    user && !(trashRead.isError && accessDenied(trashRead.error)) ? (trashRead.data ?? []) : [];
+  const trashLoading = trashRead.isFetching;
   const [trashPurgeResult, setTrashPurgeResult] = useState<TrashPurgeRead | null>(null);
-  const [gcPlan, setGcPlan] = useState<GcPlan | null>(null);
+  const gcPlan =
+    user?.is_superuser && !(gcRead.isError && accessDenied(gcRead.error))
+      ? (gcRead.data ?? null)
+      : null;
   const gcQuarantineReady = useDeadlineReached(
     gcPlan?.state === "quarantined" ? (gcPlan.quarantine_until ?? null) : null,
   );
   const [gcDigestConfirmation, setGcDigestConfirmation] = useState("");
   const [trashBusy, setTrashBusy] = useState<TrashOperation | null>(null);
-  const [trashRetentionDays, setTrashRetentionDays] = useState(30);
-  const [autoMarkKnownGood, setAutoMarkKnownGood] = useState(true);
-  const [autoMarkBusy, setAutoMarkBusy] = useState(false);
-  const [currency, setCurrency] = useState("USD");
-  const [currencyBusy, setCurrencyBusy] = useState(false);
+  const [trashRetentionDraft, setTrashRetentionDraft] = useState<RetentionDraft | null>(null);
+  const remoteConfig = useVaultConfig({
+    enabled:
+      !!user?.is_superuser && ["design", "previews", "backup", "trash"].includes(activeSection),
+    retry: false,
+  });
+  const configDenied =
+    remoteConfig.isError && [401, 403, 404].includes(parseApiError(remoteConfig.error).status);
+  const remoteConfigData = configDenied ? undefined : remoteConfig.data;
+  const preferenceCommand = useSettingsPreferenceCommand();
+  const preferenceIntent = preferenceCommand.intent;
+  const preferenceReview = preferenceCommand.state;
+  const autoMarkKnownGood =
+    preferenceIntent?.kind === "auto-mark"
+      ? preferenceIntent.value
+      : (remoteConfigData?.auto_mark_known_good ?? false);
+  const currency =
+    preferenceIntent?.kind === "currency"
+      ? preferenceIntent.value
+      : (remoteConfigData?.currency ?? "");
   // Each reader falls back to its defaults when there is no `window`, so these are
   // safe as lazy initialisers on the server as well as in the browser.
   const [previewPreferences, setPreviewPreferences] = useState(readPreviewPreferences);
-  const [modelThumbnailWidth, setModelThumbnailWidth] = useState(640);
-  const [previewBusy, setPreviewBusy] = useState<"quality" | "rebuild" | null>(null);
-  const [purgeTarget, setPurgeTarget] = useState<number | null>(null);
+  const modelThumbnailWidth =
+    preferenceIntent?.kind === "thumbnail-width"
+      ? preferenceIntent.value
+      : (remoteConfigData?.model_thumbnail_width ?? 640);
+  const [previewBusy, setPreviewBusy] = useState<"rebuild" | null>(null);
+  const [purgeTarget, setPurgeTarget] = useState<TrashedModelRead | null>(null);
   const [purgeExpiredOpen, setPurgeExpiredOpen] = useState(false);
-  const [trashStorageTier, setTrashStorageTier] = useState("verified");
-  const [trashOperations, setTrashOperations] = useState<StorageOperations>();
+  const trashRetentionText =
+    trashRetentionDraft?.text ?? String(remoteConfigData?.trash_retention_days ?? 30);
+  const parsedTrashRetentionDays = parseTrashRetentionDays(trashRetentionText);
+  const trashRetentionDays =
+    parsedTrashRetentionDays ?? remoteConfigData?.trash_retention_days ?? 30;
+  const trashStorageTier = remoteConfigData?.storage_tier ?? "unguarded";
+  const trashOperations = remoteConfigData?.storage_operations;
+  const trashRetentionBusy =
+    preferenceReview.phase === "saving" && preferenceReview.intent.kind === "trash-retention";
+  const backupCommand = useBackupCommand();
+  const backupConnectionCommand = useStorageConnectionCommand();
   const [backingUp, setBackingUp] = useState(false);
-  const [backupRunRefresh, setBackupRunRefresh] = useState(0);
-  const [backups, setBackups] = useState<BackupMeta[]>([]);
-  const [unownedBackups, setUnownedBackups] = useState<UnownedBackupCandidate[]>([]);
-  const [unownedS3Backups, setUnownedS3Backups] = useState<UnownedS3BackupCandidate[]>([]);
-  const [unownedRemoteBackups, setUnownedRemoteBackups] = useState<UnownedRemoteBackupCandidate[]>(
-    [],
+  const backupEnabled = !!user?.is_superuser && activeSection === "backup";
+  const ownedBackupRead = useQuery({ ...backupSourcesOptions(), enabled: backupEnabled });
+  const localBackupRead = useQuery({ ...unownedLocalBackupsOptions(), enabled: backupEnabled });
+  const s3BackupRead = useQuery({ ...unownedS3BackupsOptions(), enabled: backupEnabled });
+  const remoteBackupRead = useQuery({ ...unownedRemoteBackupsOptions(), enabled: backupEnabled });
+  const backupConnectionRead = useQuery({ ...storageConnectionsOptions(), enabled: backupEnabled });
+  const backupsDenied =
+    ownedBackupRead.isError &&
+    [401, 403, 404].includes(parseApiError(ownedBackupRead.error).status);
+  const backups = user?.is_superuser && !backupsDenied ? (ownedBackupRead.data ?? []) : [];
+  const unownedBackups =
+    user?.is_superuser && !localBackupRead.isError ? (localBackupRead.data ?? []) : [];
+  const unownedS3Backups =
+    user?.is_superuser && !s3BackupRead.isError ? (s3BackupRead.data ?? []) : [];
+  const unownedRemoteBackups =
+    user?.is_superuser && !remoteBackupRead.isError ? (remoteBackupRead.data ?? []) : [];
+  const backupsLoading = [ownedBackupRead, localBackupRead, s3BackupRead, remoteBackupRead].some(
+    (read) => read.isFetching,
   );
-  const [backupsLoading, setBackupsLoading] = useState(false);
-  const [backupRetentionDays, setBackupRetentionDays] = useState("30");
+  const backupDiscoveryFailed =
+    localBackupRead.isError || s3BackupRead.isError || remoteBackupRead.isError;
+  const backupConfigUnavailable = !remoteConfigData || remoteConfig.isError;
+  // Only deliberate edits live in these drafts; refreshed DTOs stay in Query.
+  const [backupRetentionDraft, setBackupRetentionDays] = useState<RetentionDraft | null>(null);
+  const backupRetentionDays =
+    backupRetentionDraft?.text ?? String(remoteConfigData?.backup_retention_days ?? 30);
   const parsedBackupRetentionDays = parseBackupRetentionDays(backupRetentionDays);
-  const [backupRetentionBusy, setBackupRetentionBusy] = useState(false);
-  const [backupConnections, setBackupConnections] = useState<StorageConnection[]>([]);
-  const [automaticBackupsEnabled, setAutomaticBackupsEnabled] = useState(false);
-  const [automaticBackupTimeUtc, setAutomaticBackupTimeUtc] = useState("02:00");
-  const [manualLocalBackupEnabled, setManualLocalBackupEnabled] = useState(true);
-  const [automaticLocalBackupEnabled, setAutomaticLocalBackupEnabled] = useState(true);
+  const backupRetentionBusy =
+    preferenceReview.phase === "saving" && preferenceReview.intent.kind === "backup-retention";
+  const [backupConnectionDrafts, setBackupConnectionDrafts] = useState<
+    Record<
+      number,
+      {
+        base: EditingBase;
+        changes: Partial<
+          Pick<StorageConnection, "manual_backup_enabled" | "automatic_backup_enabled">
+        >;
+      }
+    >
+  >({});
+  const backupConnections = !backupConnectionRead.isError
+    ? (backupConnectionRead.data ?? [])
+        .filter((connection) => connection.purpose === "backup" || connection.purpose === "both")
+        .map((connection) => ({ ...connection, ...backupConnectionDrafts[connection.id]?.changes }))
+    : [];
+  const backupPolicy = useBackupPolicyDraft(remoteConfigData);
+  const automaticBackupsEnabled = backupPolicy.values?.automatic_backups_enabled ?? false;
+  const automaticBackupTimeUtc = backupPolicy.values?.automatic_backup_time_utc ?? "02:00";
+  const manualLocalBackupEnabled = backupPolicy.values?.manual_local_backup_enabled ?? true;
+  const automaticLocalBackupEnabled = backupPolicy.values?.automatic_local_backup_enabled ?? true;
   const [backupPolicyBusy, setBackupPolicyBusy] = useState(false);
   const [restoreTarget, setRestoreTarget] = useState<BackupMeta | null>(null);
   const [deleteBackupTarget, setDeleteBackupTarget] = useState<BackupMeta | null>(null);
@@ -569,6 +758,35 @@ export function SettingsPanel() {
   const [printerImageWarningOpen, setPrinterImageWarningOpen] = useState(false);
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [restartBusy, setRestartBusy] = useState(false);
+  useEffect(() => {
+    accountLive.current = true;
+    const release = onAuthChange(() => {
+      setOwnedReceipt(null);
+      setAccessCollection(null);
+      setAccessPickerOpen(false);
+      setAccessUserId("");
+      setAccessRole("view");
+      setPrinterAccessUserId("");
+      setAccessPrinterId("");
+      setPrinterAccessRole("view");
+      setRestoreTarget(null);
+      setDeleteBackupTarget(null);
+      setAdoptTarget(null);
+      setAdoptS3Target(null);
+      setAdoptRemoteTarget(null);
+      setBackupRetentionDays(null);
+      setTrashRetentionDraft(null);
+      setBackupConnectionDrafts({});
+      setTrashPurgeResult(null);
+      setGcDigestConfirmation("");
+      setPurgeTarget(null);
+      setTrashBusy(null);
+    });
+    return () => {
+      accountLive.current = false;
+      release();
+    };
+  }, []);
   const visibleSettingsSections = SETTINGS_SECTIONS.filter(
     (section) =>
       !["sso", "maintenance", "work", "ai-search"].includes(section.id) || user?.is_superuser,
@@ -579,312 +797,174 @@ export function SettingsPanel() {
     if (section === "overview") params.delete("section");
     else params.set("section", section);
     const query = params.toString();
-    router.replace(query ? `/settings?${query}` : "/settings", { scroll: false });
+    router.replace(query ? `/settings?${query}` : "/settings");
   }
-
-  const refreshUsers = useCallback(async () => {
-    if (!user?.is_superuser) return;
-    setUsers(await listAdminUsers());
-  }, [user]);
-
-  const refreshCollectionAccess = useCallback(async () => {
-    if (!user?.is_superuser) return;
-    setAccessBusy("load");
-    try {
-      const rows = await listCollections();
-      const permissionGroups = await Promise.all(
-        rows.map((collection) => listCollectionPermissions(collection.id)),
-      );
-      setAccessCollections(rows);
-      setCollectionPermissions(permissionGroups.flat());
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setAccessBusy(null);
-    }
-  }, [user]);
-
-  const refreshPrinterAccess = useCallback(async () => {
-    if (!user?.is_superuser) return;
-    setPrinterAccessBusy("load");
-    try {
-      const printers = await listPrinters(undefined, { fresh: true });
-      const permissionGroups = await Promise.all(
-        printers.map((printer) => listPrinterPermissions(printer.id)),
-      );
-      setAccessPrinters(printers);
-      setPrinterPermissions(permissionGroups.flat());
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setPrinterAccessBusy(null);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (!user?.is_superuser) return;
-    getHealthDetails<HealthResponse>()
-      .then(setHealth)
-      .catch(() => {});
-  }, [user]);
 
   const storageHealth = storageHealthFrom(health);
 
-  const checkForUpdates = useCallback(
-    async (refresh = false) => {
-      if (!user?.is_superuser) return;
-      setReleaseChecking(true);
-      try {
-        setReleaseStatus(await getLatestRelease(refresh));
-      } catch {
-        setReleaseStatus(null);
-      } finally {
-        setReleaseChecking(false);
-      }
-    },
-    [user],
-  );
-
-  useEffect(() => {
-    // `checkForUpdates` awaits the release feed; the only synchronous write is the flag
-    // that says a request is in flight, which is what this effect exists to start.
-    // oxlint-disable-next-line react/set-state-in-effect -- the release itself arrives asynchronously
-    void checkForUpdates(false);
-  }, [checkForUpdates]);
-
-  useEffect(() => {
-    if (!user) return;
-    listApiKeys()
-      .then(setApiKeys)
-      .catch(() => {});
-    if (user.is_superuser) {
-      // Each refresher awaits its admin endpoint before writing results; the rule follows
-      // the call but not the `await` inside it, and reads the in-flight flags as cascades.
-      // oxlint-disable-next-line react/set-state-in-effect -- results are applied after the fetch resolves
-      refreshUsers().catch(() => {});
-      refreshCollectionAccess().catch(() => {});
-      refreshPrinterAccess().catch(() => {});
-    }
-  }, [user, refreshUsers, refreshCollectionAccess, refreshPrinterAccess]);
-
-  const loadTrash = useCallback(async () => {
-    if (!user) {
-      setTrashItems([]);
-      return;
-    }
-    setTrashLoading(true);
+  async function checkForUpdates(refresh = false) {
+    if (!user?.is_superuser || releaseRead.isFetching) return;
+    const session = getSessionVersion();
+    await client.cancelQueries({ queryKey: settingsSystemKeys.release, exact: true });
+    if (!accountCurrent(session)) return;
     try {
-      const [items, cfg, activePlan] = await Promise.all([
-        listTrash(),
-        getVaultConfig(),
-        user.is_superuser ? getActiveGcPlan() : Promise.resolve(null),
-      ]);
-      setTrashItems(items);
-      setTrashRetentionDays(cfg.trash_retention_days ?? 30);
-      setTrashStorageTier(cfg.storage_tier ?? "unguarded");
-      setTrashOperations(cfg.storage_operations);
-      setGcPlan(activePlan);
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setTrashLoading(false);
+      await client.fetchQuery({ ...settingsReleaseOptions(refresh), staleTime: 0 });
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
-  }, [user]);
+  }
 
-  useEffect(() => {
-    if (activeSection === "trash") {
-      // Opening the Trash section is what starts the listing fetch; `loadTrash` writes the
-      // items only after awaiting the API, and synchronously sets just its loading flag.
-      // oxlint-disable-next-line react/set-state-in-effect -- fetch-on-open of an external listing
-      loadTrash();
-    }
-  }, [activeSection, loadTrash]);
+  async function loadTrash() {
+    if (!user) return;
+    await Promise.all([trashRead.refetch(), ...(user.is_superuser ? [gcRead.refetch()] : [])]);
+  }
 
-  const loadBackups = useCallback(
-    async (preserve?: BackupMeta) => {
-      if (!user?.is_superuser) {
-        setBackups([]);
-        return;
-      }
-      setBackupsLoading(true);
-      try {
-        const [owned, unowned, unownedS3, unownedRemote, config, connections] =
-          await Promise.allSettled([
-            listBackupSources(),
-            listUnownedLocalBackups(),
-            listUnownedS3Backups(),
-            listUnownedRemoteBackups(),
-            getVaultConfig(),
-            listStorageConnections(),
-          ]);
-        if (owned.status === "rejected") throw owned.reason;
-        const refreshedBackups = owned.value;
-        setBackups(
-          preserve &&
-            !refreshedBackups.some((item) => backupSourceKey(item) === backupSourceKey(preserve))
-            ? [preserve, ...refreshedBackups]
-            : refreshedBackups,
-        );
-        // The discovery endpoint is additive. Older servers may return 404, in
-        // which case owned backups remain fully usable and the candidate panel
-        // simply stays empty.
-        setUnownedBackups(unowned.status === "fulfilled" ? unowned.value : []);
-        setUnownedS3Backups(unownedS3.status === "fulfilled" ? unownedS3.value : []);
-        setUnownedRemoteBackups(unownedRemote.status === "fulfilled" ? unownedRemote.value : []);
-        if (config.status === "fulfilled") {
-          setBackupRetentionDays(String(config.value.backup_retention_days ?? 30));
-          setAutomaticBackupsEnabled(config.value.automatic_backups_enabled ?? false);
-          setAutomaticBackupTimeUtc(config.value.automatic_backup_time_utc ?? "02:00");
-          setManualLocalBackupEnabled(config.value.manual_local_backup_enabled ?? true);
-          setAutomaticLocalBackupEnabled(config.value.automatic_local_backup_enabled ?? true);
-        }
-        setBackupConnections(
-          connections.status === "fulfilled"
-            ? connections.value.filter(
-                (connection) => connection.purpose === "backup" || connection.purpose === "both",
-              )
-            : [],
-        );
-      } catch (e) {
-        toast.error(e);
-      } finally {
-        setBackupsLoading(false);
-      }
-    },
-    [user],
-  );
+  async function loadBackups() {
+    if (!user?.is_superuser) return;
+    await Promise.all([
+      ownedBackupRead.refetch(),
+      localBackupRead.refetch(),
+      s3BackupRead.refetch(),
+      remoteBackupRead.refetch(),
+      remoteConfig.refetch(),
+      backupConnectionRead.refetch(),
+    ]);
+  }
 
   async function confirmAdoptBackup() {
     if (!adoptTarget) return;
     const target = adoptTarget;
+    const session = getSessionVersion();
     setAdoptingBackup(true);
     try {
-      await adoptLocalBackup(target.filename);
+      await backupCommand.run({ kind: "adopt-local", session, target });
+      if (!accountCurrent(session)) return;
       toast.success(t("settings.backupLegacyAdopted", { filename: target.filename }));
       setAdoptTarget(null);
-      await loadBackups();
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setAdoptingBackup(false);
+      if (accountCurrent(session)) setAdoptingBackup(false);
     }
   }
 
   async function confirmAdoptS3Backup() {
     if (!adoptS3Target) return;
     const target = adoptS3Target;
-    if (!target.source_ref || !target.archive_sha256) {
-      toast.error(t("settings.backupLegacySourceUnavailable"));
-      return;
-    }
+    const session = getSessionVersion();
     setAdoptingS3Backup(true);
     try {
-      await adoptS3Backup(target.key, target.source_ref, target.archive_sha256);
+      await backupCommand.run({ kind: "adopt-s3", session, target });
+      if (!accountCurrent(session)) return;
       toast.success(t("settings.backupLegacyAdopted", { filename: target.key }));
       setAdoptS3Target(null);
-      await loadBackups();
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setAdoptingS3Backup(false);
+      if (accountCurrent(session)) setAdoptingS3Backup(false);
     }
   }
 
   async function confirmAdoptRemoteBackup() {
     if (!adoptRemoteTarget) return;
     const target = adoptRemoteTarget;
-    if (!target.source_ref || !target.archive_sha256) {
-      toast.error(t("settings.backupLegacySourceUnavailable"));
-      return;
-    }
+    const session = getSessionVersion();
     setAdoptingRemoteBackup(true);
     try {
-      await adoptRemoteBackup(
-        target.connection_id,
-        target.key,
-        target.source_ref,
-        target.archive_sha256,
-      );
+      await backupCommand.run({ kind: "adopt-remote", session, target });
+      if (!accountCurrent(session)) return;
       toast.success(t("settings.backupLegacyAdopted", { filename: target.key }));
       setAdoptRemoteTarget(null);
-      await loadBackups();
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setAdoptingRemoteBackup(false);
+      if (accountCurrent(session)) setAdoptingRemoteBackup(false);
     }
   }
 
-  useEffect(() => {
-    if (activeSection === "backup") {
-      // Same shape as the trash listing above: opening Backup starts the listing fetch,
-      // and only the loading flag is written before the await.
-      // oxlint-disable-next-line react/set-state-in-effect -- fetch-on-open of an external listing
-      loadBackups();
-    }
-  }, [activeSection, loadBackups]);
-
-  useEffect(() => {
-    if (activeSection !== "design" || !user) return;
-    let cancelled = false;
-    getVaultConfig()
-      .then((cfg) => {
-        if (!cancelled) {
-          setAutoMarkKnownGood(cfg.auto_mark_known_good ?? true);
-          setCurrency(cfg.currency ?? "USD");
+  function settleRetention(intent: PreferenceIntent, receipt: VaultConfigRead) {
+    if (intent.kind !== "backup-retention" && intent.kind !== "trash-retention") return;
+    const setter =
+      intent.kind === "backup-retention" ? setBackupRetentionDays : setTrashRetentionDraft;
+    setter((current) =>
+      !current || current.text === intent.draft
+        ? null
+        : { ...current, base: captureEditingBase(receipt) },
+    );
+  }
+  function adoptPreference() {
+    const intent = preferenceCommand.intent;
+    if (intent?.kind === "backup-retention") setBackupRetentionDays(null);
+    if (intent?.kind === "trash-retention") setTrashRetentionDraft(null);
+    preferenceCommand.adopt();
+  }
+  async function recoverPreference(action: "review" | "retry") {
+    const session = getSessionVersion();
+    try {
+      if (action === "review") await preferenceCommand.review();
+      else {
+        let intent = preferenceCommand.intent;
+        if (!intent) return;
+        if (intent.kind === "backup-retention") {
+          if (parsedBackupRetentionDays === null) return;
+          intent = {
+            kind: "backup-retention",
+            value: parsedBackupRetentionDays,
+            draft: backupRetentionDays,
+          };
+        } else if (intent.kind === "trash-retention") {
+          if (parsedTrashRetentionDays === null) return;
+          intent = {
+            kind: "trash-retention",
+            value: parsedTrashRetentionDays,
+            draft: trashRetentionText,
+          };
         }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSection, user]);
-
-  useEffect(() => {
-    if (activeSection !== "previews" || !user?.is_superuser) return;
-    let cancelled = false;
-    getVaultConfig()
-      .then((cfg) => {
-        if (cancelled) return;
-        setModelThumbnailWidth(cfg.model_thumbnail_width);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [activeSection, user]);
-
+        const receipt = await preferenceCommand.retry(intent);
+        if (accountCurrent(session)) settleRetention(intent, receipt);
+      }
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
+    }
+  }
   async function saveAutoMarkKnownGood(next: boolean) {
-    setAutoMarkKnownGood(next);
-    setAutoMarkBusy(true);
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      backupPolicy.isPending ||
+      preferenceCommand.blocked
+    )
+      return;
+    const session = getSessionVersion();
     try {
-      await updateVaultConfig({ auto_mark_known_good: next });
-      toast.success(
-        next ? uiText("Auto-mark known good enabled.") : uiText("Auto-mark known good disabled."),
-      );
-    } catch (e) {
-      setAutoMarkKnownGood(!next);
-      toast.error(e);
-    } finally {
-      setAutoMarkBusy(false);
+      await preferenceCommand.run({ kind: "auto-mark", value: next }, remoteConfigData);
+      if (accountCurrent(session))
+        toast.success(
+          next ? uiText("Auto-mark known good enabled.") : uiText("Auto-mark known good disabled."),
+        );
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
   async function saveCurrency(next: string) {
-    const prev = currency;
-    setCurrency(next);
-    setCurrencyBusy(true);
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      backupPolicy.isPending ||
+      preferenceCommand.blocked
+    )
+      return;
+    const session = getSessionVersion();
     try {
-      await updateVaultConfig({ currency: next });
-      toast.success(uiText("Currency set to {value1}.", { value1: String(next) }));
-    } catch (e) {
-      setCurrency(prev);
-      toast.error(e);
-    } finally {
-      setCurrencyBusy(false);
+      await preferenceCommand.run({ kind: "currency", value: next }, remoteConfigData);
+      if (accountCurrent(session))
+        toast.success(uiText("Currency set to {value1}.", { value1: next }));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
   function savePreviewPreference(patch: Partial<PreviewPreferences>) {
     const next = { ...previewPreferences, ...patch };
     setPreviewPreferences(next);
@@ -893,20 +973,23 @@ export function SettingsPanel() {
   }
 
   async function saveModelThumbnailWidth(next: ModelThumbnailWidth) {
-    const previous = modelThumbnailWidth;
-    setModelThumbnailWidth(next);
-    setPreviewBusy("quality");
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      backupPolicy.isPending ||
+      preferenceCommand.blocked
+    )
+      return;
+    const session = getSessionVersion();
     try {
-      await updateVaultConfig({ model_thumbnail_width: next });
-      toast.success(uiText("Model image quality updated for new previews."));
-    } catch (e) {
-      setModelThumbnailWidth(previous);
-      toast.error(e);
-    } finally {
-      setPreviewBusy(null);
+      await preferenceCommand.run({ kind: "thumbnail-width", value: next }, remoteConfigData);
+      if (accountCurrent(session))
+        toast.success(uiText("Model image quality updated for new previews."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
   async function recreateModelImages() {
     setPreviewBusy("rebuild");
     try {
@@ -921,63 +1004,74 @@ export function SettingsPanel() {
   }
 
   async function handleBackupNow() {
+    const session = getSessionVersion();
     setBackingUp(true);
     try {
-      const accepted = await createBackup();
-      const job = await waitForImportJob(accepted.job_id, "Backup");
-      const meta = backupFromJob(job);
-      if (!meta) throw new Error(job.error ?? "backup_failed");
+      const receipt = await backupCommand.run({ kind: "create", session });
+      if (!accountCurrent(session)) return;
+      if (receipt.kind !== "saved") throw new Error("Expected a created backup receipt");
+      const meta = receipt.backup;
       const mb = formatNumber(meta.size_bytes / 1024 / 1024, {
         maximumFractionDigits: 1,
         minimumFractionDigits: 1,
       });
-      await loadBackups(meta);
-      if (meta.outcome === "partial") {
-        toast.warning(t("settings.backupPartialNotice"));
-      } else {
+      if (meta.outcome === "partial") toast.warning(t("settings.backupPartialNotice"));
+      else
         toast.success(
           uiText("Backup created — {value1} files, {value2} MB", {
             value1: String(meta.file_count),
-            value2: String(mb),
+            value2: mb,
           }),
         );
-      }
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setBackingUp(false);
-      setBackupRunRefresh((value) => value + 1);
+      if (accountCurrent(session)) setBackingUp(false);
     }
   }
 
   async function handleBackupUpload(file: File) {
+    const session = getSessionVersion();
     setUploadingBackup(true);
     try {
-      const meta = await uploadBackup(file);
-      setBackups((current) => [
-        meta,
-        ...current.filter((item) => backupSourceKey(item) !== backupSourceKey(meta)),
-      ]);
+      const receipt = await backupCommand.run({ kind: "upload", session, file });
+      if (!accountCurrent(session)) return;
+      if (receipt.kind !== "saved") throw new Error("Expected an uploaded backup receipt");
       toast.success(
-        uiText("Backup uploaded — {value1} files", { value1: String(meta.file_count) }),
+        uiText("Backup uploaded — {value1} files", { value1: String(receipt.backup.file_count) }),
       );
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setUploadingBackup(false);
+      if (accountCurrent(session)) setUploadingBackup(false);
     }
   }
 
   async function saveBackupRetention() {
-    if (parsedBackupRetentionDays === null) return;
-    setBackupRetentionBusy(true);
+    if (
+      parsedBackupRetentionDays === null ||
+      !remoteConfigData ||
+      backupConfigUnavailable ||
+      backupPolicy.isPending ||
+      preferenceCommand.blocked
+    )
+      return;
+    const session = getSessionVersion();
+    const intent: PreferenceIntent = {
+      kind: "backup-retention",
+      value: parsedBackupRetentionDays,
+      draft: backupRetentionDays,
+    };
     try {
-      await updateVaultConfig({ backup_retention_days: parsedBackupRetentionDays });
+      const receipt = await preferenceCommand.run(
+        intent,
+        backupRetentionDraft?.base ?? captureEditingBase(remoteConfigData),
+      );
+      if (!accountCurrent(session)) return;
+      settleRetention(intent, receipt);
       toast.success(t("settings.backupRetentionSaved"));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setBackupRetentionBusy(false);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
 
@@ -986,16 +1080,35 @@ export function SettingsPanel() {
     field: "manual_backup_enabled" | "automatic_backup_enabled",
     value: boolean,
   ) {
-    setBackupConnections((current) =>
-      current.map((connection) =>
-        connection.id === connectionId ? { ...connection, [field]: value } : connection,
-      ),
-    );
+    if (backupConnectionCommand.blocked) return;
+    const connection = backupConnectionRead.data?.find((row) => row.id === connectionId);
+    if (!connection) return;
+    backupPolicy.begin();
+    setBackupConnectionDrafts((current) => ({
+      ...current,
+      [connectionId]: {
+        base: current[connectionId]?.base ?? captureEditingBase(connection),
+        changes: { ...current[connectionId]?.changes, [field]: value },
+      },
+    }));
   }
 
-  async function saveBackupPolicy() {
+  async function saveBackupPolicy(revised = false) {
+    if (
+      !user?.is_superuser ||
+      backupConfigUnavailable ||
+      backupConnectionRead.isError ||
+      !backupConnectionRead.data ||
+      backupPolicy.isPending ||
+      backupConnectionCommand.isPending ||
+      backupConnectionCommand.blocked ||
+      (!revised && backupPolicy.blocked) ||
+      backupPolicyBusy
+    )
+      return;
+    const policy = backupPolicy.candidate(revised);
     const manualDestinationSelected =
-      manualLocalBackupEnabled ||
+      policy.manual_local_backup_enabled ||
       backupConnections.some(
         (connection) => connection.enabled && connection.manual_backup_enabled,
       );
@@ -1004,97 +1117,98 @@ export function SettingsPanel() {
       return;
     }
     const automaticDestinationSelected =
-      automaticLocalBackupEnabled ||
+      policy.automatic_local_backup_enabled ||
       backupConnections.some(
         (connection) => connection.enabled && connection.automatic_backup_enabled,
       );
-    if (automaticBackupsEnabled && !automaticDestinationSelected) {
+    if (policy.automatic_backups_enabled && !automaticDestinationSelected) {
       toast.error(t("settings.backupAutomaticDestinationRequired"));
       return;
     }
+    const session = getSessionVersion();
+    const sent = backupConnectionDrafts;
     setBackupPolicyBusy(true);
     try {
-      const [config, ...connections] = await Promise.all([
-        updateVaultConfig({
-          automatic_backups_enabled: automaticBackupsEnabled,
-          automatic_backup_time_utc: automaticBackupTimeUtc,
-          manual_local_backup_enabled: manualLocalBackupEnabled,
-          automatic_local_backup_enabled: automaticLocalBackupEnabled,
-        }),
-        ...backupConnections.map((connection) =>
-          updateStorageConnection(connection.id, {
-            manual_backup_enabled: connection.manual_backup_enabled,
-            automatic_backup_enabled: connection.automatic_backup_enabled,
-          }),
-        ),
-      ]);
-      setAutomaticBackupsEnabled(config.automatic_backups_enabled);
-      setAutomaticBackupTimeUtc(config.automatic_backup_time_utc);
-      setManualLocalBackupEnabled(config.manual_local_backup_enabled);
-      setAutomaticLocalBackupEnabled(config.automatic_local_backup_enabled);
-      setBackupConnections(connections);
+      // These are separate server transactions. Publish every acknowledged part
+      // through its owner before moving on; a later failure cannot undo it.
+      await backupPolicy.save(revised);
+      if (!accountCurrent(session)) return;
+      for (const connection of backupConnections) {
+        const changes = sent[connection.id];
+        if (!changes) continue;
+        await backupConnectionCommand.mutateAsync({
+          kind: "update",
+          session,
+          id: connection.id,
+          base: changes.base,
+          payload: changes.changes,
+        });
+        if (!accountCurrent(session)) return;
+        setBackupConnectionDrafts((current) => {
+          if (current[connection.id] !== sent[connection.id]) return current;
+          const next = { ...current };
+          delete next[connection.id];
+          return next;
+        });
+      }
       toast.success(t("settings.backupPolicySaved"));
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setBackupPolicyBusy(false);
+      if (accountCurrent(session)) setBackupPolicyBusy(false);
     }
   }
 
   async function confirmRestoreBackup() {
     if (!restoreTarget) return;
-    const target = restoreTarget;
+    const session = getSessionVersion();
     setRestoringBackup(true);
     try {
-      const result = await restoreBackup(target.backup_id, target.source_ref);
+      const receipt = await backupCommand.run({ kind: "restore", session, target: restoreTarget });
+      if (!accountCurrent(session)) return;
+      if (receipt.kind !== "restored") throw new Error("Expected a restored backup receipt");
       toast.success(
-        uiText("Backup restored — {value1} files", { value1: String(result.restored_files) }),
+        uiText("Backup restored — {value1} files", {
+          value1: String(receipt.result.restored_files),
+        }),
       );
       setRestoreTarget(null);
-      window.setTimeout(() => window.location.reload(), 800);
-    } catch (e) {
-      toast.error(e);
+      window.setTimeout(() => {
+        if (accountCurrent(session)) window.location.reload();
+      }, 800);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setRestoringBackup(false);
+      if (accountCurrent(session)) setRestoringBackup(false);
     }
   }
 
   async function handleDownloadBackup(backup: BackupMeta) {
-    const sourceRef = backupSourceKey(backup);
-    setDownloadingBackup(sourceRef);
+    const session = getSessionVersion();
+    setDownloadingBackup(backupSourceKey(backup));
     try {
-      await downloadBackup(backup.backup_id, backup.source_ref);
-      toast.success(uiText("Backup download started."));
-    } catch (e) {
-      toast.error(e);
+      await backupCommand.run({ kind: "download", session, target: backup });
+      if (accountCurrent(session)) toast.success(uiText("Backup download started."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setDownloadingBackup(null);
+      if (accountCurrent(session)) setDownloadingBackup(null);
     }
   }
 
   async function confirmDeleteBackup() {
     if (!deleteBackupTarget) return;
-    const target = deleteBackupTarget;
-    const sourceKey = backupSourceKey(target);
-    setDeletingBackup(sourceKey);
+    const session = getSessionVersion();
+    setDeletingBackup(backupSourceKey(deleteBackupTarget));
     try {
-      await deleteBackup(target.backup_id, target.source_ref);
-      setBackups((current) => current.filter((item) => backupSourceKey(item) !== sourceKey));
-      const deletedKey = target.key;
-      const deletedFilename = deletedKey?.split("/").at(-1);
-      setUnownedBackups((current) =>
-        current.filter((candidate) => candidate.filename !== deletedFilename),
-      );
-      setUnownedS3Backups((current) => current.filter((candidate) => candidate.key !== deletedKey));
-      setUnownedRemoteBackups((current) =>
-        current.filter((candidate) => candidate.key !== deletedKey),
-      );
+      await backupCommand.run({ kind: "delete", session, target: deleteBackupTarget });
+      if (!accountCurrent(session)) return;
       setDeleteBackupTarget(null);
       toast.success(t("settings.backupDeleteSuccess"));
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setDeletingBackup(null);
+      if (accountCurrent(session)) setDeletingBackup(null);
     }
   }
 
@@ -1136,47 +1250,61 @@ export function SettingsPanel() {
     }
   }
 
-  async function generateApiKey() {
-    setKeyBusy(true);
+  async function issueApiKey(extension: boolean) {
+    if (!user || keyBusy || receipt || apiKeysQuery.isError || apiKeysQuery.isPending) return;
+    const session = getSessionVersion();
+    const username = user.username;
+    let handoffPrepared = false;
     try {
-      const created = await createApiKey(keyName.trim() || "Programmatic access");
-      setNewApiKey(created.api_key);
-      setApiKeys((current) => [created, ...current]);
-      toast.success(uiText("API key created. Copy it now; it will not be shown again."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setKeyBusy(false);
+      await keyCommand.mutateAsync({
+        kind: "create",
+        userId: user.id,
+        session,
+        name: extension ? "Browser extension" : keyName.trim() || "Programmatic access",
+        receiveReceipt: (result) => {
+          if (!accountCurrent(session)) return;
+          setOwnedReceipt({ ...result, handoff: null });
+          if (extension) {
+            try {
+              const handoff = prepareBrowserExtensionSetup(
+                window.location.origin,
+                username,
+                result.secret,
+              );
+              handoffPrepared = true;
+              setOwnedReceipt({ ...result, handoff });
+            } catch {
+              toast.error(t("settings.accountHandoffFailed"));
+            }
+          }
+        },
+      });
+      if (!accountCurrent(session)) return;
+      toast.success(
+        handoffPrepared
+          ? uiText("Extension setup prepared. Open the browser extension on this tab.")
+          : uiText("API key created. Copy it now; it will not be shown again."),
+      );
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
-  async function setupBrowserExtension() {
-    if (!user) return;
-    setKeyBusy(true);
-    try {
-      const created = await createApiKey("Browser extension");
-      setNewApiKey(created.api_key);
-      setApiKeys((current) => [created, ...current]);
-      prepareBrowserExtensionSetup(window.location.origin, user.username, created.api_key);
-      setExtensionSetupReady(true);
-      toast.success(uiText("Extension setup prepared. Open the browser extension on this tab."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setKeyBusy(false);
-    }
+  function generateApiKey() {
+    return issueApiKey(false);
   }
-
+  function setupBrowserExtension() {
+    return issueApiKey(true);
+  }
   async function deleteApiKey(id: number) {
-    setKeyBusy(true);
+    if (!user || keyBusy || apiKeysQuery.isError || apiKeysQuery.isPending) return;
+    const session = getSessionVersion();
     try {
-      await revokeApiKey(id);
-      setApiKeys((current) => current.filter((key) => key.id !== id));
+      await keyCommand.mutateAsync({ kind: "revoke", id, userId: user.id, session });
+      if (!accountCurrent(session)) return;
+      if (receipt?.keyId === id) dismissReceipt();
       toast.success(uiText("API key revoked."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setKeyBusy(false);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
 
@@ -1204,134 +1332,179 @@ export function SettingsPanel() {
   }
 
   async function saveCollectionAccess() {
-    if (!accessUserId || !accessCollectionId) return;
-    setAccessBusy("save");
+    if (
+      !user?.is_superuser ||
+      usersQuery.isError ||
+      usersQuery.isPending ||
+      collectionPermissionsQuery.isError ||
+      collectionPermissionsQuery.isPending ||
+      accessBusy !== null ||
+      !accessUserId ||
+      !accessCollection
+    )
+      return;
+    const session = getSessionVersion();
     try {
-      await updateCollectionPermission(Number(accessCollectionId), Number(accessUserId), {
+      await collectionCommand.mutateAsync({
+        kind: "grant",
+        actorId: user.id,
+        session,
+        collectionId: accessCollection.id,
+        targetUserId: accessUserId,
         role: accessRole,
       });
-      await refreshCollectionAccess();
-      toast.success(uiText("Collection access saved."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setAccessBusy(null);
+      if (accountCurrent(session)) toast.success(uiText("Collection access saved."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
-  async function removeCollectionAccess(collectionId: number, userId: number) {
-    setAccessBusy(`${collectionId}:${userId}`);
+  async function removeCollectionAccess(collectionId: number, targetUserId: number) {
+    if (
+      !user?.is_superuser ||
+      usersQuery.isError ||
+      usersQuery.isPending ||
+      collectionPermissionsQuery.isError ||
+      collectionPermissionsQuery.isPending ||
+      accessBusy !== null
+    )
+      return;
+    const session = getSessionVersion();
     try {
-      await deleteCollectionPermission(collectionId, userId);
-      setCollectionPermissions((current) =>
-        current.filter((row) => row.collection_id !== collectionId || row.user_id !== userId),
-      );
-      toast.success(uiText("Collection access removed."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setAccessBusy(null);
+      await collectionCommand.mutateAsync({
+        kind: "revoke",
+        actorId: user.id,
+        session,
+        collectionId,
+        targetUserId,
+      });
+      if (accountCurrent(session)) toast.success(uiText("Collection access removed."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
   async function savePrinterAccess() {
-    if (!printerAccessUserId || !accessPrinterId) return;
-    setPrinterAccessBusy("save");
+    if (
+      !user?.is_superuser ||
+      usersQuery.isError ||
+      usersQuery.isPending ||
+      accessPrintersQuery.isError ||
+      selectedPrinterRead?.isError ||
+      !selectedPrinterRead?.isSuccess ||
+      printerAccessBusy !== null ||
+      !printerAccessUserId ||
+      !accessPrinterId
+    )
+      return;
+    const session = getSessionVersion();
     try {
-      await updatePrinterPermission(
-        Number(accessPrinterId),
-        Number(printerAccessUserId),
-        printerAccessRole,
-      );
-      await refreshPrinterAccess();
-      toast.success(uiText("Printer access saved."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setPrinterAccessBusy(null);
+      await printerCommand.mutateAsync({
+        kind: "grant",
+        actorId: user.id,
+        session,
+        printerId: accessPrinterId,
+        targetUserId: printerAccessUserId,
+        role: printerAccessRole,
+      });
+      if (accountCurrent(session)) toast.success(uiText("Printer access saved."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
-  async function removePrinterAccess(printerId: number, userId: number) {
-    setPrinterAccessBusy(`${printerId}:${userId}`);
+  async function removePrinterAccess(printerId: number, targetUserId: number) {
+    const read = printerAccess.find(({ printer }) => printer.id === printerId)?.query;
+    if (
+      !user?.is_superuser ||
+      usersQuery.isError ||
+      usersQuery.isPending ||
+      accessPrintersQuery.isError ||
+      read?.isError ||
+      !read?.isSuccess ||
+      printerAccessBusy !== null
+    )
+      return;
+    const session = getSessionVersion();
     try {
-      await deletePrinterPermission(printerId, userId);
-      setPrinterPermissions((current) =>
-        current.filter((row) => row.printer_id !== printerId || row.user_id !== userId),
-      );
-      toast.success(uiText("Printer access removed."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setPrinterAccessBusy(null);
+      await printerCommand.mutateAsync({
+        kind: "revoke",
+        actorId: user.id,
+        session,
+        printerId,
+        targetUserId,
+      });
+      if (accountCurrent(session)) toast.success(uiText("Printer access removed."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
+  }
+  async function refreshPrinterAccess() {
+    const session = getSessionVersion();
+    await accessPrintersQuery.refetch();
+    if (!accountCurrent(session)) return;
+    await Promise.all(printerAccess.map(({ query }) => query.refetch()));
   }
 
   async function createUser() {
-    const username = newUsername.trim();
-    const password = newUserPassword.trim();
-    if (!username || !password) return;
-    setUsersBusy("create");
+    if (!user?.is_superuser || usersBusy !== null || usersQuery.isError || usersQuery.isPending)
+      return;
+    const captured = createUserDraft;
+    const username = captured.username.trim();
+    const password = captured.password.trim();
+    if (!username || password.length < 8) return;
+    const session = getSessionVersion();
     try {
-      await createAdminUser({
-        username,
-        password,
-        email: newUserEmail.trim() || null,
+      await userCommand.mutateAsync({
+        kind: "create",
+        userId: user.id,
+        session,
+        payload: { username, password, email: captured.email.trim() || null },
       });
-      setNewUsername("");
-      setNewUserEmail("");
-      setNewUserPassword("");
-      await refreshUsers();
+      if (!accountCurrent(session)) return;
+      setCreateUserDraft((current) =>
+        current === captured ? { username: "", email: "", password: "" } : current,
+      );
       toast.success(uiText("User created."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setUsersBusy(null);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
-  async function patchUser(id: number, payload: Partial<UserRead>) {
-    setUsersBusy(id);
+  async function patchUser(id: number, payload: UserUpdate) {
+    if (!user?.is_superuser || usersBusy !== null || usersQuery.isError || usersQuery.isPending)
+      return;
+    const session = getSessionVersion();
     try {
-      await updateAdminUser(id, {
-        email: payload.email,
-        is_active: payload.is_active,
-        is_superuser: payload.is_superuser,
-      });
-      await refreshUsers();
-      toast.success(uiText("User updated."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setUsersBusy(null);
+      await userCommand.mutateAsync({ kind: "update", id, payload, userId: user.id, session });
+      if (accountCurrent(session)) toast.success(uiText("User updated."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
   async function resetUserPassword(id: number) {
-    const password = passwordDrafts[id]?.trim();
-    if (!password) return;
-    setUsersBusy(id);
+    if (!user?.is_superuser || usersBusy !== null || usersQuery.isError || usersQuery.isPending)
+      return;
+    const captured = passwordDrafts[id];
+    const password = captured?.trim();
+    if (!password || password.length < 8) return;
+    const session = getSessionVersion();
     try {
-      await resetAdminUserPassword(id, { password });
-      setPasswordDrafts((current) => ({ ...current, [id]: "" }));
+      await userCommand.mutateAsync({ kind: "password", id, password, userId: user.id, session });
+      if (!accountCurrent(session)) return;
+      setPasswordDrafts((current) =>
+        current[id] === captured ? { ...current, [id]: "" } : current,
+      );
       toast.success(uiText("Password reset."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setUsersBusy(null);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
-
   async function deactivateUser(id: number) {
-    setUsersBusy(id);
+    if (!user?.is_superuser || usersBusy !== null || usersQuery.isError || usersQuery.isPending)
+      return;
+    const session = getSessionVersion();
     try {
-      await deactivateAdminUser(id);
-      await refreshUsers();
-      toast.success(uiText("User deactivated."));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setUsersBusy(null);
+      await userCommand.mutateAsync({ kind: "deactivate", id, userId: user.id, session });
+      if (accountCurrent(session)) toast.success(uiText("User deactivated."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
 
@@ -1403,132 +1576,153 @@ export function SettingsPanel() {
   }
 
   async function saveTrashRetention() {
-    setTrashBusy("settings");
+    if (
+      !user?.is_superuser ||
+      !remoteConfigData ||
+      remoteConfig.isError ||
+      parsedTrashRetentionDays === null ||
+      preferenceCommand.blocked ||
+      backupPolicy.isPending
+    )
+      return;
+    const session = getSessionVersion();
+    const intent: PreferenceIntent = {
+      kind: "trash-retention",
+      value: parsedTrashRetentionDays,
+      draft: trashRetentionText,
+    };
     try {
-      await updateVaultConfig({ trash_retention_days: Math.max(-1, trashRetentionDays) });
+      const receipt = await preferenceCommand.run(
+        intent,
+        trashRetentionDraft?.base ?? captureEditingBase(remoteConfigData),
+      );
+      if (!accountCurrent(session)) return;
+      settleRetention(intent, receipt);
       toast.success(uiText("Trash retention updated."));
-      await loadTrash();
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setTrashBusy(null);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     }
   }
 
   async function restoreTrashItem(id: number) {
+    const target = trashItems.find((item) => item.id === id);
+    if (!target || trashRead.isError || trashBusy !== null) return;
+    const session = getSessionVersion();
     setTrashBusy(id);
     try {
-      await restoreModel(id);
-      setTrashItems((current) => current.filter((item) => item.id !== id));
-      toast.success(uiText("Model restored."));
-    } catch (e) {
-      toast.error(e);
+      await trashCommand.run({ kind: "restore", target, session });
+      if (accountCurrent(session)) toast.success(uiText("Model restored."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
-  async function purgeTrashItem(id: number) {
-    setPurgeTarget(id);
+  function purgeTrashItem(id: number) {
+    const target = trashItems.find((item) => item.id === id);
+    if (target && !trashRead.isError) setPurgeTarget(target);
   }
 
   async function confirmPurge() {
-    if (purgeTarget === null) return;
-    const id = purgeTarget;
+    if (!purgeTarget || trashRead.isError || trashBusy !== null) return;
+    const target = purgeTarget;
+    const session = getSessionVersion();
     setPurgeTarget(null);
-    setTrashBusy(id);
+    setTrashBusy(target.id);
     try {
-      const result = await purgeModel(
-        id,
-        trashOperations?.catalog_purge.confirmation_required ?? trashStorageTier !== "verified",
-      );
-      setTrashItems((current) => current.filter((item) => item.id !== id));
-      setTrashPurgeResult(result);
-      if (result.storage_cleanup_status === "completed") {
-        toast.success(cleanupStatusMessage(t, result));
-      } else {
-        toast.warning(cleanupStatusMessage(t, result));
-      }
-    } catch (e) {
-      toast.error(e);
+      const receipt = await trashCommand.run({
+        kind: "purge",
+        target,
+        session,
+        confirmStorageRisk:
+          trashOperations?.catalog_purge.confirmation_required ?? trashStorageTier !== "verified",
+      });
+      if (!accountCurrent(session)) return;
+      if (receipt.kind !== "purged") throw new Error("Expected a purge receipt");
+      setTrashPurgeResult(receipt.result);
+      if (receipt.result.storage_cleanup_status === "completed")
+        toast.success(cleanupStatusMessage(t, receipt.result));
+      else toast.warning(cleanupStatusMessage(t, receipt.result));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
   async function createExpiredGcPreview() {
+    if (!user?.is_superuser || gcRead.isError || gcRead.isPending || trashBusy !== null) return;
+    const session = getSessionVersion();
     setPurgeExpiredOpen(false);
     setTrashBusy("gc");
     try {
-      const plan = await createGcPlan();
-      setGcPlan(plan);
+      const receipt = await trashCommand.run({ kind: "preview", session });
+      if (!accountCurrent(session)) return;
+      if (receipt.kind !== "plan") throw new Error("Expected a GC plan receipt");
       setGcDigestConfirmation("");
       toast.success(
         uiText("gc.previewCreated", {
-          value1: String(plan.resource_count),
-          count: Number(plan.resource_count),
+          value1: String(receipt.plan.resource_count),
+          count: receipt.plan.resource_count,
         }),
       );
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 409 && e.code === "gc_plan_active") {
-        try {
-          const activePlan = await getActiveGcPlan();
-          if (activePlan === null) throw e;
-          setGcPlan(activePlan);
-          setGcDigestConfirmation("");
-        } catch (readError) {
-          toast.error(readError);
-        }
-      } else {
-        toast.error(e);
-      }
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
   async function approveExpiredGcPlan() {
-    if (!gcPlan) return;
+    if (!gcPlan || gcRead.isError || trashBusy !== null) return;
+    const session = getSessionVersion();
     setTrashBusy("gc");
     try {
-      const approved = await approveGcPlan(gcPlan.id, gcDigestConfirmation);
-      setGcPlan(approved);
+      await trashCommand.run({
+        kind: "approve",
+        plan: gcPlan,
+        digest: gcDigestConfirmation,
+        session,
+      });
+      if (!accountCurrent(session)) return;
       setGcDigestConfirmation("");
       toast.success(uiText("Backup verified. The plan is now in its recovery quarantine."));
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
   async function abortExpiredGcPlan() {
-    if (!gcPlan) return;
+    if (!gcPlan || gcRead.isError || trashBusy !== null) return;
+    const session = getSessionVersion();
     setTrashBusy("gc");
     try {
-      const aborted = await abortGcPlan(gcPlan.id);
-      setGcPlan(aborted);
+      await trashCommand.run({ kind: "abort", plan: gcPlan, session });
+      if (!accountCurrent(session)) return;
       setGcDigestConfirmation("");
       toast.success(uiText("GC plan aborted. Every candidate remains in the trash."));
-    } catch (e) {
-      toast.error(e);
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
   async function finalizeExpiredGcPlan() {
-    if (!gcPlan) return;
+    if (!gcPlan || gcRead.isError || trashBusy !== null) return;
+    const session = getSessionVersion();
     setTrashBusy("gc");
     try {
-      const finalized = await finalizeGcPlan(gcPlan.id);
-      setGcPlan(finalized);
-      toast.success(uiText("GC plan finalized after all safety evidence was reverified."));
-      await loadTrash();
-    } catch (e) {
-      toast.error(e);
+      await trashCommand.run({ kind: "finalize", plan: gcPlan, session });
+      if (accountCurrent(session))
+        toast.success(uiText("GC plan finalized after all safety evidence was reverified."));
+    } catch (error) {
+      if (accountCurrent(session)) toast.error(error);
     } finally {
-      setTrashBusy(null);
+      if (accountCurrent(session)) setTrashBusy(null);
     }
   }
 
@@ -1638,13 +1832,6 @@ export function SettingsPanel() {
   const selectedUserPermissions = accessUserId
     ? collectionPermissions.filter((row) => row.user_id === Number(accessUserId))
     : [];
-  const collectionById = new Map(accessCollections.map((row) => [row.id, row]));
-  const selectedUserGrantedCollectionIds = new Set(
-    selectedUserPermissions.map((row) => row.collection_id),
-  );
-  const grantableCollections = accessCollections.filter(
-    (row) => !selectedUserGrantedCollectionIds.has(row.id),
-  );
   const selectedPrinterPermissions = printerAccessUserId
     ? printerPermissions.filter((row) => row.user_id === Number(printerAccessUserId))
     : [];
@@ -1703,7 +1890,7 @@ export function SettingsPanel() {
           confirmLabel={uiText("Create preview")}
         />
         <ConfirmModal
-          open={restoreTarget !== null}
+          open={restoreTarget !== null && !backupsDenied && !!user?.is_superuser}
           onClose={() => setRestoreTarget(null)}
           onConfirm={confirmRestoreBackup}
           busy={restoringBackup}
@@ -1716,7 +1903,7 @@ export function SettingsPanel() {
           confirmLabel={uiText("Restore")}
         />
         <ConfirmModal
-          open={deleteBackupTarget !== null}
+          open={deleteBackupTarget !== null && !backupsDenied && !!user?.is_superuser}
           onClose={() => {
             if (deletingBackup === null) setDeleteBackupTarget(null);
           }}
@@ -1857,6 +2044,79 @@ export function SettingsPanel() {
           </nav>
 
           <main className="min-w-0">
+            {user?.is_superuser &&
+              !configDenied &&
+              preferenceReview.phase !== "idle" &&
+              preferenceReview.phase !== "saving" && (
+                <div
+                  role="alert"
+                  className="mb-6 space-y-3 rounded-lg border border-border p-4 text-sm"
+                >
+                  <p>
+                    {uiText(
+                      preferenceReview.problem === "conflict"
+                        ? "library.editConflict"
+                        : "library.saveUnconfirmed",
+                    )}
+                  </p>
+                  <p>{preferenceLabel(preferenceReview.intent)}</p>
+                  <Button
+                    variant="outline"
+                    disabled={preferenceReview.phase === "loading"}
+                    onClick={() => void recoverPreference("review")}
+                  >
+                    {uiText("library.reviewLatest")}
+                  </Button>
+                  {preferenceReview.phase === "ready" && (
+                    <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+                      <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
+                      <p>
+                        {String(
+                          savedPreference(preferenceReview.snapshot, preferenceReview.intent),
+                        )}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="outline"
+                          disabled={remoteConfig.isError}
+                          onClick={adoptPreference}
+                        >
+                          {uiText("library.useLatest")}
+                        </Button>
+                        <Button
+                          disabled={
+                            remoteConfig.isError ||
+                            (preferenceReview.intent.kind === "backup-retention" &&
+                              parsedBackupRetentionDays === null) ||
+                            (preferenceReview.intent.kind === "trash-retention" &&
+                              parsedTrashRetentionDays === null)
+                          }
+                          onClick={() => void recoverPreference("retry")}
+                        >
+                          {uiText("library.retryDraft")}
+                        </Button>
+                      </div>
+                    </section>
+                  )}
+                </div>
+              )}
+
+            {user?.is_superuser && healthRead.isError && (
+              <div role="alert" className="flex items-center gap-2 text-sm">
+                <p>{uiText("settings.healthLoadFailed")}</p>
+                <Button variant="outline" onClick={() => void healthRead.refetch()}>
+                  {uiText("Retry health check")}
+                </Button>
+              </div>
+            )}
+            {user?.is_superuser && releaseRead.isError && (
+              <div role="alert" className="flex items-center gap-2 text-sm">
+                <p>{uiText("settings.releaseLoadFailed")}</p>
+                <Button variant="outline" onClick={() => void checkForUpdates(true)}>
+                  {uiText("Retry update check")}
+                </Button>
+              </div>
+            )}
             {releaseStatus?.update_available && releaseStatus.latest_version && (
               <div
                 role="status"
@@ -2083,7 +2343,12 @@ export function SettingsPanel() {
                           <input
                             id="new-user-username"
                             value={newUsername}
-                            onChange={(event) => setNewUsername(event.target.value)}
+                            onChange={(event) =>
+                              setCreateUserDraft((current) => ({
+                                ...current,
+                                username: event.target.value,
+                              }))
+                            }
                             className={INPUT}
                             maxLength={128}
                             autoComplete="username"
@@ -2096,7 +2361,12 @@ export function SettingsPanel() {
                           <input
                             id="new-user-email"
                             value={newUserEmail}
-                            onChange={(event) => setNewUserEmail(event.target.value)}
+                            onChange={(event) =>
+                              setCreateUserDraft((current) => ({
+                                ...current,
+                                email: event.target.value,
+                              }))
+                            }
                             className={INPUT}
                             type="email"
                             maxLength={255}
@@ -2110,7 +2380,12 @@ export function SettingsPanel() {
                           <input
                             id="new-user-password"
                             value={newUserPassword}
-                            onChange={(event) => setNewUserPassword(event.target.value)}
+                            onChange={(event) =>
+                              setCreateUserDraft((current) => ({
+                                ...current,
+                                password: event.target.value,
+                              }))
+                            }
                             className={INPUT}
                             type="password"
                             minLength={8}
@@ -2123,7 +2398,9 @@ export function SettingsPanel() {
                           type="button"
                           onClick={createUser}
                           disabled={
-                            usersBusy === "create" ||
+                            usersBusy !== null ||
+                            usersQuery.isError ||
+                            usersQuery.isPending ||
                             !newUsername.trim() ||
                             newUserPassword.trim().length < 8
                           }
@@ -2138,12 +2415,28 @@ export function SettingsPanel() {
                       </p>
 
                       <div className="space-y-2">
-                        {users.length === 0 ? (
+                        {usersQuery.isError && (
+                          <div role="alert" className="flex items-center gap-2 text-sm">
+                            <p>{t("settings.accountUsersFailed")}</p>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => void usersQuery.refetch()}
+                            >
+                              {t("Retry")}
+                            </Button>
+                          </div>
+                        )}
+                        {usersQuery.isPending ? (
+                          <p role="status">{t("Loading…")}</p>
+                        ) : usersQuery.isError && users.length === 0 ? null : users.length === 0 ? (
                           <p className="text-sm text-muted-foreground">{uiText("No users.")}</p>
                         ) : (
                           users.map((row) => (
                             <div
                               key={row.id}
+                              role="group"
+                              aria-label={`${uiText("User")}: ${row.username}`}
                               className="rounded border border-border p-3 space-y-3"
                             >
                               <div className="flex flex-col gap-3 md:flex-row md:items-center">
@@ -2173,7 +2466,11 @@ export function SettingsPanel() {
                                 <div className="flex flex-wrap gap-2">
                                   <button
                                     type="button"
-                                    disabled={usersBusy === row.id}
+                                    disabled={
+                                      usersBusy !== null ||
+                                      usersQuery.isError ||
+                                      usersQuery.isPending
+                                    }
                                     onClick={() =>
                                       patchUser(row.id, { is_superuser: !row.is_superuser })
                                     }
@@ -2185,7 +2482,11 @@ export function SettingsPanel() {
                                   </button>
                                   <button
                                     type="button"
-                                    disabled={usersBusy === row.id}
+                                    disabled={
+                                      usersBusy !== null ||
+                                      usersQuery.isError ||
+                                      usersQuery.isPending
+                                    }
                                     onClick={() =>
                                       row.is_active
                                         ? deactivateUser(row.id)
@@ -2214,7 +2515,9 @@ export function SettingsPanel() {
                                   type="button"
                                   onClick={() => resetUserPassword(row.id)}
                                   disabled={
-                                    usersBusy === row.id ||
+                                    usersBusy !== null ||
+                                    usersQuery.isError ||
+                                    usersQuery.isPending ||
                                     (passwordDrafts[row.id]?.trim().length ?? 0) < 8
                                   }
                                   className={BTN_SECONDARY}
@@ -2240,13 +2543,13 @@ export function SettingsPanel() {
                     action={
                       <button
                         type="button"
-                        onClick={refreshCollectionAccess}
-                        disabled={accessBusy === "load"}
+                        onClick={() => void collectionPermissionsQuery.refetch()}
+                        disabled={!accessCollection || collectionPermissionsQuery.isFetching}
                         className={BTN_ICON}
                         title={uiText("Refresh collection access")}
                       >
                         <RefreshCw
-                          className={`h-4 w-4 ${accessBusy === "load" ? "animate-spin" : ""}`}
+                          className={`h-4 w-4 ${collectionPermissionsQuery.isFetching ? "animate-spin" : ""}`}
                         />
                       </button>
                     }
@@ -2259,12 +2562,11 @@ export function SettingsPanel() {
                           </span>
                           <select
                             value={accessUserId}
+                            disabled={usersQuery.isError || usersQuery.isPending}
                             onChange={(event) => {
                               setAccessUserId(event.target.value ? Number(event.target.value) : "");
-                              setAccessCollectionId("");
                             }}
                             className={INPUT}
-                            disabled={accessBusy === "load"}
                           >
                             <option value="">{uiText("Select user")}</option>
                             {nonSuperUsers.map((row) => (
@@ -2274,28 +2576,40 @@ export function SettingsPanel() {
                             ))}
                           </select>
                         </label>
-                        <label className="block space-y-1">
+                        <div className="block space-y-1">
                           <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                             {uiText("Collection")}
                           </span>
-                          <select
-                            value={accessCollectionId}
-                            onChange={(event) =>
-                              setAccessCollectionId(
-                                event.target.value ? Number(event.target.value) : "",
-                              )
+                          <DropdownMenu
+                            open={accessPickerOpen}
+                            onOpenChange={setAccessPickerOpen}
+                            role="dialog"
+                            align="start"
+                            contentClassName="w-80 max-w-[90vw] p-2"
+                            trigger={
+                              <button
+                                type="button"
+                                data-menu-trigger
+                                onClick={() => setAccessPickerOpen((open) => !open)}
+                                aria-haspopup="dialog"
+                                aria-expanded={accessPickerOpen}
+                                className={`${INPUT} w-full text-left`}
+                              >
+                                {accessCollection?.display_path ?? uiText("Select collection")}
+                              </button>
                             }
-                            className={INPUT}
-                            disabled={!accessUserId || accessBusy === "load"}
                           >
-                            <option value="">{uiText("Select collection")}</option>
-                            {grantableCollections.map((row) => (
-                              <option key={row.id} value={row.id}>
-                                {collectionDisplayPath(grantableCollections, row.path)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                            <CollectionPicker
+                              minRole="view"
+                              selectedPath={accessCollection?.path ?? null}
+                              emptyLabel={uiText("No collections found.")}
+                              onSelect={(collection) => {
+                                setAccessCollection(collection);
+                                setAccessPickerOpen(false);
+                              }}
+                            />
+                          </DropdownMenu>
+                        </div>
                         <label className="block space-y-1">
                           <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                             {uiText("Role")}
@@ -2306,7 +2620,12 @@ export function SettingsPanel() {
                               setAccessRole(selectedOption(COLLECTION_ROLES, event.target.value))
                             }
                             className={INPUT}
-                            disabled={!accessUserId || !accessCollectionId || accessBusy === "load"}
+                            disabled={
+                              usersQuery.isError ||
+                              usersQuery.isPending ||
+                              !accessUserId ||
+                              !accessCollection
+                            }
                           >
                             <option value="view">{uiText("View")}</option>
                             <option value="edit">{uiText("Edit")}</option>
@@ -2316,7 +2635,15 @@ export function SettingsPanel() {
                         <button
                           type="button"
                           onClick={saveCollectionAccess}
-                          disabled={!accessUserId || !accessCollectionId || accessBusy === "save"}
+                          disabled={
+                            usersQuery.isError ||
+                            usersQuery.isPending ||
+                            !accessUserId ||
+                            !accessCollection ||
+                            accessBusy !== null ||
+                            collectionPermissionsQuery.isPending ||
+                            collectionPermissionsQuery.isError
+                          }
                           className={`${BTN_PRIMARY} self-end`}
                         >
                           {accessBusy === "save" ? (
@@ -2334,7 +2661,26 @@ export function SettingsPanel() {
                           <span>{uiText("Role")}</span>
                           <span>{uiText("Remove")}</span>
                         </div>
-                        {!accessUserId ? (
+                        {!accessCollection ? (
+                          <p className="px-3 py-4 text-sm text-muted-foreground">
+                            {uiText("Select a collection to review grants.")}
+                          </p>
+                        ) : collectionPermissionsQuery.isError ? (
+                          <div role="alert" className="flex items-center gap-2 px-3 py-4 text-sm">
+                            <span>{uiText("Collection access could not be loaded.")}</span>
+                            <Button
+                              size="xs"
+                              variant="outline"
+                              onClick={() => void collectionPermissionsQuery.refetch()}
+                            >
+                              {uiText("Retry")}
+                            </Button>
+                          </div>
+                        ) : collectionPermissionsQuery.isPending ? (
+                          <p role="status" className="px-3 py-4 text-sm text-muted-foreground">
+                            {uiText("Loading…")}
+                          </p>
+                        ) : !accessUserId ? (
                           <p className="px-3 py-4 text-sm text-muted-foreground">
                             {uiText("Select a user to review collection grants.")}
                           </p>
@@ -2345,7 +2691,6 @@ export function SettingsPanel() {
                           </p>
                         ) : (
                           selectedUserPermissions.map((row) => {
-                            const collection = collectionById.get(row.collection_id);
                             const busyKey = `${row.collection_id}:${row.user_id}`;
                             return (
                               <div
@@ -2354,13 +2699,13 @@ export function SettingsPanel() {
                               >
                                 <div className="min-w-0">
                                   <p className="truncate text-sm text-foreground">
-                                    {collection?.path ??
+                                    {accessCollection?.display_path ??
                                       uiText("Collection #{value1}", {
                                         value1: String(row.collection_id),
                                       })}
                                   </p>
                                   <p className="text-xs text-muted-foreground">
-                                    {collection?.model_count ?? 0}
+                                    {accessCollection?.model_count ?? 0}
                                     {uiText(" models")}
                                   </p>
                                 </div>
@@ -2372,7 +2717,13 @@ export function SettingsPanel() {
                                   onClick={() =>
                                     removeCollectionAccess(row.collection_id, row.user_id)
                                   }
-                                  disabled={accessBusy === busyKey}
+                                  disabled={
+                                    usersQuery.isError ||
+                                    usersQuery.isPending ||
+                                    accessBusy !== null ||
+                                    collectionPermissionsQuery.isError ||
+                                    collectionPermissionsQuery.isPending
+                                  }
                                   className="rounded p-1 text-red-600 hover:bg-red-500/10 disabled:opacity-50"
                                   title={uiText("Remove collection access")}
                                 >
@@ -2401,13 +2752,16 @@ export function SettingsPanel() {
                     action={
                       <button
                         type="button"
-                        onClick={refreshPrinterAccess}
-                        disabled={printerAccessBusy === "load"}
+                        onClick={() => void refreshPrinterAccess()}
+                        disabled={
+                          accessPrintersQuery.isFetching ||
+                          printerAccess.some(({ query }) => query.isFetching)
+                        }
                         className={BTN_ICON}
                         title={uiText("Refresh printer access")}
                       >
                         <RefreshCw
-                          className={`h-4 w-4 ${printerAccessBusy === "load" ? "animate-spin" : ""}`}
+                          className={`h-4 w-4 ${accessPrintersQuery.isFetching || printerAccess.some(({ query }) => query.isFetching) ? "animate-spin" : ""}`}
                         />
                       </button>
                     }
@@ -2427,7 +2781,7 @@ export function SettingsPanel() {
                               setAccessPrinterId("");
                             }}
                             className={INPUT}
-                            disabled={printerAccessBusy === "load"}
+                            disabled={usersQuery.isError || usersQuery.isPending}
                           >
                             <option value="">{uiText("Choose printer user")}</option>
                             {nonSuperUsers.map((row) => (
@@ -2456,7 +2810,13 @@ export function SettingsPanel() {
                               setPrinterAccessRole(existing?.role ?? "view");
                             }}
                             className={INPUT}
-                            disabled={!printerAccessUserId || printerAccessBusy === "load"}
+                            disabled={
+                              usersQuery.isError ||
+                              usersQuery.isPending ||
+                              !printerAccessUserId ||
+                              accessPrintersQuery.isPending ||
+                              accessPrintersQuery.isError
+                            }
                           >
                             <option value="">{uiText("Select printer")}</option>
                             {accessPrinters.map((row) => (
@@ -2479,9 +2839,14 @@ export function SettingsPanel() {
                             }
                             className={INPUT}
                             disabled={
+                              usersQuery.isError ||
+                              usersQuery.isPending ||
                               !printerAccessUserId ||
                               !accessPrinterId ||
-                              printerAccessBusy === "load"
+                              !selectedPrinterRead?.isSuccess ||
+                              selectedPrinterRead.isError ||
+                              accessPrintersQuery.isPending ||
+                              accessPrintersQuery.isError
                             }
                           >
                             <option value="view">{uiText("View")}</option>
@@ -2494,7 +2859,14 @@ export function SettingsPanel() {
                           type="button"
                           onClick={savePrinterAccess}
                           disabled={
-                            !printerAccessUserId || !accessPrinterId || printerAccessBusy === "save"
+                            usersQuery.isError ||
+                            usersQuery.isPending ||
+                            !printerAccessUserId ||
+                            !accessPrinterId ||
+                            printerAccessBusy !== null ||
+                            accessPrintersQuery.isError ||
+                            !selectedPrinterRead?.isSuccess ||
+                            selectedPrinterRead.isError
                           }
                           className={`${BTN_PRIMARY} self-end`}
                         >
@@ -2506,6 +2878,43 @@ export function SettingsPanel() {
                           {uiText("Save")}
                         </button>
                       </div>
+
+                      {accessPrintersQuery.isError && (
+                        <div role="alert" className="flex items-center gap-2 text-sm">
+                          <p>{t("settings.accessPrintersFailed")}</p>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            onClick={() => void accessPrintersQuery.refetch()}
+                          >
+                            {t("Retry")}
+                          </Button>
+                        </div>
+                      )}
+                      {accessPrintersQuery.isPending && <p role="status">{t("Loading…")}</p>}
+                      {printerAccessUserId &&
+                        printerAccess.map(({ printer, query }) =>
+                          query.isError ? (
+                            <div
+                              key={printer.id}
+                              role="alert"
+                              className="flex items-center gap-2 text-sm"
+                            >
+                              <p>{t("settings.accessPrinterFailed", { name: printer.name })}</p>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => void query.refetch()}
+                              >
+                                {t("Retry")}
+                              </Button>
+                            </div>
+                          ) : query.isPending ? (
+                            <p key={printer.id} role="status">
+                              {t("settings.accessPrinterLoading", { name: printer.name })}
+                            </p>
+                          ) : null,
+                        )}
 
                       <p className="text-xs text-muted-foreground">
                         {uiText(
@@ -2523,7 +2932,11 @@ export function SettingsPanel() {
                           <p className="px-3 py-4 text-sm text-muted-foreground">
                             {uiText("Select a user to review printer grants.")}
                           </p>
-                        ) : selectedPrinterPermissions.length === 0 ? (
+                        ) : accessPrintersQuery.isError ||
+                          accessPrintersQuery.isPending ||
+                          (printerAccess.some(({ query }) => query.isError || query.isPending) &&
+                            selectedPrinterPermissions.length ===
+                              0) ? null : selectedPrinterPermissions.length === 0 ? (
                           <p className="px-3 py-4 text-sm text-muted-foreground">
                             {activePrinterAccessUser?.username ?? uiText("User")}
                             {uiText(" has no direct printer access.")}
@@ -2554,7 +2967,15 @@ export function SettingsPanel() {
                                 <button
                                   type="button"
                                   onClick={() => removePrinterAccess(row.printer_id, row.user_id)}
-                                  disabled={printerAccessBusy === busyKey}
+                                  disabled={
+                                    usersQuery.isError ||
+                                    usersQuery.isPending ||
+                                    printerAccessBusy !== null ||
+                                    accessPrintersQuery.isError ||
+                                    printerAccess.find(
+                                      ({ printer }) => printer.id === row.printer_id,
+                                    )?.query.isError
+                                  }
                                   className="rounded p-1 text-destructive hover:bg-destructive/10 disabled:opacity-50"
                                   title={uiText("Remove printer access")}
                                 >
@@ -2614,6 +3035,9 @@ export function SettingsPanel() {
                                 size="xs"
                                 onClick={setupBrowserExtension}
                                 loading={keyBusy}
+                                disabled={
+                                  receipt !== null || apiKeysQuery.isError || apiKeysQuery.isPending
+                                }
                                 className="font-mono uppercase tracking-wider"
                               >
                                 <Puzzle className="h-3.5 w-3.5" />
@@ -2646,7 +3070,12 @@ export function SettingsPanel() {
                           <button
                             type="button"
                             onClick={generateApiKey}
-                            disabled={keyBusy}
+                            disabled={
+                              keyBusy ||
+                              receipt !== null ||
+                              apiKeysQuery.isError ||
+                              apiKeysQuery.isPending
+                            }
                             className={BTN_PRIMARY}
                           >
                             <KeyRound className="h-3.5 w-3.5" />
@@ -2659,6 +3088,9 @@ export function SettingsPanel() {
                             <p className="text-xs text-muted-foreground">
                               {uiText("Copy this key now. It will only be shown once.")}
                             </p>
+                            <Button size="xs" variant="ghost" onClick={dismissReceipt}>
+                              {t("settings.accountDismissSecret")}
+                            </Button>
                             <div className="flex items-center gap-2">
                               <code className="flex-1 min-w-0 overflow-x-auto whitespace-nowrap rounded bg-muted px-3 py-2 text-xs text-foreground">
                                 {newApiKey}
@@ -2685,7 +3117,22 @@ export function SettingsPanel() {
                         )}
 
                         <div className="space-y-2">
-                          {apiKeys.length === 0 ? (
+                          {apiKeysQuery.isError && (
+                            <div role="alert" className="flex items-center gap-2 text-sm">
+                              <p>{t("settings.accountKeysFailed")}</p>
+                              <Button
+                                size="xs"
+                                variant="outline"
+                                onClick={() => void apiKeysQuery.refetch()}
+                              >
+                                {t("Retry")}
+                              </Button>
+                            </div>
+                          )}
+                          {apiKeysQuery.isPending ? (
+                            <p role="status">{t("Loading…")}</p>
+                          ) : apiKeysQuery.isError &&
+                            apiKeys.length === 0 ? null : apiKeys.length === 0 ? (
                             <p className="text-sm text-muted-foreground">
                               {uiText("No active API keys.")}
                             </p>
@@ -2693,6 +3140,8 @@ export function SettingsPanel() {
                             apiKeys.map((key) => (
                               <div
                                 key={key.id}
+                                role="group"
+                                aria-label={`${uiText("API key")}: ${key.name}`}
                                 className="flex items-center gap-3 border border-border rounded px-3 py-2"
                               >
                                 <div className="min-w-0 flex-1">
@@ -2705,7 +3154,9 @@ export function SettingsPanel() {
                                 <button
                                   type="button"
                                   onClick={() => deleteApiKey(key.id)}
-                                  disabled={keyBusy}
+                                  disabled={
+                                    keyBusy || apiKeysQuery.isError || apiKeysQuery.isPending
+                                  }
                                   className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-red-500 hover:bg-red-500/10 disabled:opacity-50"
                                   title={uiText("Revoke API key")}
                                 >
@@ -2745,6 +3196,126 @@ export function SettingsPanel() {
 
             {activeSection === "backup" && (
               <div className="space-y-6 animate-panel-in">
+                <StorageConnectionReview
+                  review={backupConnectionCommand.review}
+                  busy={backupConnectionCommand.isPending}
+                  onReview={() => {
+                    const session = getSessionVersion();
+                    void backupConnectionCommand.reviewLatest().catch((error) => {
+                      if (accountCurrent(session)) toast.error(error);
+                    });
+                  }}
+                  onAdopt={() => {
+                    const session = getSessionVersion();
+                    void backupConnectionCommand
+                      .adopt()
+                      .then((row) => {
+                        if (accountCurrent(session))
+                          setBackupConnectionDrafts((current) => {
+                            const next = { ...current };
+                            delete next[row.id];
+                            return next;
+                          });
+                      })
+                      .catch((error) => {
+                        if (accountCurrent(session)) toast.error(error);
+                      });
+                  }}
+                  onSave={() => {
+                    const session = getSessionVersion();
+                    void backupConnectionCommand
+                      .saveRevised()
+                      .then((receipt) => {
+                        if (accountCurrent(session) && receipt.kind === "saved")
+                          setBackupConnectionDrafts((current) => {
+                            const next = { ...current };
+                            delete next[receipt.connection.id];
+                            return next;
+                          });
+                      })
+                      .catch((error) => {
+                        if (accountCurrent(session)) toast.error(error);
+                      });
+                  }}
+                />
+                {backupPolicy.review.phase !== "idle" && (
+                  <div role="alert" className="space-y-3 rounded border border-border p-4">
+                    <p>
+                      {uiText(
+                        backupPolicy.review.problem === "conflict"
+                          ? "library.editConflict"
+                          : "library.saveUnconfirmed",
+                      )}
+                    </p>
+                    <Button
+                      variant="outline"
+                      disabled={backupPolicy.review.phase === "loading" || backupPolicyBusy}
+                      onClick={() => {
+                        const session = getSessionVersion();
+                        void backupPolicy.reviewLatest().catch((error) => {
+                          if (accountCurrent(session)) toast.error(error);
+                        });
+                      }}
+                    >
+                      {uiText("library.reviewLatest")}
+                    </Button>
+                    {backupPolicy.review.phase === "ready" && !remoteConfig.isError && (
+                      <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+                        <dl className="grid grid-cols-2 gap-2 text-sm">
+                          <dt>{t("settings.backupAutomaticEnable")}</dt>
+                          <dd>
+                            {uiText(
+                              backupPolicy.review.snapshot.automatic_backups_enabled
+                                ? "Enabled"
+                                : "Disabled",
+                            )}
+                          </dd>
+                          <dt>{t("settings.backupAutomaticTime")}</dt>
+                          <dd>{backupPolicy.review.snapshot.automatic_backup_time_utc}</dd>
+                          <dt>{t("settings.backupLocalManual")}</dt>
+                          <dd>
+                            {uiText(
+                              backupPolicy.review.snapshot.manual_local_backup_enabled
+                                ? "Enabled"
+                                : "Disabled",
+                            )}
+                          </dd>
+                          <dt>{t("settings.backupLocalAutomatic")}</dt>
+                          <dd>
+                            {uiText(
+                              backupPolicy.review.snapshot.automatic_local_backup_enabled
+                                ? "Enabled"
+                                : "Disabled",
+                            )}
+                          </dd>
+                        </dl>
+                        <Button
+                          variant="outline"
+                          disabled={backupPolicyBusy}
+                          onClick={backupPolicy.adopt}
+                        >
+                          {uiText("library.useLatest")}
+                        </Button>
+                        <Button
+                          disabled={
+                            backupPolicyBusy ||
+                            backupConnectionCommand.blocked ||
+                            backupConnectionRead.isError ||
+                            !backupConnectionRead.data
+                          }
+                          onClick={() => void saveBackupPolicy(true)}
+                        >
+                          {uiText("library.retryDraft")}
+                        </Button>
+                      </section>
+                    )}
+                  </div>
+                )}
+                {(remoteConfig.isError || backupConnectionRead.isError) && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {uiText("Could not load backup settings.")}
+                  </p>
+                )}
                 <SettingsCard
                   icon={RefreshCw}
                   title={t("settings.backupRetentionTitle")}
@@ -2756,7 +3327,10 @@ export function SettingsPanel() {
                       disabled={
                         !user?.is_superuser ||
                         backupRetentionBusy ||
-                        parsedBackupRetentionDays === null
+                        backupConfigUnavailable ||
+                        parsedBackupRetentionDays === null ||
+                        preferenceCommand.blocked ||
+                        backupPolicy.isPending
                       }
                       className={BTN_PRIMARY}
                     >
@@ -2777,8 +3351,17 @@ export function SettingsPanel() {
                         min={0}
                         max={365}
                         value={backupRetentionDays}
-                        disabled={!user?.is_superuser || backupRetentionBusy}
-                        onChange={(event) => setBackupRetentionDays(event.target.value)}
+                        disabled={
+                          !user?.is_superuser || backupRetentionBusy || backupConfigUnavailable
+                        }
+                        onChange={(event) => {
+                          const text = event.target.value;
+                          if (remoteConfigData)
+                            setBackupRetentionDays((previous) => ({
+                              text,
+                              base: previous?.base ?? captureEditingBase(remoteConfigData),
+                            }));
+                        }}
                         aria-invalid={parsedBackupRetentionDays === null}
                         aria-describedby={
                           parsedBackupRetentionDays === null ? "backup-retention-error" : undefined
@@ -2805,8 +3388,17 @@ export function SettingsPanel() {
                   action={
                     <button
                       type="button"
-                      onClick={saveBackupPolicy}
-                      disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                      onClick={() => void saveBackupPolicy()}
+                      disabled={
+                        !user?.is_superuser ||
+                        backupPolicy.blocked ||
+                        backupConnectionCommand.blocked ||
+                        backupPolicyBusy ||
+                        backupsLoading ||
+                        backupConfigUnavailable ||
+                        backupConnectionRead.isError ||
+                        !backupConnectionRead.data
+                      }
                       className={cn(BTN_PRIMARY, "w-full sm:w-auto")}
                     >
                       {backupPolicyBusy ? (
@@ -2831,9 +3423,19 @@ export function SettingsPanel() {
                         </span>
                         <Checkbox
                           checked={automaticBackupsEnabled}
-                          onChange={setAutomaticBackupsEnabled}
+                          onChange={(value) =>
+                            backupPolicy.edit("automatic_backups_enabled", value)
+                          }
                           ariaLabel={t("settings.backupAutomaticEnable")}
-                          disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                          disabled={
+                            !user?.is_superuser ||
+                            backupPolicyBusy ||
+                            backupConnectionCommand.blocked ||
+                            backupsLoading ||
+                            backupConfigUnavailable ||
+                            backupConnectionRead.isError ||
+                            !backupConnectionRead.data
+                          }
                         />
                       </label>
                       <label className="text-xs text-muted-foreground">
@@ -2841,11 +3443,15 @@ export function SettingsPanel() {
                         <input
                           type="time"
                           value={automaticBackupTimeUtc}
-                          onChange={(event) => setAutomaticBackupTimeUtc(event.target.value)}
+                          onChange={(event) =>
+                            backupPolicy.edit("automatic_backup_time_utc", event.target.value)
+                          }
                           disabled={
                             !user?.is_superuser ||
                             backupPolicyBusy ||
+                            backupConnectionCommand.blocked ||
                             !automaticBackupsEnabled ||
+                            backupConfigUnavailable ||
                             backupsLoading
                           }
                           className={cn(inputClasses, "mt-1.5 w-full font-mono")}
@@ -2872,17 +3478,37 @@ export function SettingsPanel() {
                           <div className="flex justify-center">
                             <Checkbox
                               checked={manualLocalBackupEnabled}
-                              onChange={setManualLocalBackupEnabled}
+                              onChange={(value) =>
+                                backupPolicy.edit("manual_local_backup_enabled", value)
+                              }
                               ariaLabel={t("settings.backupLocalManual")}
-                              disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                              disabled={
+                                !user?.is_superuser ||
+                                backupPolicyBusy ||
+                                backupConnectionCommand.blocked ||
+                                backupsLoading ||
+                                backupConfigUnavailable ||
+                                backupConnectionRead.isError ||
+                                !backupConnectionRead.data
+                              }
                             />
                           </div>
                           <div className="flex justify-center">
                             <Checkbox
                               checked={automaticLocalBackupEnabled}
-                              onChange={setAutomaticLocalBackupEnabled}
+                              onChange={(value) =>
+                                backupPolicy.edit("automatic_local_backup_enabled", value)
+                              }
                               ariaLabel={t("settings.backupLocalAutomatic")}
-                              disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                              disabled={
+                                !user?.is_superuser ||
+                                backupPolicyBusy ||
+                                backupConnectionCommand.blocked ||
+                                backupsLoading ||
+                                backupConfigUnavailable ||
+                                backupConnectionRead.isError ||
+                                !backupConnectionRead.data
+                              }
                             />
                           </div>
                         </div>
@@ -2915,7 +3541,15 @@ export function SettingsPanel() {
                                 ariaLabel={t("settings.backupUseManual", {
                                   name: connection.name,
                                 })}
-                                disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                                disabled={
+                                  !user?.is_superuser ||
+                                  backupPolicyBusy ||
+                                  backupConnectionCommand.blocked ||
+                                  backupsLoading ||
+                                  backupConfigUnavailable ||
+                                  backupConnectionRead.isError ||
+                                  !backupConnectionRead.data
+                                }
                               />
                             </div>
                             <div className="flex justify-center">
@@ -2931,7 +3565,15 @@ export function SettingsPanel() {
                                 ariaLabel={t("settings.backupUseAutomatic", {
                                   name: connection.name,
                                 })}
-                                disabled={!user?.is_superuser || backupPolicyBusy || backupsLoading}
+                                disabled={
+                                  !user?.is_superuser ||
+                                  backupPolicyBusy ||
+                                  backupConnectionCommand.blocked ||
+                                  backupsLoading ||
+                                  backupConfigUnavailable ||
+                                  backupConnectionRead.isError ||
+                                  !backupConnectionRead.data
+                                }
                               />
                             </div>
                           </div>
@@ -3010,10 +3652,7 @@ export function SettingsPanel() {
                   </div>
                 </SettingsCard>
                 {user?.is_superuser && (
-                  <BackupRunHistory
-                    refreshKey={backupRunRefresh}
-                    onPublished={() => void loadBackups()}
-                  />
+                  <BackupRunHistory onPublished={() => void ownedBackupRead.refetch()} />
                 )}
                 <SettingsCard
                   icon={RotateCcw}
@@ -3034,6 +3673,16 @@ export function SettingsPanel() {
                   }
                 >
                   <div className="divide-y divide-border">
+                    {ownedBackupRead.isError && (
+                      <p role="alert" className="p-4 text-sm text-destructive">
+                        {uiText("Could not load backup sources.")}
+                      </p>
+                    )}
+                    {backupDiscoveryFailed && (
+                      <p role="alert" className="p-4 text-sm text-destructive">
+                        {uiText("Some backup sources could not be loaded.")}
+                      </p>
+                    )}
                     {!user?.is_superuser ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">
                         {uiText("Superuser access is required.")}
@@ -3042,7 +3691,9 @@ export function SettingsPanel() {
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">
                         {uiText("Loading...")}
                       </p>
-                    ) : backups.length === 0 &&
+                    ) : !ownedBackupRead.isError &&
+                      !backupDiscoveryFailed &&
+                      backups.length === 0 &&
                       unownedBackups.length === 0 &&
                       unownedS3Backups.length === 0 &&
                       unownedRemoteBackups.length === 0 ? (
@@ -3425,6 +4076,18 @@ export function SettingsPanel() {
 
             {activeSection === "design" && (
               <div className="space-y-6 animate-panel-in">
+                {user?.is_superuser && remoteConfig.isError && (
+                  <div role="alert" className="flex items-center gap-2 text-sm">
+                    <p>{t("settings.configLoadFailed")}</p>
+                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
+                      {t("Retry")}
+                    </Button>
+                  </div>
+                )}
+                {user?.is_superuser && remoteConfig.isPending && (
+                  <p role="status">{t("Loading…")}</p>
+                )}
+
                 <SettingsCard
                   icon={Printer}
                   title={uiText("Printer cards")}
@@ -3489,7 +4152,13 @@ export function SettingsPanel() {
                       role="switch"
                       aria-label={uiText("Auto-mark known good on successful print")}
                       aria-checked={autoMarkKnownGood}
-                      disabled={!user || autoMarkBusy}
+                      disabled={
+                        !user?.is_superuser ||
+                        !remoteConfigData ||
+                        remoteConfig.isError ||
+                        preferenceCommand.blocked ||
+                        backupPolicy.isPending
+                      }
                       onClick={() => saveAutoMarkKnownGood(!autoMarkKnownGood)}
                       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
                         autoMarkKnownGood ? "bg-primary" : "bg-outline-variant"
@@ -3520,7 +4189,13 @@ export function SettingsPanel() {
                       id="display-currency"
                       value={currency}
                       onChange={(event) => saveCurrency(event.target.value)}
-                      disabled={!user || currencyBusy}
+                      disabled={
+                        !user?.is_superuser ||
+                        !remoteConfigData ||
+                        remoteConfig.isError ||
+                        preferenceCommand.blocked ||
+                        backupPolicy.isPending
+                      }
                       className={`${INPUT} max-w-xs`}
                     >
                       {CURRENCY_OPTIONS.map((opt) => (
@@ -3683,8 +4358,57 @@ export function SettingsPanel() {
               </div>
             )}
 
+            {activeSection === "gpu" && (
+              <div className="space-y-6 animate-panel-in">
+                <SettingsCard
+                  icon={Gpu}
+                  title={uiText("3D rendering")}
+                  description={uiText("Choose how 3D models are rendered in this browser.")}
+                >
+                  <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
+                    <label className="block space-y-1">
+                      <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                        {uiText("Mesh renderer")}
+                      </span>
+                      <select
+                        aria-label={uiText("Mesh renderer")}
+                        value={previewPreferences.meshRenderer}
+                        onChange={(event) =>
+                          savePreviewPreference({
+                            meshRenderer: selectedOption(MESH_RENDERERS, event.target.value),
+                          })
+                        }
+                        className={INPUT}
+                      >
+                        <option value="webgl">{uiText("WebGL compatibility")}</option>
+                        <option value="auto">{uiText("Automatic · experimental")}</option>
+                        <option value="webgpu">{uiText("WebGPU · experimental")}</option>
+                      </select>
+                      <span className="block text-xs text-muted-foreground">
+                        {uiText(
+                          "WebGPU requires HTTPS or localhost. Unavailable devices use WebGL.",
+                        )}
+                      </span>
+                    </label>
+                  </div>
+                </SettingsCard>
+              </div>
+            )}
+
             {activeSection === "previews" && (
               <div className="space-y-6 animate-panel-in">
+                {user?.is_superuser && remoteConfig.isError && (
+                  <div role="alert" className="flex items-center gap-2 text-sm">
+                    <p>{t("settings.configLoadFailed")}</p>
+                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
+                      {t("Retry")}
+                    </Button>
+                  </div>
+                )}
+                {user?.is_superuser && remoteConfig.isPending && (
+                  <p role="status">{t("Loading…")}</p>
+                )}
+
                 <SettingsCard
                   icon={Eye}
                   title={uiText("Interactive previews")}
@@ -3712,6 +4436,7 @@ export function SettingsPanel() {
                         <option value="detail">{uiText("High detail · 2×")}</option>
                       </select>
                     </label>
+
                     <label className="block space-y-1">
                       <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                         {uiText("Screenshot resolution")}
@@ -3757,7 +4482,14 @@ export function SettingsPanel() {
                             selectedOption(MODEL_THUMBNAIL_WIDTHS, Number(event.target.value)),
                           )
                         }
-                        disabled={!user?.is_superuser || previewBusy !== null}
+                        disabled={
+                          !user?.is_superuser ||
+                          !remoteConfigData ||
+                          remoteConfig.isError ||
+                          previewBusy !== null ||
+                          preferenceCommand.blocked ||
+                          backupPolicy.isPending
+                        }
                         className={INPUT}
                       >
                         {modelThumbnailWidth !== 320 &&
@@ -3800,6 +4532,22 @@ export function SettingsPanel() {
 
             {activeSection === "trash" && (
               <div className="space-y-6 animate-panel-in">
+                {gcRead.isError && user?.is_superuser && (
+                  <div role="alert" className="flex items-center gap-2 text-sm">
+                    <p>{uiText("settings.gcLoadFailed")}</p>
+                    <Button variant="outline" onClick={() => void gcRead.refetch()}>
+                      {uiText("Retry cleanup plan")}
+                    </Button>
+                  </div>
+                )}
+                {user?.is_superuser && remoteConfig.isError && (
+                  <div role="alert" className="flex items-center gap-2 text-sm">
+                    <p>{t("settings.configLoadFailed")}</p>
+                    <Button variant="outline" size="sm" onClick={() => void remoteConfig.refetch()}>
+                      {t("Retry")}
+                    </Button>
+                  </div>
+                )}
                 <SettingsCard
                   icon={Trash2}
                   title={uiText("Trash retention")}
@@ -3826,20 +4574,39 @@ export function SettingsPanel() {
                       <input
                         type="number"
                         min={-1}
-                        value={trashRetentionDays}
-                        onChange={(event) => setTrashRetentionDays(Number(event.target.value))}
-                        disabled={!user || trashBusy === "settings"}
+                        value={trashRetentionText}
+                        onChange={(event) => {
+                          const text = event.target.value;
+                          if (remoteConfigData)
+                            setTrashRetentionDraft((previous) => ({
+                              text,
+                              base: previous?.base ?? captureEditingBase(remoteConfigData),
+                            }));
+                        }}
+                        disabled={
+                          !user?.is_superuser ||
+                          !remoteConfigData ||
+                          remoteConfig.isError ||
+                          trashRetentionBusy
+                        }
                         className={INPUT}
                       />
                     </label>
                     <button
                       type="button"
                       onClick={saveTrashRetention}
-                      disabled={!user || trashBusy === "settings"}
+                      disabled={
+                        !user?.is_superuser ||
+                        !remoteConfigData ||
+                        remoteConfig.isError ||
+                        preferenceCommand.blocked ||
+                        backupPolicy.isPending ||
+                        parsedTrashRetentionDays === null
+                      }
                       className={BTN_PRIMARY}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                      {trashBusy === "settings" ? uiText("Saving") : uiText("Save retention")}
+                      {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
                     </button>
                     <button
                       type="button"
@@ -3847,7 +4614,10 @@ export function SettingsPanel() {
                       disabled={
                         !user?.is_superuser ||
                         trashBusy === "gc" ||
+                        parsedTrashRetentionDays === null ||
                         trashRetentionDays < 0 ||
+                        gcRead.isError ||
+                        gcRead.isPending ||
                         (gcPlan !== null &&
                           ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
                       }
@@ -3915,7 +4685,7 @@ export function SettingsPanel() {
                             aria-label={uiText("Confirm GC plan digest")}
                             placeholder={uiText("Paste the 64-character digest")}
                             value={gcDigestConfirmation}
-                            disabled={trashBusy === "gc"}
+                            disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
                             onChange={(event) => setGcDigestConfirmation(event.target.value.trim())}
                           />
                         </div>
@@ -3936,7 +4706,12 @@ export function SettingsPanel() {
                           <button
                             type="button"
                             className={BTN_PRIMARY}
-                            disabled={trashBusy === "gc" || gcDigestConfirmation !== gcPlan.digest}
+                            disabled={
+                              gcRead.isError ||
+                              gcRead.isPending ||
+                              trashBusy === "gc" ||
+                              gcDigestConfirmation !== gcPlan.digest
+                            }
                             onClick={approveExpiredGcPlan}
                           >
                             <ShieldCheck className="h-3.5 w-3.5" />
@@ -3948,7 +4723,11 @@ export function SettingsPanel() {
                             type="button"
                             className={BTN_PRIMARY}
                             disabled={
-                              trashBusy === "gc" || !gcPlan.quarantine_until || !gcQuarantineReady
+                              gcRead.isError ||
+                              gcRead.isPending ||
+                              trashBusy === "gc" ||
+                              !gcPlan.quarantine_until ||
+                              !gcQuarantineReady
                             }
                             onClick={finalizeExpiredGcPlan}
                           >
@@ -3960,7 +4739,7 @@ export function SettingsPanel() {
                           <button
                             type="button"
                             className={BTN_SECONDARY}
-                            disabled={trashBusy === "gc"}
+                            disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
                             onClick={abortExpiredGcPlan}
                           >
                             {uiText("Abort plan")}
@@ -4003,6 +4782,10 @@ export function SettingsPanel() {
                     ) : trashLoading ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">
                         {uiText("Loading...")}
+                      </p>
+                    ) : trashRead.isError ? (
+                      <p role="alert" className="p-4 text-sm">
+                        {uiText("settings.trashLoadFailed")}
                       </p>
                     ) : trashItems.length === 0 ? (
                       <p className="p-4 sm:p-5 text-sm text-muted-foreground">

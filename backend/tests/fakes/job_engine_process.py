@@ -43,6 +43,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from app.modules.work.contracts import JobExecution
+
 _DEADLINE_S = float(os.environ.get("JOB_ENGINE_DEADLINE_S", "120"))
 _STL = (
     b"solid cube\n"
@@ -92,7 +94,7 @@ def stall(marker: Path) -> None:
     from app.main import app
     from app.modules.derivatives import producers
 
-    def held(file_id: int):
+    def held(file_id: int, *, execution: JobExecution | None = None):
         _publish_marker(marker, file_id)
         while True:  # the parent kills this process here
             time.sleep(1)
@@ -136,7 +138,7 @@ def stall_backup(marker: Path) -> None:
     from app.main import app
     from app.modules.derivatives import producers
 
-    def held(file_id: int):
+    def held(file_id: int, *, execution: JobExecution | None = None):
         _publish_marker(marker, file_id)
         while True:  # the parent kills this process here
             time.sleep(1)
@@ -227,17 +229,21 @@ def _settle(file_id: int) -> dict:
     deadline = time.monotonic() + _DEADLINE_S
     while True:
         with get_session_factory().scoped_session() as session:
-            file = session.get(File, file_id)
-            assert file is not None
+            # READY and the thumbnail pointer commit together. Read them in
+            # one statement: a writer can commit between two SELECTs, leaving
+            # an earlier ORM File instance beside newer derivative rows.
+            observed = session.exec(
+                select(File, ArtifactDerivative)
+                .outerjoin(ArtifactDerivative, ArtifactDerivative.file_id == File.id)
+                .where(File.id == file_id)
+            ).all()
+            assert observed, f"Artifact {file_id} disappeared while settling"
+            file = observed[0][0]
             current = kinds.recipes_for(file)
             rows = [
                 row
-                for row in session.exec(
-                    select(ArtifactDerivative).where(
-                        ArtifactDerivative.file_id == file_id
-                    )
-                ).all()
-                if current.get(row.kind) == row.recipe_version
+                for _, row in observed
+                if row is not None and current.get(row.kind) == row.recipe_version
             ]
             states = {row.kind: DerivativeState(row.state).value for row in rows}
             outcome = {
@@ -267,7 +273,11 @@ def _diagnostics() -> dict:
 
     with get_session_factory().scoped_session() as session:
         jobs = session.exec(select(Job)).all()
-        ids = [execution_id(job.id, job.attempts) for job in jobs if job.attempts]
+        ids = [
+            execution_id(job.id, job.attempts, job.execution_epoch)
+            for job in jobs
+            if job.attempts
+        ]
         evidence = get_engine().evidence(ids) if ids else {}
         return {
             "jobs": [
@@ -342,11 +352,11 @@ def rederive(file_id: int) -> None:
     shown_while_deriving: list[str | None] = []
     original = producers.derive_mesh
 
-    def observed(derived_id: int):
+    def observed(derived_id: int, *, execution: JobExecution | None = None):
         with get_session_factory().scoped_session() as session:
             file = session.get(File, derived_id)
             shown_while_deriving.append(file.thumbnail_path if file else None)
-        return original(derived_id)
+        return original(derived_id, execution=execution)
 
     # Before the lifespan builds the catalog, which captures the producer.
     producers.derive_mesh = observed

@@ -10,10 +10,11 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from app.db.models import OwnedStorageObject, StorageObjectState
+from app.db.models import OwnedStorageObject, StorageDeleteIntent, StorageObjectState
 from app.modules.storage.storage_backend.contracts import (
+    CreationReceipt,
     ObjectIdentity,
     StorageCapabilities,
     StorageObjectInfo,
@@ -28,37 +29,14 @@ STALE_CREATED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class _TransientReclaimBackend(LocalStorageBackend):
-    def reclaim_unverified(
-        self,
-        key: str,
-        *,
-        expected_size: int,
-        expected_etag: str | None,
-        expected_sha256: str | None = None,
-        expected_version_id: str | None = None,
-    ) -> bool:
-        del key, expected_size, expected_etag, expected_sha256, expected_version_id
+    def rollback_create(self, receipt: CreationReceipt) -> bool:
         raise OSError("storage temporarily unavailable")
 
 
 class _ReplacementBeforeReclaimBackend(LocalStorageBackend):
-    def reclaim_unverified(
-        self,
-        key: str,
-        *,
-        expected_size: int,
-        expected_etag: str | None,
-        expected_sha256: str | None = None,
-        expected_version_id: str | None = None,
-    ) -> bool:
-        Path(key).write_bytes(b"other")
-        return super().reclaim_unverified(
-            key,
-            expected_size=expected_size,
-            expected_etag=expected_etag,
-            expected_sha256=expected_sha256,
-            expected_version_id=expected_version_id,
-        )
+    def rollback_create(self, receipt: CreationReceipt) -> bool:
+        Path(receipt.key).write_bytes(b"other")
+        return super().rollback_create(receipt)
 
 
 class _ReclaimProbeBackend(LocalStorageBackend):
@@ -66,30 +44,16 @@ class _ReclaimProbeBackend(LocalStorageBackend):
         super().__init__()
         self.removed = removed
         self.info = StorageObjectInfo(size=5, etag="etag-1")
-        self.reclaim_calls: list[dict[str, object]] = []
+        self.reclaim_calls: list[CreationReceipt] = []
 
     def object_info(self, key: str) -> StorageObjectInfo | None:
-        del key
         return self.info
 
-    def reclaim_unverified(
-        self,
-        key: str,
-        *,
-        expected_size: int,
-        expected_etag: str | None,
-        expected_sha256: str | None = None,
-        expected_version_id: str | None = None,
-    ) -> bool:
-        self.reclaim_calls.append(
-            {
-                "key": key,
-                "expected_size": expected_size,
-                "expected_etag": expected_etag,
-                "expected_sha256": expected_sha256,
-                "expected_version_id": expected_version_id,
-            }
-        )
+    def exists(self, key: str) -> bool:
+        return not self.removed
+
+    def rollback_create(self, receipt: CreationReceipt) -> bool:
+        self.reclaim_calls.append(receipt)
         return self.removed
 
 
@@ -161,7 +125,7 @@ class TestSweepOrphanedPublications:
         assert result.examined == 0
         assert db_session.get(OwnedStorageObject, row.id) is not None
 
-    def test_removes_a_stale_reservation_when_the_object_is_absent(
+    def test_defers_physical_cleanup_for_an_absent_stale_reservation(
         self, db_session: Session
     ) -> None:
         backend = get_backend()
@@ -182,7 +146,8 @@ class TestSweepOrphanedPublications:
         result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
 
         assert result.cleared == 1
-        assert db_session.get(OwnedStorageObject, row.id) is None
+        db_session.refresh(row)
+        assert row.state is StorageObjectState.RETIRING
 
     def test_reclaims_a_matching_small_orphan(self, db_session: Session) -> None:
         backend = get_backend()
@@ -209,7 +174,7 @@ class TestSweepOrphanedPublications:
         assert result.reclaimed == 1
         assert not path.exists()
 
-    def test_blocks_an_orphan_with_mismatched_evidence(
+    def test_defers_an_orphan_with_mismatched_evidence(
         self, db_session: Session
     ) -> None:
         backend = get_backend()
@@ -233,8 +198,8 @@ class TestSweepOrphanedPublications:
         result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
 
         db_session.refresh(row)
-        assert result.blocked == 1
-        assert row.state is StorageObjectState.BLOCKED
+        assert result.deferred == 1
+        assert row.state is StorageObjectState.RETIRING
         assert path.read_bytes() == b"someone-elses-bytes"
 
     def test_preserves_a_same_size_replacement_before_hash_reclamation(
@@ -263,10 +228,12 @@ class TestSweepOrphanedPublications:
 
         db_session.refresh(row)
         assert result.blocked == 1
-        assert row.state is StorageObjectState.BLOCKED
+        assert row.state is StorageObjectState.RETIRING
+        intent = db_session.exec(select(StorageDeleteIntent)).one()
+        assert intent.status == "blocked"
         assert path.read_bytes() == b"other"
 
-    def test_blocks_a_large_orphan_without_sufficient_proof(
+    def test_defers_a_large_orphan_without_sufficient_proof(
         self, db_session: Session
     ) -> None:
         backend = get_backend()
@@ -292,8 +259,8 @@ class TestSweepOrphanedPublications:
         result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
 
         db_session.refresh(row)
-        assert result.blocked == 1
-        assert row.state is StorageObjectState.BLOCKED
+        assert result.deferred == 1
+        assert row.state is StorageObjectState.RETIRING
         assert path.exists()
 
     def test_retries_a_transient_reclaim_failure(self, db_session: Session) -> None:
@@ -320,8 +287,10 @@ class TestSweepOrphanedPublications:
 
         db_session.refresh(row)
         assert result.pending == 1
-        assert row.state is StorageObjectState.PENDING
-        assert row.last_error == "OSError"
+        assert row.state is StorageObjectState.RETIRING
+        intent = db_session.exec(select(StorageDeleteIntent)).one()
+        assert intent.status == "retry"
+        assert intent.last_error == "OSError"
         assert path.exists()
 
     def test_never_sweeps_committed_ownership(self, db_session: Session) -> None:
@@ -422,10 +391,11 @@ class TestSweepOrphanedPublications:
         result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
 
         assert result.reclaimed == 1
-        assert backend.reclaim_calls[0]["expected_version_id"] == "version-1"
-        assert db_session.get(OwnedStorageObject, row.id) is None
+        assert backend.reclaim_calls[0].version_id == "version-1"
+        db_session.refresh(row)
+        assert row.state is StorageObjectState.RETIRING
 
-    def test_blocks_a_stale_reservation_with_a_size_mismatch(
+    def test_defers_a_stale_reservation_with_a_size_mismatch(
         self, db_session: Session
     ) -> None:
         backend = _ReclaimProbeBackend(removed=True)
@@ -445,9 +415,10 @@ class TestSweepOrphanedPublications:
         result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
 
         db_session.refresh(row)
-        assert result.blocked == 1
-        assert row.last_error == "storage_size_mismatch"
+        assert result.deferred == 1
+        assert row.last_error == "storage_orphan_recovery_deferred"
         assert backend.reclaim_calls == []
+        assert not db_session.exec(select(StorageDeleteIntent)).all()
 
     def test_reclaims_a_stale_reservation_with_matching_etag(
         self, db_session: Session
@@ -461,6 +432,7 @@ class TestSweepOrphanedPublications:
             object_kind="artifact",
             state=StorageObjectState.PENDING,
             size_bytes=5,
+            token="pending-token",
             etag="etag-1",
             created_at=STALE_CREATED_AT,
         )
@@ -470,7 +442,7 @@ class TestSweepOrphanedPublications:
         result = sweep_orphaned_publications(db_session, backend, now=FROZEN_NOW)
 
         assert result.reclaimed == 1
-        assert backend.reclaim_calls[0]["expected_etag"] == "etag-1"
+        assert backend.reclaim_calls[0].etag == "etag-1"
 
     def test_blocks_a_stale_reservation_when_reclaim_does_not_remove(
         self, db_session: Session
@@ -484,6 +456,7 @@ class TestSweepOrphanedPublications:
             object_kind="artifact",
             state=StorageObjectState.PENDING,
             size_bytes=5,
+            token="pending-token",
             etag="etag-1",
             created_at=STALE_CREATED_AT,
         )
@@ -494,5 +467,7 @@ class TestSweepOrphanedPublications:
 
         db_session.refresh(row)
         assert result.blocked == 1
-        assert row.state is StorageObjectState.BLOCKED
-        assert row.last_error == "storage_reclaim_mismatch"
+        assert row.state is StorageObjectState.RETIRING
+        intent = db_session.exec(select(StorageDeleteIntent)).one()
+        assert intent.status == "blocked"
+        assert intent.last_error == "storage_receipt_mismatch"

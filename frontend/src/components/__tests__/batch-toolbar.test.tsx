@@ -18,11 +18,13 @@
 
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 import { BatchToolbar } from "@/components/batch-toolbar";
-import type { CollectionRead, TagRead } from "@/types";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
+import { renderApp } from "@/test-support/render";
+import type { CollectionNodeRead, CollectionRead, TagRead } from "@/types";
 
 function collection(over: Partial<CollectionRead> = {}): CollectionRead {
   return {
@@ -39,17 +41,25 @@ function collection(over: Partial<CollectionRead> = {}): CollectionRead {
   };
 }
 
+/** A selected folder as the grid holds it: a tree node, labelled by its name. */
+function node(row: CollectionRead): CollectionNodeRead {
+  return { ...row, child_count: 0, descendant_count: 0, display_path: row.name };
+}
+
 function tag(over: Partial<TagRead> = {}): TagRead {
   return { id: 1, name: "draft", slug: "draft", model_count: 2, ...over };
 }
 
 type BatchToolbarProps = React.ComponentProps<typeof BatchToolbar>;
 
-function setup(overrides: Partial<BatchToolbarProps> = {}) {
+/** Render the toolbar over a library; destinations are searched from it. */
+function setup({
+  library = [collection()],
+  ...overrides
+}: Partial<BatchToolbarProps> & { library?: CollectionRead[] } = {}) {
   const props = {
     modelCount: 2,
     selectedCollections: [],
-    collections: [collection()],
     tags: [tag()],
     busy: false,
     onMoveSelection: vi.fn<BatchToolbarProps["onMoveSelection"]>(),
@@ -59,7 +69,7 @@ function setup(overrides: Partial<BatchToolbarProps> = {}) {
     onClear: vi.fn<BatchToolbarProps["onClear"]>(),
     ...overrides,
   };
-  render(<BatchToolbar {...props} />);
+  renderApp(<BatchToolbar {...props} />, { routes: collectionTreeRoutes(library) });
   return props;
 }
 
@@ -79,7 +89,7 @@ describe("BatchToolbar", () => {
     const props = setup();
 
     await user.click(screen.getByRole("button", { name: /move/i }));
-    await user.click(screen.getByText(/functional/i));
+    await user.click(await screen.findByRole("option", { name: /Functional/ }));
     await user.click(screen.getByRole("button", { name: /move here/i }));
 
     expect(props.onMoveSelection).toHaveBeenCalledWith("functional", 1);
@@ -90,7 +100,7 @@ describe("BatchToolbar", () => {
     const props = setup();
 
     await user.click(screen.getByRole("button", { name: /move/i }));
-    await user.click(screen.getByText(/none \(root\)/i));
+    await user.click(await screen.findByRole("option", { name: "None (root)" }));
     await user.click(screen.getByRole("button", { name: /move here/i }));
 
     expect(props.onMoveSelection).toHaveBeenCalledWith("", null);
@@ -130,7 +140,7 @@ describe("BatchToolbar", () => {
 
   it("adapts actions and renames selected folders", async () => {
     const user = userEvent.setup();
-    const folder = collection();
+    const folder = node(collection());
     const props = setup({ modelCount: 0, selectedCollections: [folder] });
 
     expect(screen.queryByRole("button", { name: /^tag$/i })).not.toBeInTheDocument();
@@ -145,18 +155,17 @@ describe("BatchToolbar", () => {
 
   it("searches destinations and excludes selected folder descendants", async () => {
     const user = userEvent.setup();
-    const selected = collection({ id: 1, path: "projects" });
-    const child = collection({ id: 2, path: "projects/archive", parent_id: 1 });
+    const selected = collection({ id: 1, name: "Projects", path: "projects" });
+    const child = collection({ id: 2, name: "Archive", path: "projects/archive", parent_id: 1 });
     const target = collection({ id: 3, name: "Storage", path: "storage" });
     setup({
       modelCount: 0,
-      selectedCollections: [selected],
-      collections: [selected, child, target],
+      selectedCollections: [node(selected)],
+      library: [selected, child, target],
     });
 
     await user.click(screen.getByRole("button", { name: /move/i }));
-    expect(screen.queryByText("projects/archive", { exact: false })).not.toBeInTheDocument();
-    await user.type(screen.getByRole("textbox", { name: /find destination/i }), "stor");
-    expect(screen.getByText("storage", { exact: false })).toBeVisible();
+    expect(await screen.findByRole("option", { name: /Storage/ })).toBeVisible();
+    expect(screen.queryByRole("option", { name: /Archive/ })).not.toBeInTheDocument();
   });
 });

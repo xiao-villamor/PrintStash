@@ -9,7 +9,7 @@ from sqlmodel import Session, create_engine, select
 
 from alembic import command
 from app.db.models import Model
-from tests.factories import build_model
+from tests.factories.migration_rows import seed_schema_row
 from tests.paths import ALEMBIC_INI
 
 BEFORE_PASSAGES = "0118bda3e719"
@@ -23,8 +23,15 @@ class TestSearchPassagesMigration:
         config.set_main_option("sqlalchemy.url", url)
         command.upgrade(config, BEFORE_PASSAGES)
         engine = create_engine(url)
-        with Session(engine) as session:
-            build_model(session, "Existing dragon")
+        with engine.begin() as connection:
+            seed_schema_row(
+                connection,
+                "models",
+                id=1,
+                name="Existing dragon",
+                slug="existing-dragon",
+                hash="a" * 64,
+            )
 
         command.upgrade(config, PASSAGES_REVISION)
 
@@ -39,8 +46,15 @@ class TestSearchPassagesMigration:
         config.set_main_option("sqlalchemy.url", url)
         command.upgrade(config, PASSAGES_REVISION)
         engine = create_engine(url)
-        with Session(engine) as session:
-            build_model(session, "Existing dragon")
+        with engine.begin() as connection:
+            seed_schema_row(
+                connection,
+                "models",
+                id=1,
+                name="Existing dragon",
+                slug="existing-dragon",
+                hash="a" * 64,
+            )
 
         command.downgrade(config, BEFORE_PASSAGES)
 

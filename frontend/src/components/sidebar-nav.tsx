@@ -3,7 +3,6 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useState } from "react";
 import { Link } from "@/lib/link";
 import { usePathname } from "@/lib/navigation";
 import {
@@ -21,7 +20,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { BrandMark } from "@/components/brand-mark";
-import { listPendingImports } from "@/lib/api";
+import { useInboxCount } from "@/lib/queries/inbox";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 
 type NavItem = {
@@ -54,20 +53,8 @@ export function SidebarNav() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const { t } = useI18n();
-  // The badge count is tagged with the account it was fetched for, so a signed-out
-  // or freshly switched user never sees the previous account's inbox total while
-  // the refetch is still in flight.
-  const [pending, setPending] = useState<{ userId: number; count: number } | null>(null);
-  useEffect(() => {
-    if (!user) return;
-    const userId = user.id;
-    listPendingImports(false)
-      .then((items) =>
-        setPending({ userId, count: items.filter((item) => item.state !== "dismissed").length }),
-      )
-      .catch(() => setPending({ userId, count: 0 }));
-  }, [pathname, user]);
-  const pendingCount = user && pending?.userId === user.id ? pending.count : 0;
+  const inbox = useInboxCount(user !== null);
+  const pendingCount = user ? (inbox.data ?? 0) : 0;
   const visibleMainItems = mainItems.filter((item) => !item.adminOnly || user?.is_superuser);
 
   return (

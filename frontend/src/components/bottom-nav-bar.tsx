@@ -2,6 +2,7 @@
 
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 
 import { useEffect, useState } from "react";
 import { Link } from "@/lib/link";
@@ -28,7 +29,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { TaskList } from "@/components/task-list";
 import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
 import { clearCompletedTasks, listTasks, subscribeTasks, type TaskItem } from "@/lib/task-center";
-import { listPendingImports } from "@/lib/api";
+import { useInboxCount } from "@/lib/queries/inbox";
 
 type NavItem = {
   href: string;
@@ -73,34 +74,21 @@ export function BottomNavBar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
+  const startup = useLibraryStartup();
+  const inboxEnabled = startup.canLoad("inbox");
   // The sheet remembers which route it was opened on, so navigating away closes
   // it by derivation instead of by an after-the-fact effect.
   const [openedOnPath, setOpenedOnPath] = useState<string | null>(null);
   const moreOpen = openedOnPath === pathname;
   const [tasks, setTasks] = useState<TaskItem[]>(listTasks);
-  const [pendingImports, setPendingImports] = useState(0);
+  const inbox = useInboxCount(inboxEnabled);
+  const pendingImports = inbox.data ?? 0;
 
   const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || user?.is_superuser);
 
   useEffect(() => subscribeTasks(() => setTasks(listTasks())), []);
 
   useEffect(() => subscribeArchiveReviewRequests(() => setOpenedOnPath(null)), []);
-
-  useEffect(() => {
-    let active = true;
-    const refresh = () =>
-      listPendingImports(false)
-        .then((rows) => {
-          if (active) setPendingImports(rows.filter((row) => row.state !== "dismissed").length);
-        })
-        .catch(() => {});
-    void refresh();
-    const timer = window.setInterval(refresh, 30000);
-    return () => {
-      active = false;
-      window.clearInterval(timer);
-    };
-  }, [pathname]);
 
   const tabs = visibleItems.slice(0, MAX_TABS);
   const overflow = visibleItems.slice(MAX_TABS);
@@ -237,6 +225,7 @@ function MoreSheet({
   useUiLocale();
   const { t } = useI18n();
   const [tasksOpen, setTasksOpen] = useState(false);
+  const startup = useLibraryStartup();
   const activeTasks = tasks.filter(
     (task) => task.status === "pending" || task.status === "running",
   ).length;
@@ -308,7 +297,10 @@ function MoreSheet({
       <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background">
         <button
           type="button"
-          onClick={() => setTasksOpen((open) => !open)}
+          onClick={() => {
+            startup.request("activity");
+            setTasksOpen((open) => !open);
+          }}
           aria-expanded={tasksOpen}
           className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >

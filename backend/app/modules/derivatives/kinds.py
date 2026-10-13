@@ -31,11 +31,13 @@ from sqlmodel import col
 from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, JobKind
 
 # Recipe versions. Bump rule: see the module docstring.
-MESH_GEOMETRY_RECIPE = 2
-MESH_THUMBNAIL_RECIPE = 2
-GCODE_METADATA_RECIPE = 2
-GCODE_THUMBNAIL_RECIPE = 1
+MESH_GEOMETRY_RECIPE = 12
+MESH_THUMBNAIL_RECIPE = 16
+GCODE_METADATA_RECIPE = 3
+GCODE_THUMBNAIL_RECIPE = 3
 TOOLPATH_RECIPE = 1
+VIEWER_STL_RECIPE = 3
+VIEWER_TYPES = (FileType.THREE_MF, FileType.OBJ, FileType.STEP)
 
 MESH_TYPES = (FileType.STL, FileType.THREE_MF, FileType.OBJ, FileType.STEP)
 BINARY_GCODE_SUFFIXES = (".bgcode", ".bgc")
@@ -90,6 +92,21 @@ GROUPS: tuple[DerivativeGroup, ...] = (
         applies=lambda: and_(_real(), col(File.file_type) == FileType.GCODE),
         applies_to=lambda file: (
             file.sha256 != SENTINEL_FILE_HASH and file.file_type == FileType.GCODE
+        ),
+    ),
+    DerivativeGroup(
+        definition=JobKind.DERIVATIVES_VIEWER_STL,
+        kinds={DerivativeKind.VIEWER_STL: VIEWER_STL_RECIPE},
+        label="3D viewer previews",
+        applies=lambda: and_(
+            _real(),
+            col(File.file_type).in_(VIEWER_TYPES),
+            col(File.viewer_requested_at).is_not(None),
+        ),
+        applies_to=lambda file: (
+            file.sha256 != SENTINEL_FILE_HASH
+            and file.file_type in VIEWER_TYPES
+            and file.viewer_requested_at is not None
         ),
     ),
     DerivativeGroup(

@@ -4,8 +4,11 @@ Only the stream interface exposes content; byte counts measure actual chunks
 returned to consumers, and direct paths/native redirects are unavailable.
 """
 
+from dataclasses import replace
 from pathlib import Path
+from typing import BinaryIO
 
+from app.modules.storage.storage_backend.contracts import CreationReceipt
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 
 
@@ -14,8 +17,19 @@ class CountingRemoteStorage(LocalStorageBackend):
 
     def __init__(self):
         super().__init__()
+        # Reads remain opaque; publications use a real local conditional writer.
+        self._writer = LocalStorageBackend()
         self.bytes_read = 0
         self.open_readers = 0
+
+    def create_stream(self, src: BinaryIO, key: str) -> CreationReceipt:
+        return replace(self._writer.create_stream(src, key), backend=self.backend_name)
+
+    def creation_matches(self, receipt: CreationReceipt) -> bool:
+        return self._writer.creation_matches(replace(receipt, backend="local"))
+
+    def rollback_create(self, receipt: CreationReceipt) -> bool:
+        return self._writer.rollback_create(replace(receipt, backend="local"))
 
     def direct_path(self, key: str):
         return None

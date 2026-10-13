@@ -99,7 +99,7 @@ test.describe("batch actions", () => {
     const moveDialog = page.getByRole("dialog", { name: /^Move \d+ item/ });
     await expect(moveDialog).toBeVisible();
     await moveDialog.getByPlaceholder("Find destination").fill(dest);
-    await moveDialog.getByRole("button", { name: new RegExp(`^${dest} `) }).click();
+    await moveDialog.getByRole("option", { name: new RegExp(`^${dest} `) }).click();
     await moveDialog.getByRole("button", { name: "Move here" }).click();
 
     await expect(modelCard(page, model)).toHaveCount(0);
@@ -171,10 +171,9 @@ test.describe("batch actions", () => {
       .getByRole("combobox")
       .filter({ has: page.getByRole("option", { name: "Select user" }) })
       .selectOption({ label: viewer });
-    await accessCard
-      .getByRole("combobox")
-      .filter({ has: page.getByRole("option", { name: "Select collection" }) })
-      .selectOption({ label: col });
+    await accessCard.getByRole("button", { name: "Select collection" }).click();
+    await accessCard.getByRole("dialog").getByPlaceholder("Find destination").fill(col);
+    await accessCard.getByRole("option", { name: new RegExp(`^${col} `) }).click();
     await accessCard
       .getByRole("combobox")
       .filter({ has: page.getByRole("option", { name: "Admin", exact: true }) })

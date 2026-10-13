@@ -8,7 +8,7 @@
  * time: running it again on a live vault is how somebody creates a second
  * "first" admin.
  *
- * Nothing renders while the probe is in flight. Painting the shell first and
+ * Nothing is visible while the probe is in flight. Painting the shell first and
  * redirecting afterwards flashes a UI the user cannot use, and on a slow link
  * they get long enough to click something in it.
  *
@@ -18,7 +18,10 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
+import { useEffect } from "react";
+import userEvent from "@testing-library/user-event";
+import { Link } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SetupGate } from "@/components/setup-gate";
@@ -152,5 +155,216 @@ describe("SetupGate", () => {
 
       expect(await screen.findByText("the vault")).toBeInTheDocument();
     });
+  });
+});
+
+describe("setup gate entry lifetime", () => {
+  it("admits navigation between application paths without a new probe", async () => {
+    const user = userEvent.setup();
+    let probes = 0;
+    renderApp(
+      <>
+        <Link to="/next">Next entry</Link>
+        <Path />
+        <SetupGate>
+          <p>the vault</p>
+        </SetupGate>
+      </>,
+      {
+        at: "/first",
+        routes: {
+          "GET /api/v1/setup/status": () =>
+            ++probes === 1 ? json(CONFIGURED) : Promise.withResolvers<Response>().promise,
+        },
+      },
+    );
+    await screen.findByText("the vault");
+
+    await user.click(screen.getByRole("link", { name: "Next entry" }));
+
+    expect(screen.getByTestId("path")).toHaveTextContent("/next");
+    expect(screen.getByText("the vault")).toBeVisible();
+    expect(probes).toBe(1);
+  });
+
+  it("keeps admitted effects running between application paths", async () => {
+    const user = userEvent.setup();
+    const stopped = vi.fn<() => void>();
+    function Subscriber() {
+      useEffect(() => stopped, []);
+      return <p>the vault</p>;
+    }
+    renderApp(
+      <>
+        <Link to="/next">Next entry</Link>
+        <Path />
+        <SetupGate>
+          <Subscriber />
+        </SetupGate>
+      </>,
+      { at: "/first", routes: { "GET /api/v1/setup/status": json(CONFIGURED) } },
+    );
+    await screen.findByText("the vault");
+
+    await user.click(screen.getByRole("link", { name: "Next entry" }));
+
+    expect(screen.getByTestId("path")).toHaveTextContent("/next");
+    expect(stopped).not.toHaveBeenCalled();
+  });
+
+  it("probes again when a setup entry path is opened from the application", async () => {
+    const user = userEvent.setup();
+    let probes = 0;
+    renderApp(
+      <>
+        <Link to="/getting-started">Storage step</Link>
+        <Path />
+        <SetupGate>
+          <p>the vault</p>
+        </SetupGate>
+      </>,
+      {
+        at: "/first",
+        routes: { "GET /api/v1/setup/status": () => (probes++, json(CONFIGURED)) },
+      },
+    );
+    await screen.findByText("the vault");
+
+    await user.click(screen.getByRole("link", { name: "Storage step" }));
+
+    await waitFor(() => expect(probes).toBe(2));
+  });
+
+  it("holds a new navigation until its setup probe completes", async () => {
+    const user = userEvent.setup();
+    const next = Promise.withResolvers<Response>();
+    let probes = 0;
+    renderApp(
+      <>
+        <Link to="/next">Next entry</Link>
+        <Path />
+        <SetupGate>
+          <p>the vault</p>
+        </SetupGate>
+      </>,
+      {
+        at: "/login",
+        routes: {
+          "GET /api/v1/setup/status": () => (++probes === 1 ? json(CONFIGURED) : next.promise),
+        },
+      },
+    );
+    await screen.findByText("the vault");
+
+    await user.click(screen.getByRole("link", { name: "Next entry" }));
+
+    expect(screen.getByText("the vault")).not.toBeVisible();
+    await act(async () => next.resolve(json(CONFIGURED)));
+    expect(await screen.findByText("the vault")).toBeVisible();
+  });
+
+  it("preserves admitted UI state across a setup probe", async () => {
+    const user = userEvent.setup();
+    const next = Promise.withResolvers<Response>();
+    let probes = 0;
+    renderApp(
+      <>
+        <Link to="/next">Next entry</Link>
+        <SetupGate>
+          <input aria-label="Draft" defaultValue="" />
+        </SetupGate>
+      </>,
+      {
+        at: "/login",
+        routes: {
+          "GET /api/v1/setup/status": () => (++probes === 1 ? json(CONFIGURED) : next.promise),
+        },
+      },
+    );
+    await user.type(await screen.findByRole("textbox", { name: "Draft" }), "Keep my draft");
+    await user.click(screen.getByRole("link", { name: "Next entry" }));
+    expect(screen.queryByRole("textbox", { name: "Draft" })).not.toBeInTheDocument();
+    await act(async () => next.resolve(json(CONFIGURED)));
+    expect(await screen.findByRole("textbox", { name: "Draft" })).toHaveValue("Keep my draft");
+  });
+
+  it("removes admitted content when setup rejects the next entry", async () => {
+    const user = userEvent.setup();
+    const next = Promise.withResolvers<Response>();
+    let probes = 0;
+    renderApp(
+      <>
+        <Link to="/next">Next entry</Link>
+        <Path />
+        <SetupGate>
+          <input aria-label="Draft" defaultValue="" />
+        </SetupGate>
+      </>,
+      {
+        at: "/login",
+        routes: {
+          "GET /api/v1/setup/status": () => (++probes === 1 ? json(CONFIGURED) : next.promise),
+        },
+      },
+    );
+    await user.type(await screen.findByRole("textbox", { name: "Draft" }), "Private draft");
+    await user.click(screen.getByRole("link", { name: "Next entry" }));
+    await act(async () => next.resolve(json(UNCONFIGURED)));
+    await waitFor(() => expect(screen.getByTestId("path")).toHaveTextContent("/setup"));
+    expect(screen.queryByDisplayValue("Private draft")).not.toBeInTheDocument();
+  });
+
+  it("aborts a superseded setup gate probe", async () => {
+    const user = userEvent.setup();
+    const old = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    let probes = 0;
+    renderApp(
+      <>
+        <Link to="/next">Next entry</Link>
+        <Path />
+        <SetupGate>
+          <p>the vault</p>
+        </SetupGate>
+      </>,
+      {
+        at: "/login",
+        routes: {
+          "GET /api/v1/setup/status": (_url, options) => {
+            probes++;
+            if (probes === 1) {
+              signal = options?.signal;
+              return old.promise;
+            }
+            return json(CONFIGURED);
+          },
+        },
+      },
+    );
+
+    await user.click(screen.getByRole("link", { name: "Next entry" }));
+    await act(async () => old.resolve(json(UNCONFIGURED)));
+
+    expect(signal?.aborted).toBe(true);
+    expect(await screen.findByTestId("path")).toHaveTextContent("/next");
+    expect(await screen.findByText("the vault")).toBeVisible();
+  });
+
+  it("aborts a setup gate probe when its view leaves", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const view = renderGate({
+      routes: {
+        "GET /api/v1/setup/status": (_url, options) => {
+          signal = options?.signal;
+          return pending.promise;
+        },
+      },
+    });
+
+    view.unmount();
+    await act(async () => pending.resolve(json(UNCONFIGURED)));
+
+    expect(signal?.aborted).toBe(true);
   });
 });

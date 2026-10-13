@@ -1,31 +1,30 @@
-import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { HardDrive, Server } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { listJobs } from "@/lib/api/jobs";
 import {
-  MODEL_DOWNLOAD_KIND,
-  actOnSearchGeneration,
-  cancelInferenceDownload,
-  deleteInferenceModel,
-  downloadInferenceModel,
-  estimateSearchGeneration,
-  listInferenceModels,
-  listSearchGenerations,
-  prepareSearchGeneration,
-  validateInferenceModel,
-} from "@/lib/api/search";
+  generationEstimateOptions,
+  useSearchCommands,
+  type AiSearchCatalog,
+} from "@/lib/queries/search";
+import { getSessionVersion } from "@/lib/session-transport";
 import { formatBytes, formatDuration, timeAgo } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { isMessageKey } from "@/lib/locale";
 import { toast } from "@/lib/toast";
-import type { GenerationProposal, SearchGeneration, SearchSettingsRead } from "@/types/search";
+import type { GenerationProposal, SearchSettingsRead } from "@/types/search";
 
-export function SearchGenerationControls({ settings }: { settings: SearchSettingsRead }) {
+export function SearchGenerationControls({
+  settings,
+  catalog,
+}: {
+  settings: SearchSettingsRead;
+  catalog: AiSearchCatalog;
+}) {
   const { t } = useI18n();
   const statusLabel = (key: string) => t(isMessageKey(key) ? key : "aiSearch.unspecified");
   const [selection, setSelection] = useState("");
@@ -40,37 +39,17 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
   const [customPrefixes, setCustomPrefixes] = useState(false);
   const [queryPrefix, setQueryPrefix] = useState("");
   const [documentPrefix, setDocumentPrefix] = useState("");
-  const models = useQuery({ queryKey: ["ai-search", "models"], queryFn: listInferenceModels });
-  const generations = useQuery({
-    queryKey: ["ai-search", "generations"],
-    queryFn: listSearchGenerations,
-    refetchInterval: (query) =>
-      query.state.data?.some(
-        (generation) =>
-          generation.state === "building" &&
-          generation.phase !== "ready" &&
-          generation.phase !== "verify_failed",
-      )
-        ? 5000
-        : false,
-  });
-  const downloads = useQuery({
-    queryKey: ["ai-search", "downloads"],
-    queryFn: async () => (await listJobs()).filter((job) => job.kind === MODEL_DOWNLOAD_KIND),
-    refetchInterval: (query) =>
-      query.state.data?.some((job) => job.state === "queued" || job.state === "running")
-        ? 1500
-        : 15000,
-  });
-  const finished =
-    downloads.data
-      ?.filter((job) => job.state === "completed")
-      .map((job) => job.job_id)
-      .join(",") ?? "";
-  const refreshModels = models.refetch;
-  useEffect(() => {
-    if (finished) void refreshModels();
-  }, [finished, refreshModels]);
+  const { models, generations, downloads } = catalog;
+  const {
+    generation: prepare,
+    generationAction: action,
+    download,
+    cancelDownload: cancel,
+    validate,
+    remove,
+  } = useSearchCommands();
+  const [estimatedProposal, setEstimatedProposal] = useState<GenerationProposal | null>(null);
+  const estimate = useQuery(generationEstimateOptions(estimatedProposal));
   const local = models.data?.find((model) => selection === `local:${model.id}`);
   const remote = settings.endpoints.find((endpoint) => selection === `endpoint:${endpoint.id}`);
   const proposal: GenerationProposal | null =
@@ -94,57 +73,8 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
     settings.settings.enabled &&
     (!local ||
       (local.installed && local.runtime_available && settings.settings.local_models_enabled));
-  const estimate = useMutation({ mutationFn: estimateSearchGeneration, onError: toast.error });
-  const prepare = useMutation({
-    mutationFn: prepareSearchGeneration,
-    onSuccess: () => {
-      void generations.refetch();
-      toast.success(t("aiSearch.buildStarted"));
-    },
-    onError: toast.error,
-  });
-  const action = useMutation({
-    mutationFn: ({
-      generation,
-      action,
-    }: {
-      generation: SearchGeneration;
-      action: "activate" | "cancel" | "retry";
-    }) => actOnSearchGeneration(generation, action),
-    onSuccess: () => {
-      void generations.refetch();
-    },
-    onError: toast.error,
-  });
-  const download = useMutation({
-    mutationFn: downloadInferenceModel,
-    onSuccess: () => {
-      void downloads.refetch();
-    },
-    onError: toast.error,
-  });
-  const cancel = useMutation({
-    mutationFn: cancelInferenceDownload,
-    onSuccess: () => {
-      void downloads.refetch();
-    },
-    onError: toast.error,
-  });
-  const validate = useMutation({
-    mutationFn: validateInferenceModel,
-    onSuccess: () => toast.success(t("aiSearch.modelReady")),
-    onError: toast.error,
-  });
-  const remove = useMutation({
-    mutationFn: deleteInferenceModel,
-    onSuccess: () => {
-      setSelection("");
-      void models.refetch();
-    },
-    onError: toast.error,
-  });
   const currentEstimate =
-    estimate.variables && JSON.stringify(estimate.variables) === JSON.stringify(proposal)
+    estimatedProposal && JSON.stringify(estimatedProposal) === JSON.stringify(proposal)
       ? estimate.data
       : undefined;
   const dimensions = local?.mrl_dimensions ?? remote?.mrl_dimensions ?? [];
@@ -198,6 +128,13 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
           <p role="status" className="mt-1 text-sm text-muted-foreground">
             {t("aiSearch.loading")}
           </p>
+        ) : generations.isError ? (
+          <div role="alert" className="space-y-2">
+            <p>{t("aiSearch.historyError")}</p>
+            <Button variant="outline" size="sm" onClick={() => void generations.refetch()}>
+              {t("aiSearch.retry")}
+            </Button>
+          </div>
         ) : active.length ? (
           <ul className="mt-2 divide-y divide-border">
             {active.map((generation) => (
@@ -222,7 +159,16 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
                     variant="outline"
                     size="sm"
                     loading={action.isPending}
-                    onClick={() => action.mutate({ generation, action: "retry" })}
+                    onClick={() =>
+                      action.mutate(
+                        {
+                          generation: { ...generation },
+                          action: "retry",
+                          session: getSessionVersion(),
+                        },
+                        { onError: toast.error },
+                      )
+                    }
                   >
                     {t("aiSearch.retry")}
                   </Button>
@@ -343,16 +289,25 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
                   </label>
                 ))}
               </div>
-            ) : (
-              <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
-                {t("aiSearch.noCompatibleModels")}
+            ) : models.isPending ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                {t("aiSearch.loading")}
               </p>
+            ) : (
+              !models.isError && (
+                <p className="rounded-md border border-border p-4 text-sm text-muted-foreground">
+                  {t("aiSearch.noCompatibleModels")}
+                </p>
+              )
             )}
           </fieldset>
           {models.isError && (
-            <p role="alert" className="text-sm text-destructive">
-              {t("aiSearch.modelsError")}
-            </p>
+            <div role="alert" className="space-y-2">
+              <p className="text-sm text-destructive">{t("aiSearch.modelsError")}</p>
+              <Button variant="outline" size="sm" onClick={() => void models.refetch()}>
+                {t("aiSearch.retry")}
+              </Button>
+            </div>
           )}
           {local && (
             <div className="space-y-2">
@@ -400,7 +355,12 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
                         (job) => job.state === "running" || job.state === "queued",
                       )
                     }
-                    onClick={() => download.mutate(local.key)}
+                    onClick={() =>
+                      download.mutate(
+                        { key: local.key, session: getSessionVersion() },
+                        { onError: toast.error },
+                      )
+                    }
                   >
                     {t("aiSearch.downloadModel")}
                   </Button>
@@ -411,7 +371,15 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
                     size="sm"
                     loading={validate.isPending}
                     disabled={!local.runtime_available}
-                    onClick={() => validate.mutate(local.id)}
+                    onClick={() =>
+                      validate.mutate(
+                        { id: local.id, session: getSessionVersion() },
+                        {
+                          onSuccess: () => toast.success(t("aiSearch.modelReady")),
+                          onError: toast.error,
+                        },
+                      )
+                    }
                   >
                     {t("aiSearch.verifyModel")}
                   </Button>
@@ -421,7 +389,12 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
                     variant="ghost"
                     size="sm"
                     loading={remove.isPending}
-                    onClick={() => remove.mutate(local.id)}
+                    onClick={() =>
+                      remove.mutate(
+                        { id: local.id, session: getSessionVersion() },
+                        { onSuccess: () => setSelection(""), onError: toast.error },
+                      )
+                    }
                   >
                     {t("aiSearch.removeModel")}
                   </Button>
@@ -576,10 +549,14 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
-              loading={estimate.isPending}
+              loading={estimate.isFetching}
               disabled={!proposal || (!!local && !local.installed)}
               onClick={() => {
-                if (proposal) estimate.mutate(proposal);
+                if (proposal) {
+                  if (JSON.stringify(proposal) === JSON.stringify(estimatedProposal))
+                    void estimate.refetch();
+                  else setEstimatedProposal(proposal);
+                }
               }}
             >
               {t("aiSearch.estimate")}
@@ -588,12 +565,24 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
               loading={prepare.isPending}
               disabled={!canPrepare || building || currentEstimate?.fits_budget === false}
               onClick={() => {
-                if (proposal) prepare.mutate(proposal);
+                if (proposal)
+                  prepare.mutate(
+                    { proposal, session: getSessionVersion() },
+                    {
+                      onSuccess: () => toast.success(t("aiSearch.buildStarted")),
+                      onError: toast.error,
+                    },
+                  );
               }}
             >
               {t("aiSearch.buildIndex")}
             </Button>
           </div>
+          {estimate.isError && JSON.stringify(estimatedProposal) === JSON.stringify(proposal) && (
+            <p role="alert" className="text-sm text-destructive">
+              {t("aiSearch.estimateError")}
+            </p>
+          )}
           {currentEstimate && (
             <p role="status" className="text-sm text-muted-foreground">
               {t(
@@ -622,6 +611,14 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
           )}
         </div>
       </div>
+      {downloads.isError && (
+        <div role="alert" className="space-y-2 px-4 py-3">
+          <p>{t("aiSearch.downloadsLoadError")}</p>
+          <Button variant="outline" size="sm" onClick={() => void downloads.refetch()}>
+            {t("aiSearch.retry")}
+          </Button>
+        </div>
+      )}
       {!!downloads.data?.length && (
         <div className="border-t border-border px-4 py-3 sm:px-5">
           <h4 className="text-sm font-semibold">{t("aiSearch.downloads")}</h4>
@@ -653,7 +650,12 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
                     variant="outline"
                     size="sm"
                     loading={cancel.isPending}
-                    onClick={() => cancel.mutate(job.job_id)}
+                    onClick={() =>
+                      cancel.mutate(
+                        { id: job.job_id, session: getSessionVersion() },
+                        { onError: toast.error },
+                      )
+                    }
                   >
                     {t("aiSearch.cancel")}
                   </Button>
@@ -668,6 +670,9 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
         {generations.isError && (
           <p role="alert" className="mt-2 text-sm text-destructive">
             {t("aiSearch.historyError")}
+            <Button variant="outline" size="sm" onClick={() => void generations.refetch()}>
+              {t("aiSearch.retry")}
+            </Button>
           </p>
         )}
         {otherGenerations.length === 0 && !generations.isPending && !generations.isError && (
@@ -735,7 +740,16 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
                       <Button
                         size="sm"
                         loading={action.isPending}
-                        onClick={() => action.mutate({ generation, action: "activate" })}
+                        onClick={() =>
+                          action.mutate(
+                            {
+                              generation: { ...generation },
+                              action: "activate",
+                              session: getSessionVersion(),
+                            },
+                            { onError: toast.error },
+                          )
+                        }
                       >
                         {t("aiSearch.activate")}
                       </Button>
@@ -745,7 +759,16 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
                         size="sm"
                         variant="outline"
                         loading={action.isPending}
-                        onClick={() => action.mutate({ generation, action: "cancel" })}
+                        onClick={() =>
+                          action.mutate(
+                            {
+                              generation: { ...generation },
+                              action: "cancel",
+                              session: getSessionVersion(),
+                            },
+                            { onError: toast.error },
+                          )
+                        }
                       >
                         {t("aiSearch.cancel")}
                       </Button>
@@ -756,7 +779,16 @@ export function SearchGenerationControls({ settings }: { settings: SearchSetting
                           size="sm"
                           variant="outline"
                           loading={action.isPending}
-                          onClick={() => action.mutate({ generation, action: "retry" })}
+                          onClick={() =>
+                            action.mutate(
+                              {
+                                generation: { ...generation },
+                                action: "retry",
+                                session: getSessionVersion(),
+                              },
+                              { onError: toast.error },
+                            )
+                          }
                         >
                           {t("aiSearch.retry")}
                         </Button>

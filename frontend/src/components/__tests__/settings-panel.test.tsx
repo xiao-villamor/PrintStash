@@ -20,17 +20,27 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { readPreviewPreferences } from "@/lib/preview-preferences";
 import { SettingsPanel } from "@/components/settings-panel";
+import { aCollectionPermission, aPrinterPermission } from "@/test-support/permissions";
+import { aUser, aApiKey } from "@/test-support/account";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
+import { backupCatalogKeys } from "@/lib/queries/settings-backup-catalog";
+import { listTasks, syncImportJobs } from "@/lib/task-center";
+import { storageConnectionKeys } from "@/lib/queries/settings-storage";
 import { queryKeys } from "@/lib/query-client";
+import { clearLogin } from "@/lib/auth-store";
+import { BROWSER_EXTENSION_SETUP_STORAGE_KEY } from "@/lib/browser-extension-setup";
 import {
   aCollection,
   aJob,
   aPrinter,
   aStorageConnection,
+  aVaultConfig,
   vaultStats,
 } from "@/test-support/factories";
 import {
@@ -40,7 +50,7 @@ import {
   type RenderAppOptions,
   type RouteTable,
 } from "@/test-support/render";
-import type { CollectionPermissionRead, JobStatus, PrinterPermissionRead, UserRead } from "@/types";
+import type { JobStatus } from "@/types";
 
 const HEALTH = {
   status: "ok",
@@ -49,7 +59,7 @@ const HEALTH = {
   storage: { status: "ok", backend: "local" },
 };
 
-const VAULT_CONFIG = {
+const VAULT_CONFIG = aVaultConfig({
   storage_backend: "local",
   data_dir: "/data/files",
   backup_retention_days: 30,
@@ -61,7 +71,7 @@ const VAULT_CONFIG = {
   trash_retention_days: 30,
   model_thumbnail_width: 640,
   currency: "USD",
-};
+});
 
 const VAULT_STATS = vaultStats();
 
@@ -89,55 +99,10 @@ const GC_PLAN = {
   items: [],
 };
 
-const ISSUED_KEY = {
-  id: 9,
-  name: "Slicer",
-  prefix: "ps_test",
-  created_at: "2026-01-01T00:00:00Z",
-  last_used_at: null,
-};
+const ISSUED_KEY = aApiKey();
 
 /** The mint response, which carries the secret a listing never returns again. */
 const MINTED_KEY = { ...ISSUED_KEY, api_key: "ps_test_this-is-not-a-real-key" };
-
-function aUser(over: Partial<UserRead> = {}): UserRead {
-  return {
-    id: 2,
-    username: "maker",
-    email: null,
-    is_superuser: false,
-    is_active: true,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    ...over,
-  };
-}
-
-function aCollectionPermission(
-  over: Partial<CollectionPermissionRead> = {},
-): CollectionPermissionRead {
-  return {
-    collection_id: 5,
-    user_id: 2,
-    username: "maker",
-    role: "edit",
-    inherited: false,
-    ...over,
-  };
-}
-
-function aPrinterPermission(over: Partial<PrinterPermissionRead> = {}): PrinterPermissionRead {
-  return {
-    id: 11,
-    printer_id: 4,
-    user_id: 2,
-    username: "maker",
-    role: "print",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    ...over,
-  };
-}
 
 function renderSettings(options: RenderAppOptions = {}) {
   const { seed = [], routes = {}, ...rest } = options;
@@ -154,7 +119,7 @@ function renderSettings(options: RenderAppOptions = {}) {
       "GET /api/v1/config": json(VAULT_CONFIG),
       "GET /api/v1/auth/api-keys": json([]),
       "GET /api/v1/admin/users": json([]),
-      "GET /api/v1/collections": json([]),
+      ...collectionTreeRoutes([aCollection({ id: 5, name: "Parts" })]),
       "GET /api/v1/printers": json([]),
       "GET /api/v1/libraries": json([]),
       "GET /api/v1/notifications": json({ enabled: false, channels: [] }),
@@ -214,6 +179,7 @@ describe("SettingsPanel", () => {
       "spoolman",
       "design",
       "previews",
+      "gpu",
       "trash",
       "about",
     ])("opens the %s section from the URL", async (section) => {
@@ -595,20 +561,69 @@ describe("SettingsPanel", () => {
   });
 
   describe("collection access", () => {
+    async function pickParts(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getByRole("button", { name: "Select collection" }));
+      await user.click(await screen.findByRole("option", { name: /Parts/ }));
+    }
+
+    it("loads permissions only for the selected collection", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderSettings({
+        at: "/settings?section=access",
+        routes: { "GET /api/v1/collections/5/permissions": json([]) },
+      });
+      await screen.findByRole("button", { name: "Select collection" });
+
+      expect(requests().filter((call) => call.url.includes("/permissions"))).toEqual([]);
+      expect(
+        requests().filter(
+          (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",
+        ),
+      ).toEqual([]);
+
+      await pickParts(user);
+
+      await waitFor(() =>
+        expect(
+          requests().filter((call) => call.url.includes("/collections/5/permissions")),
+        ).toHaveLength(1),
+      );
+    });
+
+    it("offers a retry when the selected collection's grants fail to load", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderSettings({
+        at: "/settings?section=access",
+        routes: { "GET /api/v1/collections/5/permissions": json({ detail: "unavailable" }, 503) },
+      });
+      await pickParts(user);
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Collection access could not be loaded.",
+      );
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() =>
+        expect(
+          requests().filter((call) => call.url.includes("/collections/5/permissions")),
+        ).toHaveLength(2),
+      );
+    });
+
     it("grants the role the admin chose", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=access",
         routes: {
           "GET /api/v1/admin/users": json([aUser({ id: 2, username: "maker" })]),
-          "GET /api/v1/collections": json([aCollection({ id: 5, name: "Parts" })]),
           "GET /api/v1/collections/5/permissions": json([]),
           "PUT /api/v1/collections/5/permissions/2": json(aCollectionPermission()),
         },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
-      await user.selectOptions((await screen.findAllByLabelText("User"))[0], "2");
-      await user.selectOptions(screen.getByLabelText("Collection"), "5");
+      const choice = (await screen.findAllByLabelText("User"))[0];
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "2");
+      await pickParts(user);
 
       await user.click(screen.getByRole("button", { name: "Grant" }));
 
@@ -624,10 +639,7 @@ describe("SettingsPanel", () => {
     it("cannot grant before a user is chosen", async () => {
       // The grant is per user *and* per collection; a half-filled form would
       // otherwise send a request naming nobody.
-      renderSettings({
-        at: "/settings?section=access",
-        routes: { "GET /api/v1/collections": json([aCollection({ id: 5, name: "Parts" })]) },
-      });
+      renderSettings({ at: "/settings?section=access" });
 
       expect(await screen.findByRole("button", { name: "Grant" })).toBeDisabled();
     });
@@ -652,12 +664,14 @@ describe("SettingsPanel", () => {
         at: "/settings?section=access",
         routes: {
           "GET /api/v1/admin/users": json([aUser({ id: 2, username: "maker" })]),
-          "GET /api/v1/collections": json([aCollection({ id: 5, name: "Parts" })]),
           "GET /api/v1/collections/5/permissions": json([aCollectionPermission()]),
         },
       });
 
-      await user.selectOptions((await screen.findAllByLabelText("User"))[0], "2");
+      const choice = (await screen.findAllByLabelText("User"))[0];
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "2");
+      await pickParts(user);
 
       expect(await screen.findByTitle("Remove collection access")).toBeInTheDocument();
     });
@@ -668,13 +682,15 @@ describe("SettingsPanel", () => {
         at: "/settings?section=access",
         routes: {
           "GET /api/v1/admin/users": json([aUser({ id: 2, username: "maker" })]),
-          "GET /api/v1/collections": json([aCollection({ id: 5, name: "Parts" })]),
           "GET /api/v1/collections/5/permissions": json([aCollectionPermission()]),
           "DELETE /api/v1/collections/5/permissions/2": json(null, 204),
         },
       });
 
-      await user.selectOptions((await screen.findAllByLabelText("User"))[0], "2");
+      const choice = (await screen.findAllByLabelText("User"))[0];
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "2");
+      await pickParts(user);
 
       await user.click(await screen.findByTitle("Remove collection access"));
 
@@ -701,7 +717,9 @@ describe("SettingsPanel", () => {
         },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
-      await user.selectOptions((await screen.findAllByLabelText("User"))[1], "2");
+      const choice = (await screen.findAllByLabelText("User"))[1];
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "2");
       await user.selectOptions(screen.getByLabelText("Printer"), "4");
 
       await user.click(screen.getByRole("button", { name: "Save" }));
@@ -725,7 +743,9 @@ describe("SettingsPanel", () => {
         },
       });
 
-      await user.selectOptions((await screen.findAllByLabelText("User"))[1], "2");
+      const choice = (await screen.findAllByLabelText("User"))[1];
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "2");
 
       await user.click(await screen.findByTitle("Remove printer access"));
 
@@ -853,6 +873,316 @@ describe("SettingsPanel", () => {
       };
     }
 
+    it("distinguishes an unavailable backup catalog from empty storage", async () => {
+      renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json({ detail: "unavailable" }, 503) },
+      });
+      expect(await screen.findByText("Could not load backup sources.")).toBeVisible();
+      expect(screen.queryByText("No backups found.")).toBeNull();
+    });
+    it("recovers the owned backup catalog explicitly", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json({ detail: "unavailable" }, 503) },
+      });
+      await screen.findByText("Could not load backup sources.");
+      app.route({ "GET /api/v1/backups/sources": json([BACKUP]) });
+      await userEvent.click(screen.getByRole("button", { name: "Refresh backups" }));
+      expect(await screen.findByText(BACKUP.backup_id)).toBeVisible();
+      expect(screen.queryByText("Could not load backup sources.")).toBeNull();
+      expect(app.requestsWithMethod("POST")).toHaveLength(0);
+    });
+    it("preserves an unsaved backup retention during refresh", async () => {
+      const app = renderSettings({ at: "/settings?section=backup" });
+      await screen.findByText("No backups found.");
+      const retention = screen.getByLabelText("Retention (days)");
+      await userEvent.clear(retention);
+      await userEvent.type(retention, "14");
+      await userEvent.click(screen.getByRole("button", { name: "Refresh backups" }));
+      await waitFor(() =>
+        expect(
+          app.requestsWithMethod("GET").filter((row) => row.url === "/api/v1/backups/sources"),
+        ).toHaveLength(2),
+      );
+      await screen.findByText("No backups found.");
+      expect(retention).toHaveValue(14);
+    });
+    it("preserves an unsaved backup schedule during refresh", async () => {
+      renderSettings({ at: "/settings?section=backup" });
+      await screen.findByText("No backups found.");
+      await userEvent.click(screen.getByLabelText("Enable automatic backups"));
+      const schedule = screen.getByLabelText("Daily time (UTC)");
+      fireEvent.change(schedule, { target: { value: "04:30" } });
+      await userEvent.click(screen.getByRole("button", { name: "Refresh backups" }));
+      await screen.findByText("No backups found.");
+      expect(schedule).toHaveValue("04:30");
+      expect(screen.getByLabelText("Enable automatic backups")).toBeChecked();
+    });
+    it("blocks backup policy until configuration is available", async () => {
+      renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/config": json({ detail: "unavailable" }, 503) },
+      });
+      await screen.findByText("No backups found.");
+      expect(await screen.findByText("Could not load backup settings.")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Save retention" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Save backup settings" })).toBeDisabled();
+    });
+    it("cancels an abandoned backup catalog read", async () => {
+      const held = Promise.withResolvers<Response>();
+      let signal: AbortSignal | null | undefined;
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/sources": (_url, init) => {
+            signal = init?.signal;
+            return held.promise;
+          },
+        },
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+      app.unmount();
+      await act(async () => {
+        held.resolve(json([]));
+        await held.promise;
+      });
+      expect(signal?.aborted).toBe(true);
+    });
+    it("hides denied backup rows after refresh", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Delete backup" }));
+      expect(screen.getByRole("dialog")).toBeVisible();
+      app.route({ "GET /api/v1/backups/sources": json({ detail: "forbidden" }, 403) });
+      // A refresh can also originate from another observer while confirmation is open.
+      await act(async () => {
+        await app.client.invalidateQueries();
+      });
+      await screen.findByText("Could not load backup sources.");
+      await waitFor(() => expect(screen.queryByText(BACKUP.backup_id)).toBeNull());
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(app.requestsWithMethod("DELETE")).toHaveLength(0);
+    });
+    it("distinguishes failed backup discovery from no candidates", async () => {
+      renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/unowned-local": json({ detail: "unavailable" }, 503) },
+      });
+      expect(await screen.findByText("Some backup sources could not be loaded.")).toBeVisible();
+      expect(screen.queryByText("No backups found.")).toBeNull();
+    });
+
+    it("rejects a backup confirmation after its source changed", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/sources": json([BACKUP]),
+          "DELETE /api/v1/backups/": json(null, 204),
+        },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Delete backup" }));
+      act(() =>
+        app.client.setQueryData(backupCatalogKeys.owned, [
+          { ...BACKUP, archive_sha256: "b".repeat(64) },
+        ]),
+      );
+      await userEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Delete backup" }),
+      );
+      expect(app.requestsWithMethod("DELETE")).toHaveLength(0);
+      expect(
+        await screen.findByText(
+          "The source changed during review. Review the latest version again.",
+        ),
+      ).toBeVisible();
+    });
+    it("keeps a deleted backup absent after an older catalog response", async () => {
+      const held = Promise.withResolvers<Response>();
+      let signal: AbortSignal | null | undefined;
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/sources": json([BACKUP]),
+          "DELETE /api/v1/backups/": json(null, 204),
+        },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Delete backup" }));
+      app.route({
+        "GET /api/v1/backups/sources": (_url, init) => {
+          signal = init?.signal;
+          return held.promise;
+        },
+      });
+      let pending: Promise<void>;
+      act(() => {
+        pending = app.client.invalidateQueries({ queryKey: backupCatalogKeys.owned });
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+      await userEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Delete backup" }),
+      );
+      await waitFor(() => expect(app.requestsWithMethod("DELETE")).toHaveLength(1));
+      await waitFor(() => expect(app.client.getQueryData(backupCatalogKeys.owned)).toEqual([]));
+      await act(async () => {
+        held.resolve(json([BACKUP]));
+        await pending;
+      });
+      await waitFor(() => expect(screen.queryByText(BACKUP.backup_id)).toBeNull());
+      expect(signal?.aborted).toBe(true);
+    });
+    it("retires backup confirmations with the private session", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Delete backup" }));
+      act(() => clearLogin());
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      expect(app.requestsWithMethod("DELETE")).toHaveLength(0);
+    });
+    it("retains an accepted backup without disposed-view feedback", async () => {
+      const id = "backup-disposed-view";
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: backupRoutes(id, { state: "running", result: null }),
+      });
+      await userEvent.click(await screen.findByRole("button", { name: /Backup now/ }));
+      await waitFor(() => expect(listTasks().some((task) => task.jobId === id)).toBe(true));
+      app.rerender(<p>Other view</p>);
+      app.route(backupRoutes(id));
+      await act(async () => {
+        await syncImportJobs();
+      });
+      await waitFor(() =>
+        expect(listTasks().find((task) => task.jobId === id)?.status).toBe("completed"),
+      );
+      expect(screen.queryByText(/Backup created —/)).toBeNull();
+    });
+    it("publishes acknowledged backup policy to shared configuration", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "PUT /api/v1/config": json({
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            backup_retention_days: 15,
+          }),
+        },
+      });
+      await screen.findByText("No backups found.");
+      await userEvent.clear(screen.getByLabelText("Retention (days)"));
+      await userEvent.type(screen.getByLabelText("Retention (days)"), "14");
+      await userEvent.click(screen.getByRole("button", { name: "Save retention" }));
+      await waitFor(() =>
+        expect(app.client.getQueryData(queryKeys.vaultConfig)).toMatchObject({
+          backup_retention_days: 15,
+        }),
+      );
+      expect(screen.getByLabelText("Retention (days)")).toHaveValue(15);
+    });
+
+    it("retains partial policy failure without claiming full success", async () => {
+      const connection = aStorageConnection({
+        id: 7,
+        name: "Off-site archive",
+        purpose: "backup",
+        manual_backup_enabled: true,
+      });
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/storage-connections": json([connection]),
+          "PUT /api/v1/config": json({
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            automatic_backups_enabled: true,
+          }),
+          "PATCH /api/v1/storage-connections/7": json({ detail: "unavailable" }, 503),
+        },
+      });
+      await screen.findByText("No backups found.");
+      await userEvent.click(screen.getByLabelText("Enable automatic backups"));
+      await userEvent.click(screen.getByLabelText("Use Off-site archive for manual backups"));
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await waitFor(() =>
+        expect(app.client.getQueryData(queryKeys.vaultConfig)).toMatchObject({
+          automatic_backups_enabled: true,
+        }),
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save backup settings" })).toBeDisabled(),
+      );
+      expect(screen.getByLabelText("Use Off-site archive for manual backups")).not.toBeChecked();
+      expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual(connection);
+      expect(screen.queryByText("Backup settings saved.")).toBeNull();
+      app.route({
+        "PATCH /api/v1/storage-connections/7": json({
+          ...connection,
+          edit_version: 2,
+          manual_backup_enabled: false,
+        }),
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Save revised changes" }));
+      await waitFor(() =>
+        expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual({
+          ...connection,
+          edit_version: 2,
+          manual_backup_enabled: false,
+        }),
+      );
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(2);
+    });
+
+    it("publishes an adopted backup before another listing", async () => {
+      const candidate = {
+        ...BACKUP,
+        filename: "discovered.tar.gz",
+        source_ref: "discovered-source",
+      };
+      const saved = { ...BACKUP, source_ref: "adopted-source" };
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/backups/unowned-local": json([candidate]),
+          "POST /api/v1/backups/adopt-local": json(saved),
+        },
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Adopt backup" }));
+      await userEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Adopt backup" }),
+      );
+      await waitFor(() =>
+        expect(app.client.getQueryData(backupCatalogKeys.owned)).toEqual([saved]),
+      );
+      expect(screen.queryByText("discovered.tar.gz")).toBeNull();
+      expect(
+        app.requestsWithMethod("GET").filter((row) => row.url === "/api/v1/backups/sources"),
+      ).toHaveLength(1);
+    });
+
+    it("refreshes the backup catalog when returning", async () => {
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: { "GET /api/v1/backups/sources": json([BACKUP]) },
+      });
+      await screen.findByText(BACKUP.backup_id);
+      app.rerender(<p>Other view</p>);
+      app.route({
+        "GET /api/v1/backups/sources": json([
+          { ...BACKUP, backup_id: "backup-completed-while-away" },
+        ]),
+      });
+      app.rerender(<SettingsPanel />);
+      expect(await screen.findByText("backup-completed-while-away")).toBeVisible();
+      expect(
+        app.requestsWithMethod("GET").filter((row) => row.url === "/api/v1/backups/sources"),
+      ).toHaveLength(2);
+    });
+
     it("keeps backup controls out of the storage section", async () => {
       renderSettings({ at: "/settings?section=storage" });
 
@@ -881,12 +1211,13 @@ describe("SettingsPanel", () => {
         routes: {
           "PUT /api/v1/config": (_url, init) => {
             update = JSON.parse(String(init?.body));
-            return json(VAULT_CONFIG);
+            return json({ ...VAULT_CONFIG, edit_version: 2, backup_retention_days: 14 });
           },
         },
       });
 
       const input = await screen.findByLabelText("Retention (days)");
+      await waitFor(() => expect(input).toBeEnabled());
       await user.clear(input);
       await user.type(input, "14");
       await user.click(screen.getByRole("button", { name: "Save retention" }));
@@ -895,6 +1226,10 @@ describe("SettingsPanel", () => {
         expect(requestsWithMethod("PUT").some((call) => call.url.endsWith("/config"))).toBe(true),
       );
       expect(update).toEqual({ backup_retention_days: 14 });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save retention" })).toBeEnabled(),
+      );
+      expect(input).toHaveValue(14);
     });
 
     it.each([
@@ -904,6 +1239,7 @@ describe("SettingsPanel", () => {
     ])("refuses $label backup retention", async ({ value }) => {
       renderSettings({ at: "/settings?section=backup" });
       const input = await screen.findByLabelText("Retention (days)");
+      await waitFor(() => expect(input).toBeEnabled());
 
       fireEvent.change(input, { target: { value } });
 
@@ -928,6 +1264,7 @@ describe("SettingsPanel", () => {
             updates.push(JSON.parse(String(init?.body)));
             return json({
               ...VAULT_CONFIG,
+              edit_version: 2,
               automatic_backups_enabled: true,
               automatic_backup_time_utc: "04:30",
             });
@@ -935,7 +1272,7 @@ describe("SettingsPanel", () => {
           "PATCH /api/v1/storage-connections/7": (_url, init) => {
             const body = JSON.parse(String(init?.body));
             updates.push(body);
-            return json({ ...connection, ...body });
+            return json({ ...connection, ...body, edit_version: 2 });
           },
         },
       });
@@ -959,9 +1296,43 @@ describe("SettingsPanel", () => {
             manual_local_backup_enabled: false,
             automatic_local_backup_enabled: true,
           },
-          { manual_backup_enabled: true, automatic_backup_enabled: true },
+          { automatic_backup_enabled: true },
         ]),
       );
+    });
+
+    it("preserves source-only connections when saving backup policy", async () => {
+      const backup = aStorageConnection({
+        id: 7,
+        name: "Backup destination",
+        purpose: "backup",
+        manual_backup_enabled: true,
+      });
+      const library = aStorageConnection({ id: 9, name: "Source connection", purpose: "library" });
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/storage-connections": json([backup, library]),
+          "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2 }),
+          "PATCH /api/v1/storage-connections/7": json({
+            ...backup,
+            manual_backup_enabled: false,
+            edit_version: 2,
+          }),
+        },
+      });
+      await screen.findByText("No backups found.");
+      await userEvent.click(screen.getByLabelText("Use Backup destination for manual backups"));
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await waitFor(() =>
+        expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual({
+          ...backup,
+          edit_version: 2,
+          manual_backup_enabled: false,
+        }),
+      );
+      expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual(library);
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
 
     it("refuses to save a manual policy without a destination", async () => {
@@ -1027,21 +1398,27 @@ describe("SettingsPanel", () => {
 
     it("deletes the exact backup source after confirmation", async () => {
       const user = userEvent.setup();
+      let deleted = false;
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=backup",
         routes: {
           "GET /api/v1/backups/sources": json([BACKUP]),
-          "GET /api/v1/backups/unowned-local": json([
-            {
-              ...BACKUP,
-              filename: "2026-01-01T000000Z.tar.gz",
-              source_ref: undefined,
-            },
-          ]),
-          "DELETE /api/v1/backups/2026-01-01T000000Z": json({
-            backup_id: BACKUP.backup_id,
-            deleted: true,
-          }),
+          "GET /api/v1/backups/unowned-local": () =>
+            json(
+              deleted
+                ? []
+                : [
+                    {
+                      ...BACKUP,
+                      filename: "2026-01-01T000000Z.tar.gz",
+                      source_ref: undefined,
+                    },
+                  ],
+            ),
+          "DELETE /api/v1/backups/2026-01-01T000000Z": () => {
+            deleted = true;
+            return json({ backup_id: BACKUP.backup_id, deleted: true });
+          },
         },
       });
 
@@ -1057,7 +1434,7 @@ describe("SettingsPanel", () => {
         ).toBe(true),
       );
       expect(screen.queryByText("2026-01-01T000000Z")).toBeNull();
-      expect(screen.queryByText("2026-01-01T000000Z.tar.gz")).toBeNull();
+      await waitFor(() => expect(screen.queryByText("2026-01-01T000000Z.tar.gz")).toBeNull());
     });
 
     it("describes deletion without restore consequences", async () => {
@@ -1223,7 +1600,11 @@ describe("SettingsPanel", () => {
               storage_backend: "local",
             },
           ]),
-          "POST /api/v1/backups/adopt-remote": json({ backup_id: "old" }),
+          "POST /api/v1/backups/adopt-remote": json({
+            ...BACKUP,
+            backup_id: "old",
+            source_ref: "remote-source",
+          }),
         },
       });
 
@@ -1264,7 +1645,11 @@ describe("SettingsPanel", () => {
               storage_backend: "s3",
             },
           ]),
-          "POST /api/v1/backups/adopt-s3": json({ backup_id: "legacy-1" }),
+          "POST /api/v1/backups/adopt-s3": json({
+            ...BACKUP,
+            backup_id: "legacy-1",
+            source_ref: "s3-source",
+          }),
         },
       });
 
@@ -1303,7 +1688,11 @@ describe("SettingsPanel", () => {
               storage_backend: "local",
             },
           ]),
-          "POST /api/v1/backups/adopt-local": json({ backup_id: "legacy-1" }),
+          "POST /api/v1/backups/adopt-local": json({
+            ...BACKUP,
+            backup_id: "legacy-1",
+            source_ref: "adopted-local",
+          }),
         },
       });
 
@@ -1508,14 +1897,371 @@ describe("SettingsPanel", () => {
     expect(screen.queryByRole("heading", { name: "Similar models" })).toBeNull();
   });
 
+  describe("conditional backup policy", () => {
+    it("keeps the original policy snapshot during refresh", async () => {
+      const writes: Headers[] = [];
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "PUT /api/v1/config": (_url, init) => {
+            writes.push(new Headers(init?.headers));
+            return json({ detail: "edit_conflict" }, 412);
+          },
+        },
+      });
+      const enabled = await screen.findByLabelText("Enable automatic backups");
+      await waitFor(() => expect(enabled).toBeEnabled());
+      await userEvent.click(enabled);
+      await act(async () =>
+        app.client.setQueryData(queryKeys.vaultConfig, {
+          ...VAULT_CONFIG,
+          edit_version: 2,
+          automatic_backup_time_utc: "06:45",
+        }),
+      );
+      expect(screen.getByLabelText("Daily time (UTC)")).toHaveValue("02:00");
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await screen.findByRole("button", { name: "Review latest version" });
+      expect(writes[0].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v1"`);
+      expect(JSON.parse(app.requestsWithMethod("PUT")[0].body)).toMatchObject({
+        automatic_backup_time_utc: "02:00",
+      });
+    });
+    it.each([412, 503])(
+      "%s: reviews a failed policy save before destination writes",
+      async (status) => {
+        const connection = aStorageConnection({
+          id: 7,
+          name: "Archive",
+          automatic_backup_enabled: false,
+        });
+        let reads = 0;
+        const writes: Headers[] = [];
+        const app = renderSettings({
+          at: "/settings?section=backup",
+          routes: {
+            "GET /api/v1/config": () =>
+              json({
+                ...VAULT_CONFIG,
+                edit_version: ++reads,
+                automatic_backup_time_utc: reads === 1 ? "02:00" : "06:45",
+              }),
+            "GET /api/v1/storage-connections": json([connection]),
+            "PUT /api/v1/config": (_url, init) => {
+              writes.push(new Headers(init?.headers));
+              return writes.length === 1
+                ? json({ detail: "edit_conflict" }, status)
+                : json({
+                    ...VAULT_CONFIG,
+                    edit_version: 3,
+                    automatic_backups_enabled: true,
+                    automatic_backup_time_utc: "06:45",
+                  });
+            },
+            "PATCH /api/v1/storage-connections/7": json({
+              ...connection,
+              edit_version: 2,
+              automatic_backup_enabled: true,
+            }),
+          },
+        });
+        const enabled = await screen.findByLabelText("Enable automatic backups");
+        await waitFor(() => expect(enabled).toBeEnabled());
+        await userEvent.click(enabled);
+        await userEvent.click(screen.getByLabelText("Use Archive for automatic backups"));
+        await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+        await screen.findByRole("button", { name: "Review latest version" });
+        expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+        expect(screen.getByRole("button", { name: "Save backup settings" })).toBeDisabled();
+        await userEvent.click(screen.getByRole("button", { name: "Review latest version" }));
+        const latest = await screen.findByRole("region", { name: "Latest saved version" });
+        expect(within(latest).getByText("06:45")).toBeVisible();
+        expect(screen.getByLabelText("Daily time (UTC)")).toHaveValue("02:00");
+        await userEvent.click(
+          screen.getByRole("button", { name: "Save my draft against this version" }),
+        );
+        await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
+        expect(writes[1].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v2"`);
+        expect(JSON.parse(app.requestsWithMethod("PUT")[1].body)).toMatchObject({
+          automatic_backups_enabled: true,
+          automatic_backup_time_utc: "06:45",
+        });
+        expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toEqual({
+          automatic_backup_enabled: true,
+        });
+      },
+    );
+    it("adopts a reviewed policy without writing destinations", async () => {
+      let reads = 0;
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/config": () =>
+            json({
+              ...VAULT_CONFIG,
+              edit_version: ++reads,
+              automatic_backup_time_utc: reads === 1 ? "02:00" : "06:45",
+            }),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const enabled = await screen.findByLabelText("Enable automatic backups");
+      await waitFor(() => expect(enabled).toBeEnabled());
+      await userEvent.click(enabled);
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Use latest version" }));
+      expect(enabled).not.toBeChecked();
+      expect(screen.getByLabelText("Daily time (UTC)")).toHaveValue("06:45");
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+    });
+    it("preserves confirmed destination receipts after partial failure", async () => {
+      const first = aStorageConnection({ id: 7, name: "First", automatic_backup_enabled: false });
+      const second = aStorageConnection({ id: 8, name: "Second", automatic_backup_enabled: false });
+      let version = 1;
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/storage-connections": json([first, second]),
+          "PUT /api/v1/config": () => json({ ...VAULT_CONFIG, edit_version: ++version }),
+          "PATCH /api/v1/storage-connections/7": json({
+            ...first,
+            automatic_backup_enabled: true,
+            edit_version: 2,
+          }),
+          "PATCH /api/v1/storage-connections/8": json({ detail: "unavailable" }, 503),
+        },
+      });
+      const enabled = await screen.findByLabelText("Use First for automatic backups");
+      await waitFor(() => expect(enabled).toBeEnabled());
+      await userEvent.click(enabled);
+      await userEvent.click(screen.getByLabelText("Use Second for automatic backups"));
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save backup settings" })).toBeDisabled(),
+      );
+      expect(app.client.getQueryData(storageConnectionKeys.all)).toContainEqual({
+        ...first,
+        edit_version: 2,
+        automatic_backup_enabled: true,
+      });
+      app.route({
+        "PATCH /api/v1/storage-connections/8": json({
+          ...second,
+          automatic_backup_enabled: true,
+          edit_version: 2,
+        }),
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Save revised changes" }));
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(3));
+      expect(app.requestsWithMethod("PATCH").map((request) => request.url)).toEqual([
+        "/api/v1/storage-connections/7",
+        "/api/v1/storage-connections/8",
+        "/api/v1/storage-connections/8",
+      ]);
+      expect(enabled).toBeChecked();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+    it.each([403, 503])("%s: blocks policy retry after an unavailable review", async (status) => {
+      let reads = 0;
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/config": () =>
+            ++reads === 1 ? json(VAULT_CONFIG) : json({ detail: "unavailable" }, status),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const enabled = await screen.findByLabelText("Enable automatic backups");
+      await waitFor(() => expect(enabled).toBeEnabled());
+      await userEvent.click(enabled);
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Review latest version" })).toBeEnabled(),
+      );
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).toBeNull();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+    });
+    it("retires a pending policy review on logout", async () => {
+      let reads = 0;
+      const pending = Promise.withResolvers<Response>();
+      const app = renderSettings({
+        at: "/settings?section=backup",
+        routes: {
+          "GET /api/v1/config": () => (++reads === 1 ? json(VAULT_CONFIG) : pending.promise),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const enabled = await screen.findByLabelText("Enable automatic backups");
+      await waitFor(() => expect(enabled).toBeEnabled());
+      await userEvent.click(enabled);
+      await userEvent.click(screen.getByRole("button", { name: "Save backup settings" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await act(async () => {
+        clearLogin();
+        pending.resolve(json({ ...VAULT_CONFIG, edit_version: 2 }));
+      });
+      expect(screen.queryByRole("region", { name: "Latest saved version" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).toBeNull();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+    });
+  });
+
+  describe("retention configuration editing", () => {
+    it("keeps retention editing unavailable to members", async () => {
+      const app = renderSettings({ at: "/settings?section=trash", auth: memberSession() });
+      const input = await screen.findByLabelText("Days");
+      expect(input).toBeDisabled();
+      await waitFor(() =>
+        expect(
+          app.requestsWithMethod("GET").some((request) => request.url === "/api/v1/models/trash"),
+        ).toBe(true),
+      );
+      expect(
+        app.requestsWithMethod("GET").filter((request) => request.url === "/api/v1/config"),
+      ).toHaveLength(0);
+      expect(screen.getByRole("button", { name: "Save retention" })).toBeDisabled();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+    });
+    it("retries a failed trash configuration read", async () => {
+      let reads = 0;
+      renderSettings({
+        at: "/settings?section=trash",
+        routes: {
+          "GET /api/v1/config": () =>
+            ++reads === 1 ? json({ detail: "unavailable" }, 503) : json(VAULT_CONFIG),
+        },
+      });
+      const input = await screen.findByLabelText("Days");
+      expect(input).toBeDisabled();
+      await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
+      await waitFor(() => expect(input).toBeEnabled());
+      expect(reads).toBe(2);
+    });
+    it.each([
+      { section: "backup", label: "Retention (days)", field: "backup_retention_days" },
+      { section: "trash", label: "Days", field: "trash_retention_days" },
+    ])(
+      "$section: keeps a retention draft across configuration refresh",
+      async ({ section, label, field }) => {
+        const writes: Headers[] = [];
+        const app = renderSettings({
+          at: `/settings?section=${section}`,
+          routes: {
+            "PUT /api/v1/config": (_url, init) => {
+              writes.push(new Headers(init?.headers));
+              return json({ detail: "edit_conflict" }, 412);
+            },
+          },
+        });
+        const input = await screen.findByLabelText(label);
+        await waitFor(() => expect(input).toBeEnabled());
+        await userEvent.clear(input);
+        await userEvent.type(input, "14");
+        await act(async () => {
+          app.client.setQueryData(queryKeys.vaultConfig, {
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            [field]: 9,
+          });
+        });
+        expect(input).toHaveValue(14);
+        await userEvent.click(screen.getByRole("button", { name: "Save retention" }));
+        await screen.findByRole("button", { name: "Review latest version" });
+        expect(writes[0].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v1"`);
+      },
+    );
+    it.each([
+      { section: "backup", label: "Retention (days)", field: "backup_retention_days" },
+      { section: "trash", label: "Days", field: "trash_retention_days" },
+    ])(
+      "$section: reviews a retention conflict before saving revised days",
+      async ({ section, label, field }) => {
+        let reads = 0;
+        const writes: Headers[] = [];
+        const app = renderSettings({
+          at: `/settings?section=${section}`,
+          routes: {
+            "GET /api/v1/config": () =>
+              json({ ...VAULT_CONFIG, edit_version: ++reads, [field]: reads === 1 ? 30 : 9 }),
+            "PUT /api/v1/config": (_url, init) => {
+              writes.push(new Headers(init?.headers));
+              return writes.length === 1
+                ? json({ detail: "edit_conflict" }, 412)
+                : json({ ...VAULT_CONFIG, edit_version: 3, [field]: 18 });
+            },
+          },
+        });
+        const input = await screen.findByLabelText(label);
+        await waitFor(() => expect(input).toBeEnabled());
+        await userEvent.clear(input);
+        await userEvent.type(input, "14");
+        await userEvent.click(screen.getByRole("button", { name: "Save retention" }));
+        await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+        const review = await screen.findByRole("region", { name: "Latest saved version" });
+        expect(within(review).getByText("9")).toBeVisible();
+        await userEvent.clear(input);
+        await userEvent.type(input, "18");
+        await userEvent.click(
+          screen.getByRole("button", { name: "Save my draft against this version" }),
+        );
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "Save retention" })).toBeEnabled(),
+        );
+        expect(writes).toHaveLength(2);
+        expect(writes[1].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v2"`);
+        expect(JSON.parse(app.requestsWithMethod("PUT")[1].body)).toEqual({ [field]: 18 });
+        expect(input).toHaveValue(18);
+      },
+    );
+    it("refreshes trash without replacing retention input", async () => {
+      const app = renderSettings({ at: "/settings?section=trash" });
+      const input = await screen.findByLabelText("Days");
+      await waitFor(() => expect(input).toBeEnabled());
+      await userEvent.clear(input);
+      await userEvent.type(input, "14");
+      const reads = app.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/config").length;
+      await userEvent.click(screen.getByTitle("Refresh trash"));
+      await waitFor(() =>
+        expect(
+          app.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/models/trash"),
+        ).toHaveLength(2),
+      );
+      expect(input).toHaveValue(14);
+      expect(app.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/config")).toHaveLength(
+        reads,
+      );
+    });
+    it("rejects an empty trash retention draft", async () => {
+      const app = renderSettings({ at: "/settings?section=trash" });
+      const input = await screen.findByLabelText("Days");
+      await waitFor(() => expect(input).toBeEnabled());
+      await userEvent.clear(input);
+      expect(screen.getByRole("button", { name: "Save retention" })).toBeDisabled();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+    });
+  });
+
   describe("trash retention", () => {
     it("saves the retention window", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=trash",
-        routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, trash_retention_days: 7 }) },
+        routes: {
+          "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2, trash_retention_days: 7 }),
+        },
       });
       const days = await screen.findByLabelText("Days");
+      await waitFor(() => expect(days).toBeEnabled());
       await user.clear(days);
       await user.type(days, "7");
 
@@ -1656,6 +2402,7 @@ describe("SettingsPanel", () => {
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=trash",
         routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, storage_tier: "unguarded" }),
           "GET /api/v1/models/trash": json([TRASHED_MODEL]),
           "DELETE /api/v1/models/7": json(null, 204),
         },
@@ -1676,6 +2423,7 @@ describe("SettingsPanel", () => {
       renderSettings({
         at: "/settings?section=trash",
         routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, storage_tier: "unguarded" }),
           "GET /api/v1/models/trash": json([TRASHED_MODEL]),
           "DELETE /api/v1/models/7": json({
             purged_model_ids: [7],
@@ -1751,12 +2499,12 @@ describe("SettingsPanel", () => {
             status: "update_available",
             update_available: true,
             current_version: "0.12.1",
-            latest_version: "0.13.0",
+            latest_version: "0.14.0",
           }),
         },
       });
 
-      expect(await screen.findByText(/Update available: v0\.13\.0/)).toBeInTheDocument();
+      expect(await screen.findByText(/Update available: v0\.14\.0/)).toBeInTheDocument();
     });
 
     it("says so when the release check itself could not run", async () => {
@@ -1795,14 +2543,47 @@ describe("SettingsPanel", () => {
 
     it("remembers the known-good choice", async () => {
       const user = userEvent.setup();
-      renderSettings({ at: "/settings?section=design" });
+      renderSettings({
+        at: "/settings?section=design",
+        routes: {
+          "PUT /api/v1/config": json({
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            auto_mark_known_good: true,
+          }),
+        },
+      });
 
       const toggle = await screen.findByRole("switch", {
         name: "Auto-mark known good on successful print",
       });
+      await waitFor(() => expect(toggle).toBeEnabled());
       await user.click(toggle);
+      await waitFor(() => expect(toggle).toBeEnabled());
 
       expect(toggle).toHaveAttribute("aria-checked", "true");
+    });
+  });
+
+  describe("GPU settings", () => {
+    it("opens GPU settings from section navigation", async () => {
+      const user = userEvent.setup();
+      renderSettings();
+      const nav = await screen.findByRole("navigation", { name: "Settings sections" });
+
+      await user.click(within(nav).getByRole("button", { name: /^GPU$/ }));
+
+      expect(await screen.findByRole("combobox", { name: "Mesh renderer" })).toHaveValue("webgl");
+    });
+
+    it("saves the renderer choice from the GPU section", async () => {
+      const user = userEvent.setup();
+      renderSettings({ at: "/settings?section=gpu" });
+      const choice = await screen.findByRole("combobox", { name: "Mesh renderer" });
+
+      await user.selectOptions(choice, "webgpu");
+
+      expect(readPreviewPreferences().meshRenderer).toBe("webgpu");
     });
   });
 
@@ -1933,16 +2714,134 @@ describe("SettingsPanel", () => {
   });
 
   describe("display preferences", () => {
+    it.each([412, 503])(
+      "%s: reviews a conflicting display currency before saving again",
+      async (status) => {
+        let reads = 0;
+        const writes: Headers[] = [];
+        const app = renderSettings({
+          at: "/settings?section=design",
+          routes: {
+            "GET /api/v1/config": () =>
+              json({
+                ...VAULT_CONFIG,
+                edit_version: ++reads,
+                currency: reads === 1 ? "USD" : "GBP",
+              }),
+            "PUT /api/v1/config": (_url, init) => {
+              writes.push(new Headers(init?.headers));
+              return writes.length === 1
+                ? json({ detail: "edit_conflict" }, status)
+                : json({ ...VAULT_CONFIG, edit_version: 3, currency: "EUR" });
+            },
+          },
+        });
+        const input = await screen.findByLabelText("Display currency");
+        await waitFor(() => expect(input).toBeEnabled());
+        await userEvent.selectOptions(input, "EUR");
+        const review = await screen.findByRole("button", { name: "Review latest version" });
+        expect(input).toHaveValue("EUR");
+        expect(input).toBeDisabled();
+        expect(writes).toHaveLength(1);
+        await userEvent.click(review);
+        const latest = await screen.findByRole("region", { name: "Latest saved version" });
+        expect(within(latest).getByText("GBP")).toBeVisible();
+        expect(input).toHaveValue("EUR");
+        await userEvent.click(
+          screen.getByRole("button", { name: "Save my draft against this version" }),
+        );
+        await waitFor(() => expect(input).toBeEnabled());
+        expect(input).toHaveValue("EUR");
+        expect(writes[0].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v1"`);
+        expect(writes[1].get("If-Match")).toBe(`"vault-config-e${VAULT_CONFIG.edit_epoch}-v2"`);
+        expect(app.client.getQueryData(queryKeys.vaultConfig)).toMatchObject({
+          currency: "EUR",
+          edit_version: 3,
+        });
+      },
+      // Full Settings rendering plus two saves and a review exceeds five seconds
+      // under V8 coverage; individual UI/network waits retain their own bounds.
+      15_000,
+    );
+    it("retires a pending preference review on logout", async () => {
+      let reads = 0;
+      const pending = Promise.withResolvers<Response>();
+      const app = renderSettings({
+        at: "/settings?section=design",
+        routes: {
+          "GET /api/v1/config": () => (++reads === 1 ? json(VAULT_CONFIG) : pending.promise),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const input = await screen.findByLabelText("Display currency");
+      await waitFor(() => expect(input).toBeEnabled());
+      await userEvent.selectOptions(input, "EUR");
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await act(async () => {
+        clearLogin();
+        pending.resolve(json({ ...VAULT_CONFIG, edit_version: 2, currency: "GBP" }));
+      });
+      expect(
+        screen.queryByRole("region", { name: "Latest saved version" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+    it("adopts a reviewed preference without another write", async () => {
+      let reads = 0;
+      const app = renderSettings({
+        at: "/settings?section=design",
+        routes: {
+          "GET /api/v1/config": () =>
+            json({ ...VAULT_CONFIG, edit_version: ++reads, currency: reads === 1 ? "USD" : "GBP" }),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const input = await screen.findByLabelText("Display currency");
+      await waitFor(() => expect(input).toBeEnabled());
+      await userEvent.selectOptions(input, "EUR");
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Use latest version" }));
+      expect(input).toHaveValue("GBP");
+      expect(input).toBeEnabled();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+    it.each([403, 503])("%s: blocks preference retry after a failed review", async (status) => {
+      let reads = 0;
+      const app = renderSettings({
+        at: "/settings?section=design",
+        routes: {
+          "GET /api/v1/config": () =>
+            ++reads === 1 ? json(VAULT_CONFIG) : json({ detail: "unavailable" }, status),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      const input = await screen.findByLabelText("Display currency");
+      await waitFor(() => expect(input).toBeEnabled());
+      await userEvent.selectOptions(input, "EUR");
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await waitFor(() => expect(reads).toBe(2));
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
     it("saves the display currency", async () => {
       // Every cost in the app is rendered in it, so a wrong one misprices the
       // whole library at once.
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=design",
-        routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, currency: "EUR" }) },
+        routes: {
+          "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2, currency: "EUR" }),
+        },
       });
 
-      await user.selectOptions(await screen.findByLabelText("Display currency"), "EUR");
+      const choice = await screen.findByLabelText("Display currency");
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "EUR");
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -1972,10 +2871,18 @@ describe("SettingsPanel", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderSettings({
         at: "/settings?section=previews",
-        routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, model_thumbnail_width: 1280 }) },
+        routes: {
+          "PUT /api/v1/config": json({
+            ...VAULT_CONFIG,
+            edit_version: 2,
+            model_thumbnail_width: 1280,
+          }),
+        },
       });
 
-      await user.selectOptions(await screen.findByLabelText("Model image quality"), "1280");
+      const choice = await screen.findByLabelText("Model image quality");
+      await waitFor(() => expect(choice).toBeEnabled());
+      await user.selectOptions(choice, "1280");
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -2213,5 +3120,595 @@ describe("SettingsPanel", () => {
 
       expect(await screen.findByText("Metadata display reset.")).toBeInTheDocument();
     });
+  });
+});
+
+describe("Settings account recovery", () => {
+  it("retries an unavailable API-key list without claiming it empty", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: { "GET /api/v1/auth/api-keys": json({ detail: "unavailable" }, 503) },
+    });
+    const failure = await screen.findByRole("alert");
+    expect(failure).toHaveTextContent("API keys could not be loaded.");
+    expect(screen.queryByText("No active API keys.")).toBeNull();
+    app.route({ "GET /api/v1/auth/api-keys": json([ISSUED_KEY]) });
+    await userEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Slicer")).toBeVisible();
+  });
+  it("retries an unavailable admin User list without claiming it empty", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: { "GET /api/v1/admin/users": json({ detail: "unavailable" }, 503) },
+    });
+    const failure = await screen.findByRole("alert");
+    expect(failure).toHaveTextContent("Users could not be loaded.");
+    expect(screen.queryByText("No users.")).toBeNull();
+    app.route({ "GET /api/v1/admin/users": json([aUser()]) });
+    await userEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("maker", { selector: "p" })).toBeVisible();
+  });
+  it("retires an owned extension handoff with its private session", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: { "POST /api/v1/auth/api-keys": json(MINTED_KEY) },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Set up extension" }));
+    await screen.findByText("Setup prepared");
+    expect(window.sessionStorage.getItem(BROWSER_EXTENSION_SETUP_STORAGE_KEY)).toContain(
+      MINTED_KEY.api_key,
+    );
+    app.unmount();
+    await act(async () => {
+      clearLogin();
+    });
+    expect(window.sessionStorage.getItem(BROWSER_EXTENSION_SETUP_STORAGE_KEY)).toBeNull();
+  });
+});
+
+describe("Settings account intent", () => {
+  it("keeps an issued key copyable when extension handoff storage fails", async () => {
+    const store = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, key, value) {
+      if (key === BROWSER_EXTENSION_SETUP_STORAGE_KEY)
+        throw new DOMException("Storage unavailable", "QuotaExceededError");
+      return store.call(this, key, value);
+    });
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "POST /api/v1/auth/api-keys": json(MINTED_KEY),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Set up extension" }));
+    expect(await screen.findByTitle("Copy API key")).toBeVisible();
+    expect(screen.getByText(MINTED_KEY.api_key)).toBeVisible();
+    expect(screen.queryByText("Setup prepared")).toBeNull();
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
+  });
+  it("retains a failed User create draft without an automatic retry", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "POST /api/v1/admin/users": json({ detail: "User creation unavailable" }, 503),
+      },
+    });
+    const username = await screen.findByLabelText("Username");
+    fireEvent.change(username, { target: { value: "retry-maker" } });
+    fireEvent.change(screen.getByLabelText("Initial password"), {
+      target: { value: "FakePassword123" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    expect(
+      await screen.findByText(
+        "Something went wrong reaching the server. Check that PrintStash is running and try again.",
+      ),
+    ).toBeVisible();
+    expect(username).toHaveValue("retry-maker");
+    expect(screen.getByLabelText("Initial password")).toHaveValue("FakePassword123");
+    expect(screen.getByRole("button", { name: "Create" })).toBeEnabled();
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
+  });
+  it("suppresses an issued secret after the account read is denied", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "POST /api/v1/auth/api-keys": json(MINTED_KEY),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Generate" }));
+    await screen.findByTitle("Copy API key");
+    app.route({ "GET /api/v1/auth/api-keys": json({ detail: "denied" }, 403) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["api-keys"] });
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("API keys could not be loaded.");
+    expect(screen.queryByText(MINTED_KEY.api_key)).toBeNull();
+    expect(screen.queryByTitle("Copy API key")).toBeNull();
+    expect(screen.queryByText("Slicer")).toBeNull();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();
+  });
+});
+
+describe("Settings account draft lifetime", () => {
+  it("preserves a User draft through background refresh", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+      },
+    });
+    const username = await screen.findByLabelText("Username");
+    await userEvent.type(username, "new-maker");
+    await userEvent.type(screen.getByLabelText("Initial password"), "FakePassword123");
+    app.route({ "GET /api/v1/admin/users": json([aUser({ username: "changed elsewhere" })]) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["admin", "users"] });
+    });
+    expect(username).toHaveValue("new-maker");
+    expect(screen.getByLabelText("Initial password")).toHaveValue("FakePassword123");
+    expect(await screen.findByText("changed elsewhere", { selector: "p" })).toBeVisible();
+  });
+  it("preserves a newer create draft after the earlier command completes", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "POST /api/v1/admin/users": () => pending.promise,
+      },
+    });
+    const username = await screen.findByLabelText("Username");
+    fireEvent.change(username, { target: { value: "original-maker" } });
+    fireEvent.change(screen.getByLabelText("Initial password"), {
+      target: { value: "FakePassword123" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Create" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    fireEvent.change(username, { target: { value: "next-maker" } });
+    await act(async () => {
+      pending.resolve(json(aUser({ username: "original-maker" })));
+    });
+    expect(await screen.findByText("original-maker", { selector: "p" })).toBeVisible();
+    expect(username).toHaveValue("next-maker");
+    expect(screen.getByLabelText("Initial password")).toHaveValue("FakePassword123");
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body).username).toBe("original-maker");
+  });
+  it("preserves a newer password draft after an earlier reset completes", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "POST /api/v1/admin/users/2/password": () => pending.promise,
+      },
+    });
+    const field = await screen.findByPlaceholderText("New password");
+    fireEvent.change(field, { target: { value: "OldFakePassword123" } });
+    await userEvent.click(screen.getByRole("button", { name: "Reset password" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    fireEvent.change(field, { target: { value: "NextFakePassword123" } });
+    await act(async () => {
+      pending.resolve(json(aUser()));
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Reset password" })).toBeEnabled(),
+    );
+    expect(field).toHaveValue("NextFakePassword123");
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body).password).toBe("OldFakePassword123");
+  });
+  it("dismisses the one-time key receipt without revoking its key", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "POST /api/v1/auth/api-keys": json(MINTED_KEY),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Generate" }));
+    await screen.findByTitle("Copy API key");
+    expect(screen.getByRole("button", { name: "Generate" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss this secret" }));
+    expect(screen.queryByText(MINTED_KEY.api_key)).toBeNull();
+    expect(screen.getByText("Slicer")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Generate" })).toBeEnabled();
+    expect(app.requestsWithMethod("DELETE")).toHaveLength(0);
+  });
+  it("keeps API keys usable while the User list is unavailable", async () => {
+    renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/auth/api-keys": json([ISSUED_KEY]),
+        "GET /api/v1/admin/users": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Users could not be loaded.");
+    expect(screen.getByText("Slicer")).toBeVisible();
+    expect(screen.getByTitle("Revoke API key")).toBeEnabled();
+  });
+  it("disables a selected collection grant after the User list is denied", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": json([]),
+      },
+    });
+    const selects = await screen.findAllByLabelText("User");
+    await waitFor(() => expect(selects[0]).toBeEnabled());
+    await userEvent.selectOptions(selects[0], "2");
+    await userEvent.click(screen.getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    expect(screen.getByRole("button", { name: "Grant" })).toBeEnabled();
+    app.route({ "GET /api/v1/admin/users": json({ detail: "denied" }, 403) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["admin", "users"] });
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Users could not be loaded.");
+    expect(screen.getByRole("button", { name: "Grant" })).toBeDisabled();
+    expect(selects[0]).toBeDisabled();
+    expect(screen.queryByText("maker", { selector: "p" })).toBeNull();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+  });
+});
+
+describe("Settings resource access recovery", () => {
+  it("closes a grantee selection after the User loses its selectable role", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": json([aCollectionPermission()]),
+        "GET /api/v1/printers": json([aPrinter({ id: 4, name: "Voron" })]),
+        "GET /api/v1/printers/4/permissions": json([aPrinterPermission()]),
+      },
+    });
+    const collection = await screen.findByRole("group", { name: "Collection access" });
+    const printer = screen.getByRole("group", { name: "Printer access" });
+    await within(collection).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(collection).getByLabelText("User"), "2");
+    await userEvent.click(within(collection).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await within(collection).findByTitle("Remove collection access");
+    await userEvent.selectOptions(within(printer).getByLabelText("User"), "2");
+    await within(printer).findByTitle("Remove printer access");
+    app.route({ "GET /api/v1/admin/users": json([aUser({ is_superuser: true })]) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["admin", "users"] });
+    });
+    await waitFor(() => expect(within(collection).getByLabelText("User")).toHaveValue(""));
+    expect(within(printer).getByLabelText("User")).toHaveValue("");
+    expect(within(collection).queryByTitle("Remove collection access")).toBeNull();
+    expect(within(printer).queryByTitle("Remove printer access")).toBeNull();
+    expect(within(collection).getByRole("button", { name: "Grant" })).toBeDisabled();
+  });
+  it("hides denied cached printer grants", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/printers": json([aPrinter({ id: 4, name: "Voron" })]),
+        "GET /api/v1/printers/4/permissions": json([aPrinterPermission()]),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Printer access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    await within(card).findByTitle("Remove printer access");
+    await userEvent.selectOptions(within(card).getByLabelText("Printer"), "4");
+    app.route({ "GET /api/v1/printers/4/permissions": json({ detail: "denied" }, 403) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["printer-permissions"] });
+    });
+    expect(await within(card).findByRole("alert")).toHaveTextContent("Voron");
+    expect(within(card).queryByTitle("Remove printer access")).toBeNull();
+    expect(within(card).queryByText(/has no direct printer access/)).toBeNull();
+    expect(within(card).getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+  it("discards an obsolete collection permission read after selection", async () => {
+    const held = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        ...collectionTreeRoutes([
+          aCollection({ id: 5, name: "Parts" }),
+          aCollection({ id: 6, name: "Tools" }),
+        ]),
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": (_url, init) => {
+          signal = init?.signal;
+          return held.promise;
+        },
+        "GET /api/v1/collections/6/permissions": json([
+          aCollectionPermission({ collection_id: 6, role: "admin" }),
+        ]),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Collection access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    await userEvent.click(within(card).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await waitFor(() => expect(signal).toBeDefined());
+    await userEvent.click(within(card).getByRole("button", { name: "Parts" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Tools/ }));
+    expect(await within(card).findByTitle("Remove collection access")).toBeVisible();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      held.resolve(json([aCollectionPermission()]));
+    });
+    expect(within(card).getByText("admin", { selector: "span" })).toBeVisible();
+    expect(within(card).queryByText("edit", { selector: "span" })).toBeNull();
+    expect(
+      app.requestsWithMethod("GET").filter((call) => call.url.endsWith("/permissions")),
+    ).toHaveLength(2);
+  });
+  it("preserves a newer permission draft after an earlier command completes", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser(), aUser({ id: 3, username: "next-user" })]),
+        "GET /api/v1/collections/5/permissions": json([]),
+        "PUT /api/v1/collections/5/permissions/2": () => pending.promise,
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Collection access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    await userEvent.click(within(card).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await userEvent.selectOptions(within(card).getByLabelText("Role"), "edit");
+    await userEvent.click(within(card).getByRole("button", { name: "Grant" }));
+    await waitFor(() => expect(app.requestsWithMethod("PUT")).toHaveLength(1));
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "3");
+    await userEvent.selectOptions(within(card).getByLabelText("Role"), "admin");
+    await act(async () => {
+      pending.resolve(json(aCollectionPermission()));
+    });
+    await waitFor(() => expect(within(card).getByRole("button", { name: "Grant" })).toBeEnabled());
+    expect(within(card).getByLabelText("User")).toHaveValue("3");
+    expect(within(card).getByLabelText("Role")).toHaveValue("admin");
+    expect(app.requestsWithMethod("PUT")[0].url).toBe("/api/v1/collections/5/permissions/2");
+    expect(JSON.parse(app.requestsWithMethod("PUT")[0].body)).toEqual({ role: "edit" });
+    expect(
+      app.requestsWithMethod("GET").filter((call) => call.url.endsWith("/permissions")),
+    ).toHaveLength(1);
+  });
+  it("retains failed permission intent without retrying its command", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": json([]),
+        "PUT /api/v1/collections/5/permissions/2": json(
+          { detail: "Permission command unavailable" },
+          503,
+        ),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Collection access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    await userEvent.click(within(card).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await userEvent.selectOptions(within(card).getByLabelText("Role"), "edit");
+    await userEvent.click(within(card).getByRole("button", { name: "Grant" }));
+    expect(
+      await screen.findByText(
+        "Something went wrong reaching the server. Check that PrintStash is running and try again.",
+      ),
+    ).toBeVisible();
+    expect(within(card).getByLabelText("User")).toHaveValue("2");
+    expect(within(card).getByLabelText("Role")).toHaveValue("edit");
+    expect(within(card).getByRole("button", { name: "Parts" })).toBeVisible();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+  it("clears permission selections on private retirement", async () => {
+    renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": json([]),
+        "GET /api/v1/printers": json([aPrinter({ id: 4, name: "Voron" })]),
+        "GET /api/v1/printers/4/permissions": json([]),
+      },
+    });
+    const collection = await screen.findByRole("group", { name: "Collection access" });
+    const printer = screen.getByRole("group", { name: "Printer access" });
+    await within(collection).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(collection).getByLabelText("User"), "2");
+    await userEvent.click(within(collection).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await userEvent.selectOptions(within(printer).getByLabelText("User"), "2");
+    await userEvent.selectOptions(within(printer).getByLabelText("Printer"), "4");
+    await act(async () => {
+      clearLogin();
+    });
+    expect(within(collection).getByLabelText("User")).toHaveValue("");
+    expect(within(collection).getByRole("button", { name: "Select collection" })).toBeVisible();
+    expect(within(printer).getByLabelText("User")).toHaveValue("");
+    expect(within(printer).getByLabelText("Printer")).toHaveValue("");
+  });
+  it("distinguishes failed printer choices from an empty fleet", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/printers": json({ detail: "unavailable" }, 503),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Printer access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    const alert = await within(card).findByRole("alert");
+    expect(alert).toHaveTextContent("Printers could not be loaded.");
+    expect(within(card).queryByText(/has no direct printer access/)).toBeNull();
+    app.route({
+      "GET /api/v1/printers": json([aPrinter({ id: 4, name: "Voron" })]),
+      "GET /api/v1/printers/4/permissions": json([aPrinterPermission()]),
+    });
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(await within(card).findByTitle("Remove printer access")).toBeVisible();
+  });
+  it("preserves healthy printer grants when another source fails", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/printers": json([
+          aPrinter({ id: 4, name: "Voron" }),
+          aPrinter({ id: 5, name: "Prusa" }),
+        ]),
+        "GET /api/v1/printers/4/permissions": json([aPrinterPermission()]),
+        "GET /api/v1/printers/5/permissions": json({ detail: "unavailable" }, 503),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Printer access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    expect(await within(card).findByTitle("Remove printer access")).toBeVisible();
+    const alert = within(card).getByRole("alert");
+    expect(alert).toHaveTextContent("Prusa");
+    app.route({
+      "GET /api/v1/printers/5/permissions": json([aPrinterPermission({ id: 12, printer_id: 5 })]),
+    });
+    await userEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(within(card).getAllByTitle("Remove printer access")).toHaveLength(2),
+    );
+  });
+  it("blocks collection writes until its permission read succeeds", async () => {
+    const app = renderSettings({
+      at: "/settings?section=access",
+      routes: {
+        "GET /api/v1/admin/users": json([aUser()]),
+        "GET /api/v1/collections/5/permissions": json({ detail: "unavailable" }, 503),
+      },
+    });
+    const card = await screen.findByRole("group", { name: "Collection access" });
+    await within(card).findByRole("option", { name: "maker" });
+    await userEvent.selectOptions(within(card).getByLabelText("User"), "2");
+    await userEvent.click(within(card).getByRole("button", { name: "Select collection" }));
+    await userEvent.click(await screen.findByRole("option", { name: /Parts/ }));
+    await within(card).findByRole("alert");
+    expect(within(card).getByRole("button", { name: "Grant" })).toBeDisabled();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+  });
+});
+
+describe("Settings remote configuration recovery", () => {
+  it.each(["design", "previews"])("blocks unavailable remote settings in %s", async (section) => {
+    const app = renderSettings({
+      at: `/settings?section=${section}`,
+      routes: { "GET /api/v1/config": json({ detail: "unavailable" }, 503) },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Configuration could not be loaded.",
+    );
+    const name = section === "design" ? "Display currency" : "Model image quality";
+    expect(screen.getByLabelText(name)).toBeDisabled();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+    app.route({ "GET /api/v1/config": json(VAULT_CONFIG) });
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByLabelText(name)).toBeEnabled());
+  });
+  it("shows the acknowledged normalized currency instead of the sent choice", async () => {
+    const app = renderSettings({
+      at: "/settings?section=design",
+      routes: { "PUT /api/v1/config": json({ ...VAULT_CONFIG, edit_version: 2, currency: "GBP" }) },
+    });
+    const choice = await screen.findByLabelText("Display currency");
+    await waitFor(() => expect(choice).toBeEnabled());
+    await userEvent.selectOptions(choice, "EUR");
+    await waitFor(() => expect(choice).toHaveValue("GBP"));
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url.includes("/api/v1/config")),
+    ).toHaveLength(1);
+  });
+});
+
+describe("Settings remote read recovery", () => {
+  it("keeps finalization unavailable before quarantine expires", async () => {
+    const app = renderSettings({
+      at: "/settings?section=trash",
+      routes: {
+        "GET /api/v1/admin/gc": json({
+          ...GC_PLAN,
+          state: "quarantined",
+          quarantine_until: "2099-01-01T00:00:00Z",
+        }),
+      },
+    });
+    const finalize = await screen.findByRole("button", { name: "Reverify and finalize" });
+    expect(finalize).toBeDisabled();
+    await userEvent.click(finalize);
+    expect(
+      app.requestsWithMethod("POST").filter((request) => request.url.endsWith("/finalize")),
+    ).toHaveLength(0);
+  });
+
+  it("retries unavailable health information", async () => {
+    const app = renderSettings({
+      at: "/settings?section=about",
+      routes: {
+        "GET /api/v1/health/details": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText("System health could not be loaded.")).toBeVisible();
+    app.route({ "GET /api/v1/health/details": json(HEALTH) });
+    await userEvent.click(screen.getByRole("button", { name: "Retry health check" }));
+    await waitFor(() =>
+      expect(screen.queryByText("System health could not be loaded.")).not.toBeInTheDocument(),
+    );
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url.endsWith("/health/details")),
+    ).toHaveLength(2);
+  });
+  it("retries unavailable release information", async () => {
+    const app = renderSettings({
+      at: "/settings?section=about",
+      routes: {
+        "GET /api/v1/health/releases/latest": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText("Release information could not be loaded.")).toBeVisible();
+    app.route({
+      "GET /api/v1/health/releases/latest?refresh=true": json({
+        status: "up_to_date",
+        update_available: false,
+        current_version: "0.12.1",
+        latest_version: "0.12.1",
+      }),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Retry update check" }));
+    expect(await screen.findByText("Latest published release installed.")).toBeVisible();
+    expect(screen.queryByText("Release information could not be loaded.")).not.toBeInTheDocument();
+  });
+
+  it("refuses false empty trash after a failed listing", async () => {
+    const app = renderSettings({
+      at: "/settings?section=trash",
+      routes: {
+        "GET /api/v1/models/trash": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText("Trash could not be loaded.")).toBeVisible();
+    expect(screen.queryByText("Trash is empty.")).not.toBeInTheDocument();
+    app.route({ "GET /api/v1/models/trash": json([TRASHED_MODEL]) });
+    await userEvent.click(screen.getByTitle("Refresh trash"));
+    expect(await screen.findByText(TRASHED_MODEL.name)).toBeVisible();
+  });
+  it("keeps trash available when the GC read fails", async () => {
+    renderSettings({
+      at: "/settings?section=trash",
+      routes: {
+        "GET /api/v1/models/trash": json([TRASHED_MODEL]),
+        "GET /api/v1/admin/gc": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText(TRASHED_MODEL.name)).toBeVisible();
+    expect(screen.getByRole("button", { name: "Restore" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: /Review expired/ })).toBeDisabled();
+    expect(await screen.findByText("The cleanup plan could not be loaded.")).toBeVisible();
   });
 });

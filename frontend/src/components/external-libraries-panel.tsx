@@ -1,8 +1,7 @@
-import { uiMessage } from "@/lib/locale";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -14,29 +13,44 @@ import {
   Trash2,
 } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { useQuery } from "@tanstack/react-query";
 import {
-  createExternalLibrary,
-  deleteExternalLibrary,
-  getJobStatus,
-  getVaultConfig,
-  enrollExternalLibraryRoot,
-  listExternalLibraries,
-  listStorageConnections,
-  scanExternalLibrary,
-  updateExternalLibrary,
-  updateVaultConfig,
-} from "@/lib/api";
+  defaultLibrarySourcesApi,
+  librarySourcesOptions,
+  useLibrarySourceCommand,
+  type LibrarySourcesApi,
+} from "@/lib/queries/settings-library-sources";
+import { vaultConfigOptions, useVaultConfigCommand } from "@/lib/queries/settings-config";
+import { storageConnectionsOptions, storageReadDenied } from "@/lib/queries/settings-storage";
+import { useAuth } from "@/lib/auth-context";
+import { onAuthChange } from "@/lib/auth-store";
+import { captureEditingBase } from "@/lib/api/editing";
+import type { VaultConfigRead } from "@/types";
+import { getSessionVersion } from "@/lib/session-transport";
+import { parseApiError, userMessage } from "@/lib/errors";
+import { useI18n } from "@/lib/i18n";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "@/lib/toast";
 import { Localized } from "@/components/ui/localized";
-import { trackImportJob } from "@/lib/task-center";
 import type {
   ExternalLibrary,
   ExternalLibraryCollectionMode,
   ExternalLibraryCreate,
   ExternalLibraryWatchMode,
   LibrarySourceKind,
-  StorageConnection,
 } from "@/types";
+
+type SourceToggleReview =
+  | { phase: "idle" }
+  | { phase: "required" | "loading"; next: boolean; problem: "conflict" | "unconfirmed" }
+  | {
+      phase: "ready";
+      next: boolean;
+      problem: "conflict" | "unconfirmed";
+      snapshot: VaultConfigRead;
+    };
 
 const BTN_PRIMARY =
   "inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded bg-primary text-primary-foreground text-xs font-medium uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed";
@@ -203,11 +217,13 @@ function ScheduleControl({
   onChange,
   disabled,
   inputClass,
+  label,
 }: {
   value: string;
   onChange: (cron: string) => void;
   disabled?: boolean;
   inputClass: string;
+  label?: string;
 }) {
   useUiLocale();
   const isPreset = PRESET_CRONS.includes(value);
@@ -215,6 +231,7 @@ function ScheduleControl({
     <div className="flex flex-col gap-2">
       <select
         className={inputClass}
+        aria-label={label}
         value={isPreset ? value : CUSTOM_SENTINEL}
         disabled={disabled}
         onChange={(e) => {
@@ -264,77 +281,112 @@ function isLibrarySourceKind(value: string): value is LibrarySourceKind {
   );
 }
 
-/**
- * The API this panel drives. Declared as a port so a test can render the panel
- * against a stub; production callers get {@link VAULT_API}, which wires the real
- * `@/lib/api` calls. The two config calls are narrowed to the one flag the panel
- * cares about.
- */
-export interface ExternalLibrariesApi {
-  isFeatureEnabled: () => Promise<boolean>;
-  setFeatureEnabled: (enabled: boolean) => Promise<void>;
-  list: typeof listExternalLibraries;
-  enroll: typeof enrollExternalLibraryRoot;
-  create: typeof createExternalLibrary;
-  update: typeof updateExternalLibrary;
-  remove: typeof deleteExternalLibrary;
-  scan: typeof scanExternalLibrary;
-  jobStatus: typeof getJobStatus;
-  listConnections?: typeof listStorageConnections;
+/** Existing injection supplies the same full DTO contracts as production readers/writers. */
+export type ExternalLibrariesApi = LibrarySourcesApi;
+
+export function ExternalLibrariesPanel(props: {
+  canEdit: boolean;
+  initialRootPath?: string;
+  api?: ExternalLibrariesApi;
+}) {
+  const { user } = useAuth();
+  const { t } = useI18n();
+  if (!props.canEdit || !user?.is_superuser)
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>{uiText("Library sources")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p>{t("librarySources.adminRequired")}</p>
+        </CardContent>
+      </Card>
+    );
+  return <AdminLibrarySourcesPanel {...props} />;
 }
-
-const VAULT_API: ExternalLibrariesApi = {
-  isFeatureEnabled: async () => (await getVaultConfig()).external_libraries_enabled,
-  setFeatureEnabled: async (enabled) => {
-    await updateVaultConfig({ external_libraries_enabled: enabled });
-  },
-  list: listExternalLibraries,
-  enroll: enrollExternalLibraryRoot,
-  create: createExternalLibrary,
-  update: updateExternalLibrary,
-  remove: deleteExternalLibrary,
-  scan: scanExternalLibrary,
-  jobStatus: getJobStatus,
-  listConnections: listStorageConnections,
-};
-
-async function pollScanJob(
-  jobId: string,
-  jobStatus: ExternalLibrariesApi["jobStatus"],
-): Promise<void> {
-  // Mirrors the upload modal's polling: wait until the scan job terminates.
-  const deadline = Date.now() + 15 * 60 * 1000;
-  while (Date.now() < deadline) {
-    const job = await jobStatus(jobId);
-    if (job.state === "completed") return;
-    if (job.state === "failed" || job.state === "cancelled") {
-      throw new Error(job.error || "scan_failed");
-    }
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-  throw new Error("scan_timeout");
-}
-
-export function ExternalLibrariesPanel({
+function AdminLibrarySourcesPanel({
   canEdit,
   initialRootPath = "",
-  api = VAULT_API,
+  api = defaultLibrarySourcesApi,
 }: {
   canEdit: boolean;
   initialRootPath?: string;
   api?: ExternalLibrariesApi;
 }) {
   useUiLocale();
-  const [enabled, setEnabled] = useState(false);
-  const [enableBusy, setEnableBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-
-  const [libraries, setLibraries] = useState<ExternalLibrary[]>([]);
-  const [connections, setConnections] = useState<StorageConnection[]>([]);
-  const [busyId, setBusyId] = useState<number | "create" | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<ExternalLibrary | null>(null);
-  const [enrollTarget, setEnrollTarget] = useState<ExternalLibrary | null>(null);
-
+  const { t } = useI18n();
+  const { user } = useAuth();
+  const allowed = !!user?.is_superuser && canEdit;
+  const currentAllowed = useRef(allowed);
+  useLayoutEffect(() => {
+    currentAllowed.current = allowed;
+  }, [allowed]);
+  const live = useRef(true);
+  const [retired, setRetired] = useState(false);
+  const [configWriteDenied, setConfigWriteDenied] = useState(false);
+  const draftRevision = useRef(0);
+  useEffect(() => {
+    live.current = true;
+    const release = onAuthChange(() => setRetired(true));
+    return () => {
+      live.current = false;
+      release();
+    };
+  }, []);
+  const config = useQuery({
+    ...vaultConfigOptions(api.getConfig),
+    enabled: allowed && !retired,
+    retry: false,
+  });
+  const configCommand = useVaultConfigCommand(api.updateConfig);
+  const enabled = config.data?.external_libraries_enabled ?? false;
+  const sources = useQuery({
+    ...librarySourcesOptions(api.list),
+    enabled: allowed && !retired && enabled,
+  });
+  const connectionRead = useQuery({
+    ...storageConnectionsOptions(api.listConnections),
+    enabled: allowed && !retired && enabled,
+  });
+  const command = useLibrarySourceCommand(api, allowed && !retired);
+  const denied =
+    configWriteDenied ||
+    storageReadDenied(parseApiError(config.error)) ||
+    storageReadDenied(parseApiError(sources.error)) ||
+    storageReadDenied(parseApiError(command.error));
+  const libraries =
+    allowed && !retired && !denied && sources.data?.kind === "enabled"
+      ? sources.data.items.map((row) =>
+          command.intent?.id === row.id ? { ...row, ...command.intent.payload } : row,
+        )
+      : [];
+  const connections =
+    allowed && !retired && !storageReadDenied(parseApiError(connectionRead.error))
+      ? (connectionRead.data ?? [])
+      : [];
+  const commandsAllowed =
+    allowed &&
+    !retired &&
+    !denied &&
+    !config.isError &&
+    !sources.isError &&
+    sources.data?.kind === "enabled";
+  const busyId = command.busyId;
+  const enableBusy = configCommand.isPending;
+  const [toggleReview, setToggleReview] = useState<SourceToggleReview>({ phase: "idle" });
+  const [deleteTarget, setDeleteTarget] = useState<{
+    source: ExternalLibrary;
+    session: number;
+    readVersion: number;
+  } | null>(null);
+  const [enrollTarget, setEnrollTarget] = useState<{
+    source: ExternalLibrary;
+    session: number;
+    readVersion: number;
+  } | null>(null);
+  function current(session: number) {
+    return live.current && currentAllowed.current && !retired && session === getSessionVersion();
+  }
   // Add-library draft.
   const [name, setName] = useState("");
   const [rootPath, setRootPath] = useState(initialRootPath);
@@ -345,49 +397,73 @@ export function ExternalLibrariesPanel({
   const [watchMode, setWatchMode] = useState<ExternalLibraryWatchMode>("auto");
   const [mode, setMode] = useState<ExternalLibraryCollectionMode>("mirror");
 
-  const refresh = useCallback(async () => {
+  async function toggleFeature(next: boolean, reviewed?: VaultConfigRead) {
+    if (
+      !allowed ||
+      config.isError ||
+      !config.data ||
+      enableBusy ||
+      (toggleReview.phase !== "idle" && !reviewed)
+    )
+      return;
+    const session = getSessionVersion();
     try {
-      setLibraries(await api.list());
-      if (api.listConnections) setConnections(await api.listConnections());
-    } catch (e) {
-      toast.error(e);
-    }
-  }, [api]);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .isFeatureEnabled()
-      .then((featureEnabled) => {
-        if (cancelled) return;
-        setEnabled(featureEnabled);
-        setLoaded(true);
-        if (featureEnabled) refresh();
-      })
-      .catch(() => setLoaded(true));
-    return () => {
-      cancelled = true;
-    };
-  }, [api, refresh]);
-
-  async function toggleFeature(next: boolean) {
-    setEnableBusy(true);
-    setEnabled(next);
-    try {
-      await api.setFeatureEnabled(next);
-      toast.success(
-        next ? uiText("Library sources enabled.") : uiText("Library sources disabled."),
-      );
-      if (next) await refresh();
-    } catch (e) {
-      setEnabled(!next);
-      toast.error(e);
-    } finally {
-      setEnableBusy(false);
+      await configCommand.mutateAsync({
+        session,
+        payload: { external_libraries_enabled: next },
+        base: captureEditingBase(reviewed ?? config.data),
+      });
+      if (current(session)) {
+        setToggleReview({ phase: "idle" });
+        toast.success(
+          next ? uiText("Library sources enabled.") : uiText("Library sources disabled."),
+        );
+      }
+    } catch (error) {
+      if (current(session)) {
+        if (storageReadDenied(parseApiError(error))) setConfigWriteDenied(true);
+        const status = parseApiError(error).status;
+        if (status === 412 || status === 428 || status === 0 || status >= 500)
+          setToggleReview({
+            phase: "required",
+            next,
+            problem: status === 412 || status === 428 ? "conflict" : "unconfirmed",
+          });
+        toast.error(error);
+      }
     }
   }
-
+  async function reviewToggle() {
+    if (toggleReview.phase === "idle" || toggleReview.phase === "loading" || enableBusy) return;
+    const session = getSessionVersion();
+    const { next, problem } = toggleReview;
+    setToggleReview({ phase: "loading", next, problem });
+    try {
+      const result = await config.refetch({ throwOnError: true });
+      if (!result.data) throw new Error("Configuration review has no data");
+      if (current(session))
+        setToggleReview({ phase: "ready", next, problem, snapshot: result.data });
+    } catch (error) {
+      if (current(session)) {
+        setToggleReview({ phase: "required", next, problem });
+        if (storageReadDenied(parseApiError(error))) setConfigWriteDenied(true);
+        toast.error(error);
+      }
+    }
+  }
+  async function recoverConfig() {
+    const session = getSessionVersion();
+    const result = await config.refetch();
+    if (current(session) && !result.error) setConfigWriteDenied(false);
+  }
+  async function recoverSources() {
+    const session = getSessionVersion();
+    const result = await sources.refetch();
+    if (current(session) && !result.error) command.clearError();
+  }
   async function handleCreate() {
+    if (!commandsAllowed || busyId !== null || (sourceKind !== "mounted" && connectionRead.isError))
+      return;
     if (!name.trim() || (sourceKind === "mounted" ? !rootPath.trim() : connectionId === "")) {
       toast.error(
         sourceKind === "mounted"
@@ -396,112 +472,151 @@ export function ExternalLibrariesPanel({
       );
       return;
     }
-    setBusyId("create");
+    if (
+      sourceKind !== "mounted" &&
+      !connections.some(
+        (row) =>
+          row.id === connectionId &&
+          row.kind === sourceKind &&
+          row.enabled &&
+          ["library", "both"].includes(row.purpose),
+      )
+    )
+      return;
+    const session = getSessionVersion();
+    const revision = draftRevision.current;
+    const payload: ExternalLibraryCreate = {
+      name: name.trim(),
+      root_path: sourceKind === "mounted" ? rootPath.trim() : undefined,
+      scan_schedule: scanSchedule,
+      watch_mode: sourceKind === "mounted" ? watchMode : "off",
+      collection_mode: mode,
+    };
+    if (sourceKind !== "mounted") {
+      payload.source_kind = sourceKind;
+      payload.connection_id = connectionId === "" ? null : connectionId;
+      payload.source_prefix = sourcePrefix.trim();
+    }
     try {
-      const body: ExternalLibraryCreate = {
-        name: name.trim(),
-        root_path: sourceKind === "mounted" ? rootPath.trim() : undefined,
-        scan_schedule: scanSchedule,
-        watch_mode: sourceKind === "mounted" ? watchMode : "off",
-        collection_mode: mode,
-      };
-      if (sourceKind !== "mounted") {
-        body.source_kind = sourceKind;
-        body.connection_id = connectionId === "" ? null : connectionId;
-        body.source_prefix = sourcePrefix.trim();
+      await command.mutateAsync({ session, kind: "create", payload });
+      if (!current(session)) return;
+      if (draftRevision.current === revision) {
+        setName("");
+        setRootPath("");
+        setSourceKind("mounted");
+        setConnectionId("");
+        setSourcePrefix("");
+        setScanSchedule("0 * * * *");
+        setWatchMode("auto");
+        setMode("mirror");
       }
-      await api.create(body);
-      setName("");
-      setRootPath("");
-      setSourceKind("mounted");
-      setConnectionId("");
-      setSourcePrefix("");
-      setScanSchedule("0 * * * *");
-      setWatchMode("auto");
-      setMode("mirror");
       toast.success(uiText("Library source added."));
-      await refresh();
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setBusyId(null);
+    } catch (error) {
+      if (current(session)) toast.error(error);
     }
   }
-
   async function handleScan(lib: ExternalLibrary) {
-    setBusyId(lib.id);
+    if (!commandsAllowed || busyId !== null || command.blocked) return;
+    const session = getSessionVersion();
     try {
-      const resp = await api.scan(lib.id);
-      trackImportJob(resp.job_id, uiMessage("Scan {value1}", { value1: String(lib.name) }));
-      await pollScanJob(resp.job_id, api.jobStatus);
-      toast.success(uiText('Scan complete for "{value1}".', { value1: String(lib.name) }));
-      await refresh();
-    } catch (e) {
-      toast.error(e);
-      await refresh();
-    } finally {
-      setBusyId(null);
+      await command.mutateAsync({
+        session,
+        kind: "scan",
+        id: lib.id,
+        title: uiText("Scan {value1}", { value1: lib.name }),
+      });
+      if (current(session))
+        toast.success(uiText('Scan complete for "{value1}".', { value1: lib.name }));
+    } catch (error) {
+      if (current(session)) toast.error(error);
     }
   }
-
   async function handleToggleEnabled(lib: ExternalLibrary) {
-    setBusyId(lib.id);
-    try {
-      await api.update(lib.id, { enabled: !lib.enabled });
-      await refresh();
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setBusyId(null);
-    }
+    await handleUpdate(lib, { enabled: !lib.enabled });
   }
-
-  async function handleEnroll(lib: ExternalLibrary) {
-    setBusyId(lib.id);
-    try {
-      await api.enroll(lib.id, { confirm_root_path: lib.root_path });
-      toast.success(uiText("Root verified. Rescan to resume indexing."));
-      setEnrollTarget(null);
-      await refresh();
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   async function handleUpdate(
     lib: ExternalLibrary,
-    patch: { scan_schedule?: string; watch_mode?: ExternalLibraryWatchMode },
+    payload: import("@/types").ExternalLibraryUpdate,
   ) {
-    setBusyId(lib.id);
+    if (!commandsAllowed || busyId !== null || command.blocked) return;
+    const session = getSessionVersion();
     try {
-      await api.update(lib.id, patch);
-      await refresh();
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setBusyId(null);
+      await command.mutateAsync({
+        session,
+        kind: "update",
+        id: lib.id,
+        base: captureEditingBase(lib),
+        payload,
+      });
+    } catch (error) {
+      if (current(session)) toast.error(error);
     }
   }
-
-  async function handleDelete(lib: ExternalLibrary) {
-    setBusyId(lib.id);
+  async function handleEnroll(target: { source: ExternalLibrary; session: number }) {
+    if (!commandsAllowed || busyId !== null || command.blocked) return;
     try {
-      await api.remove(lib.id);
+      await command.mutateAsync({
+        session: target.session,
+        kind: "enroll",
+        id: target.source.id,
+        root: target.source.root_path,
+      });
+      if (!current(target.session)) return;
+      toast.success(uiText("Root verified. Rescan to resume indexing."));
+      setEnrollTarget((previous) => (previous === target ? null : previous));
+    } catch (error) {
+      if (current(target.session)) toast.error(error);
+    }
+  }
+  async function handleDelete(target: { source: ExternalLibrary; session: number }) {
+    if (!commandsAllowed || busyId !== null || command.blocked) return;
+    try {
+      await command.mutateAsync({ session: target.session, kind: "delete", id: target.source.id });
+      if (!current(target.session)) return;
       toast.success(
-        uiText('Removed "{value1}". Source files were not touched.', { value1: String(lib.name) }),
+        uiText('Removed "{value1}". Source files were not touched.', {
+          value1: target.source.name,
+        }),
       );
-      await refresh();
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setBusyId(null);
-      setDeleteTarget(null);
+      setDeleteTarget((previous) => (previous === target ? null : previous));
+    } catch (error) {
+      if (current(target.session)) toast.error(error);
     }
   }
-
-  if (!loaded) return null;
+  if (retired) return null;
+  if (!allowed || !config.data || denied)
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>{uiText("Library sources")}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!allowed ? (
+            <p>{t("librarySources.adminRequired")}</p>
+          ) : config.isPending ? (
+            <Skeleton className="h-20 w-full" />
+          ) : (
+            <div role="alert">
+              <p>
+                {t(
+                  config.isError || configWriteDenied
+                    ? "librarySources.configFailed"
+                    : "librarySources.sourcesFailed",
+                )}
+              </p>
+              <Button
+                variant="outline"
+                onClick={() =>
+                  void (config.isError || configWriteDenied ? recoverConfig() : recoverSources())
+                }
+              >
+                {t("Retry")}
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
 
   return (
     <Localized>
@@ -525,7 +640,7 @@ export function ExternalLibrariesPanel({
             role="switch"
             aria-label={uiText("Library sources enabled")}
             aria-checked={enabled}
-            disabled={!canEdit || enableBusy}
+            disabled={!allowed || config.isError || enableBusy || toggleReview.phase !== "idle"}
             onClick={() => toggleFeature(!enabled)}
             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
               enabled ? "bg-primary" : "bg-outline-variant"
@@ -539,10 +654,150 @@ export function ExternalLibrariesPanel({
           </button>
         </div>
 
+        {toggleReview.phase !== "idle" && (
+          <div role="alert" className="space-y-3 p-4">
+            <p>
+              {uiText(
+                toggleReview.problem === "conflict"
+                  ? "library.editConflict"
+                  : "library.saveUnconfirmed",
+              )}
+            </p>
+            <Button
+              variant="outline"
+              disabled={enableBusy || toggleReview.phase === "loading"}
+              onClick={() => void reviewToggle()}
+            >
+              {uiText("library.reviewLatest")}
+            </Button>
+            {toggleReview.phase === "ready" && (
+              <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+                <h3 className="text-sm font-semibold">{uiText("library.latestVersion")}</h3>
+                <p>
+                  {uiText("Library sources")}:{" "}
+                  {uiText(
+                    toggleReview.snapshot.external_libraries_enabled ? "Enabled" : "Disabled",
+                  )}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={enableBusy || config.isError}
+                    onClick={() => setToggleReview({ phase: "idle" })}
+                  >
+                    {uiText("library.useLatest")}
+                  </Button>
+                  <Button
+                    disabled={enableBusy || config.isError}
+                    onClick={() => void toggleFeature(toggleReview.next, toggleReview.snapshot)}
+                  >
+                    {uiText("library.retryDraft")}
+                  </Button>
+                </div>
+              </section>
+            )}
+          </div>
+        )}
+        {config.isError && (
+          <div role="alert" className="p-4">
+            <p>{t("librarySources.configFailed")}</p>
+            <Button variant="outline" onClick={() => void recoverConfig()}>
+              {t("Retry")}
+            </Button>
+          </div>
+        )}
+        {enabled && !denied && command.review.phase !== "idle" && (
+          <section role="alert" className="space-y-3 rounded border border-border p-4">
+            <p>
+              {uiText(
+                command.review.phase === "retired"
+                  ? "storage.connectionUnavailable"
+                  : command.review.problem === "conflict"
+                    ? "library.editConflict"
+                    : "library.saveUnconfirmed",
+              )}
+            </p>
+            {command.intent?.payload.scan_schedule !== undefined && (
+              <p>
+                {uiText("Scan schedule")}: {describeSchedule(command.intent.payload.scan_schedule)}
+              </p>
+            )}
+            {command.intent?.payload.enabled !== undefined && (
+              <p>
+                {uiText("Auto-scan enabled")}:{" "}
+                {uiText(command.intent.payload.enabled ? "Enabled" : "Disabled")}
+              </p>
+            )}
+            {command.review.phase === "ready" && (
+              <section aria-label={uiText("library.latestVersion")}>
+                <p>{command.review.snapshot.name}</p>
+                <p>{command.review.snapshot.root_path}</p>
+                <p>{describeSchedule(command.review.snapshot.scan_schedule)}</p>
+                <p>{watchStatus(command.review.snapshot)}</p>
+                <p>{uiText(command.review.snapshot.enabled ? "Enabled" : "Disabled")}</p>
+              </section>
+            )}
+            <div className="flex flex-wrap gap-2">
+              {command.review.phase !== "retired" && (
+                <Button
+                  variant="outline"
+                  disabled={busyId !== null || command.review.phase === "loading"}
+                  onClick={() => {
+                    const session = getSessionVersion();
+                    void command.reviewLatest().catch((error) => {
+                      if (current(session)) toast.error(error);
+                    });
+                  }}
+                >
+                  {uiText("Review current values")}
+                </Button>
+              )}
+              {command.review.phase === "ready" && (
+                <>
+                  <Button
+                    variant="outline"
+                    disabled={busyId !== null}
+                    onClick={() => {
+                      const session = getSessionVersion();
+                      void command.adopt().catch((error) => {
+                        if (current(session)) toast.error(error);
+                      });
+                    }}
+                  >
+                    {uiText("Use current values")}
+                  </Button>
+                  <Button
+                    disabled={busyId !== null || !command.review.sameIdentity}
+                    onClick={() => {
+                      const session = getSessionVersion();
+                      void command.saveRevised().catch((error) => {
+                        if (current(session)) toast.error(error);
+                      });
+                    }}
+                  >
+                    {uiText("Save revised changes")}
+                  </Button>
+                </>
+              )}
+            </div>
+          </section>
+        )}
         {enabled && (
           <div className="p-4 sm:p-5 space-y-5">
+            {(sources.isError || sources.data?.kind === "disabled") && (
+              <div role="alert">
+                <p>{t("librarySources.sourcesFailed")}</p>
+                <Button variant="outline" onClick={() => void recoverSources()}>
+                  {t("Retry")}
+                </Button>
+              </div>
+            )}
+            {sources.isPending && <Skeleton className="h-24 w-full" />}
             {/* Existing libraries */}
-            {libraries.length === 0 ? (
+            {!sources.isPending &&
+            !sources.isError &&
+            sources.data?.kind === "enabled" &&
+            libraries.length === 0 ? (
               <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
                 <FolderSync className="h-7 w-7 text-muted-foreground/50" />
                 <p className="text-sm font-medium text-foreground">
@@ -557,7 +812,7 @@ export function ExternalLibrariesPanel({
             ) : (
               <ul className="space-y-3">
                 {libraries.map((lib) => {
-                  const busy = busyId === lib.id;
+                  const busy = busyId === lib.id || command.blocked;
                   const s = lib.last_scan_summary;
                   const binding = bindingStatus(lib);
                   const rootBound = lib.binding_state === "bound";
@@ -620,12 +875,18 @@ export function ExternalLibrariesPanel({
                                   {lib.binding_reason}
                                 </p>
                               )}
-                              {lib.root_enrollable && canEdit && (
+                              {lib.root_enrollable && commandsAllowed && (
                                 <button
                                   type="button"
                                   className={`${BTN_SECONDARY} mt-2`}
                                   disabled={busy}
-                                  onClick={() => setEnrollTarget(lib)}
+                                  onClick={() =>
+                                    setEnrollTarget({
+                                      source: lib,
+                                      session: getSessionVersion(),
+                                      readVersion: sources.dataUpdatedAt,
+                                    })
+                                  }
                                 >
                                   {uiText("Review and enroll")}
                                 </button>
@@ -642,9 +903,10 @@ export function ExternalLibrariesPanel({
                           <p className="text-2xs text-muted-foreground mt-0.5">
                             {watchStatus(lib)}
                           </p>
-                          {canEdit && (
+                          {commandsAllowed && (
                             <div className="mt-2 grid gap-2 sm:grid-cols-2 max-w-md">
                               <ScheduleControl
+                                label={`${uiText("Scan schedule")} ${lib.name}`}
                                 value={lib.scan_schedule}
                                 disabled={busy}
                                 inputClass={`${INPUT} !py-1.5 text-xs`}
@@ -702,22 +964,28 @@ export function ExternalLibrariesPanel({
                         <div className="flex flex-shrink-0 items-center gap-1.5 self-end sm:self-auto">
                           <button
                             type="button"
-                            disabled={!canEdit || busy || !rootBound}
+                            disabled={
+                              !commandsAllowed || command.blocked || busyId !== null || !rootBound
+                            }
                             onClick={() => handleScan(lib)}
                             title={
                               rootBound ? undefined : uiText("Verify the source before scanning.")
                             }
                             className={BTN_SECONDARY}
                           >
-                            <RefreshCw className={`h-3.5 w-3.5 ${busy ? "animate-spin" : ""}`} />
-                            {busy ? uiText("Scanning") : uiText("Scan now")}
+                            <RefreshCw
+                              className={`h-3.5 w-3.5 ${busyId === lib.id ? "animate-spin" : ""}`}
+                            />
+                            {busyId === lib.id ? uiText("Scanning") : uiText("Scan now")}
                           </button>
                           <button
                             type="button"
                             role="switch"
                             aria-checked={lib.enabled}
                             aria-label={uiText("Auto-scan enabled")}
-                            disabled={!canEdit || busy || !rootBound}
+                            disabled={
+                              !commandsAllowed || command.blocked || busyId !== null || !rootBound
+                            }
                             onClick={() => handleToggleEnabled(lib)}
                             className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
                               lib.enabled ? "bg-primary" : "bg-outline-variant"
@@ -731,8 +999,14 @@ export function ExternalLibrariesPanel({
                           </button>
                           <button
                             type="button"
-                            disabled={!canEdit || busy}
-                            onClick={() => setDeleteTarget(lib)}
+                            disabled={!commandsAllowed || command.blocked || busyId !== null}
+                            onClick={() =>
+                              setDeleteTarget({
+                                source: lib,
+                                session: getSessionVersion(),
+                                readVersion: sources.dataUpdatedAt,
+                              })
+                            }
                             className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-muted-foreground hover:bg-muted hover:text-destructive transition-colors disabled:opacity-50"
                             aria-label={uiText("Remove library source")}
                           >
@@ -752,8 +1026,21 @@ export function ExternalLibrariesPanel({
               )}
             </p>
 
+            {connectionRead.isError && (
+              <div role="alert">
+                <p>{t("librarySources.connectionsFailed")}</p>
+                <Button variant="outline" onClick={() => void connectionRead.refetch()}>
+                  {t("Retry")}
+                </Button>
+              </div>
+            )}
             {/* Add a library source */}
-            <div className="rounded border border-dashed border-border p-3 sm:p-4 space-y-3">
+            <div
+              className="rounded border border-dashed border-border p-3 sm:p-4 space-y-3"
+              onChangeCapture={() => {
+                draftRevision.current += 1;
+              }}
+            >
               <p className="text-2xs font-mono uppercase tracking-wider text-primary">
                 {uiText("Add a library source")}
               </p>
@@ -765,7 +1052,7 @@ export function ExternalLibrariesPanel({
                     aria-label={uiText("Source name")}
                     placeholder={uiText("e.g. Workshop NAS")}
                     value={name}
-                    disabled={!canEdit}
+                    disabled={!commandsAllowed}
                     onChange={(e) => setName(e.target.value)}
                   />
                 </label>
@@ -775,7 +1062,7 @@ export function ExternalLibrariesPanel({
                     className={INPUT}
                     aria-label={uiText("Library source type")}
                     value={sourceKind}
-                    disabled={!canEdit}
+                    disabled={!commandsAllowed}
                     onChange={(event) => {
                       if (!isLibrarySourceKind(event.target.value)) return;
                       setSourceKind(event.target.value);
@@ -797,7 +1084,7 @@ export function ExternalLibrariesPanel({
                       aria-label={uiText("Mounted folder path")}
                       placeholder={uiText("e.g. /mnt/nas/3d")}
                       value={rootPath}
-                      disabled={!canEdit}
+                      disabled={!commandsAllowed}
                       onChange={(e) => setRootPath(e.target.value)}
                     />
                   </label>
@@ -809,7 +1096,9 @@ export function ExternalLibrariesPanel({
                         className={INPUT}
                         aria-label={uiText("Remote source connection")}
                         value={connectionId}
-                        disabled={!canEdit}
+                        disabled={
+                          !commandsAllowed || connectionRead.isPending || connectionRead.isError
+                        }
                         onChange={(event) =>
                           setConnectionId(event.target.value ? Number(event.target.value) : "")
                         }
@@ -836,7 +1125,7 @@ export function ExternalLibrariesPanel({
                         aria-label={uiText("Source path within connection")}
                         placeholder={uiText("e.g. production/models")}
                         value={sourcePrefix}
-                        disabled={!canEdit}
+                        disabled={!commandsAllowed}
                         onChange={(event) => setSourcePrefix(event.target.value)}
                       />
                     </label>
@@ -846,7 +1135,7 @@ export function ExternalLibrariesPanel({
                   {uiText("Scan schedule")}
                   <ScheduleControl
                     value={scanSchedule}
-                    disabled={!canEdit}
+                    disabled={!commandsAllowed}
                     inputClass={INPUT}
                     onChange={setScanSchedule}
                   />
@@ -857,7 +1146,7 @@ export function ExternalLibrariesPanel({
                     <select
                       className={INPUT}
                       value={watchMode}
-                      disabled={!canEdit}
+                      disabled={!commandsAllowed}
                       onChange={(e) => setWatchMode(parseWatchMode(e.target.value))}
                     >
                       {WATCH_OPTIONS.map((o) => (
@@ -874,7 +1163,7 @@ export function ExternalLibrariesPanel({
                     className={INPUT}
                     aria-label={uiText("Collection layout")}
                     value={mode}
-                    disabled={!canEdit}
+                    disabled={!commandsAllowed}
                     onChange={(e) => setMode(parseCollectionMode(e.target.value))}
                   >
                     <option value="mirror">{uiText("Map subfolders to collections")}</option>
@@ -897,7 +1186,12 @@ export function ExternalLibrariesPanel({
               <div className="flex justify-end">
                 <button
                   type="button"
-                  disabled={!canEdit || busyId === "create"}
+                  disabled={
+                    !commandsAllowed ||
+                    busyId !== null ||
+                    (sourceKind !== "mounted" &&
+                      (connectionRead.isPending || connectionRead.isError))
+                  }
                   onClick={handleCreate}
                   className={BTN_PRIMARY}
                 >
@@ -909,40 +1203,44 @@ export function ExternalLibrariesPanel({
           </div>
         )}
 
-        <ConfirmModal
-          open={deleteTarget !== null}
-          onClose={() => setDeleteTarget(null)}
-          title={uiText("Remove library source?")}
-          description={
-            deleteTarget
-              ? uiText(
-                  '"{value1}" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.',
-                  { value1: String(deleteTarget.name) },
-                )
-              : ""
-          }
-          confirmLabel={uiText("Remove")}
-          busy={deleteTarget !== null && busyId === deleteTarget.id}
-          onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
-        />
-        <ConfirmModal
-          open={enrollTarget !== null}
-          onClose={() => {
-            if (busyId === null) setEnrollTarget(null);
-          }}
-          title={uiText("Enroll mounted source root?")}
-          description={
-            enrollTarget
-              ? uiText(
-                  "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: {value1}. This re-enables safe scans, watching, and writeback.",
-                  { value1: String(enrollTarget.root_path) },
-                )
-              : ""
-          }
-          confirmLabel={uiText("Enroll root")}
-          busy={enrollTarget !== null && busyId === enrollTarget.id}
-          onConfirm={() => enrollTarget && handleEnroll(enrollTarget)}
-        />
+        {commandsAllowed && (
+          <ConfirmModal
+            open={deleteTarget !== null && deleteTarget.readVersion === sources.dataUpdatedAt}
+            onClose={() => setDeleteTarget(null)}
+            title={uiText("Remove library source?")}
+            description={
+              (deleteTarget
+                ? uiText(
+                    '"{value1}" will be removed and its indexed models moved to trash. Source files remain untouched in their mounted folder or remote storage.',
+                    { value1: String(deleteTarget.source.name) },
+                  )
+                : "") + (command.error ? `\n\n${userMessage(command.error)}` : "")
+            }
+            confirmLabel={uiText("Remove")}
+            busy={deleteTarget !== null && busyId === deleteTarget.source.id}
+            onConfirm={() => deleteTarget && handleDelete(deleteTarget)}
+          />
+        )}
+        {commandsAllowed && (
+          <ConfirmModal
+            open={enrollTarget !== null && enrollTarget.readVersion === sources.dataUpdatedAt}
+            onClose={() => {
+              if (busyId === null) setEnrollTarget(null);
+            }}
+            title={uiText("Enroll mounted source root?")}
+            description={
+              (enrollTarget
+                ? uiText(
+                    "Verify that this exact mounted path belongs to this PrintStash installation before enrolling it: {value1}. This re-enables safe scans, watching, and writeback.",
+                    { value1: String(enrollTarget.source.root_path) },
+                  )
+                : "") + (command.error ? `\n\n${userMessage(command.error)}` : "")
+            }
+            confirmLabel={uiText("Enroll root")}
+            busy={enrollTarget !== null && busyId === enrollTarget.source.id}
+            onConfirm={() => enrollTarget && handleEnroll(enrollTarget)}
+          />
+        )}
       </div>
     </Localized>
   );

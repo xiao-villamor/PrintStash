@@ -85,4 +85,5 @@ class TestGroups:
             JobKind.DERIVATIVES_MESH,
             JobKind.DERIVATIVES_GCODE,
             JobKind.DERIVATIVES_TOOLPATH,
+            JobKind.DERIVATIVES_VIEWER_STL,
         }

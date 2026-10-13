@@ -3,7 +3,7 @@
 Run in an isolated export environment (torch==2.14.0+cpu, onnx==1.22.0,
 onnxruntime==1.30.0, dgl==1.1.3, einops, torch-redstone==0.0.6, pydantic).
 The application itself never imports torch or DGL. Inputs must already exist
-locally. See docs/ai-search-point-study.md for pinned sources and reproduction.
+locally. Pinned source identities and export settings are declared below.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ def main():
     paired = LocalModelManifest.model_validate_json(
         (args.paired / "manifest.json").read_bytes()
     )
-    if paired.space().config_hash != PAIRED_HASH:
+    if paired.encoder_space().config_hash != PAIRED_HASH:
         raise ValueError("unreviewed_paired_tower")
     verify_assets(args.paired, paired)
     sys.path.insert(0, str(args.support))

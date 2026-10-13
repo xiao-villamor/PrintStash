@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.core.time import ensure_utc, utcnow
+from app.core.time import ensure_utc, parse_hh_mm_time, utcnow
 from app.db.models import VaultAuditPolicy
 
 
@@ -47,14 +47,10 @@ class AuditPolicyUpdate(BaseModel):
     @field_validator("start_time")
     @classmethod
     def valid_time(cls, value: str) -> str:
-        parsed = time.fromisoformat(value)
-        if (
-            len(value) != 5
-            or parsed.tzinfo is not None
-            or parsed.second
-            or parsed.microsecond
-        ):
-            raise ValueError("audit_time_invalid")
+        try:
+            parse_hh_mm_time(value)
+        except ValueError as exc:
+            raise ValueError("audit_time_invalid") from exc
         return value
 
 

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
 
+from app.api.edit_preconditions import edit_precondition
 from app.core.security import require_superuser
 from app.db.models import (
     BackupDestinationResult,
@@ -16,6 +17,7 @@ from app.db.models import (
     OwnedStorageObject,
     StorageConnection,
     StorageConnectionPurpose,
+    User,
 )
 from app.db.session import get_session
 from app.modules.backups.backup_destination import (
@@ -26,6 +28,7 @@ from app.modules.sources.contracts import LibrarySourceError
 from app.modules.sources.library_source import (
     source_from_connection,
 )
+from app.modules.storage import connection_edits
 from app.modules.storage.storage_backend.contracts import StorageConfigurationError
 from app.modules.storage.storage_connections import (
     StorageConnectionConfigError,
@@ -39,6 +42,7 @@ from app.modules.storage.storage_operations import (
     use_availability,
 )
 from app.modules.storage.storage_providers import provider_secret_fields
+from app.schemas.editing import EditingBase, EditPrecondition
 
 router = APIRouter(
     prefix="/storage-connections",
@@ -57,7 +61,7 @@ class StorageConnectionCreate(BaseModel):
     secrets: dict[str, str] = Field(default_factory=dict)
 
 
-class StorageConnectionRead(BaseModel):
+class StorageConnectionRead(EditingBase):
     id: int
     name: str
     kind: LibrarySourceKind
@@ -108,6 +112,7 @@ def _read(row: StorageConnection) -> StorageConnectionRead:
     }
     secret_fields = sorted(json.loads(row.secret_json or "{}"))
     return StorageConnectionRead(
+        **connection_edits.connection_base(row).model_dump(),
         id=row.id,
         name=row.name,
         kind=row.kind,
@@ -200,11 +205,15 @@ def probe_connection(
 def update_connection(
     connection_id: int,
     body: StorageConnectionUpdate,
+    response: Response,
     session: Session = Depends(get_session),
+    actor: User = Depends(require_superuser),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> StorageConnectionRead:
     row = session.get(StorageConnection, connection_id)
     if row is None:
         raise HTTPException(status_code=404, detail="storage_connection_not_found")
+    connection_edits.claim_connection(session, actor, row, precondition)
     if all(
         value is None
         for value in (
@@ -248,7 +257,7 @@ def update_connection(
             changed = connection_target_signature(
                 row.kind, old_configuration, old_secrets
             ) != connection_target_signature(row.kind, configuration, secrets)
-        except (StorageConnectionConfigError, ValueError):
+        except StorageConnectionConfigError, ValueError:
             # An invalid historical profile cannot prove that an edit retains its
             # target. It can still be repaired when no dependent data exists.
             changed = True
@@ -272,9 +281,14 @@ def update_connection(
     if body.automatic_backup_enabled is not None:
         row.automatic_backup_enabled = body.automatic_backup_enabled
     session.add(row)
-    session.commit()
+    session.flush()
     session.refresh(row)
-    return _read(row)
+    receipt = _read(row)
+    session.commit()
+    response.headers["ETag"] = (
+        f'"storage-connection-{row.id}-e{receipt.edit_epoch}-v{receipt.edit_version}"'
+    )
+    return receipt
 
 
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -358,7 +372,7 @@ def _has_target_dependencies(row: StorageConnection, session: Session) -> bool:
         return True
     try:
         return _has_backup_objects(row, session)
-    except (BackupDestinationError, StorageConfigurationError, ValueError):
+    except BackupDestinationError, StorageConfigurationError, ValueError:
         # Older receipts may predate run history, while an unavailable transport
         # prevents resolving their locator. Retain the target conservatively.
         return (

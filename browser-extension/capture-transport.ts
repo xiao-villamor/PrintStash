@@ -1,3 +1,6 @@
+import { runCaptureRequest } from "./capture-operation.ts";
+import { CaptureAuthenticationError } from "./core.ts";
+
 import type { CaptureSourceDraft } from "./capture-adapter.ts";
 
 export interface BrowserCaptureFile {
@@ -11,6 +14,7 @@ export interface BrowserCaptureFile {
 export const CAPTURE_MAX_FILE_SIZE_BYTES = 512 * 1024 * 1024;
 export const CAPTURE_MAX_TOTAL_SIZE_BYTES = 1024 * 1024 * 1024;
 export const CAPTURE_MAX_FILES = 64;
+export const CAPTURE_CLEANUP_TIMEOUT_MS = 5_000;
 
 interface CaptureUploadSlot {
   id: string;
@@ -22,9 +26,57 @@ interface CaptureUploadSlot {
   sha256: string;
 }
 
-interface CaptureSlotResponse {
-  item: { id: number };
-  slots: CaptureUploadSlot[];
+function captureReceipt(payload: unknown): { itemId: number; slots: unknown } {
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("item" in payload) ||
+    typeof payload.item !== "object" ||
+    payload.item === null ||
+    !("id" in payload.item) ||
+    typeof payload.item.id !== "number" ||
+    !Number.isSafeInteger(payload.item.id) ||
+    payload.item.id <= 0
+  ) {
+    throw new Error("PrintStash returned invalid capture upload slots.");
+  }
+  return { itemId: payload.item.id, slots: "slots" in payload ? payload.slots : undefined };
+}
+
+function isCaptureSlot(slot: unknown): slot is CaptureUploadSlot {
+  return (
+    typeof slot === "object" &&
+    slot !== null &&
+    "id" in slot &&
+    typeof slot.id === "string" &&
+    slot.id.trim().length > 0 &&
+    "role" in slot &&
+    (slot.role === "file" || slot.role === "cover") &&
+    "source_file_id" in slot &&
+    (slot.source_file_id === null || typeof slot.source_file_id === "string") &&
+    "filename" in slot &&
+    typeof slot.filename === "string" &&
+    "media_type" in slot &&
+    typeof slot.media_type === "string" &&
+    "size_bytes" in slot &&
+    typeof slot.size_bytes === "number" &&
+    Number.isSafeInteger(slot.size_bytes) &&
+    slot.size_bytes >= 0 &&
+    "sha256" in slot &&
+    typeof slot.sha256 === "string"
+  );
+}
+
+function captureSlots(value: unknown, count: number): CaptureUploadSlot[] {
+  if (
+    !Array.isArray(value) ||
+    value.length !== count ||
+    !value.every(isCaptureSlot) ||
+    new Set(value.map((slot) => slot.id)).size !== count
+  ) {
+    throw new Error("PrintStash returned invalid capture upload slots.");
+  }
+  return value;
 }
 
 interface DeclaredCaptureFile {
@@ -116,6 +168,7 @@ export async function captureRichFiles({
   files,
   cover,
   runStage,
+  signal,
 }: {
   fetchImpl?: typeof fetch;
   vault: string;
@@ -126,8 +179,17 @@ export async function captureRichFiles({
   files: BrowserCaptureFile[];
   cover?: BrowserCaptureFile;
   runStage?: CaptureStageRunner;
+  signal?: AbortSignal;
 }): Promise<unknown> {
   const base = vault.replace(/\/$/, "");
+  const stageRequest = <T>(
+    stage: CaptureUploadStage,
+    operation: (signal: AbortSignal) => Promise<T>,
+  ) => {
+    const scoped = (stageSignal?: AbortSignal) =>
+      runCaptureRequest([signal, stageSignal], operation);
+    return runStage ? runStage(stage, scoped) : scoped();
+  };
   if (files.length === 0 || files.length > CAPTURE_MAX_FILES) {
     throw new Error("Capture file count is outside the supported limit.");
   }
@@ -166,6 +228,7 @@ export async function captureRichFiles({
         ...(preparedCover ? { cover: preparedCover.declaration } : {}),
       }),
     });
+    if (created.status === 401) throw new CaptureAuthenticationError();
     if (created.status === 507) {
       const detail = await created.json().catch(() => null);
       if (detail?.detail === "staging_capacity_unavailable")
@@ -174,16 +237,13 @@ export async function captureRichFiles({
     }
     if (!created.ok)
       throw new Error(`PrintStash returned ${created.status} while creating upload slots.`);
-    return (await created.json()) as CaptureSlotResponse;
+    return captureReceipt(await created.json());
   };
-  const payload = await (runStage ? runStage("slot_create", createSlot) : createSlot());
-  if (!payload?.item || !Array.isArray(payload.slots) || payload.slots.length !== uploads.length) {
-    throw new Error("PrintStash returned invalid capture upload slots.");
-  }
-
+  const payload = await stageRequest("slot_create", createSlot);
   try {
-    for (const upload of uploads) {
-      const slot = matchingSlot(payload.slots, upload);
+    const slots = captureSlots(payload.slots, uploads.length);
+    const plannedUploads = uploads.map((upload) => ({ upload, slot: matchingSlot(slots, upload) }));
+    for (const { upload, slot } of plannedUploads) {
       const uploadSlot = async (signal?: AbortSignal) => {
         const uploaded = await fetchImpl(
           `${base}/api/v1/inbox/capture-upload-slots/${encodeURIComponent(slot.id)}`,
@@ -197,39 +257,48 @@ export async function captureRichFiles({
             body: upload.file,
           },
         );
+        if (uploaded.status === 401) throw new CaptureAuthenticationError();
         if (!uploaded.ok)
           throw new Error(
             `PrintStash returned ${uploaded.status} while uploading ${upload.declaration.filename}.`,
           );
       };
-      await (runStage ? runStage("slot_upload", uploadSlot) : uploadSlot());
+      await stageRequest("slot_upload", uploadSlot);
     }
 
     const finalize = async (signal?: AbortSignal) => {
       const finalized = await fetchImpl(
-        `${base}/api/v1/inbox/${payload.item.id}/capture-upload-finalize`,
+        `${base}/api/v1/inbox/${payload.itemId}/capture-upload-finalize`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${authorization}` },
           signal,
         },
       );
+      if (finalized.status === 401) throw new CaptureAuthenticationError();
       if (!finalized.ok)
         throw new Error(`PrintStash returned ${finalized.status} while finalizing the capture.`);
       return finalized.json();
     };
-    return await (runStage ? runStage("slot_finalize", finalize) : finalize());
+    return await stageRequest("slot_finalize", finalize);
   } catch (error) {
     // A failed transfer owns no reviewable capture. Ask the vault to dismiss
     // the exact item and release any slots already uploaded in this batch.
+    const cleanup = new AbortController();
+    const deadline = setTimeout(() => cleanup.abort(), CAPTURE_CLEANUP_TIMEOUT_MS);
     try {
-      await fetchImpl(`${base}/api/v1/inbox/${payload.item.id}/capture-upload`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${authorization}` },
+      await runCaptureRequest([cleanup.signal], async (cleanupSignal) => {
+        await fetchImpl(`${base}/api/v1/inbox/${payload.itemId}/capture-upload`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${authorization}` },
+          signal: cleanupSignal,
+        });
       });
     } catch {
       // Preserve the original upload failure. The item remains visible for
       // manual dismissal if the cleanup request could not reach the vault.
+    } finally {
+      clearTimeout(deadline);
     }
     throw error;
   }

@@ -140,7 +140,7 @@ export function bgcodeFor(name: string): Buffer {
 }
 
 // A minimal single-triangle ASCII STL; the solid name keeps the bytes unique.
-function stlFor(name: string): string {
+export function stlFor(name: string): string {
   return [
     `solid ${name}`,
     "facet normal 0 0 1",
@@ -232,6 +232,11 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
 
   if (collection) {
     await dialog.getByRole("button", { name: "None" }).click();
+    // Destination results are paginated. Search by the leaf name before selecting
+    // the full displayed path, including when earlier flows created other folders.
+    await dialog
+      .getByRole("textbox", { name: "Find destination", exact: true })
+      .fill(collection.slice(collection.lastIndexOf("/") + 1));
     await dialog.getByRole("option", { name: new RegExp(collection) }).click();
   }
   if (tag) {

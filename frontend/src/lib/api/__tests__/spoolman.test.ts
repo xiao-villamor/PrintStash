@@ -18,7 +18,6 @@ import {
   testSpoolman,
   updateSpoolman,
 } from "@/lib/api/spoolman";
-import { invalidateApiCache } from "@/lib/api/request";
 
 /**
  * Pin the Spoolman API client to the backend router's wire contract: paths,
@@ -36,6 +35,8 @@ function jsonResponse<T>(data: T, status = 200): Response {
 const fetchMock = vi.fn<typeof fetch>();
 
 const status = {
+  edit_epoch: "a".repeat(32),
+  edit_version: 2,
   enabled: true,
   base_url: "http://spoolman.local:7912",
   has_api_key: false,
@@ -55,7 +56,7 @@ function lastCall() {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -76,7 +77,7 @@ describe("updateSpoolman", () => {
   it("PUTs the partial config body", async () => {
     fetchMock.mockResolvedValue(jsonResponse(status));
     const body = { base_url: "http://spoolman.local:7912", enabled: true };
-    await updateSpoolman(body);
+    await updateSpoolman(body, { base: { ...status, edit_version: 1 } });
     const { url, init } = lastCall();
     expect(url).toBe("/api/v1/spoolman");
     expect(init).toMatchObject({ method: "PUT" });

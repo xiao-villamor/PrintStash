@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -37,7 +38,7 @@ jobs:
           - suite: integration-api-routes
             paths: tests/integration/api/test_*.py tests/integration/api/v1/test_*.py
           - suite: integration-api-domains
-            paths: tests/integration/api/v1/files tests/integration/api/v1/inbox tests/integration/api/v1/ingest tests/integration/api/v1/models tests/integration/api/v1/printers tests/integration/api/v1/provider_connections tests/integration/api/v1/storage tests/integration/api/v1/taxonomy
+            paths: tests/integration/api/v1/config tests/integration/api/v1/files tests/integration/api/v1/inbox tests/integration/api/v1/ingest tests/integration/api/v1/models tests/integration/api/v1/printers tests/integration/api/v1/provider_connections tests/integration/api/v1/storage tests/integration/api/v1/taxonomy
           # Migration upgrades are costly enough that one shard can hit the
           # 15-minute job limit on a slower runner. Keep the file sets disjoint.
           - suite: integration-migrations-a
@@ -47,7 +48,7 @@ jobs:
           - suite: integration-migrations-c
             paths: tests/integration/db/migrations/test_[n-z]*.py
           - suite: integration-platform
-            paths: tests/integration/bootstrap tests/integration/core tests/integration/db/test_*.py tests/integration/db/models tests/integration/db/derived_objects tests/integration/main tests/integration/postgres tests/integration/runtime
+            paths: tests/integration/bootstrap tests/integration/core tests/integration/db/test_*.py tests/integration/db/models tests/integration/db/derived_objects tests/integration/main tests/integration/postgres tests/integration/runtime tests/integration/scripts
           - suite: integration-domains-a
             paths: tests/integration/modules/administration tests/integration/modules/backups tests/integration/modules/derivatives tests/integration/modules/identity tests/integration/modules/inference tests/integration/modules/ingestion tests/integration/modules/library tests/integration/modules/media
           - suite: integration-domains-b
@@ -64,7 +65,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
       - run: uv sync --extra dev --extra full --frozen
       - name: Verify optional dependency boundary
         if: matrix.suite == 'unit'
@@ -85,6 +86,13 @@ jobs:
         run: uv run deptry app/
       - if: matrix.suite == 'unit'
         run: uv run pyright
+      - name: Prepare PID namespace qualification
+        if: matrix.suite == 'integration-platform'
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+          unshare --user --map-root-user --pid --fork /usr/bin/true
       - name: Test backend once without external resources
         run: ./scripts/test.sh pr ${{ matrix.paths }} -q
 
@@ -102,9 +110,9 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
       - run: |
-          uv venv --python 3.11
+          uv venv --python 3.14.8
           uv pip install --python .venv/bin/python --resolution highest --editable ".[dev,mesh,printers-all,testkit]"
       - run: .venv/bin/pytest tests -q -m "not coverage_gate"
       - run: .venv/bin/ruff check src tests
@@ -149,7 +157,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
       - name: Install backend
         working-directory: backend
         run: uv sync --extra dev --frozen
@@ -167,6 +175,16 @@ jobs:
       - name: Install Chromium
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
+      - name: Verify native mesh renderer contracts
+        working-directory: frontend
+        run: pnpm test:mesh
+      - name: Verify representation pilot safety contracts
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_GC: "1"
+        run: |
+          npm ci --prefix frontend/scripts/viewer-representation-pilot --ignore-scripts --no-audit --no-fund
+          node frontend/scripts/viewer-representation-pilot/node_modules/playwright/cli.js install --with-deps chromium
+          node --test frontend/scripts/viewer-representation-pilot.test.mjs
       - name: Verify model lifecycle and backup recovery
         working-directory: frontend
         run: pnpm test:e2e:pr

@@ -1,6 +1,6 @@
 /** A disposable worker owns all geometry parsing and transfers its typed arrays. */
 import { parseGcode } from "./gcode";
-import type { ToolpathWorkerReply } from "./gcode-worker-client";
+import type { ToolpathWorkerReply } from "./gcode-worker-protocol";
 
 declare const self: {
   onmessage: ((event: MessageEvent<{ text: string }>) => void) | null;

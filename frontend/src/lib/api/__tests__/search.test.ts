@@ -1,11 +1,16 @@
 /** Interactive searches have bounded waits and preserve navigation cancellation. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { invalidateApiCache } from "@/lib/api/request";
 import {
   cancelInferenceDownload,
   deleteInferenceModel,
   downloadInferenceModel,
   getSearchPreferences,
+  getSearchSettings,
+  saveSearchSettings,
+  getSearchStatus,
+  listInferenceModels,
+  listSearchGenerations,
+  estimateSearchGeneration,
   importEnvironmentEndpoint,
   parseSearch,
   searchImage,
@@ -14,9 +19,10 @@ import {
   validateInferenceModel,
 } from "@/lib/api/search";
 import { json } from "@/test-support/render";
-import { searchResponse } from "@/test-support/search";
+import { readSearchFilters } from "@/lib/search-filters";
+import { searchResponse, searchConfiguration } from "@/test-support/search";
 
-import { expectRequest, fetchMock, lastBody, respondWith } from "./_wire";
+import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
 const fetcher = vi.fn<typeof fetch>();
 describe("Interactive search requests", () => {
@@ -67,6 +73,34 @@ describe("Interactive search requests", () => {
     ]);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it.each([
+    { label: "status", run: (signal: AbortSignal) => getSearchStatus({ signal }) },
+    { label: "settings", run: (signal: AbortSignal) => getSearchSettings({ signal }) },
+    { label: "models", run: (signal: AbortSignal) => listInferenceModels({ signal }) },
+    { label: "generations", run: (signal: AbortSignal) => listSearchGenerations({ signal }) },
+    { label: "preferences", run: (signal: AbortSignal) => getSearchPreferences({ signal }) },
+    {
+      label: "estimate",
+      run: (signal: AbortSignal) =>
+        estimateSearchGeneration(
+          {
+            local_model_id: "small",
+            index_backend: "auto",
+            quantization: "float32",
+            auto_activate: true,
+          },
+          { signal },
+        ),
+    },
+  ])("cancels an active $label read", async ({ run }) => {
+    stall();
+    const controller = new AbortController();
+    const pending = run(controller.signal);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it("rejects an already cancelled search", async () => {
     stall();
     const controller = new AbortController();
@@ -82,6 +116,33 @@ describe("Interactive search requests", () => {
     expect(await searchLibrary({ q: "bracket" })).toEqual(response);
     expect(vi.getTimerCount()).toBe(0);
   });
+  it.each(["all", "multipart"] as const)(
+    "sends Model predicates without %s saved-view metadata",
+    async (libraryView) => {
+      fetcher.mockResolvedValue(json(searchResponse()));
+      const filters = {
+        ...readSearchFilters(
+          new URLSearchParams("tag=functional&printed=no&print_duration_max_s=10800"),
+        ),
+        library_view: libraryView,
+        q: "old bookmark text",
+        sort: "name-asc" as const,
+      };
+      await searchLibrary({ q: "bracket", sort: "date-desc", filters });
+      const url = new URL(String(fetcher.mock.calls[0][0]), "http://localhost");
+      expect(url.searchParams.get("q")).toBe("bracket");
+      expect(url.searchParams.get("sort")).toBe("date-desc");
+      const sent = JSON.parse(url.searchParams.get("filters")!);
+      expect(sent).toMatchObject({
+        tag: ["functional"],
+        printed: false,
+        print_duration_max_s: 10800,
+      });
+      expect(sent).not.toHaveProperty("library_view");
+      expect(sent).not.toHaveProperty("sort");
+      expect(sent).not.toHaveProperty("q");
+    },
+  );
   it("preserves server errors", async () => {
     fetcher.mockResolvedValue(json({ detail: "search_unavailable" }, 503));
     await expect(searchLibrary({ q: "bracket" })).rejects.toMatchObject({
@@ -102,7 +163,6 @@ describe("Local model management", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
-    invalidateApiCache();
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -150,5 +210,34 @@ describe("Local model management", () => {
 
     expectRequest("/api/v1/config/ai-search/endpoints/from-environment/chat", "POST");
     expect(lastBody()).toEqual({});
+  });
+});
+
+describe("Conditional Search settings transport", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("sends the captured editing base", async () => {
+    const original = searchConfiguration({ edit_version: 5 });
+    fetchMock.mockResolvedValue(json({ ...original, edit_version: 6 }));
+    await saveSearchSettings(original.settings, original);
+    const headers = new Headers(lastCall().init.headers);
+    expect(headers.get("If-Match")).toBe(`"search-settings-e${original.edit_epoch}-v5"`);
+    expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
+    expect(lastBody()).toEqual(original.settings);
+  });
+
+  it.each([
+    { label: "non-advancing", edit_version: 1, edit_epoch: "a".repeat(32) },
+    { label: "other history", edit_version: 2, edit_epoch: "b".repeat(32) },
+  ])("refuses a $label acknowledgement", async ({ edit_version, edit_epoch }) => {
+    const original = searchConfiguration();
+    fetchMock.mockResolvedValue(json(searchConfiguration({ edit_version, edit_epoch })));
+    await expect(saveSearchSettings(original.settings, original)).rejects.toThrow(
+      "Invalid editing acknowledgement",
+    );
   });
 });

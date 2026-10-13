@@ -155,13 +155,13 @@ class TestCrashRecovery:
     ) -> None:
         # One API per vault: holding the vault lock proves the previous API
         # process is gone, so its work must not wait out the stale window
-        # (here an hour, far beyond the harness deadline).
+        # (here an hour, far beyond the shared 120s harness deadline). A
+        # killed reconcile pass can retain its separate cursor lease for 60s.
         process, file_id = _stall(vault_env, tmp_path / "running")
         _kill(process)
         restarted = {
             **vault_env,
             "VAULT_JOBS_EXECUTOR_STALE_SECONDS": "3600",
-            "JOB_ENGINE_DEADLINE_S": "60",
         }
 
         states = _converge(restarted, file_id)
@@ -225,10 +225,10 @@ def _lose_artifact_bytes(environment: dict[str, str], file_id: int) -> None:
 class TestRestore:
     """A backup restored through the API, on a real engine that starts empty.
 
-    SQLite only: PrintStash backs up a SQLite vault itself, while a PostgreSQL
-    vault is restored by the operator's own database tooling, which also
-    brings back (or drops) the engine's ``dbos`` schema. That case, a restored
-    application database with an empty engine schema, is
+    This test uses SQLite to exercise the shared API restore flow. PostgreSQL
+    backup and restore use a portable SQLite-format database snapshot; the
+    engine's separate ``dbos`` schema is not part of either database backup.
+    PostgreSQL engine-state recovery is covered by
     ``TestEngineStateLoss[postgresql]``.
     """
 

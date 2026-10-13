@@ -9,15 +9,18 @@ from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field
 
 from app.db.models import CollectionRole
 from app.schemas.documents import DocumentListItem
+from app.schemas.editing import EditingBase
 
 
-class MultipartModelListItem(BaseModel):
+class MultipartModelListItem(EditingBase):
     id: int
     name: str
     slug: str
     description: Optional[str] = None
     collection: Optional[str] = None
     collection_id: Optional[int] = None
+    # The collection's name path (``Parts/Brackets``); None outside a collection.
+    collection_label: Optional[str] = None
     part_count: int = 0
     model_count: int = 0
     guide_count: int = 0

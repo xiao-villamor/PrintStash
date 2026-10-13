@@ -1,11 +1,11 @@
+import type { EditingBase } from "@/types/editing";
+import { editHeaders, requireEditingReceipt } from "./editing";
 import {
-  authHeaders,
   expectOk,
   getJson,
+  jsonHeaders,
   GetJsonOptions,
-  getUrl,
-  handleResponse,
-  invalidateApiCache,
+  requestApi,
   sendAction,
   sendForm,
   sendFormWithProgress,
@@ -20,6 +20,7 @@ import {
   ListModelsParams,
   ManualPrintJobCreate,
   ModelBatchResult,
+  ModelEditBatchResult,
   ModelListItem,
   ModelFacetsRead,
   ModelPageRead,
@@ -36,7 +37,7 @@ import {
   VaultStatsRead,
 } from "@/types";
 
-function modelListSearch(params?: ListModelsParams): URLSearchParams {
+export function modelListSearch(params?: ListModelsParams): URLSearchParams {
   const search = new URLSearchParams();
   if (params?.collection) search.set("collection", params.collection);
   if (params?.direct) search.set("direct", "true");
@@ -77,19 +78,23 @@ function modelListSearch(params?: ListModelsParams): URLSearchParams {
   return search;
 }
 
-export async function listModels(params?: ListModelsParams): Promise<ModelListItem[]> {
+export async function listModels(
+  params?: ListModelsParams,
+  options?: GetJsonOptions,
+): Promise<ModelListItem[]> {
   const query = modelListSearch(params).toString();
-  return getJson<ModelListItem[]>(`/api/v1/models${query ? `?${query}` : ""}`);
+  return getJson<ModelListItem[]>(`/api/v1/models${query ? `?${query}` : ""}`, options);
 }
 
-export async function listModelPage(params?: ListModelPageParams): Promise<ModelPageRead> {
+export async function listModelPage(
+  params?: ListModelPageParams,
+  options?: GetJsonOptions,
+): Promise<ModelPageRead> {
   const search = modelListSearch(params);
   if (params?.sort) search.set("sort", params.sort);
   if (params?.cursor) search.set("cursor", params.cursor);
   const query = search.toString();
-  return getJson<ModelPageRead>(`/api/v1/models/page${query ? `?${query}` : ""}`, {
-    fresh: true,
-  });
+  return getJson<ModelPageRead>(`/api/v1/models/page${query ? `?${query}` : ""}`, options);
 }
 
 export async function listOutlinerModels(
@@ -97,9 +102,7 @@ export async function listOutlinerModels(
 ): Promise<OutlinerModelRead[]> {
   const search = modelListSearch(params);
   const query = search.toString();
-  return getJson<OutlinerModelRead[]>(`/api/v1/models/outliner${query ? `?${query}` : ""}`, {
-    fresh: true,
-  });
+  return getJson<OutlinerModelRead[]>(`/api/v1/models/outliner${query ? `?${query}` : ""}`, {});
 }
 
 export async function getModelFacets(
@@ -107,9 +110,7 @@ export async function getModelFacets(
 ): Promise<ModelFacetsRead> {
   const search = modelListSearch(params);
   const query = search.toString();
-  return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`, {
-    fresh: true,
-  });
+  return getJson<ModelFacetsRead>(`/api/v1/models/facets${query ? `?${query}` : ""}`, {});
 }
 
 export function starModel(id: number): Promise<ModelStarRead> {
@@ -118,13 +119,11 @@ export function starModel(id: number): Promise<ModelStarRead> {
 
 export async function unstarModel(id: number): Promise<ModelStarRead> {
   const path = `/api/v1/models/${id}/star`;
-  const res = await fetch(getUrl(path), { method: "DELETE", headers: authHeaders() });
-  invalidateApiCache(path);
-  return handleResponse<ModelStarRead>(res);
+  return requestApi<ModelStarRead>(path, { method: "DELETE" });
 }
 
-export function getModel(id: number): Promise<ModelRead> {
-  return getJson<ModelRead>(`/api/v1/models/${id}`);
+export function getModel(id: number, options?: GetJsonOptions): Promise<ModelRead> {
+  return getJson<ModelRead>(`/api/v1/models/${id}`, options);
 }
 
 export function getVaultStats(options?: GetJsonOptions): Promise<VaultStatsRead> {
@@ -132,40 +131,46 @@ export function getVaultStats(options?: GetJsonOptions): Promise<VaultStatsRead>
 }
 
 export async function downloadModelExport(format: "json" | "csv"): Promise<void> {
-  const res = await fetch(getUrl(`/api/v1/models/export?format=${format}`), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
-  await expectOk(res);
-  const blob = await res.blob();
-  const fallback = `printstash-model-export.${format}`;
-  const disposition = res.headers.get("content-disposition") ?? "";
-  const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? fallback;
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  return requestApi(
+    `/api/v1/models/export?format=${format}`,
+    { cache: "no-store" },
+    async (res, session) => {
+      await expectOk(res, session);
+      const blob = await res.blob();
+      session.assertCurrent();
+      const fallback = `printstash-model-export.${format}`;
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? fallback;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    },
+  );
 }
 
 export async function downloadLibraryArchive(version: 1 | 2 = 2): Promise<void> {
-  const res = await fetch(getUrl(`/api/v1/models/library-archive?version=${version}`), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
-  await expectOk(res);
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `printstash-library-v${version}.zip`;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+  return requestApi(
+    `/api/v1/models/library-archive?version=${version}`,
+    { cache: "no-store" },
+    async (res, session) => {
+      await expectOk(res, session);
+      const blob = await res.blob();
+      session.assertCurrent();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `printstash-library-v${version}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    },
+  );
 }
 
 export function importLibraryArchive(file: File): Promise<JobAccepted> {
@@ -174,12 +179,18 @@ export function importLibraryArchive(file: File): Promise<JobAccepted> {
   return sendForm("/api/v1/models/library-import", form);
 }
 
-export function getModelPrinterFiles(id: number): Promise<ModelPrinterFileRead[]> {
-  return getJson<ModelPrinterFileRead[]>(`/api/v1/models/${id}/printer-files`);
+export function getModelPrinterFiles(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<ModelPrinterFileRead[]> {
+  return getJson<ModelPrinterFileRead[]>(`/api/v1/models/${id}/printer-files`, options);
 }
 
-export function getModelPrintJobs(id: number): Promise<ModelPrintJobRead[]> {
-  return getJson<ModelPrintJobRead[]>(`/api/v1/models/${id}/print-jobs`);
+export function getModelPrintJobs(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<ModelPrintJobRead[]> {
+  return getJson<ModelPrintJobRead[]>(`/api/v1/models/${id}/print-jobs`, options);
 }
 
 export function getArtifactOutcomes(
@@ -209,31 +220,62 @@ export function importPrintJobsFromPrinter(
   );
 }
 
-export function updateModel(id: number, payload: ModelUpdate): Promise<ModelRead> {
-  return sendJson<ModelRead>(`/api/v1/models/${id}`, "PATCH", payload);
+/** Every editor sends the version of the snapshot its intent was based on. */
+export function updateModel(
+  id: number,
+  payload: ModelUpdate,
+  base: EditingBase,
+): Promise<ModelRead> {
+  return sendJson<ModelRead>(
+    `/api/v1/models/${id}`,
+    "PATCH",
+    payload,
+    editHeaders("model", id, base),
+  ).then((saved) => {
+    if (saved.id !== id) throw new Error("Invalid Model acknowledgement");
+    requireEditingReceipt(saved, base);
+    return saved;
+  });
 }
 
 export function deleteModel(id: number): Promise<void> {
   return sendAction(`/api/v1/models/${id}`, "DELETE");
 }
 
-export function batchMoveModels(modelIds: number[], collection: string): Promise<ModelBatchResult> {
-  return sendJson<ModelBatchResult>("/api/v1/models/batch/move", "POST", {
-    model_ids: modelIds,
-    collection,
-  });
+export function batchMoveModels(
+  modelIds: number[],
+  collection: string,
+  expectedVersions: Record<number, EditingBase>,
+): Promise<ModelEditBatchResult> {
+  return sendJson<ModelEditBatchResult>(
+    "/api/v1/models/batch/move",
+    "POST",
+    {
+      model_ids: modelIds,
+      collection,
+      expected_versions: expectedVersions,
+    },
+    { "X-PrintStash-Edit-Contract": "conditional-v1" },
+  );
 }
 
 export function batchTagModels(
   modelIds: number[],
   add: string[],
   remove: string[],
-): Promise<ModelBatchResult> {
-  return sendJson<ModelBatchResult>("/api/v1/models/batch/tags", "POST", {
-    model_ids: modelIds,
-    add,
-    remove,
-  });
+  expectedVersions: Record<number, EditingBase>,
+): Promise<ModelEditBatchResult> {
+  return sendJson<ModelEditBatchResult>(
+    "/api/v1/models/batch/tags",
+    "POST",
+    {
+      model_ids: modelIds,
+      add,
+      remove,
+      expected_versions: expectedVersions,
+    },
+    { "X-PrintStash-Edit-Contract": "conditional-v1" },
+  );
 }
 
 export function batchSetRevisionLabels(
@@ -252,32 +294,43 @@ export function batchDeleteModels(modelIds: number[]): Promise<ModelBatchResult>
   });
 }
 
-export function listTrash(): Promise<TrashedModelRead[]> {
-  return getJson<TrashedModelRead[]>("/api/v1/models/trash");
+export function listTrash(options: GetJsonOptions = {}): Promise<TrashedModelRead[]> {
+  return getJson<TrashedModelRead[]>("/api/v1/models/trash", options);
 }
 
-export function restoreModel(id: number): Promise<ModelRead> {
-  return sendJson<ModelRead>(`/api/v1/models/${id}/restore`, "POST", {});
-}
-
-export async function purgeModel(id: number, confirmStorageRisk = false): Promise<TrashPurgeRead> {
-  const query = confirmStorageRisk ? "?confirm_storage_risk=true" : "";
-  const res = await fetch(getUrl(`/api/v1/models/${id}/purge${query}`), {
-    method: "DELETE",
-    headers: authHeaders(),
+export function restoreModel(
+  id: number,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<ModelRead> {
+  return requestApi<ModelRead>(`/api/v1/models/${id}/restore`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
   });
-  invalidateApiCache(`/api/v1/models/${id}/purge`);
-  return normalizeTrashPurgeRead(await handleResponse<Partial<TrashPurgeRead>>(res));
+}
+
+export async function purgeModel(
+  id: number,
+  confirmStorageRisk = false,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<TrashPurgeRead> {
+  const query = confirmStorageRisk ? "?confirm_storage_risk=true" : "";
+  return normalizeTrashPurgeRead(
+    await requestApi<Partial<TrashPurgeRead>>(`/api/v1/models/${id}/purge${query}`, {
+      method: "DELETE",
+      signal: options.signal,
+    }),
+  );
 }
 
 export async function purgeExpiredTrash(confirmStorageRisk = false): Promise<TrashPurgeRead> {
   const query = confirmStorageRisk ? "?confirm_storage_risk=true" : "";
-  const res = await fetch(getUrl(`/api/v1/models/trash/expired${query}`), {
-    method: "DELETE",
-    headers: authHeaders(),
-  });
-  invalidateApiCache("/api/v1/models/trash/expired");
-  return normalizeTrashPurgeRead(await handleResponse<Partial<TrashPurgeRead>>(res));
+  return normalizeTrashPurgeRead(
+    await requestApi<Partial<TrashPurgeRead>>(`/api/v1/models/trash/expired${query}`, {
+      method: "DELETE",
+    }),
+  );
 }
 
 export function updateFileRevision(
@@ -302,9 +355,7 @@ export function replaceFileTags(
 
 export async function trashSourceFile(modelId: number, fileId: number): Promise<ModelRead> {
   const path = `/api/v1/models/${modelId}/files/${fileId}`;
-  const res = await fetch(getUrl(path), { method: "DELETE", headers: authHeaders() });
-  invalidateApiCache(path);
-  return handleResponse<ModelRead>(res);
+  return requestApi<ModelRead>(path, { method: "DELETE" });
 }
 
 export function restoreSourceFile(modelId: number, fileId: number): Promise<ModelRead> {
@@ -313,12 +364,9 @@ export function restoreSourceFile(modelId: number, fileId: number): Promise<Mode
 
 export async function deleteFileRevision(modelId: number, fileId: number): Promise<ModelRead> {
   const path = `/api/v1/models/${modelId}/files/${fileId}/revision`;
-  const res = await fetch(getUrl(path), {
+  return requestApi<ModelRead>(path, {
     method: "DELETE",
-    headers: authHeaders(),
   });
-  invalidateApiCache(path);
-  return handleResponse<ModelRead>(res);
 }
 
 export function addGcodeRevision(modelId: number, formData: FormData): Promise<ModelRead> {

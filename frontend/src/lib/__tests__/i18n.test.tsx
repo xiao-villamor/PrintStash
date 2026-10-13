@@ -7,7 +7,16 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LocaleToggle } from "@/components/locale-toggle";
 import { I18nProvider, useI18n, useUiLocale } from "@/lib/i18n";
-import { setLocale, uiText } from "@/lib/locale";
+import {
+  ensureLocaleCatalog,
+  getMessageCatalog,
+  setLocale,
+  setLocaleCatalogLoader,
+  SUPPORTED_LOCALES,
+  uiText,
+  type MessageCatalog,
+} from "@/lib/locale";
+import { loadLocaleCatalog } from "@/locales/registry";
 import { Modal } from "@/components/ui/modal";
 
 function Probe({ name = "Files" }: { name?: string }) {
@@ -104,6 +113,30 @@ describe("I18nProvider", () => {
     expect(screen.getByRole("dialog", { name: "Ajustes" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Cerrar" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Te damos la bienvenida" })).toBeVisible();
+  });
+
+  it("leaves a stored locale alone while its catalog is still arriving", async () => {
+    const arriving = Promise.withResolvers<MessageCatalog>();
+    const spanish = getMessageCatalog("es");
+    setLocaleCatalogLoader((locale) =>
+      locale === "es" ? arriving.promise : loadLocaleCatalog(locale),
+    );
+    try {
+      await ensureLocaleCatalog("en");
+      localStorage.setItem("printstash.locale", "es");
+
+      render(
+        <I18nProvider>
+          <Probe />
+        </I18nProvider>,
+      );
+
+      expect(localStorage.getItem("printstash.locale")).toBe("es");
+    } finally {
+      arriving.resolve(spanish);
+      setLocaleCatalogLoader();
+      await Promise.all(SUPPORTED_LOCALES.map(ensureLocaleCatalog));
+    }
   });
 
   it("preserves language when persistence is unavailable", async () => {

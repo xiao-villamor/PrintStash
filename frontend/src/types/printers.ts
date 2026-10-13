@@ -1,3 +1,5 @@
+import type { EditingBase } from "./editing";
+
 /**
  * One value inside a JSON blob a printer provider owns rather than PrintStash:
  * a Moonraker/Klipper config dump or a live status snapshot. These are relayed
@@ -66,7 +68,7 @@ export interface PrinterPermissionRead {
   updated_at: string;
 }
 
-export interface PrinterRead {
+export interface PrinterRead extends EditingBase {
   id: number;
   name: string;
   provider: PrinterProvider;
@@ -75,17 +77,17 @@ export interface PrinterRead {
   provider_variant?: PrinterVariant | null;
   bambu_host?: string | null;
   bambu_serial?: string | null;
-  has_bambu_access_code?: boolean;
+  has_bambu_access_code: boolean;
   prusalink_url?: string | null;
   prusalink_auth_mode?: PrusaLinkAuthMode | null;
   prusalink_username?: string | null;
-  has_prusalink_password?: boolean;
-  has_prusalink_api_key?: boolean;
+  has_prusalink_password: boolean;
+  has_prusalink_api_key: boolean;
   elegoo_centauri_host?: string | null;
   elegoo_centauri_mainboard_id?: string | null;
-  has_elegoo_centauri_access_code?: boolean;
+  has_elegoo_centauri_access_code: boolean;
   octoprint_url?: string | null;
-  has_octoprint_api_key?: boolean;
+  has_octoprint_api_key: boolean;
   model_name?: string | null;
   detected_model?: string | null;
   capabilities: PrinterCapabilities;
@@ -96,8 +98,8 @@ export interface PrinterRead {
   drain_mode: boolean;
   drain_reason: string | null;
   drain_updated_at: string | null;
-  provider_material_sync_enabled?: boolean;
-  operator_release_required?: boolean;
+  provider_material_sync_enabled: boolean;
+  operator_release_required: boolean;
   status: PrinterStatus;
   last_seen_at: string | null;
   last_error: string | null;

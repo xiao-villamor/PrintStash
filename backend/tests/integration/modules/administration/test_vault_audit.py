@@ -1679,6 +1679,35 @@ class TestReparseMetadata:
 
 
 class TestRepairFinding:
+    def test_disabled_metadata_repair_preserves_an_open_finding(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_user,
+        make_audit_run,
+        make_audit_finding,
+        make_system_config,
+        make_metadata,
+    ):
+        from app.core.errors import OperationError
+
+        user = make_user()
+        artifact = make_file(make_model(), filename="disabled.stl")
+        make_metadata(artifact)
+        make_system_config(derivatives_mesh_enabled=False)
+        run = make_audit_run(user)
+        finding = make_audit_finding(
+            run,
+            code="metadata_missing",
+            repair_action="reparse_metadata",
+            details_json=json.dumps({"file_id": artifact.id}),
+        )
+        with pytest.raises(OperationError, match="derivative_group_disabled"):
+            vault_audit.repair_finding(db_session, finding.id, user.id)
+        db_session.refresh(finding)
+        assert finding.state is VaultAuditFindingState.OPEN
+
     def test_repair_finding_already_resolved_is_a_noop(
         self, db_session: Session
     ) -> None:

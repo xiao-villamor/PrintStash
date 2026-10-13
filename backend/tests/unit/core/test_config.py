@@ -6,8 +6,16 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.exc import ArgumentError
 
-from app.core.config import DATA_ROOT_LAYOUT, ConfigResolver, FrozenSettings, _overlay
+from app.core.config import (
+    DATA_ROOT_LAYOUT,
+    ConfigResolver,
+    FrozenSettings,
+    _overlay,
+    _sqlite_db_path,
+)
+from app.modules.derivatives.policy import SETTINGS
 
 DATA_ROOT = Path("/srv/printstash")
 POSTGRES_URL = "postgresql+psycopg://printstash:secret@postgres:5432/printstash"
@@ -22,11 +30,14 @@ class TestSettings:
             ("mesh_memory_budget_fraction", 1.01),
             ("mesh_render_face_chunk_size", 0),
             ("mesh_step_timeout_seconds", 0),
+            ("mesh_worker_timeout_seconds", 9),
+            ("mesh_worker_timeout_seconds", 3601),
             ("mesh_stream_timeout_seconds", 0),
             ("mesh_stream_timeout_seconds", 46),
             ("max_archive_entries", 0),
             ("backup_retention_days", -1),
             ("trash_retention_days", -1),
+            ("slow_request_ms", 0),
         ],
     )
     def test_numeric_settings_reject_impossible_values(
@@ -47,6 +58,20 @@ class TestSettings:
         # identifies the deployment's app registration.
         assert "client-id" not in rendered
         assert "client-secret" not in rendered
+
+    def test_slow_request_threshold_defaults_to_one_second(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("VAULT_SLOW_REQUEST_MS", raising=False)
+
+        assert FrozenSettings(_env_file=None).slow_request_ms == 1000
+
+    def test_slow_request_threshold_reads_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VAULT_SLOW_REQUEST_MS", "250")
+
+        assert FrozenSettings(_env_file=None).slow_request_ms == 250
 
     @pytest.mark.parametrize(
         ("field", "value"),
@@ -171,3 +196,108 @@ class TestConfigResolver:
         monkeypatch.setitem(_overlay, "data_dir", Path("/mnt/runtime/files"))
 
         assert resolver.frozen.data_dir == DATA_ROOT / "files"
+
+
+class TestDerivativeDefaults:
+    def test_all_producer_groups_default_to_enabled(self, monkeypatch):
+        for name in SETTINGS.values():
+            monkeypatch.delenv(f"VAULT_{name.upper()}", raising=False)
+        configured = FrozenSettings(_env_file=None)
+        assert all(getattr(configured, name) is True for name in SETTINGS.values())
+
+    @pytest.mark.parametrize("name", list(SETTINGS.values()))
+    def test_reads_a_disabled_environment_default(self, monkeypatch, name):
+        monkeypatch.setenv(f"VAULT_{name.upper()}", "false")
+        assert getattr(FrozenSettings(_env_file=None), name) is False
+
+
+class TestInferenceResidencySettings:
+    def test_defaults_to_a_bounded_model_partition(self, monkeypatch):
+        for name in (
+            "EMBEDDING_MEMORY_BUDGET_FRACTION",
+            "EMBEDDING_RESIDENT_WORKERS",
+            "EMBEDDING_WORKER_MEMORY_MB",
+        ):
+            monkeypatch.delenv(f"VAULT_{name}", raising=False)
+        configured = FrozenSettings(_env_file=None)
+        assert configured.embedding_memory_budget_fraction == 0.25
+        assert configured.embedding_resident_workers == 1
+        assert configured.embedding_worker_memory_mb == 1024
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("embedding_memory_budget_fraction", 0),
+            ("embedding_memory_budget_fraction", 1),
+            ("embedding_memory_budget_fraction", float("nan")),
+            ("embedding_resident_workers", 0),
+            ("embedding_resident_workers", 3),
+            ("embedding_worker_memory_mb", 511),
+        ],
+    )
+    def test_rejects_an_invalid_model_partition(self, field, value):
+        with pytest.raises(ValidationError):
+            FrozenSettings(_env_file=None, **{field: value})
+
+    def test_reads_the_model_partition_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("VAULT_EMBEDDING_MEMORY_BUDGET_FRACTION", "0.2")
+        monkeypatch.setenv("VAULT_EMBEDDING_RESIDENT_WORKERS", "2")
+        monkeypatch.setenv("VAULT_EMBEDDING_WORKER_MEMORY_MB", "768")
+        configured = FrozenSettings(_env_file=None)
+        assert configured.embedding_memory_budget_fraction == 0.2
+        assert configured.embedding_resident_workers == 2
+        assert configured.embedding_worker_memory_mb == 768
+
+
+class TestBatchWindowSettings:
+    @pytest.mark.parametrize(
+        "field", ["ingestion_batch_max_files", "ingestion_batch_max_mb"]
+    )
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_refuses_nonpositive_window_limits(self, field, value):
+        with pytest.raises(ValidationError):
+            FrozenSettings(_env_file=None, **{field: value})
+
+    def test_has_bounded_window_defaults(self, monkeypatch):
+        monkeypatch.delenv("VAULT_INGESTION_BATCH_MAX_FILES", raising=False)
+        monkeypatch.delenv("VAULT_INGESTION_BATCH_MAX_MB", raising=False)
+        configured = FrozenSettings(_env_file=None)
+        assert configured.ingestion_batch_max_files == 4
+        assert configured.ingestion_batch_max_mb == 512
+
+    def test_reads_explicit_window_limits(self, monkeypatch):
+        monkeypatch.setenv("VAULT_INGESTION_BATCH_MAX_FILES", "2")
+        monkeypatch.setenv("VAULT_INGESTION_BATCH_MAX_MB", "8")
+        configured = FrozenSettings(_env_file=None)
+        assert configured.ingestion_batch_max_files == 2
+        assert configured.ingestion_batch_max_mb == 8
+
+
+class TestSqliteDbPath:
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            ("sqlite:///library.sqlite?timeout=10", Path("library.sqlite")),
+            ("sqlite+pysqlite:////srv/library.sqlite", Path("/srv/library.sqlite")),
+            ("sqlite:///folder/library.sqlite", Path("folder/library.sqlite")),
+        ],
+        ids=["relative-query", "absolute-driver", "nested"],
+    )
+    def test_returns_the_file_path(self, url: str, expected: Path) -> None:
+        assert _sqlite_db_path(url) == expected
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "sqlite://",
+            "sqlite:///:memory:",
+            "postgresql+psycopg://example/db",
+        ],
+        ids=["empty", "memory", "postgres"],
+    )
+    def test_omits_non_file_database_paths(self, url: str) -> None:
+        assert _sqlite_db_path(url) is None
+
+    def test_refuses_a_malformed_sqlite_url(self) -> None:
+        with pytest.raises(ArgumentError, match="Could not parse"):
+            _sqlite_db_path("sqlite-invalid")

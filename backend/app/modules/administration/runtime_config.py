@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy import func
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.config import DEFAULT_JWT_SECRET, _overlay, ensure_dirs, settings
 from app.core.logging import get_logger
 from app.core.time import utcnow
-from app.db.models import File, SystemConfig, User
+from app.db.models import File, LibraryRevision, SystemConfig, User
 from app.modules.storage.storage_providers import (
     SFTPProviderConfig,
     StorageProviderConfig,
@@ -30,6 +30,7 @@ from app.modules.storage.storage_providers import (
     split_provider_config,
 )
 from app.runtime.maintenance import guarded_storage_configuration
+from app.schemas.editing import EditingBase
 
 from .config_repository import get_or_create
 
@@ -422,10 +423,47 @@ def activate_config(config: SystemConfig) -> None:
     ensure_dirs()
 
 
+def publish_config_edit(config: SystemConfig, fields: frozenset[str]) -> None:
+    """Publish only the edited runtime fields from the latest committed row.
+
+    Unrelated edits must not activate or revalidate a legacy provider. The caller
+    holds the configuration row lock so delayed publishers cannot restore stale
+    values after another command commits.
+    """
+    from app.core.config import Settings
+
+    for name in fields:
+        if name in Settings.model_fields and name not in {
+            "storage_provider",
+            "storage_provider_config",
+        }:
+            value = getattr(config, name)
+            if value is None:
+                value = getattr(settings.frozen, name)
+            if name in {"data_dir", "thumb_dir"}:
+                value = Path(value)
+            _overlay[name] = value
+    if "storage_backend" in fields and config.s3_root is not None:
+        _overlay["s3_root"] = config.s3_root
+    if fields & {"storage_provider", "storage_provider_config"}:
+        provider = _stored_provider_config(config)
+        if provider is None:
+            raise ValueError("stored_provider_configuration_invalid")
+        _project_provider_overlay(provider)
+    if fields & {
+        "storage_backend",
+        "data_dir",
+        "thumb_dir",
+        "storage_provider",
+        "storage_provider_config",
+    }:
+        ensure_dirs()
+
+
 def _json_object(value: str | None) -> dict[str, Any]:
     try:
         parsed = json.loads(value or "{}")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
 
@@ -643,7 +681,13 @@ def has_storage_state(session: Session) -> bool:
 def get_sanitized_storage_provider(
     session: Session,
 ) -> tuple[str, dict[str, object]] | None:
-    config = session.get(SystemConfig, 1)
+    return sanitized_storage_provider(session.get(SystemConfig, 1))
+
+
+def sanitized_storage_provider(
+    config: SystemConfig | None,
+) -> tuple[str, dict[str, object]] | None:
+    """Sanitize the provider from the same row snapshot as its editing base."""
     if config is None or not config.storage_provider:
         return None
     nonsecret = _json_object(config.storage_provider_config_json)
@@ -801,7 +845,7 @@ def update_config(
             fallback = _env_or_default(field_name)
             try:
                 pending_overlay[field_name] = int(fallback or 0)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pending_overlay[field_name] = 30
 
     def _apply_bool(field_name: str, value: Optional[bool]) -> None:
@@ -883,6 +927,7 @@ def update_backup_schedule(
     time_utc: str | None = None,
     manual_local_enabled: bool | None = None,
     automatic_local_enabled: bool | None = None,
+    commit: bool = True,
 ) -> SystemConfig:
     from app.modules.backups.backup_schedule import update_schedule
 
@@ -892,6 +937,7 @@ def update_backup_schedule(
         time_utc=time_utc,
         manual_local_enabled=manual_local_enabled,
         automatic_local_enabled=automatic_local_enabled,
+        commit=commit,
     )
 
 
@@ -901,12 +947,17 @@ def notifications_enabled(session: Session) -> bool:
     return False if config is None else bool(config.notifications_enabled)
 
 
-def set_notifications_enabled(session: Session, enabled: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_notifications_enabled(
+    session: Session, enabled: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.notifications_enabled = enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
     session.refresh(config)
     return config
 
@@ -917,13 +968,18 @@ def spoolman_enabled(session: Session) -> bool:
     return False if config is None else bool(config.spoolman_enabled)
 
 
-def set_spoolman_enabled(session: Session, enabled: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_spoolman_enabled(
+    session: Session, enabled: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.spoolman_enabled = enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
+    else:
+        session.flush()
     return config
 
 
@@ -936,13 +992,18 @@ def spoolman_write_enabled(session: Session) -> bool:
     return False if config is None else bool(config.spoolman_write_enabled)
 
 
-def set_spoolman_write_enabled(session: Session, enabled: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_spoolman_write_enabled(
+    session: Session, enabled: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.spoolman_write_enabled = enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
+    else:
+        session.flush()
     return config
 
 
@@ -954,13 +1015,18 @@ def spoolman_write_force(session: Session) -> bool:
     return False if config is None else bool(config.spoolman_write_force)
 
 
-def set_spoolman_write_force(session: Session, force: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_spoolman_write_force(
+    session: Session, force: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.spoolman_write_force = force
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
+    else:
+        session.flush()
     return config
 
 
@@ -980,18 +1046,22 @@ def set_spoolman_config(
     *,
     base_url: Any = _UNSET,
     api_key: Any = _UNSET,
+    commit: bool = True,
 ) -> SystemConfig:
     """Persist base URL and/or API key. ``_UNSET`` leaves a field untouched so a
     blank/masked key from the UI never clobbers a stored secret."""
-    config = get_or_create(session)
+    config = get_or_create(session, commit=commit)
     if base_url is not _UNSET:
         config.spoolman_base_url = (base_url or "").strip().rstrip("/") or None
     if api_key is not _UNSET:
         config.spoolman_api_key = api_key or None
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
+    else:
+        session.flush()
     return config
 
 
@@ -1001,33 +1071,40 @@ def currency(session: Session) -> str:
     return (config.currency if config and config.currency else None) or "USD"
 
 
-def set_currency(session: Session, code: str) -> SystemConfig:
-    config = get_or_create(session)
+def set_currency(session: Session, code: str, *, commit: bool = True) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.currency = code.upper() if code else None
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
     return config
 
 
-def set_external_libraries_enabled(session: Session, enabled: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_external_libraries_enabled(
+    session: Session, enabled: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.external_libraries_enabled = enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
     return config
 
 
-def set_auto_mark_known_good(session: Session, enabled: bool) -> SystemConfig:
-    config = get_or_create(session)
+def set_auto_mark_known_good(
+    session: Session, enabled: bool, *, commit: bool = True
+) -> SystemConfig:
+    config = get_or_create(session, commit=commit)
     config.auto_mark_known_good = enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
     return config
 
 
@@ -1070,25 +1147,36 @@ def mark_configured(session: Session, *, commit: bool = True) -> SystemConfig:
 
 
 def get_effective_config(session: Session) -> dict:
-    """Return the current effective config (env + DB overlay merged).
+    """Read the effective process configuration for existing runtime consumers."""
+    return _configuration_values(session.get(SystemConfig, 1), for_editing=False)
 
-    ``settings`` is now a ConfigResolver — attribute reads already resolve
-    overlay-preferred values. No manual merge needed.
-    """
-    config = session.get(SystemConfig, 1)
+
+def get_editing_config(config: SystemConfig | None) -> dict:
+    """Read editable values from one persisted snapshot, independent of publication."""
+    return _configuration_values(config, for_editing=True)
+
+
+def _configuration_values(config: SystemConfig | None, *, for_editing: bool) -> dict:
+    def value(name: str):
+        if for_editing and config is not None:
+            override = getattr(config, name, None)
+            return getattr(settings.frozen, name) if override is None else override
+        # Before the singleton exists there are only deployment/runtime defaults.
+        return getattr(settings, name)
+
     return {
-        "storage_backend": str(settings.storage_backend),
-        "data_dir": str(settings.data_dir),
-        "thumb_dir": str(settings.thumb_dir),
-        "s3_bucket": str(settings.s3_bucket),
-        "s3_endpoint_url": str(settings.s3_endpoint_url),
-        "s3_region": str(settings.s3_region),
-        "s3_addressing_style": str(settings.s3_addressing_style),
-        "s3_access_key": _mask_secret(str(settings.s3_access_key)),
-        "s3_secret_key": _mask_secret(str(settings.s3_secret_key)),
-        "has_s3_access_key": bool(settings.s3_access_key),
-        "has_s3_secret_key": bool(settings.s3_secret_key),
-        "backup_retention_days": int(settings.backup_retention_days),
+        "storage_backend": str(value("storage_backend")),
+        "data_dir": str(value("data_dir")),
+        "thumb_dir": str(value("thumb_dir")),
+        "s3_bucket": str(value("s3_bucket")),
+        "s3_endpoint_url": str(value("s3_endpoint_url")),
+        "s3_region": str(value("s3_region")),
+        "s3_addressing_style": str(value("s3_addressing_style")),
+        "s3_access_key": _mask_secret(str(value("s3_access_key"))),
+        "s3_secret_key": _mask_secret(str(value("s3_secret_key"))),
+        "has_s3_access_key": bool(value("s3_access_key")),
+        "has_s3_secret_key": bool(value("s3_secret_key")),
+        "backup_retention_days": int(value("backup_retention_days")),
         "automatic_backups_enabled": bool(config and config.automatic_backups_enabled),
         "automatic_backup_time_utc": (
             config.automatic_backup_time_utc if config else "02:00"
@@ -1102,33 +1190,37 @@ def get_effective_config(session: Session) -> dict:
         "automatic_local_backup_enabled": (
             config.automatic_local_backup_enabled if config else True
         ),
-        "storage_min_free_bytes": int(settings.storage_min_free_bytes),
-        "trash_retention_days": int(settings.trash_retention_days),
-        "model_thumbnail_width": int(settings.model_thumbnail_width),
-        "backup_s3_bucket": str(settings.backup_s3_bucket),
-        "backup_s3_endpoint_url": str(settings.backup_s3_endpoint_url),
-        "backup_s3_region": str(settings.backup_s3_region),
-        "backup_s3_access_key": _mask_secret(str(settings.backup_s3_access_key)),
-        "backup_s3_secret_key": _mask_secret(str(settings.backup_s3_secret_key)),
-        "has_backup_s3_access_key": bool(settings.backup_s3_access_key),
-        "has_backup_s3_secret_key": bool(settings.backup_s3_secret_key),
-        "has_backup_s3": bool(settings.backup_s3_bucket),
-        "auto_mark_known_good": auto_mark_known_good_enabled(session),
-        "external_libraries_enabled": external_libraries_enabled(session),
-        "notifications_enabled": notifications_enabled(session),
-        "spoolman_enabled": spoolman_enabled(session),
-        "currency": currency(session),
-        "oidc_enabled": bool(settings.oidc_enabled),
-        "oidc_issuer_url": str(settings.oidc_issuer_url),
-        "oidc_client_id": str(settings.oidc_client_id),
-        "has_oidc_client_secret": bool(settings.oidc_client_secret),
-        "oidc_scopes": str(settings.oidc_scopes),
-        "oidc_username_claim": str(settings.oidc_username_claim),
-        "oidc_groups_claim": str(settings.oidc_groups_claim),
-        "oidc_admin_groups": str(settings.oidc_admin_groups),
-        "oidc_display_name": str(settings.oidc_display_name),
-        "oidc_redirect_uri": str(settings.oidc_redirect_uri),
-        "oidc_allow_insecure_http": bool(settings.oidc_allow_insecure_http),
+        "storage_min_free_bytes": int(value("storage_min_free_bytes")),
+        "trash_retention_days": int(value("trash_retention_days")),
+        "model_thumbnail_width": int(value("model_thumbnail_width")),
+        "backup_s3_bucket": str(value("backup_s3_bucket")),
+        "backup_s3_endpoint_url": str(value("backup_s3_endpoint_url")),
+        "backup_s3_region": str(value("backup_s3_region")),
+        "backup_s3_access_key": _mask_secret(str(value("backup_s3_access_key"))),
+        "backup_s3_secret_key": _mask_secret(str(value("backup_s3_secret_key"))),
+        "has_backup_s3_access_key": bool(value("backup_s3_access_key")),
+        "has_backup_s3_secret_key": bool(value("backup_s3_secret_key")),
+        "has_backup_s3": bool(value("backup_s3_bucket")),
+        "auto_mark_known_good": True
+        if config is None
+        else bool(config.auto_mark_known_good),
+        "external_libraries_enabled": bool(
+            config and config.external_libraries_enabled
+        ),
+        "notifications_enabled": bool(config and config.notifications_enabled),
+        "spoolman_enabled": bool(config and config.spoolman_enabled),
+        "currency": config.currency if config and config.currency else "USD",
+        "oidc_enabled": bool(value("oidc_enabled")),
+        "oidc_issuer_url": str(value("oidc_issuer_url")),
+        "oidc_client_id": str(value("oidc_client_id")),
+        "has_oidc_client_secret": bool(value("oidc_client_secret")),
+        "oidc_scopes": str(value("oidc_scopes")),
+        "oidc_username_claim": str(value("oidc_username_claim")),
+        "oidc_groups_claim": str(value("oidc_groups_claim")),
+        "oidc_admin_groups": str(value("oidc_admin_groups")),
+        "oidc_display_name": str(value("oidc_display_name")),
+        "oidc_redirect_uri": str(value("oidc_redirect_uri")),
+        "oidc_allow_insecure_http": bool(value("oidc_allow_insecure_http")),
     }
 
 
@@ -1138,3 +1230,32 @@ def _mask_secret(value: str) -> str:
     if len(value) <= 8:
         return "*" * len(value)
     return value[:4] + "*" * (len(value) - 8) + value[-4:]
+
+
+def read_editing_snapshot(session: Session) -> tuple[EditingBase, dict]:
+    """Capture the persisted row and history epoch in one statement."""
+    from app.modules.derivatives.policy import SettingName
+
+    config, epoch = session.exec(
+        select(SystemConfig, LibraryRevision.epoch)
+        .select_from(LibraryRevision)
+        .outerjoin(SystemConfig, col(SystemConfig.id) == 1)
+        .where(col(LibraryRevision.id) == 1)
+        .execution_options(populate_existing=True)
+    ).one()
+    # The absent singleton has its initial version; first write creates it under
+    # the existing configuration lock before the atomic claim.
+    base = EditingBase(
+        edit_epoch=epoch,
+        edit_version=1 if config is None else config.vault_edit_version,
+    )
+    values = get_editing_config(config)
+    for name in SettingName:
+        override = getattr(config, name.value) if config is not None else None
+        values[name.value] = (
+            getattr(settings.frozen, name.value) if override is None else override
+        )
+    provider = sanitized_storage_provider(config)
+    if provider is not None:
+        values["storage_provider"], values["storage_provider_config"] = provider
+    return base, values

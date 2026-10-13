@@ -1,6 +1,6 @@
 [tools]
 node = "24"
-python = "3.11"
+python = "3.14.8"
 pnpm = "10"
 uv = "latest"
 

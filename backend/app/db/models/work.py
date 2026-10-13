@@ -7,7 +7,8 @@ serialized: every attempt rebuilds what it needs from the subject row.
 """
 
 from datetime import datetime
-from typing import Optional
+from typing import ClassVar, Optional
+from uuid import uuid4
 
 from sqlalchemy import CheckConstraint, Column, ForeignKey, Index, Integer, Text, text
 from sqlmodel import Field
@@ -32,6 +33,11 @@ class Job(SQLModel, table=True):
     ``job_id``: the Job, not an engine execution, owns their staged bytes.
     """
 
+    # Machine bookkeeping, rewritten many times per Job: user actions on work
+    # are recorded explicitly, and a row-level trail of every heartbeat only
+    # adds a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
+
     __tablename__ = "jobs"
     __table_args__ = (
         Index(
@@ -51,6 +57,15 @@ class Job(SQLModel, table=True):
         enum_check("kind", JobKind),
         enum_check("priority", WorkPriority),
         enum_check("state", JobState),
+        CheckConstraint("length(execution_epoch) > 0", name="execution_epoch_present"),
+        CheckConstraint(
+            "submitted_epoch IS NULL OR length(submitted_epoch) > 0",
+            name="submitted_epoch_present",
+        ),
+        CheckConstraint(
+            "backfill_admission_epoch IS NULL OR length(backfill_admission_epoch) > 0",
+            name="backfill_admission_epoch_present",
+        ),
     )
 
     id: str = Field(primary_key=True, max_length=64)
@@ -72,7 +87,14 @@ class Job(SQLModel, table=True):
     )
     # Display-safe progress, counts and result. Never replayed as input.
     status_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
-    # Executions submitted so far; the engine execution id is ``<id>:<attempts>``.
+    # Retry invalidates callbacks without counting an execution that never ran.
+    execution_epoch: str = Field(default_factory=lambda: uuid4().hex, max_length=64)
+    # Last epoch accepted by the engine; None means never submitted.
+    submitted_epoch: Optional[str] = Field(default=None, max_length=64)
+    # Pre-engine backfill reservation; only equality with execution_epoch grants
+    # authority. Retry may retain a stale marker without retaining its slot.
+    backfill_admission_epoch: Optional[str] = Field(default=None, max_length=64)
+    # Executions submitted so far, across explicit retries.
     attempts: int = Field(default=0)
     # Consecutive interrupted executions; bounded by ``jobs_max_resubmits``.
     resubmits: int = Field(default=0)
@@ -94,10 +116,24 @@ class ReconcileCursor(SQLModel, table=True):
     a finishing pass as still active and would drop the nudge).
     """
 
+    # Machine bookkeeping, rewritten many times per Job: user actions on work
+    # are recorded explicitly, and a row-level trail of every heartbeat only
+    # adds a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
+
     __tablename__ = "reconcile_cursors"
     __table_args__ = (
         enum_check("source", JobKind),
         enum_check("pass_priority", WorkPriority),
+        enum_check("discovery_next_priority", WorkPriority),
+        CheckConstraint(
+            "(scan_recent_at IS NULL) = (scan_recent_file_id IS NULL)",
+            name="recent_keyset_complete",
+        ),
+        CheckConstraint(
+            "scan_recent_file_id IS NULL OR scan_recent_file_id > 0",
+            name="recent_keyset_positive_id",
+        ),
         # A queued pass always records its priority; a held claim, its expiry;
         # a parked drain, both ends of its window.
         CheckConstraint(
@@ -140,6 +176,17 @@ class ReconcileCursor(SQLModel, table=True):
     # where its rotating window over older Artifacts stands.
     scan_high_water: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
     scan_position: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+    # A one-item discovery pass alternates tiers across processes and restarts.
+    discovery_next_priority: WorkPriority = Field(
+        default=WorkPriority.BACKFILL,
+        sa_column=Column(
+            EnumText(WorkPriority), nullable=False, server_default="backfill"
+        ),
+    )
+    # Indexed keyset for recent uploads or viewer demand. These are scan
+    # positions, not foreign keys: deletion must not invalidate pagination.
+    scan_recent_at: datetime | None = None
+    scan_recent_file_id: int | None = None
 
 
 class WorkFence(SQLModel, table=True):
@@ -149,6 +196,11 @@ class WorkFence(SQLModel, table=True):
     anything once a worker runs in another process. A holder heartbeats; a
     crashed holder's fence expires on its own after ``expires_at``.
     """
+
+    # Machine bookkeeping, rewritten many times per Job: user actions on work
+    # are recorded explicitly, and a row-level trail of every heartbeat only
+    # adds a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
 
     __tablename__ = "work_fences"
 
@@ -162,6 +214,11 @@ class WorkFence(SQLModel, table=True):
 
 class WorkExecutor(SQLModel, table=True):
     """A process that runs jobs, with its role and last heartbeat."""
+
+    # Machine bookkeeping, rewritten many times per Job: user actions on work
+    # are recorded explicitly, and a row-level trail of every heartbeat only
+    # adds a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
 
     __tablename__ = "work_executors"
     __table_args__ = (enum_check("role", ProcessRole),)

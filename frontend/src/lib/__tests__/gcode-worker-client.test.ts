@@ -53,6 +53,37 @@ describe("Cancelable toolpath parsing", () => {
     await expect(result).rejects.toMatchObject({ code: "limit" });
     expect(boundary.worker.terminate).toHaveBeenCalledTimes(1);
   });
+  it("reports invalid input after worker cleanup", async () => {
+    const boundary = workerBoundary();
+    const result = parseGcodeInWorker("bad input", new AbortController().signal, boundary.create);
+    boundary.send({ kind: "error", code: "invalid" });
+    await expect(result).rejects.toMatchObject({ code: "invalid" });
+    expect(boundary.worker.terminate).toHaveBeenCalledTimes(1);
+  });
+  it("retires a crashed worker", async () => {
+    const boundary = workerBoundary();
+    const controller = new AbortController();
+    const result = parseGcodeInWorker("G1 X10 E1", controller.signal, boundary.create);
+    boundary.worker.onerror?.(new ErrorEvent("error"));
+
+    await expect(result).rejects.toThrow("toolpath_worker_failed");
+    controller.abort();
+    expect(boundary.worker.terminate).toHaveBeenCalledTimes(1);
+  });
+  it("retires the worker after dispatch failure", async () => {
+    const boundary = workerBoundary();
+    const controller = new AbortController();
+    const failure = new DOMException("Cannot clone input", "DataCloneError");
+    boundary.worker.postMessage = () => {
+      throw failure;
+    };
+
+    await expect(parseGcodeInWorker("G1 X10 E1", controller.signal, boundary.create)).rejects.toBe(
+      failure,
+    );
+    controller.abort();
+    expect(boundary.worker.terminate).toHaveBeenCalledTimes(1);
+  });
   it("removes its abort listener after completion", async () => {
     const boundary = workerBoundary();
     const controller = new AbortController();

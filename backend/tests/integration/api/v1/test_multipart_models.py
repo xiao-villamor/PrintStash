@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 
+import httpx
+import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
+from app.api.v1 import multipart_models as multipart_router
 from app.core.time import utcnow
 from app.db.models import (
     CollectionRole,
@@ -1014,6 +1018,20 @@ class TestMultipartModels:
         assert response.status_code == 403
         assert response.json()["detail"] == "collection_permission_denied"
 
+    def test_labels_a_listed_set_with_its_collections_names(
+        self, client, auth_headers, make_collection, make_multipart_model
+    ) -> None:
+        parts = make_collection("Parts")
+        make_multipart_model(
+            "Kit", collection=make_collection("Wall Kits", parent=parts)
+        )
+
+        response = client.get("/api/v1/multipart-models", headers=auth_headers)
+
+        assert response.json()[0]["collection_label"] == "Parts/Wall Kits", (
+            response.text
+        )
+
     def test_user_without_collection_access_sees_no_aggregates_or_candidates(
         self, client, auth_headers, make_collection, make_user, headers_for
     ) -> None:
@@ -1894,3 +1912,68 @@ class TestMultipartModels:
 
         assert response.status_code == 200, response.text
         assert [item["id"] for item in response.json()] == [own.id]
+
+
+class TestCoverUploadExecution:
+    @pytest.mark.asyncio
+    async def test_owns_upload_sessions(
+        self, app, db_session, auth_headers, make_multipart_model
+    ):
+        from threading import get_ident
+
+        from app.db.session import get_session_factory, override_session_factory
+        from tests.fakes.thread_sessions import ThreadBoundSessionFactory
+
+        aggregate = make_multipart_model("Cover boundary")
+        factory = ThreadBoundSessionFactory(db_session.get_bind())
+        previous = get_session_factory()
+        override_session_factory(factory)
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                response = await client.put(
+                    f"/api/v1/multipart-models/{aggregate.id}/cover",
+                    headers=auth_headers,
+                    files={
+                        "file": ("display.png", png(width=96, height=72), "image/png")
+                    },
+                )
+        finally:
+            override_session_factory(previous)
+        assert response.status_code == 200, response.text
+        assert factory.opened_count > 0
+        assert factory.active_count == 0
+        assert get_ident() not in factory.thread_ids
+
+    @pytest.mark.asyncio
+    async def test_keeps_health_responsive_during_publication(
+        self, app, auth_headers, make_multipart_model, monkeypatch
+    ):
+        aggregate = make_multipart_model("Cover boundary")
+        loop = asyncio.get_running_loop()
+        observations = []
+        publish = multipart_router.prepare_bytes
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+
+            def delayed_publication(*args, **kwargs):
+                health = asyncio.run_coroutine_threadsafe(
+                    client.get("/api/v1/health"), loop
+                )
+                try:
+                    observations.append(health.result(timeout=2).status_code)
+                except TimeoutError:
+                    health.cancel()
+                    observations.append(None)
+                return publish(*args, **kwargs)
+
+            monkeypatch.setattr(multipart_router, "prepare_bytes", delayed_publication)
+            response = await client.put(
+                f"/api/v1/multipart-models/{aggregate.id}/cover",
+                headers=auth_headers,
+                files={"file": ("display.png", png(width=96, height=72), "image/png")},
+            )
+        assert response.status_code == 200, response.text
+        assert observations == [200]

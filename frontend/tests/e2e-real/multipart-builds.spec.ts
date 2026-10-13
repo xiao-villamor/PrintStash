@@ -13,13 +13,18 @@ test.describe("Multipart manufacturing", () => {
     const name = `Table legs ${Date.now()}`;
     await uploadGcodeModel(page, name);
     const href = await modelCard(page, name).getAttribute("href");
-    const modelId = Number(href?.split("/").pop());
+    expect(href).toBeTruthy();
+    const modelId = Number(new URL(href!, page.url()).pathname.split("/").pop());
     const model = await (await page.request.get(`${API}/models/${modelId}`)).json();
     const revision = model.files.find((file: { file_type: string }) => file.file_type === "gcode");
     const created = await page.request.post(`${API}/multipart-models`, { data: { name } });
     expect(created.status()).toBe(201);
     const composition = await created.json();
     const saved = await page.request.put(`${API}/multipart-models/${composition.id}`, {
+      headers: {
+        "If-Match": `"multipart-${composition.id}-e${composition.edit_epoch}-v${composition.edit_version}"`,
+        "X-PrintStash-Edit-Contract": "conditional-v1",
+      },
       data: { parts: [{ name: "Leg", quantity: 4, choices: [{ model_id: modelId }] }] },
     });
     expect(saved.ok()).toBeTruthy();
@@ -42,7 +47,28 @@ test.describe("Multipart manufacturing", () => {
     await page.getByRole("button", { name: "Refresh" }).click();
     const firstAttempt = part.getByRole("form", { name: `Job #${firstJob}` });
     await firstAttempt.getByLabel("Confirmed usable").fill("3");
-    await firstAttempt.getByRole("button", { name: "Confirm result" }).click();
+    // A second inspection confirms two pieces while this editor still has three.
+    const concurrent = await (await page.request.get(`${API}/multipart-builds/${buildId}`)).json();
+    const attempt = concurrent.parts[0].attempts[0];
+    expect(
+      (
+        await page.request.post(
+          `${API}/multipart-builds/${buildId}/attempts/${attempt.id}/confirm`,
+          {
+            data: {
+              version: attempt.version,
+              valid_units: 2,
+              idempotency_key: crypto.randomUUID(),
+            },
+          },
+        )
+      ).ok(),
+    ).toBeTruthy();
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(firstAttempt.getByRole("button", { name: "Correct result" })).toBeDisabled();
+    await expect(firstAttempt.getByLabel("Confirmed usable")).toHaveValue("3");
+    await firstAttempt.getByRole("button", { name: "Review latest version" }).click();
+    await firstAttempt.getByRole("button", { name: "Correct result" }).click();
     await expect(part.getByText("1 missing", { exact: true })).toBeVisible();
     await part.getByLabel("Pieces produced by this file").fill("1");
     await expect(part.getByLabel("Print jobs to queue")).toHaveValue("1");

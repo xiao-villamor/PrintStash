@@ -6,7 +6,7 @@ from datetime import datetime, time
 
 from sqlmodel import Session
 
-from app.core.time import ensure_utc, utcnow
+from app.core.time import ensure_utc, parse_hh_mm_time, utcnow
 from app.db.models import SystemConfig
 from app.modules.administration.config_repository import get_or_create
 
@@ -15,12 +15,9 @@ DEFAULT_BACKUP_TIME_UTC = "02:00"
 
 def parse_backup_time(value: str) -> time:
     try:
-        parsed = time.fromisoformat(value)
+        return parse_hh_mm_time(value)
     except ValueError as exc:
         raise ValueError("automatic_backup_time_invalid") from exc
-    if parsed.second or parsed.microsecond or len(value) != 5:
-        raise ValueError("automatic_backup_time_invalid")
-    return parsed
 
 
 def automatic_backup_due(config: SystemConfig | None, now: datetime) -> bool:
@@ -53,6 +50,7 @@ def update_schedule(
     time_utc: str | None = None,
     manual_local_enabled: bool | None = None,
     automatic_local_enabled: bool | None = None,
+    commit: bool = True,
 ) -> SystemConfig:
     config = get_or_create(session, commit=False)
     if time_utc is not None:
@@ -66,6 +64,7 @@ def update_schedule(
         config.automatic_local_backup_enabled = automatic_local_enabled
     config.updated_at = utcnow()
     session.add(config)
-    session.commit()
-    session.refresh(config)
+    if commit:
+        session.commit()
+        session.refresh(config)
     return config

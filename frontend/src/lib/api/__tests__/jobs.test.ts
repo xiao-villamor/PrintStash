@@ -7,7 +7,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cancelJob, getJobStatus, listJobs, listWorkJobs, retryJob } from "@/lib/api/jobs";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
@@ -16,7 +15,6 @@ const RUNNING = { job_id: "abc", state: "running" };
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
 });
 
 afterEach(() => {
@@ -50,6 +48,23 @@ describe("listJobs", () => {
 
     expectRequest("/api/v1/jobs");
     expect(lastCall().init).toMatchObject({ cache: "no-store" });
+  });
+
+  it("cancels a catalog read while preserving tracked identities", async () => {
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = listJobs(["tracked/job"], { signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expectRequest("/api/v1/jobs?tracked_job_id=tracked%2Fjob");
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("names the Jobs a reconnecting Task Center still tracks", async () => {
@@ -99,5 +114,44 @@ describe("retryJob", () => {
       status: 410,
       code: "job_subject_gone",
     });
+  });
+});
+
+describe("administrator Job reader", () => {
+  it("reads work Jobs through caller cancellation", async () => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const caller = new AbortController();
+    const pending = listWorkJobs({ signal: caller.signal });
+    caller.abort();
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    finish(new Response("[]"));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("owned Job write cancellation", () => {
+  it.each(["cancel", "retry"] as const)("aborts the %s acknowledgement", async (action) => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const caller = new AbortController();
+    const pending =
+      action === "cancel"
+        ? cancelJob("abc", { signal: caller.signal })
+        : retryJob("abc", { signal: caller.signal });
+    caller.abort();
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    finish(new Response(JSON.stringify(RUNNING)));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });

@@ -42,6 +42,24 @@ class SystemConfig(SQLModel, table=True):
     __tablename__ = "system_config"
 
     id: Optional[int] = Field(default=1, primary_key=True)
+    # Only the vault-config editing aggregate. Operational bookkeeping and
+    # independently owned feature settings do not invalidate its editing base.
+    vault_edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+
+    # Search opt-ins have an independent editing boundary from vault settings.
+    search_edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+
+    spoolman_edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+
+    notification_edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
 
     # Random installation identity used to bind managed filesystem roots to
     # this database. It is generated once and never derived from a path.
@@ -146,6 +164,11 @@ class SystemConfig(SQLModel, table=True):
     backup_s3_secret_key: Optional[str] = Field(
         default=None, sa_column=Column(EncryptedText(), nullable=True)
     )
+
+    # Null inherits the deployment default; persisted values are live controls.
+    derivatives_mesh_enabled: Optional[bool] = None
+    derivatives_gcode_enabled: Optional[bool] = None
+    derivatives_toolpath_enabled: Optional[bool] = None
 
     # Behaviour toggles
     # When true, a file's revision is auto-marked known_good after its first

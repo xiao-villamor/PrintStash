@@ -41,13 +41,33 @@ function parseCardMetrics(raw: string): CardMetrics | null {
   return [first, second, third];
 }
 
+// A failed write stays authoritative for this document; reload starts from storage.
+let documentChoice: { value: CardMetrics; pending: boolean } | null = null;
+const copyMetrics = (value: CardMetrics): CardMetrics => [...value];
+
 export function readCardMetrics(): CardMetrics {
-  if (!("window" in globalThis)) return DEFAULT_CARD_METRICS;
-  const raw = window.localStorage.getItem(CARD_METRIC_STORAGE_KEY);
-  if (!raw) return DEFAULT_CARD_METRICS;
-  return parseCardMetrics(raw) ?? DEFAULT_CARD_METRICS;
+  if (!("window" in globalThis)) return copyMetrics(DEFAULT_CARD_METRICS);
+  if (documentChoice?.pending) return copyMetrics(documentChoice.value);
+  let raw: string | null;
+  try {
+    raw = window.localStorage.getItem(CARD_METRIC_STORAGE_KEY);
+  } catch {
+    return copyMetrics(documentChoice?.value ?? DEFAULT_CARD_METRICS);
+  }
+  const value = raw ? (parseCardMetrics(raw) ?? DEFAULT_CARD_METRICS) : DEFAULT_CARD_METRICS;
+  documentChoice = { value: copyMetrics(value), pending: false };
+  return copyMetrics(value);
 }
 
 export function writeCardMetrics(metrics: CardMetrics): void {
-  window.localStorage.setItem(CARD_METRIC_STORAGE_KEY, JSON.stringify(metrics));
+  if (!("window" in globalThis)) return;
+  // Encoding/input failures are not optional persistence failures.
+  const raw = JSON.stringify(metrics);
+  documentChoice = { value: copyMetrics(metrics), pending: true };
+  try {
+    window.localStorage.setItem(CARD_METRIC_STORAGE_KEY, raw);
+    documentChoice.pending = false;
+  } catch {
+    // Keep the selected browser preference usable until a later write succeeds.
+  }
 }

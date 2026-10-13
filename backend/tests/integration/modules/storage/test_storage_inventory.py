@@ -335,3 +335,47 @@ class TestInventory:
 
         assert payload["active_reservations"][0]["operation_kind"] == "artifact-upload"
         assert "private-session-id" not in str(payload)
+
+
+class TestRetiredPublicationInventory:
+    def test_excludes_retired_history_from_current_byte_totals(
+        self, db_session, make_owned_storage_object
+    ):
+        from app.db.models import StorageObjectState
+
+        make_owned_storage_object(
+            state=StorageObjectState.RETIRING, size_bytes=23, object_kind="thumbnail"
+        )
+        assert inventory(db_session).unique_owned_bytes == 0
+
+    def test_excludes_retired_history_from_legacy_usage(
+        self, db_session, make_owned_storage_object
+    ):
+        from app.db.models import StorageObjectState
+        from app.modules.storage.storage_inventory import legacy_usage
+
+        make_owned_storage_object(state=StorageObjectState.RETIRING, size_bytes=23)
+        assert legacy_usage(db_session)["object_count"] == 0
+        assert legacy_usage(db_session)["total_size_bytes"] == 0
+
+    def test_excludes_retired_backups_from_retention_candidates(
+        self, db_session, make_owned_storage_object
+    ):
+        from datetime import UTC, datetime
+
+        from app.db.models import StorageObjectState
+        from app.modules.storage.storage_inventory import cleanup_opportunities
+
+        make_owned_storage_object(
+            state=StorageObjectState.RETIRING,
+            size_bytes=23,
+            object_kind="backup",
+            created_at=datetime(2020, 1, 1, tzinfo=UTC),
+        )
+        preview = next(
+            row
+            for row in cleanup_opportunities(db_session)
+            if row["owner"] == "backups"
+        )
+        assert preview["candidate_count"] == 0
+        assert preview["candidate_bytes"] == 0

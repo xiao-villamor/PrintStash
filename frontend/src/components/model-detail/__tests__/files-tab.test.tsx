@@ -34,12 +34,15 @@ const artifact: FileRead = {
 };
 
 const updatedModel: ModelRead = {
+  edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  edit_version: 1,
   id: 1,
   name: "Bracket",
   slug: "bracket",
   hash: "a".repeat(64),
   collection: null,
   collection_id: null,
+  collection_label: null,
   description: null,
   source_url: null,
   effective_role: "admin",
@@ -49,6 +52,7 @@ const updatedModel: ModelRead = {
   updated_at: "2026-01-01T00:00:00Z",
   files: [{ ...artifact, tags: ["Existing", "Workshop"] }],
   starred: false,
+  derivatives_revision: "0",
 };
 
 describe("FilesTab", () => {

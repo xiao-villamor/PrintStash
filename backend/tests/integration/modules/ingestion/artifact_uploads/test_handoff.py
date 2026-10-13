@@ -41,6 +41,7 @@ from app.modules.work.submission import nudge, submit
 from app.runtime.engine.inline import InlineJobEngine
 from tests._env import use_local_storage
 from tests.factories import build_artifact_upload
+from tests.factories.ops import build_job_context
 from tests.factories.protocols import MakeJob, MakeModel, MakeUser
 
 RECOVERY, UPLOAD = handoff.definitions()
@@ -151,20 +152,27 @@ class TestRunVerifiedUploadIngestion:
         ).one()
         assert artifact.file_type == FileType.GCODE
 
+    @pytest.mark.parametrize("empty_quarantine", [False, True])
     def test_completes_the_upload_session(
         self,
         db_session: Session,
         make_job: MakeJob,
         owner: User,
         work_engine: InlineJobEngine,
+        empty_quarantine: bool,
     ) -> None:
-        upload, _job_id = _verified(db_session, make_job, owner)
+        upload, job_id = _verified(db_session, make_job, owner)
+        directory = settings.incoming_dir / "artifact-uploads" / upload.id
+        if empty_quarantine:
+            (directory / ".printstash-staging-quarantine").mkdir(mode=0o700)
 
         _run(work_engine, db_session)
 
         assert db_session.get(ArtifactUploadSession, upload.id).state == (
             ArtifactUploadState.COMPLETED
         )
+        assert db_session.get(Job, job_id).state == JobState.COMPLETED
+        assert not directory.exists()
 
     def test_releases_the_staged_bytes_of_a_completed_upload(
         self,
@@ -287,7 +295,9 @@ class TestRunVerifiedUploadIngestion:
         db_session.commit()
 
         handoff.run_verified_upload_ingestion(
-            upload_id=upload.id, job_id=job_id, session_factory=get_session_factory()
+            upload_id=upload.id,
+            job_context=build_job_context(job_id),
+            session_factory=get_session_factory(),
         )
 
         assert (
@@ -342,7 +352,11 @@ class TestFailure:
     ) -> None:
         upload, _job_id = _verified(db_session, make_job, owner)
 
-        UPLOAD.on_failure(db_session, handoff.subject_key(upload.id), "boom")
+        from app.modules.work.contracts import JobOutcome
+
+        build_job_context(_job_id).finish(
+            JobOutcome.FAILED, error="boom", retryable=True
+        )
         db_session.commit()
 
         db_session.expire_all()

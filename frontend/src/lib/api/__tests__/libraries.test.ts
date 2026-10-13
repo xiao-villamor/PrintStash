@@ -26,7 +26,8 @@ import {
   updateExternalLibrary,
 } from "@/lib/api/libraries";
 import { getVaultConfig, updateVaultConfig } from "@/lib/api/config";
-import { invalidateApiCache } from "@/lib/api/request";
+import { aVaultConfig } from "@/test-support/factories";
+import { json } from "@/test-support/render";
 
 /**
  * Pin the External Libraries (NAS mirroring) API client to the exact wire
@@ -61,6 +62,8 @@ function respondWith(data: WireValue, status = 200) {
 
 const library = {
   id: 7,
+  edit_epoch: "a".repeat(32),
+  edit_version: 1,
   name: "nas-main",
   root_path: "/mnt/nas/models",
   enabled: true,
@@ -87,7 +90,7 @@ function lastCall() {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -139,9 +142,9 @@ describe("createExternalLibrary", () => {
 
 describe("updateExternalLibrary", () => {
   it("PATCHes the addressed library with a partial body", async () => {
-    respondWith({ ...library, enabled: false });
+    respondWith({ ...library, enabled: false, edit_version: 2 });
 
-    const updated = await updateExternalLibrary(7, { enabled: false });
+    const updated = await updateExternalLibrary(7, { enabled: false }, { base: library });
 
     expect(updated.enabled).toBe(false);
     const { url, init } = lastCall();
@@ -203,14 +206,103 @@ describe("getVaultConfig", () => {
   });
 
   it("PUTs a toggle of external_libraries_enabled", async () => {
-    respondWith({ storage_backend: "local", external_libraries_enabled: false });
+    fetchMock.mockResolvedValueOnce(
+      json(aVaultConfig({ edit_version: 2, external_libraries_enabled: false })),
+    );
 
-    const cfg = await updateVaultConfig({ external_libraries_enabled: false });
+    const cfg = await updateVaultConfig(
+      { external_libraries_enabled: false },
+      { base: aVaultConfig() },
+    );
 
     expect(cfg.external_libraries_enabled).toBe(false);
     const { url, init } = lastCall();
     expect(url).toBe("/api/v1/config");
     expect(init).toMatchObject({ method: "PUT" });
     expect(init.body).toBe(JSON.stringify({ external_libraries_enabled: false }));
+  });
+});
+
+describe("reader cancellation", () => {
+  it("aborts an active external libraries read", async () => {
+    const controller = new AbortController();
+    let delivered: AbortSignal | null = null;
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) throw new Error("Cancellation signal is required");
+          delivered = signal;
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+    const outcome = listExternalLibraries({ signal: controller.signal }).catch(
+      (error: Error) => error,
+    );
+    controller.abort();
+    await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
+    expect(delivered).toMatchObject({ aborted: true });
+  });
+});
+
+describe("management caller cancellation", () => {
+  it.each([
+    {
+      label: "create",
+      call: (signal: AbortSignal) =>
+        createExternalLibrary({ name: "Test", root_path: "/mnt/test" }, { signal }),
+    },
+    {
+      label: "update",
+      call: (signal: AbortSignal) =>
+        updateExternalLibrary(7, { enabled: false }, { signal, base: library }),
+    },
+    {
+      label: "enroll",
+      call: (signal: AbortSignal) =>
+        enrollExternalLibraryRoot(7, { confirm_root_path: "/mnt/test" }, { signal }),
+    },
+    { label: "delete", call: (signal: AbortSignal) => deleteExternalLibrary(7, { signal }) },
+    { label: "scan", call: (signal: AbortSignal) => scanExternalLibrary(7, { signal }) },
+  ])("aborts the exact $label command", async ({ call }) => {
+    const controller = new AbortController();
+    let delivered: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          delivered = options?.signal;
+          delivered?.addEventListener("abort", () => reject(delivered?.reason), { once: true });
+        }),
+    );
+
+    const pending = call(controller.signal).catch((error: Error) => error);
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({ name: "AbortError" });
+    expect(delivered).toMatchObject({ aborted: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Source edit preconditions", () => {
+  it("sends the captured source base", async () => {
+    respondWith({ ...library, name: "Saved", edit_version: 2 });
+    await updateExternalLibrary(7, { name: "Saved" }, { base: library });
+    expect(new Headers(lastCall().init.headers).get("If-Match")).toBe(
+      `"library-source-7-e${library.edit_epoch}-v1"`,
+    );
+    expect(new Headers(lastCall().init.headers).get("X-PrintStash-Edit-Contract")).toBe(
+      "conditional-v1",
+    );
+  });
+  it.each([
+    { label: "identity", change: { id: 8, edit_version: 2 } },
+    { label: "history", change: { edit_epoch: "b".repeat(32), edit_version: 2 } },
+    { label: "version", change: { edit_version: 1 } },
+  ])("rejects an invalid source receipt: $label", async ({ change }) => {
+    respondWith({ ...library, ...change });
+    await expect(updateExternalLibrary(7, { name: "Saved" }, { base: library })).rejects.toThrow(
+      /Invalid .*acknowledgement/,
+    );
   });
 });

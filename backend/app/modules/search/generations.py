@@ -439,7 +439,7 @@ def proposal_space(session: Session, proposal: GenerationProposal) -> Space:
                     "embedding_alignment_unavailable", kind=ErrorKind.INVALID
                 )
             return VisualRecipe.space(
-                model.manifest.space(),
+                model.manifest.encoder_space(),
                 image_size=model.manifest.image.image_size,
                 profile=proposal.profile,
                 aggregation=proposal.aggregation,

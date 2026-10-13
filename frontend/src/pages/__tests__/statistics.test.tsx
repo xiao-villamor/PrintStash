@@ -17,13 +17,14 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import StatisticsPage from "@/pages/statistics";
 import { queryKeys } from "@/lib/query-client";
-import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
+import { json, renderApp, memberSession, type RenderAppOptions } from "@/test-support/render";
+import { aVaultConfig } from "@/test-support/factories";
 import type { PrintStatisticsRead } from "@/types";
 
 const WIDGET_PREFERENCE_KEY = "printstash:statistics-widgets";
@@ -62,10 +63,10 @@ function renderStatistics(options: RenderAppOptions & { stats?: PrintStatisticsR
   // The statistics query is deliberately *not* seeded: the period is the whole
   // subject here, and a pre-filled cache means no request is ever made.
   return renderApp(<StatisticsPage />, {
-    seed: [[queryKeys.vaultConfig, { currency: "USD" }], ...seed],
+    seed: [[queryKeys.vaultConfig, aVaultConfig()], ...seed],
     routes: {
       "GET /api/v1/models/stats/prints": json(stats),
-      "GET /api/v1/config": json({ currency: "USD" }),
+      "GET /api/v1/config": json(aVaultConfig()),
       ...routes,
     },
     ...rest,
@@ -81,6 +82,38 @@ afterEach(() => {
 });
 
 describe("StatisticsPage", () => {
+  describe("read recovery", () => {
+    it.each([
+      [403, false],
+      [503, true],
+    ] as const)("protects cached statistics during HTTP %s", async (status, retained) => {
+      const app = renderStatistics();
+      await screen.findByText("34.50", { exact: false });
+      app.route({ "GET /api/v1/models/stats/prints": json({ detail: "unavailable" }, status) });
+
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: queryKeys.printStats("30d") });
+      });
+
+      await screen.findByText("Failed to load statistics.");
+      expect(screen.queryByText("34.50", { exact: false }) !== null).toBe(retained);
+      expect(screen.getByRole("button", { name: "Retry" })).toBeEnabled();
+    });
+
+    it("retries failed statistics for the selected period", async () => {
+      const user = userEvent.setup();
+      const app = renderStatistics({
+        routes: { "GET /api/v1/models/stats/prints": json({ detail: "offline" }, 500) },
+      });
+      await screen.findByText("Failed to load statistics.");
+      app.route({ "GET /api/v1/models/stats/prints": json(statistics()) });
+
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+
+      expect(await screen.findByText("34.50", { exact: false })).toBeInTheDocument();
+    });
+  });
+
   describe("what it reports", () => {
     it("names the page", async () => {
       renderStatistics();
@@ -134,6 +167,38 @@ describe("StatisticsPage", () => {
       await waitFor(() =>
         expect(requests().some((call) => call.url.includes("period=7d"))).toBe(true),
       );
+    });
+
+    it("ignores an obsolete period read", async () => {
+      let respond!: (response: Response) => void;
+      let signal: AbortSignal | null | undefined;
+      const pending = new Promise<Response>((resolve) => {
+        respond = resolve;
+      });
+      const user = userEvent.setup();
+      const app = renderStatistics({
+        routes: {
+          "GET /api/v1/models/stats/prints?period=30d": (_url, init) => {
+            signal = init?.signal;
+            return pending;
+          },
+          "GET /api/v1/models/stats/prints?period=7d": json(
+            statistics({ period: "7d", total_cost: 77 }),
+          ),
+        },
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+
+      await user.click(screen.getByRole("button", { name: "7 days" }));
+      expect(await screen.findByText("77.00", { exact: false })).toBeInTheDocument();
+      expect(signal?.aborted).toBe(true);
+      await act(async () => {
+        respond(json(statistics({ total_cost: 1 })));
+        await pending;
+      });
+
+      expect(screen.getByText("77.00", { exact: false })).toBeInTheDocument();
+      expect(app.client.getQueryData(queryKeys.printStats("30d"))).toBeUndefined();
     });
 
     it("asks for everything when the user picks all time", async () => {
@@ -309,5 +374,38 @@ describe("StatisticsPage", () => {
       // reads as a bug rather than as an honest answer.
       expect(await screen.findByText("No completed prints in this period.")).toBeInTheDocument();
     });
+  });
+});
+
+describe("Statistics authoritative currency", () => {
+  it("keeps nonmonetary statistics available while currency cannot be read", async () => {
+    const app = renderApp(<StatisticsPage />, {
+      routes: {
+        "GET /api/v1/models/stats/prints": json(statistics()),
+        "GET /api/v1/config": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Configuration could not be loaded.",
+    );
+    expect(screen.getByText("Filament used", { exact: true })).toBeVisible();
+    expect(screen.getAllByText("Cost unavailable").length).toBe(2);
+    expect(screen.queryByText(/\$34\.50/)).toBeNull();
+    app.route({ "GET /api/v1/config": json(aVaultConfig({ currency: "EUR" })) });
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText(/€34\.50/)).toBeVisible();
+  });
+  it("does not request administrator configuration for a member", async () => {
+    const app = renderApp(<StatisticsPage />, {
+      auth: memberSession(),
+      routes: {
+        "GET /api/v1/models/stats/prints": json({ detail: "forbidden" }, 403),
+        "GET /api/v1/config": json({ detail: "forbidden" }, 403),
+      },
+    });
+    await screen.findByText("Failed to load statistics.");
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url.includes("/api/v1/config")),
+    ).toHaveLength(0);
   });
 });

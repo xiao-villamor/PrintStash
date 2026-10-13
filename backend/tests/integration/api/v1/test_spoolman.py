@@ -437,3 +437,98 @@ class TestListSpools:
         resp = client.get("/api/v1/spoolman/spools", headers=auth_headers)
         assert resp.status_code == 200
         assert resp.json() == []
+
+
+class TestConditionalSpoolmanEdits:
+    def test_rejects_stale_spoolman_edits(self, client, auth_headers):
+        initial = client.get("/api/v1/spoolman", headers=auth_headers)
+        assert "etag" in initial.headers
+        headers = {
+            **auth_headers,
+            "If-Match": initial.headers["etag"],
+            "X-PrintStash-Edit-Contract": "conditional-v1",
+        }
+        first = client.put(
+            "/api/v1/spoolman",
+            headers=headers,
+            json={"base_url": "http://first.test:7912"},
+        )
+        assert first.status_code == 200, first.text
+        stale = client.put(
+            "/api/v1/spoolman",
+            headers=headers,
+            json={"base_url": "http://stale.test:7912"},
+        )
+        assert stale.status_code == 412, stale.text
+        assert (
+            client.get("/api/v1/spoolman", headers=auth_headers).json()["base_url"]
+            == "http://first.test:7912"
+        )
+
+    def test_requires_an_opted_in_edit_base(self, client, auth_headers):
+        response = client.put(
+            "/api/v1/spoolman",
+            headers={**auth_headers, "X-PrintStash-Edit-Contract": "conditional-v1"},
+            json={"write_force": True},
+        )
+        assert response.status_code == 428, response.text
+        assert (
+            client.get("/api/v1/spoolman", headers=auth_headers).json()["write_force"]
+            is False
+        )
+
+    def test_preserves_legacy_spoolman_compatibility(self, client, auth_headers):
+        original = client.get("/api/v1/spoolman", headers=auth_headers)
+        assert "etag" in original.headers
+        legacy = client.put(
+            "/api/v1/spoolman", headers=auth_headers, json={"write_force": True}
+        )
+        assert legacy.status_code == 200
+        assert legacy.json()["edit_version"] > original.json()["edit_version"]
+        rejected = client.put(
+            "/api/v1/spoolman",
+            headers={**auth_headers, "If-Match": original.headers["etag"]},
+            json={"write_force": False},
+        )
+        assert rejected.status_code == 412
+
+    def test_rejects_old_database_history(self, client, auth_headers):
+        base = client.get("/api/v1/spoolman", headers=auth_headers).json()
+        assert "edit_version" in base
+        response = client.put(
+            "/api/v1/spoolman",
+            headers={
+                **auth_headers,
+                "If-Match": f'"spoolman-settings-e{"0" * 32}-v{base["edit_version"]}"',
+            },
+            json={"write_force": True},
+        )
+        assert response.status_code == 412
+        assert (
+            client.get("/api/v1/spoolman", headers=auth_headers).json()["write_force"]
+            is False
+        )
+
+    def test_keeps_configuration_aggregates_independent(self, client, auth_headers):
+        initial = client.get("/api/v1/config", headers=auth_headers).json()
+        response = client.put(
+            "/api/v1/spoolman", headers=auth_headers, json={"write_force": True}
+        )
+        assert response.status_code == 200
+        current = client.get("/api/v1/config", headers=auth_headers).json()
+        assert current["edit_version"] == initial["edit_version"]
+
+
+class TestSpoolmanWriteAuthority:
+    def test_denies_an_unauthenticated_write(self, client):
+        assert client.put("/api/v1/spoolman", json={"enabled": True}).status_code == 401
+
+    def test_denies_a_non_administrator_write(self, client, user_headers):
+        assert (
+            client.put(
+                "/api/v1/spoolman",
+                headers=user_headers("operator"),
+                json={"enabled": True},
+            ).status_code
+            == 403
+        )

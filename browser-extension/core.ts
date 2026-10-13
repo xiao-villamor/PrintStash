@@ -305,6 +305,7 @@ async function fetchVault(
   try {
     return await fetchImpl(`${base}${path}`, options);
   } catch {
+    if (options.signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
     throw new Error(
       local
         ? `Couldn't reach PrintStash at ${new URL(base).host}. Check that PrintStash is running and that this address opens in Chrome.`
@@ -318,16 +319,19 @@ async function vaultLogin({
   base,
   username,
   apiKey,
+  signal,
 }: {
   fetchImpl: typeof fetch;
   base: string;
   username?: string;
   apiKey?: string;
+  signal?: AbortSignal;
 }) {
   const login = await fetchVault(fetchImpl, base, "/api/v1/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     credentials: "omit",
+    signal,
     body: JSON.stringify({
       username: String(username).trim(),
       api_key: String(apiKey).trim(),
@@ -338,7 +342,7 @@ async function vaultLogin({
     throw new Error(await responseDetail(login, `PrintStash login returned ${login.status}.`));
   }
   const loginBody = await login.json().catch(() => null);
-  if (typeof loginBody.access_token !== "string" || !loginBody.access_token) {
+  if (!loginBody || typeof loginBody.access_token !== "string" || !loginBody.access_token) {
     throw new Error("PrintStash did not return an access token.");
   }
   return loginBody.access_token;
@@ -389,7 +393,8 @@ export async function claimBrowserPairing({
   return { base, deviceCredential: payload.credential, device: payload.device || null };
 }
 
-export async function verifyBrowserDevice({
+/** Check public server reachability; paired credentials are authenticated when used for capture. */
+export async function verifyVaultReachability({
   fetchImpl = fetch,
   vault,
 }: {
@@ -438,6 +443,14 @@ export async function verifyVaultConnection({
   return { base, accessToken, user };
 }
 
+/** A capture endpoint rejected the current browser or access credential. */
+export class CaptureAuthenticationError extends Error {
+  constructor() {
+    super("The PrintStash connection expired. Reconnect and try again.");
+    this.name = "CaptureAuthenticationError";
+  }
+}
+
 export async function captureModelPage({
   fetchImpl = fetch,
   vault,
@@ -448,6 +461,7 @@ export async function captureModelPage({
   pageUrl,
   title,
   captureSource,
+  signal,
 }: {
   fetchImpl?: typeof fetch;
   vault: string;
@@ -458,6 +472,7 @@ export async function captureModelPage({
   pageUrl: string;
   title?: string;
   captureSource?: CaptureSourceDraft;
+  signal?: AbortSignal;
 }) {
   const base = normalizeVault(vault);
   const source = classifyModelPage(pageUrl);
@@ -477,10 +492,13 @@ export async function captureModelPage({
   const sourceUrl = captureUrlForVault(pageUrl);
 
   const token =
-    accessToken || deviceCredential || (await vaultLogin({ fetchImpl, base, username, apiKey }));
+    accessToken ||
+    deviceCredential ||
+    (await vaultLogin({ fetchImpl, base, username, apiKey, signal }));
 
   const captured = await fetchVault(fetchImpl, base, "/api/v1/inbox", {
     method: "POST",
+    signal,
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
@@ -494,6 +512,7 @@ export async function captureModelPage({
         : {}),
     }),
   });
+  if (captured.status === 401) throw new CaptureAuthenticationError();
   if (!captured.ok) {
     throw new Error(await responseDetail(captured, `PrintStash returned ${captured.status}.`));
   }

@@ -2,14 +2,13 @@
 
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { collectionDisplayPath } from "@/lib/collection-display";
 
 import { useMemo, useState } from "react";
 import { FolderInput, Pencil, Plus, Tag, Trash2, X } from "lucide-react";
-import { CollectionRead, TagRead } from "@/types";
+import { CollectionNodeRead, TagRead } from "@/types";
+import { CollectionPicker } from "@/components/collection-picker";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import { Input } from "@/components/ui/input";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
 import { DURATION, useMountTransition } from "@/lib/overlay";
 
@@ -21,7 +20,6 @@ import { DURATION, useMountTransition } from "@/lib/overlay";
 export function BatchToolbar({
   modelCount,
   selectedCollections,
-  collections,
   tags,
   busy,
   canMoveToRoot = true,
@@ -32,8 +30,8 @@ export function BatchToolbar({
   onClear,
 }: {
   modelCount: number;
-  selectedCollections: CollectionRead[];
-  collections: CollectionRead[];
+  /** The selected folders, as the grid loaded them. */
+  selectedCollections: CollectionNodeRead[];
   tags: TagRead[];
   busy: boolean;
   canMoveToRoot?: boolean;
@@ -122,7 +120,6 @@ export function BatchToolbar({
       <MoveDialog
         open={moveOpen}
         count={count}
-        collections={collections}
         selectedCollections={selectedCollections}
         busy={busy}
         canMoveToRoot={canMoveToRoot}
@@ -181,7 +178,6 @@ export function BatchToolbar({
 function MoveDialog({
   open,
   count,
-  collections,
   selectedCollections,
   busy,
   canMoveToRoot,
@@ -190,36 +186,18 @@ function MoveDialog({
 }: {
   open: boolean;
   count: number;
-  collections: CollectionRead[];
-  selectedCollections: CollectionRead[];
+  selectedCollections: CollectionNodeRead[];
   busy: boolean;
   canMoveToRoot: boolean;
   onClose: () => void;
   onConfirm: (target: string, parentId: number | null) => void;
 }) {
   useUiLocale();
-  const [target, setTarget] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  // The destination's path, or "" for the root; its id is the new parent.
+  const [target, setTarget] = useState<{ path: string; id: number | null } | null>(null);
   const blockedPaths = useMemo(
     () => selectedCollections.map((collection) => collection.path),
     [selectedCollections],
-  );
-  const sorted = useMemo(
-    () =>
-      collections
-        .filter(
-          (collection) =>
-            !blockedPaths.some(
-              (path) => collection.path === path || collection.path.startsWith(`${path}/`),
-            ),
-        )
-        .filter((collection) =>
-          collectionDisplayPath(collections, collection.path)
-            ?.toLowerCase()
-            .includes(query.trim().toLowerCase()),
-        )
-        .sort((a, b) => a.path.localeCompare(b.path)),
-    [blockedPaths, collections, query],
   );
 
   return (
@@ -229,48 +207,20 @@ function MoveDialog({
       title={uiText("items.move", { value1: String(count), count: Number(count) })}
       className="max-w-md"
     >
-      <Input
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder={uiText("Find destination...")}
-        aria-label={uiText("Find destination")}
-        className="mb-2"
+      <CollectionPicker
+        minRole="edit"
+        selectedPath={target?.path ?? null}
+        onSelect={(collection) =>
+          setTarget(
+            collection === null
+              ? { path: "", id: null }
+              : { path: collection.path, id: collection.id },
+          )
+        }
+        noneLabel={canMoveToRoot ? uiText("None (root)") : undefined}
+        excludePaths={blockedPaths}
+        emptyLabel={uiText("No valid destinations")}
       />
-      <div className="max-h-72 overflow-y-auto rounded border border-border">
-        {canMoveToRoot && (
-          <button
-            type="button"
-            onClick={() => setTarget("")}
-            className={`w-full text-left px-3 py-2 font-mono text-xs transition-colors ${
-              target === ""
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:bg-muted"
-            }`}
-          >
-            {uiText("None (root)")}
-          </button>
-        )}
-        {sorted.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            onClick={() => setTarget(c.path)}
-            className={`w-full text-left px-3 py-2 font-mono text-xs transition-colors ${
-              target === c.path
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:bg-muted"
-            }`}
-          >
-            {collectionDisplayPath(collections, c.path)}{" "}
-            <span className="opacity-50">({c.model_count})</span>
-          </button>
-        ))}
-        {sorted.length === 0 && (
-          <p className="px-3 py-6 text-center text-sm text-muted-foreground">
-            {uiText("No valid destinations")}
-          </p>
-        )}
-      </div>
       <div className="mt-5 flex gap-3">
         <button
           type="button"
@@ -284,11 +234,7 @@ function MoveDialog({
           type="button"
           onClick={() => {
             if (target === null) return;
-            const parentId =
-              target === ""
-                ? null
-                : (collections.find((collection) => collection.path === target)?.id ?? null);
-            onConfirm(target, parentId);
+            onConfirm(target.path, target.id);
           }}
           disabled={busy || target === null}
           className="flex-1 h-9 rounded bg-primary text-primary-foreground text-sm font-mono uppercase tracking-wider hover:bg-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -308,7 +254,7 @@ function RenameCollectionsDialog({
   onConfirm,
 }: {
   open: boolean;
-  collections: CollectionRead[];
+  collections: CollectionNodeRead[];
   busy: boolean;
   onClose: () => void;
   onConfirm: (names: Record<number, string>) => void;
@@ -335,7 +281,7 @@ function RenameCollectionsDialog({
         {collections.map((collection) => (
           <label key={collection.id} className="block space-y-1">
             <span className="block truncate font-mono text-3xs text-muted-foreground">
-              {collectionDisplayPath(collections, collection.path)}
+              {collection.display_path}
             </span>
             <input
               value={values[collection.id]}

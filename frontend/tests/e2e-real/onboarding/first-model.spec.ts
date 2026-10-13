@@ -146,7 +146,12 @@ test.describe("Browser onboarding", () => {
         await page.getByLabel("Username").fill("first-owner");
         await page.getByLabel("Password", { exact: true }).fill("BrowserPassword123");
         await page.getByRole("button", { name: "Sign in", exact: true }).press("Enter");
-        await expect(page).toHaveURL(/\/$/);
+        await expect(page).toHaveURL(
+          (url) =>
+            url.pathname === "/" &&
+            url.searchParams.get("type") === "all" &&
+            url.searchParams.get("sort") === "date-desc",
+        );
         // This owner-only control appears after login confirmation completes.
         await page.getByRole("button", { name: "Resume the getting-started guide" }).click();
       }
@@ -206,7 +211,12 @@ test.describe("Browser onboarding", () => {
       await page.getByRole("button", { name: /Idioma:/ }).click();
       await page.getByRole("menuitemradio", { name: "English", exact: true }).click();
       await page.getByRole("button", { name: "I'll do this later" }).press("Enter");
-      await expect(page).toHaveURL(/\/$/);
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/" &&
+          url.searchParams.get("type") === "all" &&
+          url.searchParams.get("sort") === "date-desc",
+      );
       await page.getByRole("button", { name: "Resume the getting-started guide" }).press("Enter");
       await expect(page).toHaveURL(/\/getting-started$/);
       await page.goto("/settings");
@@ -256,9 +266,18 @@ test.describe("Browser onboarding", () => {
       await expect(page.getByRole("heading", { name: "Connect an existing folder" })).toBeVisible();
       await page.getByLabel("Folder name").fill("My existing folder");
       await page.getByLabel("Folder path on the server").fill(sourcePath);
-      await page
-        .getByRole("button", { name: "Connect and find models", exact: true })
-        .press("Enter");
+      const [activation] = await Promise.all([
+        page.waitForResponse(
+          (response) =>
+            response.url().includes("/api/v1/config") && response.request().method() === "PUT",
+        ),
+        page.getByRole("button", { name: "Connect and find models", exact: true }).press("Enter"),
+      ]);
+      expect(activation.status()).toBe(200);
+      expect(activation.request().headers()["x-printstash-edit-contract"]).toBe("conditional-v1");
+      expect(activation.request().headers()["if-match"]).toMatch(
+        /^"vault-config-e[0-9a-f]{32}-v[1-9][0-9]*"$/,
+      );
       await expect(page.getByRole("link", { name: "Connected model", exact: true })).toBeVisible();
       if (loseResponse) expect(accountRequests).toBe(1);
     },

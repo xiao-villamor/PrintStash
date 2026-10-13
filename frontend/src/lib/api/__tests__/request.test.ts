@@ -13,11 +13,9 @@
  * so it is attacker-shaped: a name with a path separator or a newline in it is
  * what this sanitises before it reaches the download attribute.
  *
- * **The GET cache.** Caching is what keeps a navigation from refetching the same
- * config four times, and the risk is entirely staleness: an in-flight
- * deduplication that outlives its usefulness, or a cache that survives a
- * mutation, both show the user data they just changed away. So `fresh: true` and
- * `invalidateApiCache` are asserted as hard bypasses, and every mutation clears.
+ * **Session transport.** Query owns JSON freshness. The HTTP layer reads every
+ * time and fences headers, bodies and acknowledged writes against the session
+ * incarnation that started them. Caller cancellation retains its reason.
  *
  * **Auth headers.** No token is read out of legacy browser storage, and no empty
  * `Authorization` header is sent — the second would look like a malformed
@@ -29,26 +27,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   downloadAuthenticatedFile,
   getJson,
+  getPublicJson,
+  getPublicDerivedBlob,
+  getPublicDerivedText,
+  requestPublicApi,
   getAuthenticatedBlob,
   getAuthenticatedText,
   getDerivedText,
   getUrl,
   getWsUrl,
-  invalidateApiCache,
   parseContentDispositionFilename,
   sanitizeDownloadFilename,
   sendAction,
   sendFormWithProgress,
+  sendForm,
   sendJson,
 } from "@/lib/api/request";
+import { getSessionVersion } from "@/lib/session-transport";
+import { queryClient, queryKeys } from "@/lib/query-client";
 import { FetchBackedXhr } from "@/test-support/fetch-backed-xhr";
-
-/**
- * request.ts keeps a small in-memory GET cache (30s TTL) with in-flight
- * deduplication, sitting *underneath* TanStack Query. These tests pin its real
- * behaviour: cache hits skip the network, concurrent calls share one request,
- * `fresh` bypasses the cache, and any mutation clears it.
- */
+import { clearLogin, getUser, storeLogin, retirePrivateSessionScope } from "@/lib/auth-store";
 
 /** Any payload the API can serialise as a JSON response body. */
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -81,8 +79,9 @@ function blobResponse(headers: HeadersInit = {}): Response {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  // Start each test with an empty cache (also drops any prior inflight map).
-  invalidateApiCache();
+  // Clear Query state independently of transport (which does not cache).
+  queryClient.clear();
+  clearLogin();
   window.localStorage.clear();
 });
 
@@ -251,53 +250,76 @@ describe("downloadFilename", () => {
 });
 
 describe("getJson", () => {
-  it("serves a second call from cache without a second fetch", async () => {
-    respondWith([{ id: 1 }]);
-
-    const first = await getJson("/api/v1/models");
-    const second = await getJson("/api/v1/models");
-
-    expect(first).toEqual([{ id: 1 }]);
-    expect(second).toEqual([{ id: 1 }]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it("reads current data after another tab changes the session", async () => {
+    respondWith([{ name: "old owner" }]);
+    await getJson("/api/v1/tags");
+    window.dispatchEvent(new StorageEvent("storage", { key: "printstash.user" }));
+    respondWith([{ name: "new owner" }]);
+    expect(await getJson("/api/v1/tags")).toEqual([{ name: "new owner" }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("deduplicates concurrent in-flight requests for the same path", async () => {
-    let resolve!: (r: Response) => void;
-    fetchMock.mockReturnValue(
-      new Promise<Response>((r) => {
-        resolve = r;
-      }),
-    );
+  it.each(["plain", "abortable"] as const)(
+    "ignores an old session's 401 on a %s read",
+    async (mode) => {
+      const pending = Promise.withResolvers<Response>();
+      fetchMock.mockReturnValueOnce(pending.promise);
+      storeLogin("", { id: 7, username: "old-owner", email: null, is_superuser: false });
+      const options = mode === "abortable" ? { signal: new AbortController().signal } : undefined;
+      const oldRead = getJson("/api/v1/auth/me", options);
+      const outcome = oldRead.catch((error: Error) => error);
+      storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
+      pending.resolve(jsonResponse({ detail: "expired" }, 401));
+      expect(await outcome).toMatchObject({
+        name: "AbortError",
+        message: "request_session_changed",
+      });
+      expect(getUser()?.id).toBe(9);
+    },
+  );
 
-    const both = Promise.all([getJson("/api/v1/tags"), getJson("/api/v1/tags")]);
-    resolve(jsonResponse([{ id: 9 }]));
-    const [a, b] = await both;
-
-    expect(a).toEqual([{ id: 9 }]);
-    expect(b).toEqual([{ id: 9 }]);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+  it("returns fresh JSON on every transport read", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ id: 2 }));
+    expect(await getJson("/api/v1/models")).toEqual({ id: 1 });
+    expect(await getJson("/api/v1/models")).toEqual({ id: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("bypasses the cache when { fresh: true } is passed", async () => {
+  it("keeps concurrent transport reads independent", async () => {
+    const first = Promise.withResolvers<Response>();
+    const second = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const reads = [getJson("/api/v1/models"), getJson("/api/v1/models")];
+    second.resolve(jsonResponse({ id: 2 }));
+    first.resolve(jsonResponse({ id: 1 }));
+    expect(await Promise.all(reads)).toEqual([{ id: 1 }, { id: 2 }]);
+  });
+
+  it("requests network revalidation without a cache mode option", async () => {
     respondWith([]);
 
-    await getJson("/api/v1/printers", { fresh: true });
-    await getJson("/api/v1/printers", { fresh: true });
+    await getJson("/api/v1/printers", {});
+    await getJson("/api/v1/printers", {});
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    // fresh reads must not be cached or served to non-fresh reads either.
+    // No caller opt-in is required for network freshness.
     expect(initOf(0)).toMatchObject({ cache: "no-store" });
   });
+});
 
-  it("refetches after invalidateApiCache clears the cache", async () => {
-    respondWith([{ id: 1 }]);
-
-    await getJson("/api/v1/models");
-    invalidateApiCache("/api/v1/models");
-    await getJson("/api/v1/models");
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+describe("protected byte session isolation", () => {
+  it("ignores an old session's unauthorized thumbnail response", async () => {
+    const pending = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(pending.promise);
+    storeLogin("", { id: 7, username: "old-owner", email: null, is_superuser: false });
+    const oldRead = getAuthenticatedBlob("/api/v1/files/1/thumbnail");
+    const outcome = oldRead.catch((error: Error) => error);
+    storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
+    pending.resolve(jsonResponse({ detail: "expired" }, 401));
+    expect(await outcome).toMatchObject({ name: "AbortError", message: "request_session_changed" });
+    expect(getUser()?.id).toBe(9);
   });
 });
 
@@ -306,7 +328,7 @@ describe("authHeaders", () => {
     window.localStorage.setItem("printstash.token", "abc123");
     respondWith([]);
 
-    await getJson("/api/v1/models", { fresh: true });
+    await getJson("/api/v1/models", {});
 
     const headers = new Headers(initOf(0).headers);
     expect(headers.get("Authorization")).toBeNull();
@@ -315,7 +337,7 @@ describe("authHeaders", () => {
   it("omits the Authorization header when there is no token", async () => {
     respondWith([]);
 
-    await getJson("/api/v1/models", { fresh: true });
+    await getJson("/api/v1/models", {});
 
     const headers = new Headers(initOf(0).headers);
     expect(headers.get("Authorization")).toBeNull();
@@ -323,8 +345,8 @@ describe("authHeaders", () => {
 });
 
 describe("sendJson", () => {
-  it("sendJson issues the right method/body and clears the GET cache", async () => {
-    // Prime the cache, then mutate and confirm a follow-up GET refetches.
+  it("sends the requested JSON method and payload", async () => {
+    // Reads remain network requests around an acknowledged mutation.
     respondWith([{ id: 1 }]);
     await getJson("/api/v1/collections");
 
@@ -338,7 +360,7 @@ describe("sendJson", () => {
 
     respondWith([{ id: 1 }, { id: 2 }]);
     await getJson("/api/v1/collections");
-    // 1 initial GET + 1 POST + 1 refetched GET = 3 (cache was busted).
+    // One initial GET, one POST and one current GET.
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -348,7 +370,7 @@ describe("sendJson", () => {
     expect(initOf(0)).toMatchObject({ method: "DELETE" });
   });
 
-  it("keeps cached reads when a mutation fails", async () => {
+  it("reads current server state after a failed mutation", async () => {
     respondWith([{ id: 1 }]);
     await getJson("/api/v1/models");
 
@@ -358,8 +380,8 @@ describe("sendJson", () => {
     ).rejects.toMatchObject({ status: 400 });
 
     respondWith([{ id: 2 }]);
-    expect(await getJson("/api/v1/models")).toEqual([{ id: 1 }]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(await getJson("/api/v1/models")).toEqual([{ id: 2 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });
 
@@ -450,12 +472,328 @@ describe("getDerivedText", () => {
 
 describe("getAuthenticatedText", () => {
   it("preserves cancellation while revalidating protected text", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("G1 X10"));
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = options?.signal;
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
     const controller = new AbortController();
-
-    const content = await getAuthenticatedText("/api/v1/files/7/download", controller.signal);
-
-    expect(content).toBe("G1 X10");
-    expect(initOf(0)).toMatchObject({ cache: "no-cache", signal: controller.signal });
+    const content = getAuthenticatedText("/api/v1/files/7/download", controller.signal);
+    const reason = new DOMException("Navigation", "AbortError");
+    controller.abort(reason);
+    await expect(content).rejects.toBe(reason);
+    expect(initOf(0).cache).toBe("no-cache");
+    expect(initOf(0).signal?.aborted).toBe(true);
   });
+});
+
+/** Deferred bodies expose races that header-only transport guards cannot catch. */
+describe("session request completion", () => {
+  function establishSession(id = 7) {
+    storeLogin("", { id, username: `owner-${id}`, email: null, is_superuser: false });
+  }
+
+  it.each([
+    { label: "JSON", read: () => getJson("/api/v1/models") },
+    { label: "text", read: () => getAuthenticatedText("/api/v1/files/7/download") },
+    { label: "blob", read: () => getAuthenticatedBlob("/api/v1/files/7/download") },
+  ])("rejects old-session response bodies for $label", async ({ read }) => {
+    establishSession();
+    const body = Promise.withResolvers<Uint8Array>();
+    const response = new Response(
+      new ReadableStream({
+        async start(controller) {
+          controller.enqueue(await body.promise);
+          controller.close();
+        },
+      }),
+    );
+    fetchMock.mockResolvedValueOnce(response);
+    const pending = read();
+    const outcome = pending.catch((error: Error) => error);
+    await vi.waitFor(() => expect(response.bodyUsed).toBe(true));
+    establishSession(9);
+    body.resolve(new TextEncoder().encode('{"id":7}'));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(getUser()?.id).toBe(9);
+  });
+
+  it("ignores unauthorized bodies from retired sessions", async () => {
+    establishSession();
+    const body = Promise.withResolvers<Uint8Array>();
+    const response = new Response(
+      new ReadableStream({
+        async start(controller) {
+          controller.enqueue(await body.promise);
+          controller.close();
+        },
+      }),
+      { status: 401 },
+    );
+    fetchMock.mockResolvedValueOnce(response);
+    const pending = getJson("/api/v1/auth/me");
+    const outcome = pending.catch((error: Error) => error);
+    await vi.waitFor(() => expect(response.bodyUsed).toBe(true));
+    establishSession(9);
+    body.resolve(new TextEncoder().encode('{"detail":"expired"}'));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(getUser()?.id).toBe(9);
+  });
+
+  it("preserves current-session unauthorized errors", async () => {
+    establishSession();
+    respondWith({ detail: "invalid_or_expired_token" }, 401);
+    await expect(getJson("/api/v1/auth/me")).rejects.toMatchObject({
+      status: 401,
+      code: "invalid_or_expired_token",
+    });
+    expect(getUser()).toBeNull();
+  });
+
+  it.each([
+    { label: "JSON", write: () => sendJson("/api/v1/models", "POST", {}) },
+    { label: "form", write: () => sendForm("/api/v1/ingest", new FormData()) },
+    { label: "action", write: () => sendAction("/api/v1/models/7", "DELETE") },
+  ])("rejects retired mutation acknowledgements for $label", async ({ write }) => {
+    establishSession();
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const pending = write();
+    const outcome = pending.catch((error: Error) => error);
+    establishSession(9);
+    queryClient.setQueryData(queryKeys.models, [{ id: 9 }]);
+    headers.resolve(jsonResponse({ id: 7 }));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(queryClient.getQueryData(queryKeys.models)).toEqual([{ id: 9 }]);
+    expect(queryClient.getQueryState(queryKeys.models)?.isInvalidated).toBe(false);
+  });
+
+  it("aborts pending transports on logout", async () => {
+    establishSession();
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const pending = getJson("/api/v1/models");
+    const outcome = pending.catch((error: Error) => error);
+    clearLogin();
+    expect(initOf(0).signal?.aborted).toBe(true);
+    headers.resolve(jsonResponse([]));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+  });
+
+  it("rejects same-account session replacement", async () => {
+    establishSession();
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const pending = getJson("/api/v1/models");
+    const outcome = pending.catch((error: Error) => error);
+    establishSession();
+    expect(initOf(0).signal?.aborted).toBe(true);
+    headers.resolve(jsonResponse([]));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+  });
+
+  it("preserves caller cancellation", async () => {
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const caller = new AbortController();
+    const reason = new DOMException("Navigation cancelled", "AbortError");
+    const pending = getJson("/api/v1/models", { signal: caller.signal });
+    const outcome = pending.catch((error: Error) => error);
+    caller.abort(reason);
+    headers.resolve(jsonResponse([]));
+    expect(await outcome).toBe(reason);
+  });
+});
+
+/** Upload progress belongs to the session that started the browser transfer. */
+describe("upload session retirement", () => {
+  it("aborts retired upload progress", async () => {
+    FetchBackedXhr.requests = [];
+    vi.stubGlobal("XMLHttpRequest", FetchBackedXhr);
+    fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
+    const progress = vi.fn<(loaded: number, total: number) => void>();
+    const pending = sendFormWithProgress(
+      "/api/v1/ingest",
+      new FormData(),
+      new AbortController().signal,
+      progress,
+    );
+    const outcome = pending.catch((error: Error) => error);
+    const transfer = FetchBackedXhr.requests[0];
+    transfer.emitProgress(1, 8);
+    clearLogin();
+    transfer.emitProgress(8, 8);
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(progress.mock.calls).toEqual([[1, 8]]);
+  });
+});
+
+describe("public transport", () => {
+  const reads = [
+    {
+      label: "JSON",
+      read: (signal?: AbortSignal) => getPublicJson("/api/v1/public/token", { signal }),
+    },
+    {
+      label: "binary",
+      read: (signal?: AbortSignal) => getPublicDerivedBlob("/api/v1/public/token/stl", signal),
+    },
+    {
+      label: "text",
+      read: (signal?: AbortSignal) => getPublicDerivedText("/api/v1/public/token/toolpath", signal),
+    },
+  ];
+  function login() {
+    storeLogin("", { id: 1, username: "owner", email: null, is_superuser: true });
+  }
+  it.each(reads)("omits private credentials from public reads ($label)", async ({ read }) => {
+    login();
+    respondWith({ value: "public" });
+    await read();
+    expect(initOf(0).credentials).toBe("omit");
+    expect(new Headers(initOf(0).headers).has("authorization")).toBe(false);
+  });
+  it.each(reads)(
+    "preserves private identity after public unauthorized responses ($label)",
+    async ({ read }) => {
+      login();
+      const version = getSessionVersion();
+      respondWith({ detail: "share_denied" }, 401);
+      await expect(read()).rejects.toMatchObject({ status: 401, code: "share_denied" });
+      expect(getUser()?.username).toBe("owner");
+      expect(getSessionVersion()).toBe(version);
+    },
+  );
+  it.each(reads)(
+    "completes public reads across private scope retirement ($label)",
+    async ({ read }) => {
+      login();
+      const pending = Promise.withResolvers<Response>();
+      fetchMock.mockReturnValueOnce(pending.promise);
+      const outcome = read();
+      const signal = initOf(0).signal;
+      retirePrivateSessionScope();
+      expect(signal?.aborted).toBe(false);
+      pending.resolve(jsonResponse({ value: "public" }));
+      await expect(outcome).resolves.toBeDefined();
+    },
+  );
+  it.each([
+    {
+      label: "JSON",
+      read: (signal: AbortSignal) => getPublicJson("/public", { signal }),
+      body: "json" as const,
+      value: { value: "late" },
+    },
+    {
+      label: "binary",
+      read: (signal: AbortSignal) => getPublicDerivedBlob("/public", signal),
+      body: "blob" as const,
+      value: new Blob(["late"]),
+    },
+    {
+      label: "text",
+      read: (signal: AbortSignal) => getPublicDerivedText("/public", signal),
+      body: "text" as const,
+      value: "late",
+    },
+  ])(
+    "preserves caller cancellation through public body parsing ($label)",
+    async ({ read, body, value }) => {
+      const response = jsonResponse({ value: "body" });
+      const pending = Promise.withResolvers<typeof value>();
+      const consume = vi.spyOn(response, body).mockImplementation(() => pending.promise);
+      fetchMock.mockResolvedValueOnce(response);
+      const caller = new AbortController();
+      const outcome = read(caller.signal).catch((error: Error) => error);
+      await vi.waitFor(() => expect(consume).toHaveBeenCalledOnce());
+      const reason = new DOMException("token changed", "AbortError");
+      caller.abort(reason);
+      pending.resolve(value);
+      expect(await outcome).toBe(reason);
+    },
+  );
+  it("skips a public request with an already aborted caller", async () => {
+    const caller = new AbortController();
+    const reason = new DOMException("token changed", "AbortError");
+    caller.abort(reason);
+    await expect(getPublicJson("/public", { signal: caller.signal })).rejects.toBe(reason);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it("preserves public derivative preparation responses", async () => {
+    respondWith({ state: "running" }, 202);
+    expect(await getPublicDerivedBlob("/public/stl")).toEqual({ ready: false });
+    expect(await getPublicDerivedText("/public/toolpath")).toEqual({
+      ready: false,
+      state: "running",
+    });
+  });
+  it("rejects malformed public derivative state", async () => {
+    respondWith({ state: "made-up" }, 202);
+    await expect(getPublicDerivedText("/public/toolpath")).rejects.toThrow(
+      "derivative_state_invalid",
+    );
+  });
+  it.each(["network", "redirect"])(
+    "retries public artifact delivery through the proxy without credentials (%s)",
+    async (mode) => {
+      if (mode === "network") fetchMock.mockRejectedValueOnce(new TypeError("provider egress"));
+      else {
+        const response = jsonResponse({ detail: "expired" }, 403);
+        vi.spyOn(response, "redirected", "get").mockReturnValue(true);
+        fetchMock.mockResolvedValueOnce(response);
+      }
+      fetchMock.mockResolvedValueOnce(new Response("public bytes"));
+      expect(await getPublicDerivedText("/public/toolpath")).toEqual({
+        ready: true,
+        text: "public bytes",
+      });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      for (const call of fetchMock.mock.calls) {
+        expect(call[1]?.credentials).toBe("omit");
+        expect(new Headers(call[1]?.headers).has("authorization")).toBe(false);
+      }
+      expect(new Headers(initOf(1).headers).get("X-PrintStash-Delivery")).toBe("proxy");
+    },
+  );
+  it("preserves public bodyless acknowledgements", async () => {
+    respondWith(null, 204);
+    expect(await getPublicJson("/public")).toBeUndefined();
+  });
+  it("preserves public retryable failures", async () => {
+    login();
+    const version = getSessionVersion();
+    respondWith({ detail: "unavailable" }, 503);
+    await expect(getPublicJson("/public")).rejects.toMatchObject({
+      status: 503,
+      code: "unavailable",
+    });
+    expect(getSessionVersion()).toBe(version);
+  });
+  it("removes an accidental Authorization header from public transport", async () => {
+    respondWith({ value: "public" });
+    await requestPublicApi("/public", {
+      headers: { Authorization: "Bearer private", Accept: "application/json" },
+      credentials: "include",
+    });
+    expect(new Headers(initOf(0).headers).has("authorization")).toBe(false);
+    expect(new Headers(initOf(0).headers).get("accept")).toBe("application/json");
+    expect(initOf(0).credentials).toBe("omit");
+  });
+});
+
+describe("transport effect ownership", () => {
+  it.each(["json", "form", "action"] as const)(
+    "leaves Query state untouched after a %s write",
+    async (kind) => {
+      queryClient.setQueryData(queryKeys.models, [{ id: 7 }]);
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));
+      if (kind === "json") await sendJson("/api/v1/models", "POST", {});
+      if (kind === "form") await sendForm("/api/v1/models", new FormData());
+      if (kind === "action") await sendAction("/api/v1/models", "DELETE");
+      expect(queryClient.getQueryState(queryKeys.models)?.isInvalidated).toBe(false);
+    },
+  );
 });

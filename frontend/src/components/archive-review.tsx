@@ -1,22 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { CheckSquare, ChevronRight, File, Folder, Search, Square } from "lucide-react";
 
 import { getJobStatus } from "@/lib/api/jobs";
 import { selectArchiveEntries } from "@/lib/api/models";
 import { useAuth } from "@/lib/auth-context";
-import { collectionDisplayPath } from "@/lib/collection-display";
-import { userMessage } from "@/lib/errors";
+import { ApiError, userMessage } from "@/lib/errors";
+import { onAuthChange } from "@/lib/auth-store";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { formatBytes } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 import { uiMessage, uiText } from "@/lib/locale";
-import { useCollections } from "@/lib/queries";
+import { useCollectionLookup, useCollectionSearch } from "@/lib/queries";
 import { listTasks, trackImportJob, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
-import type { ArchiveEntry, ArchiveManifest, JobStatus } from "@/types";
+import type { ArchiveEntry, ArchiveManifest, CollectionNodeRead, JobStatus } from "@/types";
 
 import { Button } from "@/components/ui/button";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { CollectionPicker } from "@/components/collection-picker";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 
@@ -51,44 +55,78 @@ function parentOf(entry: ArchiveEntry): string | null {
 }
 
 export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose: () => void }) {
+  const [mountedSession] = useState(getSessionVersion);
+  const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
+  if (session !== mountedSession) return null;
+  return <ArchiveReview key={jobId} jobId={jobId} onClose={onClose} session={session} />;
+}
+
+function ArchiveReview({
+  jobId,
+  onClose,
+  session,
+}: {
+  jobId: string;
+  onClose: () => void;
+  session: number;
+}) {
   useUiLocale();
   const { user } = useAuth();
-  const { data: collections = [] } = useCollections();
-  const [manifest, setManifest] = useState<ArchiveManifest | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // The first folder a non-administrator may write to, found without listing
+  // the library (#295).
+  const writableProbe = useCollectionSearch("", "edit", { enabled: !user?.is_superuser });
+  const firstWritable = writableProbe.data?.pages[0]?.items[0] ?? null;
+  // A completed archive manifest is immutable review input, not a live Job poll.
+  const manifestQuery = useQuery({
+    queryKey: ["archive-manifest", session, jobId],
+    queryFn: async ({ signal }) => {
+      requireSessionVersion(session);
+      return manifestFromJob(await getJobStatus(jobId, { signal }));
+    },
+    staleTime: Infinity,
+    retry: false,
+  });
+  const denied =
+    manifestQuery.error instanceof ApiError && [401, 403, 404].includes(manifestQuery.error.status);
+  const manifest = denied ? null : (manifestQuery.data ?? null);
+  const loadError =
+    manifestQuery.error instanceof ArchiveReviewUnavailableError
+      ? manifestQuery.error.message
+      : manifestQuery.error
+        ? userMessage(manifestQuery.error)
+        : null;
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [folder, setFolder] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [pickedCollection, setPickedCollection] = useState<string | null | undefined>(undefined);
+  // The collection picked, "none" for the vault root, or undefined for no pick yet.
+  const [pickedCollection, setPickedCollection] = useState<CollectionNodeRead | "none" | undefined>(
+    undefined,
+  );
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const task = listTasks().find((item) => item.jobId === jobId);
-  const writableCollections = collections.filter(
-    (item) => item.effective_role === "edit" || item.effective_role === "admin",
-  );
-  const collection =
+  const collection: string | null =
     pickedCollection !== undefined
-      ? pickedCollection
-      : (task?.archiveCollection ??
-        (!user?.is_superuser ? (writableCollections[0]?.path ?? null) : null));
+      ? pickedCollection === "none"
+        ? null
+        : pickedCollection.path
+      : (task?.archiveCollection ?? (!user?.is_superuser ? (firstWritable?.path ?? null) : null));
+  // A destination that was not picked here still needs its names.
+  const destinationLookup = useCollectionLookup(pickedCollection === undefined ? collection : null);
+  const destinationLabel =
+    pickedCollection !== undefined && pickedCollection !== "none"
+      ? pickedCollection.display_path
+      : destinationLookup.data?.collection.path === collection
+        ? destinationLookup.data.collection.display_path
+        : null;
   const tags = task?.archiveTags ?? [];
-
-  useEffect(() => {
-    let active = true;
-    getJobStatus(jobId)
-      .then(manifestFromJob)
-      .then((value) => {
-        if (active) setManifest(value);
-      })
-      .catch((error: Error) => {
-        if (active)
-          setLoadError(
-            error instanceof ArchiveReviewUnavailableError ? error.message : userMessage(error),
-          );
-      });
-    return () => {
-      active = false;
-    };
-  }, [jobId]);
 
   const importable = useMemo(
     () => manifest?.entries.filter((entry) => entry.file_type !== null) ?? [],
@@ -147,11 +185,15 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
       return;
     setSubmitting(true);
     try {
+      if (!live.current) return;
+      requireSessionVersion(session);
       const accepted = await selectArchiveEntries(manifest.archive_id, {
         names: [...selected],
         collection: collection ?? undefined,
         tags: tags.length ? tags.join(",") : undefined,
       });
+      requireSessionVersion(session);
+      if (!live.current) return;
       trackImportJob(
         accepted.job_id,
         uiMessage("Import {value1}", { value1: manifest.archive_name }),
@@ -160,6 +202,7 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
       toast.info(uiText("Selected ZIP files are importing in the background."));
       onClose();
     } catch (error) {
+      if (!live.current || session !== getSessionVersion()) return;
       toast.error(error);
       setSubmitting(false);
     }
@@ -188,6 +231,14 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
             <p role="alert" className="text-sm text-destructive">
               {loadError}
             </p>
+            <Button
+              variant="outline"
+              className="self-end"
+              onClick={() => void manifestQuery.refetch()}
+              disabled={manifestQuery.isFetching}
+            >
+              {uiText("Retry")}
+            </Button>
             <Button variant="outline" className="self-end" onClick={onClose}>
               {uiText("Cancel")}
             </Button>
@@ -369,23 +420,43 @@ export function ArchiveReviewDialog({ jobId, onClose }: { jobId: string; onClose
                 })}
               </p>
               <div className="flex flex-wrap items-end gap-2">
-                <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                <div className="flex flex-col gap-1 text-xs text-muted-foreground">
                   {uiText("Destination collection")}
-                  <select
-                    value={collection ?? ""}
-                    onChange={(event) => setPickedCollection(event.target.value || null)}
-                    className="min-h-9 rounded border border-border bg-background px-2 text-sm text-foreground"
+                  <DropdownMenu
+                    open={pickerOpen}
+                    onOpenChange={setPickerOpen}
+                    align="end"
+                    role="dialog"
+                    contentClassName="w-72 rounded border border-border bg-popover p-2 text-popover-foreground shadow-lg"
+                    trigger={
+                      <button
+                        type="button"
+                        aria-haspopup="dialog"
+                        aria-expanded={pickerOpen}
+                        onClick={() => setPickerOpen((value) => !value)}
+                        className="min-h-9 max-w-56 truncate rounded border border-border bg-background px-2 text-left text-sm text-foreground"
+                      >
+                        {destinationLabel ??
+                          (collection === null
+                            ? user?.is_superuser
+                              ? uiText("Vault root")
+                              : uiText("Choose a collection")
+                            : collection)}
+                      </button>
+                    }
                   >
-                    <option value="">
-                      {user?.is_superuser ? uiText("Vault root") : uiText("Choose a collection")}
-                    </option>
-                    {writableCollections.map((item) => (
-                      <option key={item.id} value={item.path}>
-                        {collectionDisplayPath(collections, item.path)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                    <CollectionPicker
+                      minRole="edit"
+                      selectedPath={collection ?? ""}
+                      onSelect={(picked) => {
+                        setPickedCollection(picked ?? "none");
+                        setPickerOpen(false);
+                      }}
+                      noneLabel={user?.is_superuser ? uiText("Vault root") : undefined}
+                      emptyLabel={uiText("No editable collections.")}
+                    />
+                  </DropdownMenu>
+                </div>
                 <Button variant="outline" onClick={onClose}>
                   {uiText("Cancel")}
                 </Button>

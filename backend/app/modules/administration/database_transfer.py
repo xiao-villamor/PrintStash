@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import warnings
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -18,6 +19,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, MetaData, Table, inspect, select, text
 from sqlmodel import Session, SQLModel
 
+from app.db import library_contracts_v1
 from app.db.derived_objects import managed_names
 from app.db.models import IndexGeneration
 from app.modules.search import lexical_index, vector_index
@@ -92,6 +94,14 @@ def _empty_target(connection) -> None:
     for name in inspector.get_table_names():
         if name == "alembic_version":
             continue
+        if name == "library_revision":
+            # Fresh schema bootstrap owns one zero-counter authority row. It
+            # is not user data; a nonzero counter still proves prior vault use.
+            authority = connection.execute(
+                text("SELECT id,revision,authorization_revision FROM library_revision")
+            ).all()
+            if authority == [(1, 0, 0)]:
+                continue
         if (
             connection.execute(text(f"SELECT 1 FROM {quote(name)} LIMIT 1")).first()
             is not None
@@ -104,6 +114,32 @@ def _empty_target(connection) -> None:
     )
     if unknown:
         raise DatabaseTransferError("database_transfer_target_schema_unknown")
+
+
+def _require_source_library_authority(connection) -> None:
+    if (
+        connection.execute(
+            text("SELECT id FROM library_revision WHERE id=1")
+        ).scalar_one_or_none()
+        is None
+    ):
+        raise DatabaseTransferError("database_transfer_source_authority_missing")
+
+
+@contextmanager
+def _copying_library_rows(connection):
+    """Copy exact row facts without derived write-trigger interference.
+
+    The caller owns an atomic PostgreSQL destination transaction (all tables
+    locked for restore), or an unpublished private SQLite snapshot. Only this
+    versioned contract's triggers are suspended. Failed copies roll back their
+    removal; successful copies reinstall them before publication. The snapshot
+    contains the source epoch; admitted restore renews it before this copy.
+    """
+    library_contracts_v1.uninstall(connection)
+    connection.execute(text("DELETE FROM library_revision"))
+    yield
+    library_contracts_v1.install(connection)
 
 
 def _defer_foreign_keys(
@@ -201,6 +237,7 @@ def _transfer(
             )
             if actual != expected:
                 raise DatabaseTransferError("database_transfer_source_schema_unknown")
+            _require_source_library_authority(src)
             source_meta = MetaData()
             source_meta.reflect(src, only=sorted(expected))
             with warnings.catch_warnings():
@@ -238,17 +275,22 @@ def _transfer(
                     ) or name.startswith("code_gen_"):
                         dst.execute(text(f"DROP TABLE {quote(name)}"))
             originals = _defer_foreign_keys(dst, list(target_meta.tables.values()))
-            if replace_existing:
-                for table in reversed(tables):
-                    dst.execute(target_meta.tables[table.name].delete())
-            for table in tables:
-                destination = target_meta.tables[table.name]
-                for batch in _rows(src, table, batch_size=batch_size):
-                    dst.execute(destination.insert(), [dict(row) for row in batch])
-                proof = _proof(dst, destination, batch_size=batch_size)
-                if proof != next(item for item in proofs if item.name == table.name):
-                    raise DatabaseTransferError("database_transfer_verification_failed")
-            _restore_foreign_keys(dst, originals)
+            with _copying_library_rows(dst):
+                if replace_existing:
+                    for table in reversed(tables):
+                        dst.execute(target_meta.tables[table.name].delete())
+                for table in tables:
+                    destination = target_meta.tables[table.name]
+                    for batch in _rows(src, table, batch_size=batch_size):
+                        dst.execute(destination.insert(), [dict(row) for row in batch])
+                    proof = _proof(dst, destination, batch_size=batch_size)
+                    if proof != next(
+                        item for item in proofs if item.name == table.name
+                    ):
+                        raise DatabaseTransferError(
+                            "database_transfer_verification_failed"
+                        )
+                _restore_foreign_keys(dst, originals)
             for table in target_meta.tables.values():
                 for column in table.primary_key.columns:
                     sequence = dst.execute(
@@ -353,21 +395,25 @@ def snapshot_postgres(
         )
         if actual != expected:
             raise DatabaseTransferError("database_transfer_source_schema_unknown")
+        _require_source_library_authority(src)
         source_meta, target_meta = MetaData(), MetaData()
         source_meta.reflect(src, only=sorted(expected))
         SQLModel.metadata.create_all(dst)
         target_meta.reflect(dst, only=sorted(expected))
         proofs = []
-        for name in sorted(expected):
-            table, destination = source_meta.tables[name], target_meta.tables[name]
-            proof = _proof(src, table, batch_size=batch_size)
-            for batch in _rows(src, table, batch_size=batch_size):
-                dst.execute(destination.insert(), [dict(row) for row in batch])
-            if _proof(dst, destination, batch_size=batch_size) != proof:
-                raise DatabaseTransferError("database_transfer_verification_failed")
-            proofs.append(proof)
-        if dst.exec_driver_sql("PRAGMA foreign_key_check").first() is not None:
-            raise DatabaseTransferError("database_transfer_source_foreign_keys_invalid")
+        with _copying_library_rows(dst):
+            for name in sorted(expected):
+                table, destination = source_meta.tables[name], target_meta.tables[name]
+                proof = _proof(src, table, batch_size=batch_size)
+                for batch in _rows(src, table, batch_size=batch_size):
+                    dst.execute(destination.insert(), [dict(row) for row in batch])
+                if _proof(dst, destination, batch_size=batch_size) != proof:
+                    raise DatabaseTransferError("database_transfer_verification_failed")
+                proofs.append(proof)
+            if dst.exec_driver_sql("PRAGMA foreign_key_check").first() is not None:
+                raise DatabaseTransferError(
+                    "database_transfer_source_foreign_keys_invalid"
+                )
         head = src.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         dst.execute(
             text(

@@ -18,6 +18,7 @@
  * the model with no image.
  */
 
+import { anEditingBase } from "@/test-support/factories";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -29,7 +30,6 @@ import {
   putModelSourceCover,
 } from "@/lib/api/provenance";
 import { getPendingImport, parseInboxManifest } from "@/lib/api/inbox";
-import { invalidateApiCache } from "@/lib/api/request";
 import type { ModelProvenancePatch } from "@/types/provenance";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -41,27 +41,39 @@ function reply(body: string): Response {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
 });
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("getModelProvenance", () => {
   it("GETs the explicit model provenance read contract", async () => {
-    fetchMock.mockResolvedValue(reply('{"sources":[]}'));
+    fetchMock.mockResolvedValue(
+      reply('{"edit_epoch":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","edit_version":1,"sources":[]}'),
+    );
 
-    await expect(getModelProvenance(41)).resolves.toEqual({ sources: [] });
+    await expect(getModelProvenance(41)).resolves.toEqual({
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      edit_version: 1,
+      sources: [],
+    });
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/models/41/provenance", expect.any(Object));
   });
 
   it("PATCHes only explicit overrides and clears at a provenance source", async () => {
-    fetchMock.mockResolvedValue(reply('{"sources":[]}'));
+    fetchMock.mockResolvedValue(
+      reply('{"edit_epoch":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","edit_version":2,"sources":[]}'),
+    );
     const payload: ModelProvenancePatch = {
       overrides: { title: "Bench" },
       clear_overrides: ["description"],
     };
 
-    await patchModelProvenance(41, 8, payload);
+    await patchModelProvenance(
+      41,
+      8,
+      payload,
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1 }),
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/models/41/provenance/8",
@@ -72,7 +84,11 @@ describe("getModelProvenance", () => {
   it("uses the exact private source-cover routes and PUT multipart upload", async () => {
     const cover =
       '{"id":3,"provenance_source_id":8,"content_type":"image/webp","size_bytes":12,"updated_at":"2026-08-24T00:00:00Z"}';
-    fetchMock.mockResolvedValueOnce(reply(cover)).mockResolvedValueOnce(reply(cover));
+    fetchMock.mockResolvedValueOnce(reply(cover)).mockResolvedValueOnce(
+      new Response(cover, {
+        headers: { ETag: '"model-41-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v2"' },
+      }),
+    );
 
     await getModelSourceCover(41, 8);
     expect(fetchMock).toHaveBeenCalledWith(
@@ -80,14 +96,28 @@ describe("getModelProvenance", () => {
       expect.any(Object),
     );
 
-    await putModelSourceCover(41, 8, new File(["cover"], "cover.png", { type: "image/png" }));
+    await putModelSourceCover(
+      41,
+      8,
+      new File(["cover"], "cover.png", { type: "image/png" }),
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1 }),
+    );
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/v1/models/41/provenance/8/cover",
       expect.objectContaining({ method: "PUT", body: expect.any(FormData) }),
     );
 
-    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }));
-    await deleteModelSourceCover(41, 8);
+    fetchMock.mockResolvedValueOnce(
+      new Response(null, {
+        status: 204,
+        headers: { ETag: '"model-41-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v3"' },
+      }),
+    );
+    await deleteModelSourceCover(
+      41,
+      8,
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 1 }),
+    );
     expect(fetchMock).toHaveBeenLastCalledWith(
       "/api/v1/models/41/provenance/8/cover",
       expect.objectContaining({ method: "DELETE" }),
@@ -95,6 +125,172 @@ describe("getModelProvenance", () => {
     expect(getModelSourceCoverContentPath(41, 8)).toBe(
       "/api/v1/models/41/provenance/8/cover/content",
     );
+  });
+});
+
+describe("conditional Source editing", () => {
+  it.each([
+    { label: "override", payload: { overrides: { title: "Mine" }, clear_overrides: [] } },
+    { label: "restore", payload: { overrides: {}, clear_overrides: ["title"] } },
+  ] satisfies { label: string; payload: ModelProvenancePatch }[])(
+    "sends conditional $label edits",
+    async ({ payload }) => {
+      fetchMock.mockResolvedValue(
+        reply('{"edit_epoch":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","edit_version":9,"sources":[]}'),
+      );
+      await patchModelProvenance(
+        41,
+        8,
+        payload,
+        anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 4 }),
+      );
+      const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+      expect(headers.get("If-Match")).toBe('"model-41-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v4"');
+      expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
+    },
+  );
+
+  it.each([
+    { label: "upload", method: "PUT" },
+    { label: "delete", method: "DELETE" },
+  ])("sends conditional cover $label", async ({ method }) => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        method === "PUT"
+          ? JSON.stringify({
+              id: 3,
+              provenance_source_id: 8,
+              content_type: "image/webp",
+              size_bytes: 12,
+              updated_at: "2026-08-24T00:00:00Z",
+            })
+          : null,
+        {
+          status: method === "PUT" ? 200 : 204,
+          headers: { ETag: '"model-41-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v9"' },
+        },
+      ),
+    );
+    const receipt =
+      method === "PUT"
+        ? await putModelSourceCover(
+            41,
+            8,
+            new File(["x"], "cover.png", { type: "image/png" }),
+            anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 4 }),
+          )
+        : await deleteModelSourceCover(
+            41,
+            8,
+            anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 4 }),
+          );
+    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+    expect(headers.get("If-Match")).toBe('"model-41-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v4"');
+    expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
+    expect(receipt).toMatchObject({
+      edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      edit_version: 9,
+    });
+  });
+
+  it.each([
+    { label: "missing", etag: null },
+    { label: "previous history", etag: '"model-41-ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-v9"' },
+    { label: "wrong entity", etag: '"model-42-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v9"' },
+    { label: "stale", etag: '"model-41-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v4"' },
+    { label: "malformed", etag: '"model-41-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-vNaN"' },
+  ])("rejects a $label cover acknowledgement", async ({ etag }) => {
+    fetchMock.mockResolvedValue(
+      new Response(null, { status: 204, headers: etag ? { ETag: etag } : {} }),
+    );
+    await expect(
+      deleteModelSourceCover(
+        41,
+        8,
+        anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 4 }),
+      ),
+    ).rejects.toThrow(/Invalid (Source|editing)/);
+  });
+
+  it.each([0, 4, null])("rejects an unusable override acknowledgement %s", async (version) => {
+    fetchMock.mockResolvedValue(
+      reply(
+        JSON.stringify({
+          edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          edit_version: version,
+          sources: [],
+        }),
+      ),
+    );
+    await expect(
+      patchModelProvenance(
+        41,
+        8,
+        { overrides: { title: "Mine" }, clear_overrides: [] },
+        anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 4 }),
+      ),
+    ).rejects.toThrow(/Invalid (Source|editing)/);
+  });
+
+  it.each([0, -1, Number.MAX_SAFE_INTEGER + 1])(
+    "refuses invalid editing base %s before sending",
+    async (version) => {
+      await expect(
+        putModelSourceCover(
+          41,
+          8,
+          new File(["x"], "cover.png", { type: "image/png" }),
+          anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: version }),
+        ),
+      ).rejects.toThrow("Invalid editing base");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([0, null, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects malformed Source read version %s",
+    async (version) => {
+      fetchMock.mockResolvedValue(
+        reply(
+          JSON.stringify({
+            edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            edit_version: version,
+            sources: [],
+          }),
+        ),
+      );
+      await expect(getModelProvenance(41)).rejects.toThrow("Invalid editing base");
+    },
+  );
+
+  it("rejects cover metadata for another source", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ id: 3, provenance_source_id: 99 }), {
+        headers: { ETag: '"model-41-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v9"' },
+      }),
+    );
+    await expect(
+      putModelSourceCover(
+        41,
+        8,
+        new File(["x"], "cover.png", { type: "image/png" }),
+        anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 4 }),
+      ),
+    ).rejects.toThrow("Invalid Source cover acknowledgement");
+  });
+
+  it("cancels a retired Source read", async () => {
+    const controller = new AbortController();
+    const response = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValue(response.promise);
+    const read = getModelProvenance(41, { signal: controller.signal });
+    const rejected = read.catch((error) => error);
+    controller.abort();
+    response.resolve(
+      reply('{"edit_epoch":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","edit_version":1,"sources":[]}'),
+    );
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
   });
 });
 

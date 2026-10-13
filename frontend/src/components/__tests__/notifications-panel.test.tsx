@@ -23,11 +23,14 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NotificationsPanel, type NotificationsPanelDeps } from "@/components/notifications-panel";
+import { ApiError } from "@/lib/errors";
+import { clearLogin } from "@/lib/auth-store";
+import { notificationKeys } from "@/lib/queries/settings-notifications";
 import { aPrinter } from "@/test-support/factories";
 import { renderApp } from "@/test-support/render";
 import type {
@@ -40,10 +43,13 @@ import type {
   PrinterRead,
 } from "@/types";
 
+const EDIT_BASE = { edit_epoch: "a".repeat(32), edit_version: 1 };
+
 const FROZEN_NOW = "2026-01-01T00:00:00Z";
 
 function aChannel(over: Partial<NotificationChannel> = {}): NotificationChannel {
   return {
+    ...EDIT_BASE,
     id: 3,
     name: "Workshop webhook",
     target: "webhook",
@@ -84,10 +90,10 @@ function stubDeps(over: Partial<NotificationsPanelDeps> = {}): NotificationsPane
   return {
     getNotificationsSettings: vi
       .fn<() => Promise<NotificationsSettings>>()
-      .mockResolvedValue({ enabled: true, channels: [aChannel()] }),
+      .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [aChannel()] }),
     setNotificationsEnabled: vi
       .fn<(enabled: boolean) => Promise<NotificationsSettings>>()
-      .mockResolvedValue({ enabled: false, channels: [] }),
+      .mockResolvedValue({ ...EDIT_BASE, enabled: false, channels: [] }),
     createNotificationChannel: vi
       .fn<(body: NotificationChannelCreate) => Promise<NotificationChannel>>()
       .mockResolvedValue(aChannel()),
@@ -131,6 +137,25 @@ async function openDraft(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: /Add channel/ }));
 }
 
+async function openConflictingDraft(over: Partial<NotificationsPanelDeps> = {}) {
+  const result = renderPanel({
+    updateNotificationChannel: vi
+      .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+      .mockRejectedValueOnce(new ApiError(412, "edit_conflict", "edit_conflict"))
+      .mockResolvedValue(
+        aChannel({ name: "Local draft", edit_version: 3, events: ["printer_offline"] }),
+      ),
+    ...over,
+  });
+  await userEvent.click(await screen.findByTitle("Edit channel"));
+  const input = screen.getByPlaceholderText(/Living-room/);
+  await userEvent.clear(input);
+  await userEvent.type(input, "Local draft");
+  await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await screen.findByRole("button", { name: "Review current values" });
+  return result;
+}
+
 beforeEach(() => {
   window.localStorage.clear();
 });
@@ -140,6 +165,659 @@ afterEach(() => {
 });
 
 describe("NotificationsPanel", () => {
+  it("retries unavailable notification settings", async () => {
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [aChannel()] });
+    renderPanel({ getNotificationsSettings: read });
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(screen.queryByText("No notification channels yet")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Retry notification settings" }));
+    expect(await screen.findByText("Workshop webhook")).toBeVisible();
+  });
+
+  it("blocks draft replacement during a notification save", async () => {
+    const pending = Promise.withResolvers<NotificationChannel>();
+    const write = vi
+      .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+      .mockReturnValue(pending.promise);
+    renderPanel({ updateNotificationChannel: write });
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+    expect(screen.getByPlaceholderText(/Living-room/)).toBeDisabled();
+    expect(screen.getByTitle("Edit channel")).toBeDisabled();
+    await act(async () => {
+      pending.resolve(aChannel());
+      await pending.promise;
+    });
+  });
+
+  it("reports unavailable delivery history separately", async () => {
+    const read = vi
+      .fn<NotificationsPanelDeps["listNotificationDeliveries"]>()
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockResolvedValue([aDelivery({ attempts: 4 })]);
+    renderPanel({ listNotificationDeliveries: read });
+
+    expect(
+      await screen.findByText("Notification delivery history could not be loaded."),
+    ).toBeVisible();
+    expect(screen.getByText("Workshop webhook")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Retry delivery history" }));
+
+    expect(await screen.findByText("×4")).toBeVisible();
+  });
+
+  it("refuses fabricated empty printer choices", async () => {
+    const read = vi
+      .fn<NotificationsPanelDeps["listPrinters"]>()
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockResolvedValue([aPrinter({ id: 4, name: "Voron" })]);
+    renderPanel({ listPrinters: read });
+    await openDraft(userEvent.setup());
+    await userEvent.type(screen.getByPlaceholderText(/Living-room/), "Scoped draft");
+    await userEvent.click(screen.getByRole("checkbox", { name: "All printers" }));
+
+    expect(await screen.findByText("Printer choices could not be loaded.")).toBeVisible();
+    expect(screen.queryByText("No printers configured.")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create channel" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Retry printer choices" }));
+
+    expect(await screen.findByRole("checkbox", { name: "Voron" })).toBeEnabled();
+    expect(screen.getByPlaceholderText(/Living-room/)).toHaveValue("Scoped draft");
+  });
+
+  it("retires notification work with the session", async () => {
+    const pending = Promise.withResolvers<NotificationChannel>();
+    const write = vi
+      .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+      .mockReturnValue(pending.promise);
+    const { client, deps } = renderPanel({ updateNotificationChannel: write });
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    await userEvent.type(screen.getAllByPlaceholderText("•••••••• (unchanged)")[0]!, "fake-secret");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+
+    act(() => clearLogin());
+    await act(async () => {
+      pending.resolve(aChannel({ name: "Old session receipt" }));
+      await pending.promise;
+    });
+
+    expect(write.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
+    expect(screen.queryByDisplayValue("fake-secret")).not.toBeInTheDocument();
+    expect(JSON.stringify(client.getQueryData(notificationKeys.settings) ?? null)).not.toContain(
+      "Old session receipt",
+    );
+    expect(deps.toast.success).not.toHaveBeenCalled();
+    expect(deps.toast.error).not.toHaveBeenCalled();
+  });
+
+  it("cancels notification reads after disposal", async () => {
+    const pending = Promise.withResolvers<NotificationsSettings>();
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockReturnValue(pending.promise);
+    const { unmount, client } = renderPanel({ getNotificationsSettings: read });
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(1));
+
+    unmount();
+    await act(async () => {
+      pending.resolve({ ...EDIT_BASE, enabled: true, channels: [aChannel()] });
+      await pending.promise;
+    });
+
+    expect(read.mock.calls[0]?.[0]?.signal?.aborted).toBe(true);
+    expect(client.getQueryData(notificationKeys.settings)).toBeUndefined();
+  });
+
+  it("keeps raw credentials outside shared caches", async () => {
+    const pending = Promise.withResolvers<NotificationChannel>();
+    const write = vi
+      .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+      .mockReturnValue(pending.promise);
+    const { client } = renderPanel({ updateNotificationChannel: write });
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    await userEvent.type(screen.getAllByPlaceholderText("•••••••• (unchanged)")[0]!, "fake-secret");
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+
+    expect(client.getMutationCache().getAll()).toEqual([]);
+    expect(JSON.stringify(client.getQueryData(notificationKeys.settings))).not.toContain(
+      "fake-secret",
+    );
+    await act(async () => {
+      pending.resolve(aChannel());
+      await pending.promise;
+    });
+
+    expect(
+      client.getQueryData<NotificationsSettings>(notificationKeys.settings)?.channels[0]?.config
+        .url,
+    ).toBe("********");
+  });
+
+  it("uses the confirmed master switch", async () => {
+    renderPanel({
+      setNotificationsEnabled: vi
+        .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
+        .mockResolvedValue({ ...EDIT_BASE, enabled: true }),
+    });
+    const toggle = await screen.findByRole("checkbox");
+
+    await userEvent.click(toggle);
+
+    await waitFor(() => expect(toggle).toBeEnabled());
+    expect(toggle).toBeChecked();
+  });
+
+  it("avoids private reads for a nonadministrator", () => {
+    const { deps } = renderPanel({}, false);
+
+    expect(
+      screen.getByText("Only an administrator can manage notification channels."),
+    ).toBeVisible();
+    expect(deps.getNotificationsSettings).not.toHaveBeenCalled();
+    expect(deps.listNotificationDeliveries).not.toHaveBeenCalled();
+    expect(deps.listPrinters).not.toHaveBeenCalled();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("retains an editable draft after a transient settings error", async () => {
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
+      .mockRejectedValueOnce(new Error("unavailable"))
+      .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [aChannel()] });
+    const { client } = renderPanel({ getNotificationsSettings: read });
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    const input = screen.getByPlaceholderText(/Living-room/);
+    await userEvent.clear(input);
+    await userEvent.type(input, "Unsaved draft");
+
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: notificationKeys.settings });
+    });
+
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(input).toHaveValue("Unsaved draft");
+    expect(input).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Retry notification settings" }));
+
+    await waitFor(() => expect(input).toBeEnabled());
+    expect(input).toHaveValue("Unsaved draft");
+  });
+
+  it("completes delivery history during a channel save", async () => {
+    const pending = Promise.withResolvers<NotificationDelivery[]>();
+    renderPanel({
+      listNotificationDeliveries: vi
+        .fn<NotificationsPanelDeps["listNotificationDeliveries"]>()
+        .mockReturnValue(pending.promise),
+    });
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Save changes" })).not.toBeInTheDocument(),
+    );
+
+    await act(async () => {
+      pending.resolve([aDelivery({ attempts: 4 })]);
+      await pending.promise;
+    });
+
+    expect(await screen.findByText("×4")).toBeVisible();
+  });
+
+  it("rejects a pre-save read after confirmation", async () => {
+    const pending = Promise.withResolvers<NotificationsSettings>();
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
+      .mockReturnValue(pending.promise);
+    const { client } = renderPanel({
+      getNotificationsSettings: read,
+      updateNotificationChannel: vi
+        .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+        .mockResolvedValue(aChannel({ name: "Confirmed name" })),
+    });
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    act(() => {
+      void client.invalidateQueries({ queryKey: notificationKeys.settings });
+    });
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByText("Confirmed name")).toBeVisible();
+
+    await act(async () => {
+      pending.resolve({ ...EDIT_BASE, enabled: true, channels: [aChannel()] });
+      await pending.promise;
+    });
+
+    expect(screen.getByText("Confirmed name")).toBeVisible();
+    expect(screen.queryByText("Workshop webhook")).not.toBeInTheDocument();
+  });
+
+  it("retires an unmounted notification command", async () => {
+    const pending = Promise.withResolvers<NotificationChannel>();
+    const write = vi
+      .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+      .mockReturnValue(pending.promise);
+    const { unmount, client, deps } = renderPanel({ updateNotificationChannel: write });
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+
+    unmount();
+    await act(async () => {
+      pending.resolve(aChannel({ name: "Abandoned receipt" }));
+      await pending.promise;
+    });
+
+    expect(write.mock.calls[0]?.[2]?.signal?.aborted).toBe(true);
+    expect(
+      client.getQueryData<NotificationsSettings>(notificationKeys.settings)?.channels[0]?.name,
+    ).toBe("Workshop webhook");
+    expect(deps.toast.success).not.toHaveBeenCalled();
+    expect(deps.toast.error).not.toHaveBeenCalled();
+  });
+
+  it("retains a rejected notification draft", async () => {
+    renderPanel({
+      updateNotificationChannel: vi
+        .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+        .mockRejectedValue(new ApiError(400, "invalid_config", "invalid_config")),
+    });
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    const input = screen.getByPlaceholderText(/Living-room/);
+    await userEvent.clear(input);
+    await userEvent.type(input, "Retained draft");
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
+    expect(input).toHaveValue("Retained draft");
+  });
+
+  it("publishes the confirmed master editing base", async () => {
+    const receipt = { ...EDIT_BASE, edit_version: 2, enabled: false };
+    const { client } = renderPanel({
+      setNotificationsEnabled: vi
+        .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
+        .mockResolvedValue(receipt),
+    });
+
+    await userEvent.click(await screen.findByRole("checkbox"));
+
+    await waitFor(() =>
+      expect(client.getQueryData<NotificationsSettings>(notificationKeys.settings)).toMatchObject(
+        receipt,
+      ),
+    );
+  });
+
+  it("requires review after a conflicting channel save", async () => {
+    renderPanel({
+      updateNotificationChannel: vi
+        .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+        .mockRejectedValue(new ApiError(412, "edit_conflict", "edit_conflict")),
+    });
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    const input = screen.getByPlaceholderText(/Living-room/);
+    await userEvent.clear(input);
+    await userEvent.type(input, "My draft");
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(await screen.findByRole("button", { name: "Review current values" })).toBeEnabled();
+    expect(input).toHaveValue("My draft");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+
+  it("retains the original channel editing base after refresh", async () => {
+    const { client, deps } = renderPanel();
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    const input = screen.getByPlaceholderText(/Living-room/);
+    await userEvent.clear(input);
+    await userEvent.type(input, "My draft");
+    act(() =>
+      client.setQueryData(notificationKeys.settings, {
+        ...EDIT_BASE,
+        enabled: true,
+        channels: [aChannel({ name: "Other edit", edit_version: 2, events: ["printer_offline"] })],
+      }),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(deps.updateNotificationChannel).toHaveBeenCalledWith(
+        3,
+        { name: "My draft" },
+        { base: EDIT_BASE, signal: expect.any(AbortSignal) },
+      ),
+    );
+  });
+
+  it("refuses an empty selected-printer scope", async () => {
+    renderPanel();
+    await openDraft(userEvent.setup());
+    await userEvent.type(screen.getByPlaceholderText(/Living-room/), "Scoped draft");
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "All printers" }));
+
+    expect(screen.getByRole("button", { name: "Create channel" })).toBeDisabled();
+    expect(screen.getByText("Select at least one printer, or choose All printers.")).toBeVisible();
+  });
+
+  it("presents legacy empty scopes as all printers", async () => {
+    renderPanel({
+      getNotificationsSettings: vi
+        .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+        .mockResolvedValue({
+          ...EDIT_BASE,
+          enabled: true,
+          channels: [aChannel({ printer_ids: [] })],
+        }),
+    });
+
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+
+    expect(screen.getByRole("checkbox", { name: "All printers" })).toBeChecked();
+  });
+
+  it("saves deliberate changes against the reviewed channel", async () => {
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
+      .mockResolvedValue({
+        ...EDIT_BASE,
+        enabled: true,
+        channels: [aChannel({ name: "Remote edit", edit_version: 2, events: ["printer_offline"] })],
+      });
+    const { deps } = await openConflictingDraft({ getNotificationsSettings: read });
+
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save revised changes" }));
+
+    expect(await screen.findByText("Local draft")).toBeVisible();
+    expect(deps.updateNotificationChannel).toHaveBeenLastCalledWith(
+      3,
+      { name: "Local draft" },
+      { base: { ...EDIT_BASE, edit_version: 2 }, signal: expect.any(AbortSignal) },
+    );
+    expect(screen.getByText(/Printer offline · all printers/)).toBeVisible();
+  });
+
+  it("requires review after an uncertain channel save", async () => {
+    const { deps } = await openConflictingDraft({
+      updateNotificationChannel: vi
+        .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+        .mockRejectedValue(new TypeError("Failed to fetch")),
+    });
+
+    expect(screen.getByPlaceholderText(/Living-room/)).toHaveValue("Local draft");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(deps.updateNotificationChannel).toHaveBeenCalledTimes(1);
+    expect(deps.toast.success).not.toHaveBeenCalled();
+  });
+
+  it("adopts a replacement channel before editing", async () => {
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
+      .mockResolvedValue({
+        ...EDIT_BASE,
+        enabled: true,
+        channels: [aChannel({ name: "Replacement", edit_epoch: "b".repeat(32) })],
+      });
+    await openConflictingDraft({ getNotificationsSettings: read });
+    await userEvent.type(
+      screen.getAllByPlaceholderText("•••••••• (unchanged)")[0]!,
+      "fake-old-secret",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+
+    expect(await screen.findByRole("button", { name: "Save revised changes" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Use current values" }));
+    expect(screen.getByPlaceholderText(/Living-room/)).toHaveValue("Replacement");
+    expect(screen.queryByDisplayValue("fake-old-secret")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      label: "missing",
+      review: () => Promise.resolve({ ...EDIT_BASE, enabled: true, channels: [] }),
+    },
+    {
+      label: "denied",
+      review: () => Promise.reject(new ApiError(403, "admin_required", "admin_required")),
+    },
+  ])("retires a missing or denied channel editor: $label", async ({ review }) => {
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
+      .mockImplementation(review);
+    const { deps } = await openConflictingDraft({ getNotificationsSettings: read });
+
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+
+    await waitFor(() =>
+      expect(screen.queryByPlaceholderText(/Living-room/)).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByRole("button", { name: "Save revised changes" })).not.toBeInTheDocument();
+    expect(deps.updateNotificationChannel).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a channel draft when review fails temporarily", async () => {
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
+      .mockRejectedValueOnce(new ApiError(503, "unavailable", "unavailable"))
+      .mockResolvedValue({
+        ...EDIT_BASE,
+        enabled: true,
+        channels: [aChannel({ edit_version: 2 })],
+      });
+    await openConflictingDraft({ getNotificationsSettings: read });
+
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Review current values" })).toBeEnabled(),
+    );
+    expect(screen.getByPlaceholderText(/Living-room/)).toHaveValue("Local draft");
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+    expect(await screen.findByRole("button", { name: "Save revised changes" })).toBeEnabled();
+  });
+
+  it.each([
+    { label: "conflict", failure: new ApiError(412, "edit_conflict", "edit_conflict") },
+    { label: "uncertain", failure: new TypeError("Failed to fetch") },
+  ])("reviews a failed master switch intent: $label", async ({ failure }) => {
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
+      .mockResolvedValue({ ...EDIT_BASE, edit_version: 2, enabled: true, channels: [aChannel()] });
+    const write = vi
+      .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValue({ ...EDIT_BASE, edit_version: 3, enabled: false });
+    renderPanel({ getNotificationsSettings: read, setNotificationsEnabled: write });
+    await userEvent.click(await screen.findByRole("checkbox"));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save revised changes" }));
+
+    await waitFor(() => expect(screen.getByRole("checkbox")).not.toBeChecked());
+    expect(write).toHaveBeenLastCalledWith(false, {
+      base: { ...EDIT_BASE, edit_version: 2 },
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("retires a notification review with its session", async () => {
+    const pending = Promise.withResolvers<NotificationsSettings>();
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
+      .mockReturnValue(pending.promise);
+    await openConflictingDraft({ getNotificationsSettings: read });
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+    await waitFor(() => expect(read).toHaveBeenCalledTimes(2));
+
+    act(() => clearLogin());
+    await act(async () => {
+      pending.resolve({
+        ...EDIT_BASE,
+        enabled: true,
+        channels: [aChannel({ name: "Private review", edit_version: 2 })],
+      });
+      await pending.promise;
+    });
+
+    expect(screen.queryByRole("button", { name: "Save revised changes" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Private review")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Local draft")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      label: "newer version",
+      observed: [aChannel({ name: "Observed", edit_version: 3 })],
+      expected: ["Observed"],
+    },
+    {
+      label: "replacement history",
+      observed: [aChannel({ name: "Observed", edit_epoch: "b".repeat(32) })],
+      expected: ["Observed"],
+    },
+    { label: "removed channel", observed: [], expected: [] },
+  ])("preserves newer observed notification receipts: $label", async ({ observed, expected }) => {
+    const pending = Promise.withResolvers<NotificationChannel>();
+    const write = vi
+      .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+      .mockReturnValue(pending.promise);
+    const { client } = renderPanel({ updateNotificationChannel: write });
+    await userEvent.click(await screen.findByTitle("Edit channel"));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+
+    act(() =>
+      client.setQueryData(notificationKeys.settings, {
+        ...EDIT_BASE,
+        enabled: true,
+        channels: observed,
+      }),
+    );
+    await act(async () => {
+      pending.resolve(aChannel({ name: "Older acknowledgement", edit_version: 2 }));
+      await pending.promise;
+    });
+
+    expect(
+      client
+        .getQueryData<NotificationsSettings>(notificationKeys.settings)
+        ?.channels.map((channel) => channel.name),
+    ).toEqual(expected);
+  });
+
+  it("requires adoption after the master history changes", async () => {
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
+      .mockResolvedValue({
+        ...EDIT_BASE,
+        edit_epoch: "b".repeat(32),
+        enabled: false,
+        channels: [aChannel()],
+      });
+    renderPanel({
+      getNotificationsSettings: read,
+      setNotificationsEnabled: vi
+        .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
+        .mockRejectedValue(new ApiError(412, "edit_conflict", "edit_conflict")),
+    });
+    await userEvent.click(await screen.findByRole("checkbox"));
+
+    await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
+
+    expect(await screen.findByRole("button", { name: "Save revised changes" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Use current values" }));
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    expect(screen.getByRole("checkbox")).toBeEnabled();
+  });
+
+  it("preserves a newer observed master receipt", async () => {
+    const pending = Promise.withResolvers<NotificationsSettings>();
+    const write = vi
+      .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
+      .mockReturnValue(pending.promise);
+    const { client } = renderPanel({ setNotificationsEnabled: write });
+    await userEvent.click(await screen.findByRole("checkbox"));
+    await waitFor(() => expect(write).toHaveBeenCalledTimes(1));
+
+    act(() =>
+      client.setQueryData(notificationKeys.settings, {
+        ...EDIT_BASE,
+        edit_version: 3,
+        enabled: true,
+        channels: [aChannel()],
+      }),
+    );
+    await act(async () => {
+      pending.resolve({ ...EDIT_BASE, edit_version: 2, enabled: false, channels: [] });
+      await pending.promise;
+    });
+
+    expect(screen.getByRole("checkbox")).toBeChecked();
+    expect(
+      client.getQueryData<NotificationsSettings>(notificationKeys.settings)?.edit_version,
+    ).toBe(3);
+  });
+
+  it("adopts current state after history changes during review", async () => {
+    const read = vi
+      .fn<NotificationsPanelDeps["getNotificationsSettings"]>()
+      .mockResolvedValueOnce({ ...EDIT_BASE, enabled: true, channels: [aChannel()] })
+      .mockResolvedValueOnce({
+        ...EDIT_BASE,
+        edit_version: 2,
+        enabled: false,
+        channels: [aChannel()],
+      })
+      .mockResolvedValue({ ...EDIT_BASE, edit_epoch: "b".repeat(32), enabled: true, channels: [] });
+    const { client } = renderPanel({
+      getNotificationsSettings: read,
+      setNotificationsEnabled: vi
+        .fn<NotificationsPanelDeps["setNotificationsEnabled"]>()
+        .mockRejectedValue(new ApiError(412, "edit_conflict", "edit_conflict")),
+    });
+    await userEvent.click(await screen.findByRole("checkbox"));
+    await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
+    await screen.findByRole("button", { name: "Use current values" });
+    act(() =>
+      client.setQueryData(notificationKeys.settings, {
+        ...EDIT_BASE,
+        edit_epoch: "b".repeat(32),
+        enabled: true,
+        channels: [],
+      }),
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Use current values" }));
+
+    await waitFor(() => expect(screen.getByRole("checkbox")).toBeEnabled());
+    expect(screen.getByRole("checkbox")).toBeChecked();
+    expect(client.getQueryData<NotificationsSettings>(notificationKeys.settings)?.edit_epoch).toBe(
+      "b".repeat(32),
+    );
+  });
+
   describe("the master switch", () => {
     it("waits for the settings before rendering a state", () => {
       // Painting "Off" and correcting it makes a working setup flash as broken.
@@ -164,7 +842,12 @@ describe("NotificationsPanel", () => {
 
       await user.click(await screen.findByRole("checkbox"));
 
-      await waitFor(() => expect(deps.setNotificationsEnabled).toHaveBeenCalledWith(false));
+      await waitFor(() =>
+        expect(deps.setNotificationsEnabled).toHaveBeenCalledWith(false, {
+          base: EDIT_BASE,
+          signal: expect.any(AbortSignal),
+        }),
+      );
     });
 
     it("leaves the switch alone when the server refuses", async () => {
@@ -207,9 +890,11 @@ describe("NotificationsPanel", () => {
       // "All printers" and "these two" are different grants; collapsing them is
       // how an alert arrives about a printer the operator never subscribed to.
       renderPanel({
-        getNotificationsSettings: vi
-          .fn<() => Promise<NotificationsSettings>>()
-          .mockResolvedValue({ enabled: true, channels: [aChannel({ printer_ids: [4, 5] })] }),
+        getNotificationsSettings: vi.fn<() => Promise<NotificationsSettings>>().mockResolvedValue({
+          ...EDIT_BASE,
+          enabled: true,
+          channels: [aChannel({ printer_ids: [4, 5] })],
+        }),
       });
 
       expect(await screen.findByText(/2 printer\(s\)/)).toBeInTheDocument();
@@ -219,7 +904,7 @@ describe("NotificationsPanel", () => {
       renderPanel({
         getNotificationsSettings: vi
           .fn<() => Promise<NotificationsSettings>>()
-          .mockResolvedValue({ enabled: true, channels: [] }),
+          .mockResolvedValue({ ...EDIT_BASE, enabled: true, channels: [] }),
       });
 
       expect(await screen.findByText("No notification channels yet")).toBeInTheDocument();
@@ -230,6 +915,7 @@ describe("NotificationsPanel", () => {
       // away has been waiting on alerts that stopped days ago.
       renderPanel({
         getNotificationsSettings: vi.fn<() => Promise<NotificationsSettings>>().mockResolvedValue({
+          ...EDIT_BASE,
           enabled: true,
           channels: [aChannel({ enabled: false, consecutive_failures: 5, last_error: "410" })],
         }),
@@ -241,6 +927,7 @@ describe("NotificationsPanel", () => {
     it("marks a channel the operator turned off as simply disabled", async () => {
       renderPanel({
         getNotificationsSettings: vi.fn<() => Promise<NotificationsSettings>>().mockResolvedValue({
+          ...EDIT_BASE,
           enabled: true,
           channels: [aChannel({ enabled: false, consecutive_failures: 0 })],
         }),
@@ -258,6 +945,7 @@ describe("NotificationsPanel", () => {
     it("shows a channel whose last delivery failed", async () => {
       renderPanel({
         getNotificationsSettings: vi.fn<() => Promise<NotificationsSettings>>().mockResolvedValue({
+          ...EDIT_BASE,
           enabled: true,
           channels: [aChannel({ last_status: "failed", last_error: "connection refused" })],
         }),
@@ -271,9 +959,11 @@ describe("NotificationsPanel", () => {
 
     it("shows a channel that has never delivered anything", async () => {
       renderPanel({
-        getNotificationsSettings: vi
-          .fn<() => Promise<NotificationsSettings>>()
-          .mockResolvedValue({ enabled: true, channels: [aChannel({ last_status: null })] }),
+        getNotificationsSettings: vi.fn<() => Promise<NotificationsSettings>>().mockResolvedValue({
+          ...EDIT_BASE,
+          enabled: true,
+          channels: [aChannel({ last_status: null })],
+        }),
         listNotificationDeliveries: vi
           .fn<(limit?: number) => Promise<NotificationDelivery[]>>()
           .mockResolvedValue([]),
@@ -330,6 +1020,7 @@ describe("NotificationsPanel", () => {
             events: ["print_completed", "print_failed"],
             printer_ids: null,
           }),
+          { signal: expect.any(AbortSignal) },
         ),
       );
     });
@@ -373,6 +1064,7 @@ describe("NotificationsPanel", () => {
       await waitFor(() =>
         expect(deps.createNotificationChannel).toHaveBeenCalledWith(
           expect.objectContaining({ config: { topic: "prints" } }),
+          { signal: expect.any(AbortSignal) },
         ),
       );
     });
@@ -390,6 +1082,7 @@ describe("NotificationsPanel", () => {
       await waitFor(() =>
         expect(deps.createNotificationChannel).toHaveBeenCalledWith(
           expect.objectContaining({ printer_ids: [4] }),
+          { signal: expect.any(AbortSignal) },
         ),
       );
     });
@@ -455,7 +1148,8 @@ describe("NotificationsPanel", () => {
       await waitFor(() =>
         expect(deps.updateNotificationChannel).toHaveBeenCalledWith(
           3,
-          expect.objectContaining({ config: {} }),
+          {},
+          { base: EDIT_BASE, signal: expect.any(AbortSignal) },
         ),
       );
     });
@@ -474,6 +1168,7 @@ describe("NotificationsPanel", () => {
         expect(deps.updateNotificationChannel).toHaveBeenCalledWith(
           3,
           expect.objectContaining({ name: "Renamed" }),
+          { base: EDIT_BASE, signal: expect.any(AbortSignal) },
         ),
       );
     });
@@ -489,14 +1184,18 @@ describe("NotificationsPanel", () => {
       expect(screen.getByRole("combobox")).toBeDisabled();
     });
 
-    it("re-reads the channels after a save", async () => {
+    it("publishes a confirmed channel receipt", async () => {
       const user = userEvent.setup();
-      const { deps } = renderPanel();
+      renderPanel({
+        updateNotificationChannel: vi
+          .fn<NotificationsPanelDeps["updateNotificationChannel"]>()
+          .mockResolvedValue(aChannel({ name: "Confirmed channel" })),
+      });
       await user.click(await screen.findByTitle("Edit channel"));
 
       await user.click(screen.getByRole("button", { name: /Save changes/ }));
 
-      await waitFor(() => expect(deps.getNotificationsSettings).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText("Confirmed channel")).toBeVisible();
     });
   });
 
@@ -507,7 +1206,11 @@ describe("NotificationsPanel", () => {
 
       await user.click(await screen.findByTitle("Send a test notification"));
 
-      await waitFor(() => expect(deps.testNotificationChannel).toHaveBeenCalledWith(3));
+      await waitFor(() =>
+        expect(deps.testNotificationChannel).toHaveBeenCalledWith(3, {
+          signal: expect.any(AbortSignal),
+        }),
+      );
     });
 
     it("reports a test the server could not deliver", async () => {
@@ -546,16 +1249,30 @@ describe("NotificationsPanel", () => {
 
       await user.click(await screen.findByTitle("Delete channel"));
 
-      await waitFor(() => expect(deps.deleteNotificationChannel).toHaveBeenCalledWith(3));
+      await waitFor(() =>
+        expect(deps.deleteNotificationChannel).toHaveBeenCalledWith(3, {
+          signal: expect.any(AbortSignal),
+        }),
+      );
     });
 
-    it("re-reads the channels afterwards", async () => {
+    it("removes a confirmed deleted channel", async () => {
       const user = userEvent.setup();
-      const { deps } = renderPanel();
+      const pending = Promise.withResolvers<void>();
+      renderPanel({
+        deleteNotificationChannel: vi
+          .fn<NotificationsPanelDeps["deleteNotificationChannel"]>()
+          .mockReturnValue(pending.promise),
+      });
 
       await user.click(await screen.findByTitle("Delete channel"));
 
-      await waitFor(() => expect(deps.getNotificationsSettings).toHaveBeenCalledTimes(2));
+      expect(screen.getByText("Workshop webhook")).toBeVisible();
+      await act(async () => {
+        pending.resolve();
+        await pending.promise;
+      });
+      expect(await screen.findByText("No notification channels yet")).toBeVisible();
     });
   });
 
@@ -621,19 +1338,19 @@ describe("NotificationsPanel", () => {
     it("offers no master switch to flip", async () => {
       renderPanel({}, false);
 
-      expect(await screen.findByRole("checkbox")).toBeDisabled();
+      expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     });
   });
 
   describe("when the settings cannot be read", () => {
     it("stops loading rather than hanging", async () => {
-      const { deps } = renderPanel({
+      renderPanel({
         getNotificationsSettings: vi
           .fn<() => Promise<NotificationsSettings>>()
           .mockRejectedValue(new Error("boom")),
       });
 
-      await waitFor(() => expect(deps.toast.error).toHaveBeenCalled());
+      expect(await screen.findByRole("alert")).toBeVisible();
       expect(screen.queryByText("Loading…")).toBeNull();
     });
   });

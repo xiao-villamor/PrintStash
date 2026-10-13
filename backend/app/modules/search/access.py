@@ -16,12 +16,12 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
-from app.modules.identity.rbac import accessible_collection_ids
+from app.modules.identity.rbac import accessible_collection_ids_stmt
 from app.modules.library.model_views.access import accessible_live_model_ids_stmt
 
 
 def visible_subjects(session: Session, user: User):
-    collections = accessible_collection_ids(session, user) if user.is_active else set()
+    collections = accessible_collection_ids_stmt(session, user)
     models = accessible_live_model_ids_stmt(session, user)
     if not user.is_active:
         models = models.where(false())

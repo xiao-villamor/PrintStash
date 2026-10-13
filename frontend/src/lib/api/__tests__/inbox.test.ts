@@ -26,7 +26,6 @@ import {
   retryPendingImport,
   updatePendingImport,
 } from "@/lib/api/inbox";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
@@ -51,7 +50,7 @@ const ITEM = { id: 1, state: "review", manifest: V2_MANIFEST };
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -185,6 +184,25 @@ describe("getPendingImport", () => {
     // A silently-dropped manifest would render an empty review screen with no
     // explanation; the caller needs to know the parse failed.
     await expect(getPendingImport(1)).rejects.toThrow("Invalid inbox manifest response");
+  });
+  it("carries cancellation to the Inbox detail request", async () => {
+    let respond!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    );
+    const controller = new AbortController();
+    const pending = getPendingImport(1, controller.signal);
+
+    controller.abort();
+    respond(
+      new Response(JSON.stringify(ITEM), { headers: { "content-type": "application/json" } }),
+    );
+
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });
 

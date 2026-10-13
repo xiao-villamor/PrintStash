@@ -17,6 +17,7 @@ from .fingerprint import (
     measure_triangles,
     validate_mesh_arrays,
 )
+from .time_budget import check_deadline
 
 if TYPE_CHECKING:
     import numpy as np
@@ -41,6 +42,9 @@ def prepare_surface(vertices: NDArray[Any], faces: NDArray[Any]) -> Surface:
     """Return a centered analysis surface while retaining its original origin."""
     import numpy as np
 
+    # Trimesh exposes tracking ndarray subclasses. Their hooks otherwise follow
+    # every temporary through the thousands of proximity queries in a scan.
+    vertices, faces = np.asarray(vertices), np.asarray(faces)
     validate_mesh_arrays(vertices, faces, FingerprintBudget())
     try:
         with np.errstate(over="raise", invalid="raise", divide="raise"):
@@ -116,35 +120,12 @@ def sample_surface(surface: Surface, count: int, seed: int) -> FloatArray:
 
 
 def nearest_neighbors(
-    source: FloatArray, target: FloatArray
+    source: FloatArray, target: FloatArray, *, deadline: float | None = None
 ) -> tuple[FloatArray, IntArray]:
-    """Nearest points in blocks of at most 128 × target-count distances.
+    """Convenience lookup for one pair of bounded verification point samples."""
+    from .point_neighbors import PointNeighbors
 
-    The target is capped by the owning operation. Verification samples at most
-    5,000 points; exact vertex equivalence uses the admitted mesh vertex cap.
-    """
-    import numpy as np
-
-    if not len(target):
-        raise GeometryError("empty_target")
-    distances = np.empty(len(source), dtype=np.float64)
-    indices = np.empty(len(source), dtype=np.int64)
-    target_norm = np.einsum("ij,ij->i", target, target)
-    # Bound the distance temporary at 1M float64 cells even for dense meshes.
-    chunk = max(1, min(128, 1_000_000 // len(target)))
-    for start in range(0, len(source), chunk):
-        block = source[start : start + chunk]
-        squared = (
-            np.einsum("ij,ij->i", block, block)[:, None]
-            + target_norm[None, :]
-            - 2 * (block @ target.T)
-        )
-        choices = np.argmin(squared, axis=1)
-        distances[start : start + len(block)] = np.sqrt(
-            np.maximum(squared[np.arange(len(block)), choices], 0)
-        )
-        indices[start : start + len(block)] = choices
-    return distances, indices
+    return PointNeighbors(target, deadline=deadline).query(source, deadline=deadline)
 
 
 def equivalent_triangles(
@@ -154,6 +135,8 @@ def equivalent_triangles(
     scale: float,
     translation: FloatArray,
     tolerance: float,
+    *,
+    deadline: float | None = None,
 ) -> bool:
     """Verify a bijection of vertices and triangle incidence, after alignment.
 
@@ -165,10 +148,12 @@ def equivalent_triangles(
 
     if len(left.vertices) != len(right.vertices) or len(left.faces) != len(right.faces):
         return False
+    check_deadline(deadline)
     target = right.vertices @ rotation * scale + translation
     # Lexicographic order suffices only after demonstrating every positional
     # correspondence. Near ties are handled with a second shifted grid.
     for offset in (0.0, 0.5):
+        check_deadline(deadline)
         a = np.floor(left.vertices / tolerance + offset).astype(np.int64)
         b = np.floor(target / tolerance + offset).astype(np.int64)
         order_a = np.lexsort(a.T[::-1])

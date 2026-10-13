@@ -13,7 +13,7 @@
  * which looks like missing data rather than a stale preference.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CARD_METRIC_STORAGE_KEY,
@@ -50,5 +50,156 @@ describe("readCardMetrics", () => {
       JSON.stringify(["material", "slicer", "not_a_metric"]),
     );
     expect(readCardMetrics()).toEqual(DEFAULT_CARD_METRICS);
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+
+  writeCardMetrics(DEFAULT_CARD_METRICS);
+});
+
+describe("optional card metrics persistence", () => {
+  it.each([{ failure: "property" }, { failure: "getItem" }])(
+    "uses defaults when card metrics storage $failure is blocked",
+    ({ failure }) => {
+      const error = new DOMException("blocked storage", "SecurityError");
+      const spy =
+        failure === "property"
+          ? vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+              throw error;
+            })
+          : vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+              throw error;
+            });
+      try {
+        expect(readCardMetrics()).toEqual(DEFAULT_CARD_METRICS);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
+  it.each([{ failure: "property" }, { failure: "getItem" }])(
+    "retains read card metrics when storage $failure is blocked",
+    ({ failure }) => {
+      const choice: CardMetrics = ["material", "slicer", "file_count"];
+      localStorage.setItem(CARD_METRIC_STORAGE_KEY, JSON.stringify(choice));
+      expect(readCardMetrics()).toEqual(choice);
+      const error = new DOMException("blocked storage", "SecurityError");
+      const spy =
+        failure === "property"
+          ? vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+              throw error;
+            })
+          : vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+              throw error;
+            });
+      try {
+        expect(readCardMetrics()).toEqual(choice);
+      } finally {
+        spy.mockRestore();
+      }
+    },
+  );
+  it.each([{ failure: "property" }, { failure: "setItem" }])(
+    "retains selected card metrics after storage $failure fails",
+    ({ failure }) => {
+      const choice: CardMetrics = ["material", "slicer", "file_count"];
+      writeCardMetrics(DEFAULT_CARD_METRICS);
+      const error = new DOMException("storage quota", "QuotaExceededError");
+      const spy =
+        failure === "property"
+          ? vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+              throw error;
+            })
+          : vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+              throw error;
+            });
+      try {
+        expect(() => writeCardMetrics(choice)).not.toThrow();
+      } finally {
+        spy.mockRestore();
+      }
+      expect(readCardMetrics()).toEqual(choice);
+      expect(readCardMetrics()).toEqual(choice);
+      expect(JSON.parse(localStorage.getItem(CARD_METRIC_STORAGE_KEY)!)).toEqual(
+        DEFAULT_CARD_METRICS,
+      );
+    },
+  );
+  it("snapshots unpersisted card metrics choices", () => {
+    const choice: CardMetrics = ["material", "slicer", "file_count"];
+    const expected = structuredClone(choice);
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("storage quota", "QuotaExceededError");
+    });
+    try {
+      writeCardMetrics(choice);
+    } finally {
+      spy.mockRestore();
+    }
+    choice[0] = "print_time";
+    const result = readCardMetrics();
+    result[1] = "layer_height";
+    expect(readCardMetrics()).toEqual(expected);
+  });
+  it("preserves card metrics serialization errors", () => {
+    const error = new TypeError("invalid preference encoding");
+    const choice: CardMetrics = ["material", "slicer", "file_count"];
+    vi.spyOn(JSON, "stringify").mockImplementationOnce(() => {
+      throw error;
+    });
+    expect(() => writeCardMetrics(choice)).toThrow(error);
+    expect(readCardMetrics()).toEqual(DEFAULT_CARD_METRICS);
+  });
+  it("releases pending card metrics after persistence recovers", () => {
+    const choice: CardMetrics = ["material", "slicer", "file_count"];
+    const external: CardMetrics = ["file_count", "material", "slicer"];
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("storage quota", "QuotaExceededError");
+    });
+    try {
+      writeCardMetrics(choice);
+    } finally {
+      spy.mockRestore();
+    }
+    writeCardMetrics(DEFAULT_CARD_METRICS);
+    localStorage.setItem(CARD_METRIC_STORAGE_KEY, JSON.stringify(external));
+    expect(readCardMetrics()).toEqual(external);
+  });
+});
+
+describe("card metric environment boundaries", () => {
+  it.each([{ slot: 0 }, { slot: 1 }, { slot: 2 }])(
+    "rejects an unknown metric in slot $slot",
+    ({ slot }) => {
+      const stored = ["material", "slicer", "file_count"];
+      stored[slot] = "removed_metric";
+      localStorage.setItem(CARD_METRIC_STORAGE_KEY, JSON.stringify(stored));
+      expect(readCardMetrics()).toEqual(DEFAULT_CARD_METRICS);
+    },
+  );
+  it("reads default card metrics without a browser", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "window")!;
+    Reflect.deleteProperty(globalThis, "window");
+    try {
+      const value = readCardMetrics();
+      expect(value).toEqual(DEFAULT_CARD_METRICS);
+      value[0] = "material";
+      expect(readCardMetrics()).toEqual(DEFAULT_CARD_METRICS);
+    } finally {
+      Object.defineProperty(globalThis, "window", descriptor);
+    }
+  });
+  it("ignores card metric writes without a browser", () => {
+    const stored = localStorage.getItem(CARD_METRIC_STORAGE_KEY);
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "window")!;
+    Reflect.deleteProperty(globalThis, "window");
+    try {
+      expect(() => writeCardMetrics(["material", "slicer", "file_count"])).not.toThrow();
+    } finally {
+      Object.defineProperty(globalThis, "window", descriptor);
+    }
+    expect(localStorage.getItem(CARD_METRIC_STORAGE_KEY)).toBe(stored);
   });
 });

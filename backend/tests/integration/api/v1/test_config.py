@@ -22,10 +22,11 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.core.config import _overlay
-from app.db.models import File, FileType, Model
+from app.db.models import File, FileType, Model, SystemConfig
 from app.modules.administration import runtime_config
 from tests.factories import build_file, build_model
 from tests.integration.conftest import UserHeaders
@@ -754,29 +755,124 @@ class TestMakerWorld:
 
 
 class TestStorageRootEnrollment:
+    @pytest.mark.parametrize("role", ["data", "thumb"], ids=["data", "thumb"])
+    def test_rejects_an_unobserved_root_change(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        tmp_path: Path,
+        role: str,
+        db_session: Session,
+    ) -> None:
+        before = db_session.get(SystemConfig, 1)
+        identity_before = before.storage_identity if before is not None else None
+        reviewed = Path(_overlay[f"{role}_dir"])
+        replacement = tmp_path / f"replacement-{role}"
+        replacement.mkdir()
+        _overlay[f"{role}_dir"] = replacement
+
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": role, "confirm": True, "expected_path": str(reviewed)},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "storage_review_changed"
+        assert not (reviewed / ".printstash-storage-root.json").exists()
+        assert not (replacement / ".printstash-storage-root.json").exists()
+        db_session.expire_all()
+        after = db_session.get(SystemConfig, 1)
+        assert (
+            after.storage_identity if after is not None else None
+        ) == identity_before
+
+    def test_rejects_a_different_path_to_the_same_root(
+        self, client: TestClient, auth_headers: dict[str, str], tmp_path: Path
+    ) -> None:
+        root = Path(_overlay["data_dir"])
+        root.mkdir()
+        alias = tmp_path / "reviewed-alias"
+        alias.symlink_to(root, target_is_directory=True)
+
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": "data", "confirm": True, "expected_path": str(alias)},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "storage_review_changed"
+        assert not (root / ".printstash-storage-root.json").exists()
+
+    def test_rejects_enrollment_for_a_nonlocal_backend(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        _overlay["storage_backend"] = "s3"
+        root = Path(_overlay["data_dir"])
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": "data", "confirm": True, "expected_path": str(root)},
+            headers=auth_headers,
+        )
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"] == "storage_backend_not_local"
+        assert not (root / ".printstash-storage-root.json").exists()
+
+    def test_rejects_member_root_enrollment(
+        self, client: TestClient, user_headers: UserHeaders
+    ) -> None:
+        root = Path(_overlay["data_dir"])
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": "data", "confirm": True, "expected_path": str(root)},
+            headers=user_headers("root-member"),
+        )
+        assert response.status_code == 403, response.text
+        assert not (root / ".printstash-storage-root.json").exists()
+
+    def test_rejects_an_empty_reviewed_path(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        response = client.post(
+            "/api/v1/config/storage-roots/enroll",
+            json={"role": "data", "confirm": True, "expected_path": ""},
+            headers=auth_headers,
+        )
+        assert response.status_code == 422, response.text
+        assert not (
+            Path(_overlay["data_dir"]) / ".printstash-storage-root.json"
+        ).exists()
+
     def test_requires_an_explicit_confirmation(
         self, client: TestClient, auth_headers: dict[str, str]
     ) -> None:
         response = client.post(
             "/api/v1/config/storage-roots/enroll",
-            json={"role": "data"},
+            json={"role": "data", "expected_path": str(_overlay["data_dir"])},
             headers=auth_headers,
         )
 
         assert response.status_code == 400, response.text
         assert response.json()["detail"] == "storage_root_confirmation_required"
 
+    @pytest.mark.parametrize("reviewed", [False, True], ids=["legacy", "reviewed"])
     def test_superuser_can_enroll_an_existing_markerless_root(
         self,
         client: TestClient,
         auth_headers: dict[str, str],
+        reviewed: bool,
     ) -> None:
         root = Path(_overlay["data_dir"])
         root.mkdir(parents=True, exist_ok=True)
 
         response = client.post(
             "/api/v1/config/storage-roots/enroll",
-            json={"role": "data", "confirm": True},
+            json={
+                "role": "data",
+                "confirm": True,
+                **({"expected_path": str(root)} if reviewed else {}),
+            },
             headers=auth_headers,
         )
 
@@ -791,3 +887,150 @@ class TestStorageRootEnrollment:
         )
         assert marker["role"] == "data"
         assert marker["installation"]
+
+
+class TestConfigurationTransaction:
+    @pytest.mark.parametrize(
+        "typed_provider", [False, True], ids=["scalar", "typed-provider"]
+    )
+    def test_rejects_the_entire_patch_when_the_final_database_write_fails(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        db_session: Session,
+        typed_provider: bool,
+    ) -> None:
+        if typed_provider:
+            runtime_config.update_storage_provider(
+                db_session,
+                provider="webdav",
+                raw_config={
+                    "provider": "webdav",
+                    "endpoint_url": "https://dav.example.test",
+                    "username": "example",
+                    "password": "original-test-password",
+                    "root": "models",
+                },
+            )
+        baseline = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={"oidc_client_id": "original", "backup_retention_days": 14},
+        )
+        assert baseline.status_code == 200, baseline.text
+        before = baseline.json()
+        engine = db_session.get_bind()
+        with Session(engine) as initial:
+            row = initial.get(SystemConfig, 1)
+            assert row is not None
+            original_provider = row.storage_provider
+            original_secrets = row.storage_provider_secret_json
+        # Fault at the persistence boundary, after the old handler had already
+        # committed the controls, flags, schedule and currency individually.
+        with engine.begin() as connection:
+            connection.exec_driver_sql("""
+                CREATE TRIGGER reject_config_tail BEFORE UPDATE ON system_config
+                WHEN NEW.oidc_client_id = 'rejected-by-database'
+                BEGIN SELECT RAISE(ABORT, 'configuration_write_rejected'); END
+            """)
+        patch = {
+            "derivatives_mesh_enabled": False,
+            "auto_mark_known_good": False,
+            "external_libraries_enabled": True,
+            "automatic_backups_enabled": True,
+            "automatic_backup_time_utc": "03:15",
+            "manual_local_backup_enabled": False,
+            "automatic_local_backup_enabled": False,
+            "currency": "EUR",
+            "backup_retention_days": 7,
+            "oidc_client_id": "rejected-by-database",
+        }
+        if typed_provider:
+            patch.update(
+                {
+                    "storage_provider": "webdav",
+                    "storage_provider_config": {
+                        "provider": "webdav",
+                        "endpoint_url": "https://dav.example.test",
+                        "username": "example",
+                        "password": "test-only-password",
+                        "root": "models",
+                    },
+                }
+            )
+        try:
+            with pytest.raises(IntegrityError, match="configuration_write_rejected"):
+                client.put(
+                    "/api/v1/config",
+                    headers=auth_headers,
+                    json=patch,
+                )
+        finally:
+            with engine.begin() as connection:
+                connection.exec_driver_sql("DROP TRIGGER reject_config_tail")
+
+        current = client.get("/api/v1/config", headers=auth_headers)
+        assert current.status_code == 200, current.text
+        assert current.json() == before
+        with Session(engine) as restarted:
+            row = restarted.get(SystemConfig, 1)
+            assert row is not None
+            assert row.oidc_client_id == "original"
+            assert row.backup_retention_days == 14
+            assert row.auto_mark_known_good is True
+            assert row.external_libraries_enabled is False
+            assert row.automatic_backups_enabled is False
+            assert row.currency is None
+            assert row.storage_provider == original_provider
+            assert row.storage_provider_secret_json == original_secrets
+
+    def test_publishes_a_successfully_committed_mixed_patch(
+        self, client: TestClient, auth_headers: dict[str, str]
+    ) -> None:
+        patch = {
+            "derivatives_mesh_enabled": False,
+            "auto_mark_known_good": False,
+            "external_libraries_enabled": True,
+            "automatic_backups_enabled": True,
+            "automatic_backup_time_utc": "03:15",
+            "manual_local_backup_enabled": False,
+            "automatic_local_backup_enabled": False,
+            "currency": "EUR",
+            "backup_retention_days": 7,
+            "oidc_client_id": "accepted-client",
+        }
+        saved = client.put("/api/v1/config", headers=auth_headers, json=patch)
+        assert saved.status_code == 200, saved.text
+        current = client.get("/api/v1/config", headers=auth_headers)
+        assert current.status_code == 200, current.text
+        for field, value in patch.items():
+            assert saved.json()[field] == value
+            assert current.json()[field] == value
+
+    def test_clears_runtime_overrides_in_a_mixed_patch(
+        self, client: TestClient, auth_headers: dict[str, str], db_session: Session
+    ) -> None:
+        original = client.get("/api/v1/config", headers=auth_headers).json()
+        saved = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={"backup_retention_days": 7, "oidc_client_id": "temporary"},
+        )
+        assert saved.status_code == 200, saved.text
+        cleared = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={
+                "auto_mark_known_good": False,
+                "backup_retention_days": -1,
+                "oidc_client_id": "",
+            },
+        )
+        assert cleared.status_code == 200, cleared.text
+        assert cleared.json()["auto_mark_known_good"] is False
+        for field in ("backup_retention_days", "oidc_client_id"):
+            assert cleared.json()[field] == original[field]
+        row = db_session.get(SystemConfig, 1)
+        assert row is not None
+        assert row.backup_retention_days is None
+        assert row.oidc_client_id is None

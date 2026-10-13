@@ -1,3 +1,4 @@
+import type { EditingBase } from "@/types/editing";
 import type { ModelListItem } from "@/types/models";
 
 export type SearchSubjectType = "model" | "collection" | "multipart_model" | "document";
@@ -93,7 +94,7 @@ export interface EndpointProposal {
   headers?: Record<string, string>;
   inherit_credentials_from_id?: number;
 }
-export interface SearchSettingsRead {
+export interface SearchSettingsRead extends EditingBase {
   settings: SearchSettings;
   endpoints: InferenceEndpoint[];
   environment_endpoints: ("embedding" | "chat")[];

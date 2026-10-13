@@ -13,12 +13,16 @@ from app.modules.work.submission import PRIORITY_RANK, dedupe_key, execution_id
 
 class TestExecutionId:
     def test_is_unique_per_attempt(self) -> None:
-        assert execution_id("job-1", 1) != execution_id("job-1", 2)
+        assert execution_id("job-1", 1, "epoch") != execution_id("job-1", 2, "epoch")
 
     def test_is_stable_for_one_attempt(self) -> None:
         # A crash between submitting and recording the attempt re-derives the
         # same id, so the engine returns the execution it already has.
-        assert execution_id("job-1", 2) == execution_id("job-1", 2) == "job-1:2"
+        assert (
+            execution_id("job-1", 2, "epoch")
+            == execution_id("job-1", 2, "epoch")
+            == "job-1:epoch:2"
+        )
 
 
 class TestDedupeKey:

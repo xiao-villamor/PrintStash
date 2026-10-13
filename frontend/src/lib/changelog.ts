@@ -22,6 +22,25 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "0.14.0",
+    date: "Sep 2026",
+    changes: [
+      "Compose installs now use one persistent /data volume, with hard-linked imports when staging shares the Vault mount; existing five-volume installs need the documented data move before upgrading",
+      "Background work now runs as durable, restart-recoverable Jobs with progress, cancellation, retry, worker controls, and live updates; several older task and backup API endpoints have changed",
+      "Model Families have been removed while Models, files, Revisions, print history, and Multipart Models remain independent; Family-only metadata does not survive the upgrade",
+      "AI Search adds text indexing and optional local image and geometry search, with guided setup, bounded inference, and faster indexing and retrieval",
+      "Similar Models adds opt-in geometry analysis, resumable scans, comparison review, and verified part or plate matches for Multipart Models",
+      "ZIP imports can be prepared in the background for file-by-file review, with clearer progress and preview status",
+      "Storage adds verified Vault migration, scheduled audits, capacity headroom, usage history, provider presets, and an optional bounded remote Artifact cache",
+      "First-run setup now guides the administrator through account creation, storage checks, and a first Model, while managed deployments can provision the first administrator through environment settings",
+      "Multipart selection and builds now support large libraries, part quantities, chosen Revisions, and tracked usable output",
+      "BGCODE previews use a bounded official converter, and authorized S3 Artifact downloads can use short-lived redirects through the canonical download endpoint",
+      "File staging now falls back safely on Unraid SHFS and other filesystems without hard links; 3MF imports and previews bound repeated project parts to avoid exhausting memory",
+      "Storage, Maintenance, Background work, AI Search, library navigation, and mobile layouts now present clearer controls and progress",
+      "The browser extension now handles multi-file capture and permission requests more reliably, with clearer pairing and transfer errors",
+    ],
+  },
+  {
     version: "0.13.0",
     date: "Sep 2026",
     changes: [

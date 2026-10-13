@@ -1,45 +1,84 @@
 "use client";
 
+import { useLibraryNavigationReads } from "@/features/library/navigation-reads";
+import { useTaxonomyCommands } from "@/features/library/taxonomy";
+
+import { LibraryBatchRecovery } from "@/components/library-batch-recovery";
+
+import { useLibraryReadingPosition } from "@/features/library/reading-position";
+import { LibraryItemLink } from "@/features/library/navigation";
+import { useModelOpenIntent } from "@/features/library/model-detail";
+import { useLibraryEntry, type LibraryEntry } from "@/features/library/navigation-state";
+import {
+  moveLibraryModels,
+  tagLibraryModels,
+  type LibraryEditReceipt,
+  type LibraryBatchOutcome,
+} from "@/features/library/batch-edits";
+import { useSavedViews, type SavedViewCommand } from "@/features/library/saved-views";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+
+import {
+  libraryBrowseOptions,
+  libraryBrowseKeys,
+  useLibraryBrowse,
+} from "@/features/library/browse";
+import { useLibraryThumbnails } from "@/features/library/thumbnails";
+import { useLibraryAuthority } from "@/features/library/authority";
+import { listLibraryPage } from "@/lib/api/library-browse";
+
 import { historyFilters, historyKeys } from "@/lib/search-filters";
+import {
+  readLibraryFilters,
+  writeLibraryFilters,
+  effectiveLibraryView,
+  sameLibraryFilters,
+  structuredLibraryFilterKeys as STRUCTURED_FILTER_KEYS,
+  type StructuredLibraryFilterKey as StructuredFilterKey,
+} from "@/features/library/filters";
 
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 
 import { knownUiText, uiText, type MessageKey } from "@/lib/locale";
-import { getErrorMessage } from "@/lib/errors";
+import { getErrorMessage, parseApiError, userMessage } from "@/lib/errors";
 import { filterValueText } from "@/lib/filter-labels";
-import { collectionDisplayPath } from "@/lib/collection-display";
 
 import { useUiLocale } from "@/lib/i18n";
+import { useIntentPrefetch } from "@/lib/use-intent-prefetch";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 
-import { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import {
-  ArtifactFileType,
+  CollectionNodeRead,
   CollectionRead,
-  FileRevisionStatus,
+  CollectionPage,
   ModelBatchResult,
   ModelListItem,
   ModelSort,
   MultipartModelListItem,
-  PrintJobState,
   PrinterRead,
   SavedViewRead,
   TagRead,
 } from "@/types";
 import { ModelCard } from "@/components/model-card";
-import { ModelTagsDialog } from "@/components/model-tags-dialog";
-import { MODEL_DND_MIME } from "@/lib/model-dnd";
+import { DeferredDialog } from "@/components/deferred-dialog";
+import { lazyImport } from "@/lib/lazy-component";
+import { useModelMoves } from "@/features/library/moves";
+import { ModelMoveReview } from "@/components/model-move-review";
+import { MODEL_DND_MIME, captureModelDrag, readModelDrag, type ModelDrag } from "@/lib/model-dnd";
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
-import { MultipartModelCard, NewMultipartModelModal } from "@/components/multipart-model-browser";
+import { MultipartModelCard } from "@/components/multipart-model-card";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { DocumentBrowser } from "@/components/document-browser";
-import { FilterSidebar, type LibraryViewMode } from "@/components/filter-sidebar";
+import { FilterSidebar } from "@/components/filter-sidebar";
+import { readLibraryLocation, type LibraryViewMode } from "@/features/library/url";
 import { MobileFilterDrawer } from "@/components/mobile-filter-drawer";
 import { StructuredFilters } from "@/components/structured-filters";
-import { UploadModal, UploadMode } from "@/components/upload-modal";
+import type { UploadMode } from "@/components/upload-modal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
@@ -70,23 +109,13 @@ import {
   ChevronDown,
   MoreHorizontal,
   Boxes,
+  ScanSearch,
 } from "lucide-react";
 import {
-  createCollection,
-  updateModel,
-  moveCollection,
-  renameCollection,
-  deleteCollection,
-  batchMoveModels,
-  batchTagModels,
+  listCollectionChildren,
+  searchCollections,
   batchDeleteModels,
-  createSavedView,
-  updateSavedView,
-  deleteSavedView,
-  listSavedViews,
-  listModels,
   restoreModel,
-  replaceCollectionTags,
 } from "@/lib/api";
 import {
   isMeshFile,
@@ -97,12 +126,11 @@ import {
   BulkItem,
 } from "@/lib/bulk-upload";
 import {
-  useCollections,
+  useCollectionReadme,
+  useCollectionChildren,
+  useCollectionLookup,
+  useCollectionSearch,
   useModelFacets,
-  useLibraryPrefetch,
-  useModelList,
-  useMultipartModels,
-  useOutlinerModels,
   usePrinters,
   useTags,
   type ModelListFilters,
@@ -114,19 +142,23 @@ import { useAuth } from "@/lib/auth-context";
 import { Link } from "@/lib/link";
 import { timeAgo } from "@/lib/format";
 import { rememberLastCollection, readLastView, rememberLastView } from "@/lib/last-collection";
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
-import { useMediaQuery } from "@/lib/use-media-query";
+import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import { useStartupThumbnails } from "@/lib/use-startup-thumbnails";
 import { useThumbnailArrivals } from "@/lib/use-thumbnail-arrivals";
 import { cn } from "@/lib/utils";
 import { TabBar } from "@/components/ui/tabs";
 
-function viewFilterSignature(filters: SavedViewRead["filters"]): string {
-  return JSON.stringify(
-    Object.fromEntries(
-      Object.entries(filters).sort(([left], [right]) => left.localeCompare(right)),
-    ),
-  );
-}
+const UploadModal = lazyImport(() =>
+  import("@/components/upload-modal").then((module) => ({ default: module.UploadModal })),
+);
+const ModelTagsDialog = lazyImport(() =>
+  import("@/components/model-tags-dialog").then((module) => ({ default: module.ModelTagsDialog })),
+);
+const NewMultipartModelModal = lazyImport(() =>
+  import("@/components/new-multipart-model-modal").then((module) => ({
+    default: module.NewMultipartModelModal,
+  })),
+);
 
 type SortKey = ModelSort;
 type ViewMode = "grid" | "list";
@@ -134,7 +166,9 @@ type LibraryItem =
   | { kind: "model"; value: ModelListItem }
   | { kind: "multipart"; value: MultipartModelListItem };
 
-const PAGE_SIZE = 60;
+// Fill the initial viewport without projecting/mounting sixty cards at once.
+// Later pages keep the same bound and use the server cursor.
+const PAGE_SIZE = 24;
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   {
     value: "relevance",
@@ -197,25 +231,6 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
     },
   },
 ];
-
-/** Sort the two card types as one library whenever they share a meaningful key. */
-function sortLibraryItems(items: LibraryItem[], sortKey: SortKey): LibraryItem[] {
-  return [...items].sort((left, right) => {
-    if (sortKey === "name-asc" || sortKey === "name-desc") {
-      const order = left.value.name.localeCompare(right.value.name);
-      return sortKey === "name-asc" ? order : -order;
-    }
-    if (sortKey === "date-asc" || sortKey === "date-desc") {
-      const order = Date.parse(left.value.updated_at) - Date.parse(right.value.updated_at);
-      return sortKey === "date-asc" ? order : -order;
-    }
-    // Print-result sorts have no aggregate equivalent yet. Preserve the API's
-    // Model order and put sets after it instead of implying a fabricated score.
-    if (left.kind !== right.kind) return left.kind === "model" ? -1 : 1;
-    if (left.kind === "model") return 0;
-    return Date.parse(right.value.updated_at) - Date.parse(left.value.updated_at);
-  });
-}
 
 type MenuTriggerSize = "xs" | "sm";
 type MenuTriggerVariant = "outline" | "ghost";
@@ -401,154 +416,89 @@ function DisplayMenu({
   );
 }
 
-// Every model filter that lives in the URL as a repeated query parameter.
-const STRUCTURED_FILTER_KEYS = [
-  "file_type",
-  "material_type",
-  "slicer_name",
-  "printer_model",
-  "revision_status",
-  "print_outcome",
-  "storage",
-  "printed",
-  "has_similar_candidates",
-] as const;
-type StructuredFilterKey = (typeof STRUCTURED_FILTER_KEYS)[number];
-
+/** Bare paths, as builds before #295 wrote them; read when nothing newer is stored. */
 const RECENT_FOLDERS_KEY = "ps-recent-folders";
+const RECENT_FOLDERS_LABELLED_KEY = "ps-recent-folders-labelled";
 const RECENT_FOLDERS_LIMIT = 6;
 const LIBRARY_VIEW_KEY = "ps-vault-library-view";
-// A signed-out session has no saved views; a shared constant keeps the derived
-// list referentially stable across renders.
-const NO_SAVED_VIEWS: SavedViewRead[] = [];
-
-// The values each enum-valued filter accepts. The URL is user-editable, so a
-// `?file_type=nonsense` has to be dropped before it reaches a query.
-type StorageKind = NonNullable<ModelListFilters["storage"]>[number];
-const ARTIFACT_FILE_TYPES: readonly ArtifactFileType[] = [
-  "stl",
-  "3mf",
-  "gcode",
-  "obj",
-  "step",
-  "dxf",
-];
-const FILE_REVISION_STATUSES: readonly FileRevisionStatus[] = [
-  "known_good",
-  "needs_test",
-  "failed",
-  "archived",
-];
-const PRINT_JOB_STATES: readonly PrintJobState[] = [
-  "queued",
-  "uploading",
-  "started",
-  "printing",
-  "paused",
-  "completed",
-  "cancelled",
-  "failed",
-];
-const STORAGE_KINDS: readonly StorageKind[] = ["vault", "external"];
-
-/** Keep the URL values the API recognises, in the order the URL listed them. */
-function parseFilterValues<T extends string>(values: string[], allowed: readonly T[]): T[] {
-  const parsed: T[] = [];
-  for (const value of values) {
-    const match = allowed.find((option) => option === value);
-    if (match !== undefined) parsed.push(match);
-  }
-  return parsed;
-}
 
 function readVaultPreference(key: string): string | null {
   if (!("window" in globalThis)) return null;
   return localStorage.getItem(key);
 }
 
-/**
- * The recent-folder list is a UI convenience written by this component. Paths are
- * re-checked against the live collection list before they're offered (see
- * `availableRecentFolders`), so decoding only has to survive edited JSON.
- */
-function readRecentFolders(): string[] {
-  const raw = readVaultPreference(RECENT_FOLDERS_KEY);
+/** A folder visited recently: its path to navigate to, its names to show. */
+interface RecentFolder {
+  path: string;
+  label: string;
+}
+
+/** Until a folder's names load, it is shown by the last part of its path. */
+function provisionalLabel(path: string): string {
+  return path.split("/").at(-1) ?? path;
+}
+
+/** Decode stored JSON that should be an array, or nothing if it is not one. */
+function readStoredArray(raw: string | null): readonly StoredEntry[] {
   if (raw === null) return [];
   try {
-    const decoded: unknown = JSON.parse(raw);
-    return Array.isArray(decoded) ? decoded.map((entry) => String(entry)) : [];
+    // `JSON.parse` is `any`; the annotation is the boundary, checked just below.
+    const decoded: StoredEntry = JSON.parse(raw);
+    return Array.isArray(decoded) ? decoded : [];
   } catch {
     return [];
   }
 }
 
-function writeRecentFolders(paths: string[]): void {
+/** A value JSON can hold: what edited or older storage may contain. */
+type StoredEntry =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly StoredEntry[]
+  | { readonly [key: string]: StoredEntry };
+
+/**
+ * The recent-folder list is a UI convenience written by this component, kept as
+ * `[path, label]` pairs so the menu needs no collection list to name them.
+ * Builds before labels were kept wrote bare paths under the older key; those
+ * are read once, until the next write, with a provisional label.
+ */
+function readRecentFolders(): RecentFolder[] {
+  const labelled = readVaultPreference(RECENT_FOLDERS_LABELLED_KEY);
+  if (labelled !== null) {
+    return readStoredArray(labelled).flatMap((entry) =>
+      Array.isArray(entry) && entry.length === 2
+        ? [{ path: String(entry[0]), label: String(entry[1]) }]
+        : [],
+    );
+  }
+  return readStoredArray(readVaultPreference(RECENT_FOLDERS_KEY)).map((entry) => ({
+    path: String(entry),
+    label: provisionalLabel(String(entry)),
+  }));
+}
+
+function writeRecentFolders(folders: RecentFolder[]): void {
   if (!("window" in globalThis)) return;
-  localStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(paths));
-}
-
-/** The remembered sort, resolved back to one of the options we render. */
-function readSortKey(): SortKey {
-  const stored = readVaultPreference("ps-vault-sort");
-  return SORT_OPTIONS.find((option) => option.value === stored)?.value ?? "date-desc";
-}
-
-/** Decode the persisted Library view without trusting browser-owned storage. */
-function readLibraryView(): LibraryViewMode | null {
-  const stored = readVaultPreference(LIBRARY_VIEW_KEY);
-  if (
-    stored === "organized" ||
-    stored === "all" ||
-    stored === "multipart" ||
-    stored === "components"
-  ) {
-    return stored;
-  }
-  return null;
-}
-
-function childCollections(
-  collections: CollectionRead[],
-  selectedPath: string | null,
-): CollectionRead[] {
-  const selected = selectedPath ? collections.find((c) => c.path === selectedPath) : null;
-  const parentId = selectedPath ? (selected?.id ?? -1) : null;
-  return collections
-    .filter((c) => c.parent_id === parentId)
-    .sort((a, b) => a.name.localeCompare(b.name));
-}
-
-function collectionBreadcrumbs(
-  collections: CollectionRead[],
-  selectedPath: string | null,
-): CollectionRead[] {
-  if (!selectedPath) return [];
-  const byPath = new Map(collections.map((c) => [c.path, c]));
-  const parts = selectedPath.split("/");
-  const crumbs: CollectionRead[] = [];
-  for (let i = 1; i <= parts.length; i += 1) {
-    const c = byPath.get(parts.slice(0, i).join("/"));
-    if (c) crumbs.push(c);
-  }
-  return crumbs;
-}
-
-function selectedCollectionName(
-  collections: CollectionRead[],
-  selectedPath: string | null,
-): string | null {
-  if (!selectedPath) return null;
-  const byPath = new Map(collections.map((c) => [c.path, c]));
-  return byPath.get(selectedPath)?.name ?? null;
+  localStorage.setItem(
+    RECENT_FOLDERS_LABELLED_KEY,
+    JSON.stringify(folders.map((folder) => [folder.path, folder.label])),
+  );
 }
 
 function canWriteCollection(collection: CollectionRead | null | undefined): boolean {
   return collection?.effective_role === "edit" || collection?.effective_role === "admin";
 }
 
+type LibraryRefreshState = { entry: LibraryEntry } & (
+  | { status: "pending" }
+  | { status: "failed" | "denied"; error: string }
+);
+
 export interface BrowserInitialData {
   models: ModelListItem[];
-  collections: CollectionRead[];
   tags: TagRead[];
   printers: PrinterRead[];
 }
@@ -560,62 +510,131 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const auth = useRequireAuth();
-  const { user } = useAuth();
-  const desktopOutliner = useMediaQuery("(min-width: 768px)");
+  const { user, refresh: refreshAuth } = useAuth();
+  const {
+    createCollection,
+    moveCollection,
+    renameCollection,
+    deleteCollection,
+    replaceCollectionTags,
+  } = useTaxonomyCommands();
+  const startup = useLibraryStartup();
+  const settleStartup = startup.settle;
+  const filtersEnabled = startup.canLoad("filters");
+  const savedViewsEnabled = startup.canLoad("saved-views");
   // Shared taxonomy facets from the TanStack Query cache: one cache entry shared
   // with the detail/upload views, revalidated on focus, and refetched after any
   // collection/tag mutation (the api layer invalidates the query cache).
-  const collectionsQuery = useCollections();
-  const tagsQuery = useTags();
-  // Stable empty-array fallback: `data ?? []` would allocate a new array every
-  // render, which cascaded into the useMemo hooks below re-running on every
-  // render even when the underlying query data hadn't changed.
-  const collections = useMemo(() => collectionsQuery.data ?? [], [collectionsQuery.data]);
+  // Collections are read a level, a lookup or a search at a time (#295); tags
+  // are one small list shared with the detail/upload views.
+  const tagsQuery = useTags({ enabled: filtersEnabled });
   const tags = tagsQuery.data ?? [];
   // Printers (superuser-only filter) share the same cache as the printers page
   // and send-to dialog; gated so non-admins don't fetch a list they can't use.
-  const printers = usePrinters({ enabled: !!user?.is_superuser }).data ?? initial?.printers ?? [];
+  const printers =
+    usePrinters({ enabled: filtersEnabled && !!user?.is_superuser }).data ??
+    initial?.printers ??
+    [];
   const filterQuery = searchParams.toString();
-  const selectedTags = useMemo(() => new URLSearchParams(filterQuery).getAll("tag"), [filterQuery]);
-  const selectedPrinterId = searchParams.get("printer_id")
-    ? Number(searchParams.get("printer_id"))
-    : null;
-  const rawPresence = searchParams.get("printer_presence");
-  const selectedPrinterPresence =
-    rawPresence === "any" || rawPresence === "none" ? rawPresence : null;
-  const favoritesOnly = searchParams.get("favorites") === "true";
   function setSelectedTags(value: string[]) {
     const params = new URLSearchParams(searchParams.toString());
     const tags = value;
     params.delete("tag");
     tags.forEach((tag) => params.append("tag", tag));
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    router.replace(params.size ? `/?${params}` : "/");
   }
   function setSelectedPrinterId(value: number | null) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("printer_presence");
     if (value !== null) params.set("printer_id", String(value));
     else params.delete("printer_id");
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    router.replace(params.size ? `/?${params}` : "/");
   }
   function setSelectedPrinterPresence(value: "any" | "none" | null) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("printer_id");
     if (value !== null) params.set("printer_presence", value);
     else params.delete("printer_presence");
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    router.replace(params.size ? `/?${params}` : "/");
   }
-  const [loadedSavedViews, setLoadedSavedViews] = useState<SavedViewRead[]>([]);
-  // Saved views belong to an account, so a signed-out session simply has none.
-  const savedViews = auth.isAuthenticated ? loadedSavedViews : NO_SAVED_VIEWS;
-  const [activeSavedViewId, setActiveSavedViewId] = useState<number | null>(null);
+  const savedViewsOwner = useSavedViews(savedViewsEnabled);
+  const savedViews = savedViewsOwner.views;
+  const [savedViewSelection, setSavedViewSelection] = useState<{
+    session: number;
+    id: number;
+  } | null>(null);
+  const activeSavedViewId =
+    savedViewSelection?.session === savedViewsOwner.session ? savedViewSelection.id : null;
+  function setActiveSavedViewId(id: number | null) {
+    setSavedViewSelection(id === null ? null : { session: savedViewsOwner.session, id });
+  }
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   const [saveViewName, setSaveViewName] = useState("");
   const [saveViewBusy, setSaveViewBusy] = useState(false);
+  const [saveViewSession, setSaveViewSession] = useState(savedViewsOwner.session);
+  const saveViewRevision = useRef(0);
+  function openSaveView() {
+    saveViewRevision.current += 1;
+    setSaveViewSession(savedViewsOwner.session);
+    setSaveViewName("");
+    setSaveViewBusy(false);
+    setSaveViewOpen(true);
+  }
+  const savedViewReadState = savedViewsOwner.query.isError
+    ? {
+        status: "error" as const,
+        retry: () => {
+          void savedViewsOwner.query.refetch();
+        },
+      }
+    : { status: savedViewsOwner.query.isPending ? ("loading" as const) : ("ready" as const) };
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
     readVaultPreference("ps-vault-view") === "list" ? "list" : "grid",
   );
-  const [sortKey, setSortKey] = useState<SortKey>(readSortKey);
+  const [initialLibraryPreferences] = useState(() => ({
+    view: readVaultPreference(LIBRARY_VIEW_KEY),
+    sort: readVaultPreference("ps-vault-sort"),
+  }));
+  const [initialLibrarySection] = useState<"models" | "docs">(() =>
+    readLastView() === "docs" ? "docs" : "models",
+  );
+  const libraryLocation = useMemo(
+    () =>
+      readLibraryLocation(
+        new URLSearchParams(filterQuery),
+        initialLibraryPreferences,
+        initialLibrarySection,
+      ),
+    [filterQuery, initialLibraryPreferences, initialLibrarySection],
+  );
+  const { view: libraryView, sort: sortKey, section: docView } = libraryLocation;
+  const canViewPrinters = !!user?.is_superuser;
+  const libraryFilters = useMemo(
+    () =>
+      readLibraryFilters(
+        new URLSearchParams(libraryLocation.href.split("?")[1]),
+        libraryLocation,
+        canViewPrinters,
+      ),
+    [libraryLocation, canViewPrinters],
+  );
+  const { filters: currentFilters, structured, baseFilters } = libraryFilters;
+  const selectedTags = currentFilters.tag;
+  const selectedPrinterId = currentFilters.printer_id;
+  const selectedPrinterPresence = currentFilters.printer_presence;
+  const favoritesOnly = currentFilters.favorites;
+  const canonicalLibraryHref = `/?${libraryFilters.params}`;
+  const currentLocationHref = searchParams.size ? `/?${searchParams}` : "/";
+  useEffect(() => {
+    if (currentLocationHref !== canonicalLibraryHref) router.replace(canonicalLibraryHref);
+  }, [currentLocationHref, canonicalLibraryHref, router]);
+  useEffect(() => {
+    if (
+      initialLibraryPreferences.view === "organized" ||
+      initialLibraryPreferences.view === "components"
+    )
+      localStorage.setItem(LIBRARY_VIEW_KEY, "all");
+  }, [initialLibraryPreferences.view]);
   const [sortOpen, setSortOpen] = useState(false);
   const [displayOpen, setDisplayOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -624,28 +643,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [compact, setCompact] = useState(
     () => readVaultPreference("ps-vault-density") === "compact",
   );
-  const [recentFolders, setRecentFolders] = useState<string[]>(readRecentFolders);
+  const [recentFolders, setRecentFolders] = useState<RecentFolder[]>(readRecentFolders);
   const [recentFoldersOpen, setRecentFoldersOpen] = useState(false);
-  // Seed from the URL (`?v=docs`), falling back to the remembered tab, so
-  // returning from a document (Back or the logo) lands on the Documents tab
-  // instead of resetting to Models.
-  const requestedVaultView = searchParams.get("v");
-  const initialVaultView = requestedVaultView === "docs" ? "docs" : readLastView();
-  const [docView, setDocView] = useState<"models" | "docs">(
-    initialVaultView === "docs" ? "docs" : "models",
-  );
-  const requestedLibraryView = searchParams.get("type");
-  const [libraryView, setLibraryView] = useState<LibraryViewMode>(() => {
-    if (
-      requestedLibraryView === "all" ||
-      requestedLibraryView === "multipart" ||
-      requestedLibraryView === "components"
-    ) {
-      return requestedLibraryView;
-    }
-    if (requestedVaultView === "multipart") return "multipart";
-    return readLibraryView() ?? "all";
-  });
   const [multipartCreateOpen, setMultipartCreateOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [tagTarget, setTagTarget] = useState<ModelListItem | null>(null);
@@ -739,35 +738,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setUploadOpen(true);
   }
 
-  const facetsLoading = collectionsQuery.isLoading || tagsQuery.isLoading;
   const [isCreatingCollection, setIsCreatingCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
   const { open: filterDrawerOpen, openDrawer, closeDrawer } = useMobileFilterDrawer();
-
-  useEffect(() => {
-    function restoreFiltersFromHistory() {
-      const params = new URLSearchParams(window.location.search);
-      const nextLibraryView = params.get("type");
-      setLibraryView(
-        nextLibraryView === "all" ||
-          nextLibraryView === "multipart" ||
-          nextLibraryView === "components"
-          ? nextLibraryView
-          : params.get("v") === "multipart"
-            ? "multipart"
-            : "organized",
-      );
-    }
-    window.addEventListener("popstate", restoreFiltersFromHistory);
-    return () => window.removeEventListener("popstate", restoreFiltersFromHistory);
-  }, []);
-
-  useEffect(() => {
-    if (!auth.isAuthenticated) return;
-    listSavedViews()
-      .then(setLoadedSavedViews)
-      .catch(() => setLoadedSavedViews([]));
-  }, [auth.isAuthenticated]);
 
   // Collection selection lives in the URL (`?c=<path>`) so it resets when the
   // user navigates away (e.g. to Settings) and clicks "Vault" again — that link
@@ -775,19 +748,20 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // mirroring into state) means a folder switch just re-keys the model query;
   // `keepPreviousData` holds the old cards on screen until the new page lands, so
   // there's no manual clearing or loading flash.
-  const selectedCollection = searchParams.get("c") || null;
+  const selectedCollection = currentFilters.collection;
   // Entering a folder pushes it onto the recent list on the render that first
   // sees the new `?c=`, so the list is never a navigation behind the URL.
   const [recordedCollection, setRecordedCollection] = useState<string | null>(null);
   if (recordedCollection !== selectedCollection) {
     setRecordedCollection(selectedCollection);
     if (selectedCollection !== null)
-      setRecentFolders((current) =>
-        [selectedCollection, ...current.filter((item) => item !== selectedCollection)].slice(
-          0,
-          RECENT_FOLDERS_LIMIT,
-        ),
-      );
+      setRecentFolders((current) => {
+        const known = current.find((item) => item.path === selectedCollection);
+        return [
+          known ?? { path: selectedCollection, label: provisionalLabel(selectedCollection) },
+          ...current.filter((item) => item.path !== selectedCollection),
+        ].slice(0, RECENT_FOLDERS_LIMIT);
+      });
   }
 
   useEffect(() => {
@@ -806,26 +780,32 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     rememberLastView(docView);
   }, [docView]);
 
+  const startNavigationReads = useLibraryNavigationReads();
   function handleCollectionChange(path: string | null) {
     if (path === selectedCollection) return;
-    setSelectedIds(new Set());
+    startNavigationReads(path, {
+      ...folderModelFilters(path),
+      view: libraryView,
+      limit: PAGE_SIZE,
+      sort: sortKey,
+    });
+    // An already empty selection must not render the departing grid urgently
+    // before Router can commit the destination and start its critical reads.
+    setSelectedIds((current) => (current.size === 0 ? current : new Set()));
     const params = new URLSearchParams(searchParams.toString());
     if (path) params.set("c", path);
     else params.delete("c");
     const qs = params.toString();
-    router.push(qs ? `/?${qs}` : "/", { scroll: false });
+    router.push(qs ? `/?${qs}` : "/");
   }
 
   function handleLibraryViewChange(view: LibraryViewMode) {
-    setLibraryView(view);
     localStorage.setItem(LIBRARY_VIEW_KEY, view);
-    setDocView("models");
     setSelectedIds(new Set());
     const params = new URLSearchParams(searchParams.toString());
-    params.delete("v");
-    if (view === "organized") params.delete("type");
-    else params.set("type", view);
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    params.set("v", "models");
+    params.set("type", view);
+    router.replace(params.size ? `/?${params}` : "/");
   }
 
   useEffect(() => {
@@ -833,65 +813,21 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("upload");
     const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+    router.replace(qs ? `/?${qs}` : "/");
   }, [uploadRequested, searchParams, router]);
 
   const query = searchParams.get("q") ?? "";
-  const searchQuery = query.trim() || undefined;
-  const canViewPrinters = !!user?.is_superuser;
+  const searchQuery = currentFilters.q ?? undefined;
   const queryClient = useQueryClient();
-  // Raw URL values, one entry per filter key; `satisfies` makes a missing key a
-  // type error instead of a silently absent filter.
-  const structured = {
-    file_type: searchParams.getAll("file_type"),
-    material_type: searchParams.getAll("material_type"),
-    slicer_name: searchParams.getAll("slicer_name"),
-    printer_model: searchParams.getAll("printer_model"),
-    revision_status: searchParams.getAll("revision_status"),
-    print_outcome: searchParams.getAll("print_outcome"),
-    storage: searchParams.getAll("storage"),
-    printed: searchParams.getAll("printed"),
-    has_similar_candidates: searchParams.getAll("has_similar_candidates"),
-  } satisfies Record<StructuredFilterKey, string[]>;
-  // The enum-valued filters, parsed down to the values the API accepts.
-  const fileTypes = parseFilterValues(structured.file_type, ARTIFACT_FILE_TYPES);
-  const revisionStatuses = parseFilterValues(structured.revision_status, FILE_REVISION_STATUSES);
-  const printOutcomes = parseFilterValues(structured.print_outcome, PRINT_JOB_STATES);
-  const storageKinds = parseFilterValues(structured.storage, STORAGE_KINDS);
 
   function setStructuredFilter(key: StructuredFilterKey, values: string[]) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete(key);
     values.forEach((value) => params.append(key, value));
     const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+    router.replace(qs ? `/?${qs}` : "/");
   }
 
-  // Filters shared by the grid + outliner queries; only the search query and
-  // pagination differ between them.
-  const baseFilters: ModelListFilters = {
-    ...historyFilters(searchParams),
-    tag: selectedTags.length ? selectedTags : undefined,
-    printer_id: canViewPrinters ? (selectedPrinterId ?? undefined) : undefined,
-    printer_presence:
-      canViewPrinters && selectedPrinterId === null
-        ? (selectedPrinterPresence ?? undefined)
-        : undefined,
-    favorites: favoritesOnly || undefined,
-    file_type: fileTypes,
-    material_type: structured.material_type,
-    slicer_name: structured.slicer_name,
-    printer_model: structured.printer_model,
-    revision_status: revisionStatuses,
-    print_outcome: printOutcomes,
-    storage: storageKinds,
-    printed: structured.printed[0] ? structured.printed[0] === "yes" : undefined,
-    has_similar_candidates: structured.has_similar_candidates[0]
-      ? structured.has_similar_candidates[0] === "yes"
-      : undefined,
-    uploaded_after: searchParams.get("uploaded_after") || undefined,
-    uploaded_before: searchParams.get("uploaded_before") || undefined,
-  };
   // One builder per folder-scoped query, shared by the live queries and the
   // hover prefetch so a warmed folder fills exactly the entries it will read.
   // They default to the current folder rather than taking it as an argument:
@@ -907,124 +843,61 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     direct: !searchQuery,
     q: searchQuery,
   });
-  const folderMultipartFilters = (collection: string | null = selectedCollection) => ({
-    collection: collection ?? undefined,
-    direct: !searchQuery,
-    q: searchQuery,
-    tag: selectedTags.length ? selectedTags : undefined,
-    favorites: favoritesOnly || undefined,
-    limit: 500,
-  });
-  const facetQuery = useModelFacets(folderModelFilters());
+  const facetQuery = useModelFacets(folderModelFilters(), { enabled: filtersEnabled });
 
   function writeFilterUrl(filters: SavedViewRead["filters"]) {
-    const params = new URLSearchParams();
-    if (filters.collection) params.set("c", filters.collection);
-    if (filters.q) params.set("q", filters.q);
-    filters.tag.forEach((tag) => params.append("tag", tag));
-    if (filters.printer_id) params.set("printer_id", String(filters.printer_id));
-    if (filters.printer_presence) params.set("printer_presence", filters.printer_presence);
-    if (filters.favorites) params.set("favorites", "true");
-    for (const key of [
-      "file_type",
-      "material_type",
-      "slicer_name",
-      "printer_model",
-      "revision_status",
-      "print_outcome",
-      "storage",
-    ] as const) {
-      for (const value of filters[key] ?? []) params.append(key, value);
-    }
-    if (filters.has_similar_candidates != null)
-      params.set("has_similar_candidates", filters.has_similar_candidates ? "yes" : "no");
-    if (filters.printed != null) params.set("printed", filters.printed ? "yes" : "no");
-    if (filters.uploaded_after) params.set("uploaded_after", filters.uploaded_after);
-    if (filters.uploaded_before) params.set("uploaded_before", filters.uploaded_before);
-    historyKeys.forEach((key) => {
-      if (filters[key] != null) params.set(key, String(filters[key]));
-    });
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    const params = writeLibraryFilters(filters, canViewPrinters);
+    router.replace(`/?${params}`);
   }
 
   function applySavedView(view: SavedViewRead) {
     setFiltersExpanded(null);
     setActiveSavedViewId(view.id);
-    if (view.filters.sort) setSortKey(view.filters.sort);
     setSelectedIds(new Set());
     writeFilterUrl(view.filters);
   }
 
   async function saveCurrentView() {
     const name = saveViewName.trim();
-    if (!name) return;
+    if (!name || saveViewBusy) return;
+    const session = getSessionVersion();
+    const revision = saveViewRevision.current;
     setSaveViewBusy(true);
     try {
-      const created = await createSavedView(name, currentViewFilters());
-      setLoadedSavedViews((current) =>
-        [...current, created].sort((a, b) => a.name.localeCompare(b.name)),
-      );
-      setSaveViewOpen(false);
-      setSaveViewName("");
+      await savedViewsOwner.mutation.mutateAsync({
+        kind: "create",
+        name,
+        filters: currentFilters,
+      });
+      requireSessionVersion(session);
+      if (revision === saveViewRevision.current) {
+        setSaveViewOpen(false);
+        setSaveViewName("");
+      }
       toast.success(uiText("View saved"));
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
     } finally {
-      setSaveViewBusy(false);
+      if (session === getSessionVersion()) setSaveViewBusy(false);
     }
-  }
-
-  function currentViewFilters(): SavedViewRead["filters"] {
-    return {
-      ...historyFilters(searchParams),
-      sort: sortKey,
-      collection: selectedCollection,
-      direct: !searchQuery,
-      tag: selectedTags,
-      q: searchQuery ?? null,
-      printer_id: selectedPrinterId,
-      printer_presence: selectedPrinterPresence,
-      favorites: favoritesOnly,
-      file_type: fileTypes,
-      material_type: structured.material_type,
-      slicer_name: structured.slicer_name,
-      printer_model: structured.printer_model,
-      revision_status: revisionStatuses,
-      print_outcome: printOutcomes,
-      storage: storageKinds,
-      printed: structured.printed[0] ? structured.printed[0] === "yes" : null,
-      has_similar_candidates: structured.has_similar_candidates[0]
-        ? structured.has_similar_candidates[0] === "yes"
-        : null,
-      uploaded_after: searchParams.get("uploaded_after"),
-      uploaded_before: searchParams.get("uploaded_before"),
-    };
   }
 
   const activeSavedView = savedViews.find((view) => view.id === activeSavedViewId) ?? null;
   const savedViewModified =
     activeSavedView !== null &&
-    viewFilterSignature({
-      ...activeSavedView.filters,
-      has_similar_candidates: activeSavedView.filters.has_similar_candidates ?? null,
-      collection: activeSavedView.filters.collection ?? null,
-      q: activeSavedView.filters.q ?? null,
-      printer_id: activeSavedView.filters.printer_id ?? null,
-      printer_presence: activeSavedView.filters.printer_presence ?? null,
-      tag: [...activeSavedView.filters.tag].sort(),
-    }) !==
-      viewFilterSignature({
-        ...currentViewFilters(),
-        tag: [...selectedTags].sort(),
-      });
+    !sameLibraryFilters(activeSavedView.filters, currentFilters, canViewPrinters);
 
-  async function manageSavedView(action: () => Promise<SavedViewRead | void>, success: MessageKey) {
+  async function manageSavedView(command: SavedViewCommand, success: MessageKey) {
+    const session = getSessionVersion();
     try {
-      await action();
-      setLoadedSavedViews(await listSavedViews());
+      await savedViewsOwner.mutation.mutateAsync(command);
+      requireSessionVersion(session);
+      if (command.kind === "delete") {
+        setSavedViewSelection((current) => (current?.id === command.id ? null : current));
+      }
       toast.success(uiText(success));
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
       throw error;
     }
   }
@@ -1043,102 +916,269 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // The paginated grid. `keepPreviousData` (in the hook) holds the current page
   // on screen while a new search/folder loads, and results are cached per filter
   // set so backspacing a query or re-entering a folder is instant.
-  const multipartListEnabled = libraryView !== "components";
-  const modelQuery = useModelList(folderModelFilters(), PAGE_SIZE, sortKey, true);
-  const multipartQuery = useMultipartModels(folderMultipartFilters(), {
-    enabled: multipartListEnabled,
-  });
-  const libraryPrefetch = useLibraryPrefetch();
-  const multipartMembershipQuery = useMultipartModels(
-    { limit: 500 },
-    { enabled: libraryView === "components" },
-  );
-  const multipartGroupingQuery = useMultipartModels(
-    {
-      tag: selectedTags.length ? selectedTags : undefined,
-      favorites: favoritesOnly || undefined,
-      limit: 500,
-    },
-    { enabled: libraryView === "organized" && !searchQuery },
-  );
-  const multipartOutlinerQuery = useMultipartModels(
-    {
-      tag: selectedTags.length ? selectedTags : undefined,
-      favorites: favoritesOnly || undefined,
-      limit: 500,
-    },
-    { enabled: desktopOutliner && libraryView !== "components" },
-  );
-  const outlinerQuery = useOutlinerModels(baseFilters, 500, {
-    enabled: desktopOutliner,
-  });
+  const browseParams = {
+    ...folderModelFilters(),
+    view: libraryView,
+    limit: PAGE_SIZE,
+    sort: sortKey,
+  };
+  const modelQuery = useLibraryBrowse(browseParams);
 
-  const models = useMemo(
-    () => modelQuery.data?.pages.flatMap((page) => page.items) ?? [],
+  const selectedLookup = useCollectionLookup(selectedCollection);
+  const selectedCollectionRow =
+    selectedLookup.data?.collection.path === selectedCollection
+      ? selectedLookup.data.collection
+      : null;
+  // Read alongside the folder page, before committing the destination. A
+  // description inserted after its cards would move the entire browsing surface.
+  const collectionReadme = useCollectionReadme(selectedCollectionRow?.id ?? null, {
+    enabled: selectedCollectionRow?.has_readme ?? false,
+  });
+  const folderSearch = useCollectionSearch(searchQuery ?? "", "view", {
+    enabled: searchQuery !== undefined,
+  });
+  const folderLevel = useCollectionChildren(selectedCollectionRow?.id ?? null, {
+    enabled:
+      searchQuery === undefined && (selectedCollection === null || selectedCollectionRow !== null),
+  });
+  const folderPages = searchQuery !== undefined ? folderSearch : folderLevel;
+  // Canonical replacement creates a Router key. Publish the visit only once
+  // that identity is settled, before the reader can establish its position.
+  const projectionReady =
+    currentLocationHref === canonicalLibraryHref &&
+    (selectedCollection === null || selectedCollectionRow !== null) &&
+    (!selectedCollectionRow?.has_readme || !collectionReadme.isPending) &&
+    folderPages.data !== undefined &&
+    !folderPages.isPlaceholderData &&
+    modelQuery.data !== undefined &&
+    !modelQuery.isPlaceholderData;
+
+  const entry = useLibraryEntry(canonicalLibraryHref, projectionReady);
+  const modelMoves = useModelMoves(entry, refresh);
+  const [refreshState, setRefreshState] = useState<LibraryRefreshState | null>(null);
+  const refreshScope = useRef({ entry, sequence: 0 });
+  useLayoutEffect(() => {
+    const scope = refreshScope.current;
+    scope.entry = entry;
+    return () => {
+      scope.sequence++;
+    };
+  }, [entry]);
+  const currentRefresh = refreshState?.entry === entry ? refreshState : null;
+  const browseReady = projectionReady && currentRefresh === null;
+  const orderedItems = useMemo<LibraryItem[]>(
+    () =>
+      modelQuery.data?.pages.flatMap((page) =>
+        page.items.map((entry): LibraryItem =>
+          entry.kind === "model"
+            ? { kind: "model", value: entry.model }
+            : { kind: "multipart", value: entry.multipart },
+        ),
+      ) ?? [],
     [modelQuery.data],
   );
-  const multipartModels = useMemo(() => multipartQuery.data ?? [], [multipartQuery.data]);
-  const multipartMembership = useMemo(
-    () => multipartMembershipQuery.data ?? [],
-    [multipartMembershipQuery.data],
+  // Commit one coherent browsing result. Independent requests may settle in any
+  // order; neither placeholder models nor a cached root folder page belongs to
+  // a destination whose lookup/children have not completed yet.
+  const nextSnapshot = useMemo(() => {
+    if (!browseReady) return null;
+    return {
+      entry,
+      items: orderedItems,
+      modelPages: modelQuery.data?.pages.length ?? 0,
+      folderPages: folderPages.data?.pages.length ?? 0,
+      collections: folderPages.data?.pages.flatMap((page) => page.items) ?? [],
+      collection: selectedCollectionRow,
+      breadcrumbs:
+        selectedCollectionRow && selectedLookup.data
+          ? [...selectedLookup.data.ancestors, selectedCollectionRow]
+          : [],
+      hasMore: modelQuery.hasNextPage ?? false,
+      moreFolders: folderPages.hasNextPage ?? false,
+    };
+  }, [
+    browseReady,
+    entry,
+    orderedItems,
+    folderPages.data,
+    folderPages.hasNextPage,
+    selectedCollectionRow,
+    selectedLookup.data,
+    modelQuery.hasNextPage,
+    modelQuery.data?.pages.length,
+  ]);
+  const [settledSnapshot, setSettledSnapshot] = useState(nextSnapshot);
+  if (nextSnapshot !== null && nextSnapshot !== settledSnapshot) setSettledSnapshot(nextSnapshot);
+  const snapshot = currentRefresh?.status === "denied" ? null : (nextSnapshot ?? settledSnapshot);
+  const displayedCollection = snapshot?.collection ?? null;
+  const onAuthorityRetired = useCallback(() => {
+    const session = getSessionVersion();
+    void refreshAuth().catch((error) => {
+      if (session === getSessionVersion()) toast.error(error);
+    });
+  }, [refreshAuth]);
+  const authority = useLibraryAuthority(browseReady ? (modelQuery.data?.pages[0] ?? null) : null, {
+    eventsReady: startup.canLoad("activity"),
+    onRefresh: () => reading.refresh(refresh),
+    onAuthorityRetired,
+  });
+  const refreshRequired =
+    authority.refreshRequired || modelQuery.refreshRequired || currentRefresh !== null;
+  const libraryItems = snapshot?.items ?? [];
+  const visibleModels = libraryItems.flatMap((item) => (item.kind === "model" ? [item.value] : []));
+  const visibleMultipartModels = libraryItems.flatMap((item) =>
+    item.kind === "multipart" ? [item.value] : [],
   );
-  const memberModelIds = useMemo(
-    () => new Set(multipartMembership.flatMap((item) => item.member_model_ids)),
-    [multipartMembership],
-  );
-  const groupedModelIds = useMemo(
-    () => new Set((multipartGroupingQuery.data ?? []).flatMap((item) => item.member_model_ids)),
-    [multipartGroupingQuery.data],
-  );
-  const visibleMultipartModels = libraryView === "components" ? [] : multipartModels;
-  const visibleModels = (() => {
-    if (libraryView === "multipart") return [];
-    if (libraryView === "components") {
-      return models.filter((model) => memberModelIds.has(model.id));
-    }
-    if (libraryView === "organized" && !searchQuery) {
-      return models.filter((model) => !groupedModelIds.has(model.id));
-    }
-    return models;
-  })();
-  const outlinerModels = outlinerQuery.data ?? [];
-  const outlinerMultipartModels =
-    libraryView === "components"
-      ? (multipartMembershipQuery.data ?? [])
-      : (multipartOutlinerQuery.data ?? []);
-  // First load shows skeletons; a filter change keeps the previous page visible
-  // and just flags `refreshing` for the subtle "Updating…" hint.
-  const loading =
-    modelQuery.isLoading ||
-    multipartQuery.isLoading ||
-    (libraryView === "organized" && !searchQuery && multipartGroupingQuery.isLoading) ||
-    (libraryView === "components" && multipartMembershipQuery.isLoading);
-  const refreshing = modelQuery.isFetching && !modelQuery.isFetchingNextPage && !loading;
-  const loadingMore = modelQuery.isFetchingNextPage;
-  const hasMore = modelQuery.hasNextPage ?? false;
-  const fetchNextPage = modelQuery.fetchNextPage;
+  const visibleCollections = snapshot?.collections ?? [];
+  const breadcrumbs = snapshot?.breadcrumbs ?? [];
+  const selectedName = snapshot?.collection?.name ?? null;
   const error =
-    modelQuery.error?.message ??
-    multipartQuery.error?.message ??
-    multipartGroupingQuery.error?.message ??
-    multipartMembershipQuery.error?.message ??
+    (currentRefresh && currentRefresh.status !== "pending" ? currentRefresh.error : null) ??
+    (modelQuery.refreshRequired ? null : modelQuery.error?.message) ??
+    (selectedCollection !== null ? selectedLookup.error?.message : null) ??
+    folderPages.error?.message ??
     null;
-  // A fresh upload's card shows a placeholder until its thumbnail is derived;
-  // refetch the list when one lands instead of waiting for a reload.
-  const refreshModels = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: queryKeys.models });
-  }, [queryClient]);
-  useThumbnailArrivals(visibleModels, refreshModels);
+  const loading = snapshot === null && !browseReady && error === null;
+  const refreshing =
+    currentRefresh?.status === "pending" ||
+    (!loading &&
+      !error &&
+      (!browseReady || (modelQuery.isFetching && !modelQuery.isFetchingNextPage)));
+  const loadingMore = modelQuery.isFetchingNextPage || !browseReady;
+  const hasMore = snapshot?.hasMore ?? false;
+
+  useEffect(() => {
+    if (browseReady) settleStartup("cards", "ready");
+    else if (error !== null) settleStartup("cards", "failed");
+  }, [browseReady, error, settleStartup]);
+  const startupContent = useRef<HTMLElement>(null);
+  const listContent = useRef<HTMLDivElement>(null);
+  const reading = useLibraryReadingPosition(
+    snapshot?.entry,
+    viewMode,
+    startupContent,
+    listContent,
+    snapshot !== null && docView === "models" && !authority.authorizationChanged,
+    {
+      ready: browseReady,
+      models: {
+        count: snapshot?.modelPages ?? 0,
+        more: modelQuery.hasNextPage ?? false,
+        pending: modelQuery.isFetching,
+        failed: modelQuery.isError,
+        next: () => void modelQuery.loadMore(),
+      },
+      folders: {
+        count: snapshot?.folderPages ?? 0,
+        more: folderPages.hasNextPage ?? false,
+        pending: folderPages.isFetching,
+        failed: folderPages.isError,
+        next: () => void folderPages.fetchNextPage({ cancelRefetch: false }),
+      },
+    },
+  );
+  useStartupThumbnails(startupContent, browseReady, libraryItems.length > 0);
+  const thumbnails = useLibraryThumbnails(
+    visibleModels,
+    browseReady ? (modelQuery.data?.pages[0] ?? null) : null,
+    onAuthorityRetired,
+  );
+  useThumbnailArrivals(visibleModels, thumbnails.refresh);
 
   function loadMore() {
-    if (hasMore && !loadingMore) fetchNextPage();
+    if (hasMore && !loadingMore && !refreshRequired && !authority.authorizationChanged)
+      void modelQuery.loadMore();
   }
-  function refresh() {
-    void Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.models }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
-    ]);
+  async function refresh() {
+    const session = getSessionVersion();
+    if (
+      entry.session !== session ||
+      authority.authorizationChanged ||
+      currentRefresh?.status === "pending"
+    )
+      return;
+    const scope = refreshScope.current;
+    const sequence = ++scope.sequence;
+    const isCurrent = () =>
+      getSessionVersion() === session && scope.entry === entry && scope.sequence === sequence;
+    // The view below explicitly reloads its taxonomy and continuation pages.
+    // Mark other metadata stale without starting duplicate reads of that view.
+    for (const queryKey of [queryKeys.models, queryKeys.collections])
+      void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.vaultStats });
+    setRefreshState({ entry, status: "pending" });
+    let lookupPending = selectedCollection !== null;
+    try {
+      const previousFolders =
+        searchQuery === undefined
+          ? queryKeys.collectionChildren(selectedCollectionRow?.id ?? null)
+          : queryKeys.collectionSearch(searchQuery, "view");
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: libraryBrowseKeys.all }),
+        queryClient.cancelQueries({ queryKey: previousFolders, exact: true }),
+        queryClient.cancelQueries({
+          queryKey: queryKeys.collectionLookup(selectedCollection),
+          exact: true,
+        }),
+      ]);
+      if (!isCurrent()) return;
+      await queryClient.invalidateQueries({ queryKey: libraryBrowseKeys.all, refetchType: "none" });
+      if (!isCurrent()) return;
+      // Resolve the path first: a replacement folder may have a different id.
+      let parentId: number | null = null;
+      if (selectedCollection !== null) {
+        const lookup = await selectedLookup.refetch({ throwOnError: true });
+        if (!isCurrent()) return;
+        if (!lookup.data) throw new Error("Collection refresh returned no lookup");
+        parentId = lookup.data.collection.id;
+      }
+      lookupPending = false;
+      const folderKey =
+        searchQuery === undefined
+          ? queryKeys.collectionChildren(parentId)
+          : queryKeys.collectionSearch(searchQuery, "view");
+      await queryClient.cancelQueries({ queryKey: folderKey, exact: true });
+      if (!isCurrent()) return;
+      await Promise.all([
+        queryClient.resetQueries(
+          { queryKey: libraryBrowseKeys.pages(browseParams), exact: true },
+          { throwOnError: true },
+        ),
+        (async () => {
+          await queryClient.resetQueries(
+            { queryKey: folderKey, exact: true },
+            { throwOnError: true },
+          );
+          if (!isCurrent()) return;
+          // A new parent key may not have an observer yet. Fetch its same Query
+          // entry explicitly; Infinity reuses the page resetQueries just read.
+          await queryClient.fetchInfiniteQuery<
+            CollectionPage,
+            Error,
+            CollectionPage,
+            typeof folderKey,
+            string | null
+          >({
+            queryKey: folderKey,
+            queryFn: ({ pageParam, signal }) =>
+              searchQuery === undefined
+                ? listCollectionChildren(parentId, pageParam, undefined, { signal })
+                : searchCollections(searchQuery, "view", pageParam, undefined, { signal }),
+            initialPageParam: null,
+            getNextPageParam: (page: CollectionPage) => page.next_cursor,
+            staleTime: Infinity,
+          });
+        })(),
+        queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
+      ]);
+      if (isCurrent()) setRefreshState(null);
+    } catch (error) {
+      if (!isCurrent()) return;
+      const denied = lookupPending && parseApiError(error).status === 404;
+      if (denied) setSettledSnapshot(null);
+      setRefreshState({ entry, status: denied ? "denied" : "failed", error: userMessage(error) });
+    }
   }
 
   // Multi-select for batch actions. The selected set is view-independent so it
@@ -1149,20 +1189,31 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const showLibraryTools = libraryToolsOpen;
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [selectedCollectionIds, setSelectedCollectionIds] = useState<Set<number>>(new Set());
+  // Selected folders are kept as the rows they were picked from: they may leave
+  // the view (another folder opened) and still need their names and paths.
+  const [selectedCollectionRows, setSelectedCollectionRows] = useState<
+    Map<number, CollectionNodeRead>
+  >(new Map());
   const [batchBusy, setBatchBusy] = useState(false);
+  const [batchRecovery, setBatchRecovery] = useState<{
+    entry: typeof entry;
+    receipt: LibraryBatchOutcome & { undo: (() => Promise<LibraryBatchOutcome>) | null };
+    intent: string[];
+    models: ModelListItem[];
+  } | null>(null);
+  const currentBatchRecovery =
+    batchRecovery?.entry === entry && entry.session === getSessionVersion() ? batchRecovery : null;
+  function reviewInterruptedBatch(
+    receipt: LibraryBatchOutcome & { undo: (() => Promise<LibraryBatchOutcome>) | null },
+    intent: string[],
+    models: ModelListItem[],
+  ) {
+    setBatchRecovery({ entry, receipt, intent, models });
+  }
   const [selectingAll, setSelectingAll] = useState(false);
   const lastSelectedModelId = useRef<number | null>(null);
   const selectedModelSnapshot = useRef<Map<number, ModelListItem>>(new Map());
   const sortedModels = visibleModels;
-  const libraryItems = sortLibraryItems(
-    [
-      ...visibleModels.map((value) => ({ kind: "model" as const, value })),
-      ...visibleMultipartModels.map((value) => ({ kind: "multipart" as const, value })),
-    ],
-    sortKey,
-  );
-
   const openTagEditor = useCallback(
     (model: ModelListItem) => {
       setTagTarget(model);
@@ -1172,66 +1223,66 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     [setTagTarget, setTagDialogOpen],
   );
 
-  const toggleSelect = useCallback(
-    (id: number, range = false) => {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        if (range && lastSelectedModelId.current !== null) {
-          const from = sortedModels.findIndex((model) => model.id === lastSelectedModelId.current);
-          const to = sortedModels.findIndex((model) => model.id === id);
-          if (from >= 0 && to >= 0)
-            sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1).forEach((model) => {
-              next.add(model.id);
-              selectedModelSnapshot.current.set(model.id, model);
-            });
-        } else if (next.has(id)) next.delete(id);
-        else next.add(id);
-        lastSelectedModelId.current = id;
-        const model = sortedModels.find((item) => item.id === id);
-        if (model) selectedModelSnapshot.current.set(id, model);
-        return next;
-      });
-    },
-    [sortedModels],
-  );
+  const selectionOrder = useRef(sortedModels);
+  useLayoutEffect(() => {
+    selectionOrder.current = sortedModels;
+  }, [sortedModels]);
+  const toggleSelect = useCallback((id: number, range = false) => {
+    // Capture this gesture once; React may replay the state updater.
+    const sortedModels = selectionOrder.current;
+    const anchor = lastSelectedModelId.current;
+    const selectingRange = range && anchor !== null;
+    const from = selectingRange ? sortedModels.findIndex((model) => model.id === anchor) : -1;
+    const to = sortedModels.findIndex((model) => model.id === id);
+    const rangeModels =
+      from >= 0 && to >= 0 ? sortedModels.slice(Math.min(from, to), Math.max(from, to) + 1) : [];
+    lastSelectedModelId.current = id;
+    for (const model of rangeModels) selectedModelSnapshot.current.set(model.id, model);
+    const model = sortedModels.find((item) => item.id === id);
+    if (model) selectedModelSnapshot.current.set(id, model);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selectingRange) rangeModels.forEach((model) => next.add(model.id));
+      else if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   function toggleCollectionSelect(id: number) {
-    setSelectedCollectionIds((prev) => {
-      const next = new Set(prev);
+    const row = visibleCollections.find((collection) => collection.id === id);
+    setSelectedCollectionRows((prev) => {
+      const next = new Map(prev);
       if (next.has(id)) next.delete(id);
-      else next.add(id);
+      else if (row) next.set(id, row);
       return next;
     });
   }
 
   const clearSelection = useCallback(() => {
     setSelectedIds(new Set());
-    setSelectedCollectionIds(new Set());
+    setSelectedCollectionRows(new Map());
     setSelectMode(false);
   }, []);
 
   function selectAllVisible() {
     setSelectedIds(new Set(sortedModels.map((m) => m.id)));
     selectedModelSnapshot.current = new Map(sortedModels.map((model) => [model.id, model]));
-    setSelectedCollectionIds(new Set(visibleCollections.map((collection) => collection.id)));
+    setSelectedCollectionRows(
+      new Map(visibleCollections.map((collection) => [collection.id, collection])),
+    );
   }
 
   async function selectAllMatching() {
     setSelectingAll(true);
     try {
       const all: ModelListItem[] = [];
-      for (let offset = 0; ; offset += 500) {
-        const page = await listModels({
-          ...baseFilters,
-          collection: selectedCollection ?? undefined,
-          direct: !searchQuery,
-          q: searchQuery,
-          limit: 500,
-          offset,
-        });
-        all.push(...page);
-        if (page.length < 500) break;
-      }
+      let cursor: string | undefined;
+      do {
+        const page = await listLibraryPage({ ...browseParams, cursor });
+        all.push(...page.items.flatMap((item) => (item.kind === "model" ? [item.model] : [])));
+        cursor = page.next_cursor ?? undefined;
+      } while (cursor !== undefined);
       setSelectedIds(new Set(all.map((model) => model.id)));
       selectedModelSnapshot.current = new Map(all.map((model) => [model.id, model]));
       toast.info(uiText("{value1} matching models selected", { value1: String(all.length) }));
@@ -1263,10 +1314,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   const selectedIdList = Array.from(selectedIds);
   const selectedCollections = useMemo(
-    () => collections.filter((collection) => selectedCollectionIds.has(collection.id)),
-    [collections, selectedCollectionIds],
+    () => [...selectedCollectionRows.values()],
+    [selectedCollectionRows],
   );
-  const selectionCount = selectedIds.size + selectedCollectionIds.size;
+  const selectionCount = selectedIds.size + selectedCollectionRows.size;
 
   useEffect(() => {
     function onShortcut(event: KeyboardEvent) {
@@ -1287,7 +1338,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   async function runCollectionBatch(
     success: MessageKey,
-    operation: (collection: CollectionRead) => Promise<CollectionRead>,
+    operation: (collection: CollectionNodeRead) => Promise<CollectionRead>,
   ) {
     setBatchBusy(true);
     let succeeded = 0;
@@ -1299,7 +1350,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         succeeded += 1;
       } catch {
         failed += 1;
-        failedFolders.push(collectionDisplayPath(collections, collection.path) ?? collection.name);
+        failedFolders.push(collection.display_path);
       }
     }
     if (succeeded) toast.success(uiText(success, { count: succeeded }));
@@ -1317,16 +1368,22 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     setBatchBusy(true);
     let succeeded = 0;
     let failed = 0;
-    const movedModelIds: number[] = [];
-    const movedCollections: CollectionRead[] = [];
+    let modelReceipt: LibraryEditReceipt | null = null;
+    const movedCollections: CollectionNodeRead[] = [];
     const failureDetails: string[] = [];
-    const originalModels = new Map(selectedModelSnapshot.current);
+    const session = getSessionVersion();
     try {
+      const selectedModels = selectedIdList.map((id) => {
+        const model = selectedModelSnapshot.current.get(id);
+        if (!model) throw new Error("selected_model_snapshot_missing");
+        return model;
+      });
       if (selectedIdList.length) {
-        const result = await batchInChunks((ids) => batchMoveModels(ids, target));
+        modelReceipt = await moveLibraryModels(selectedModels, target);
+        requireSessionVersion(session);
+        const result = modelReceipt.result;
         succeeded += result.succeeded_count;
         failed += result.failed_count;
-        movedModelIds.push(...result.succeeded_ids);
         failureDetails.push(
           ...result.failed.map((failure) =>
             uiText("Model #{value1}: {value2}", {
@@ -1336,36 +1393,65 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           ),
         );
       }
+      if (modelReceipt?.completion.status === "interrupted") {
+        reviewInterruptedBatch(
+          modelReceipt,
+          [uiText("Move to: {value1}", { value1: target || uiText("None (root)") })],
+          selectedModels,
+        );
+        void refresh();
+        return;
+      }
       for (const collection of selectedCollections) {
+        requireSessionVersion(session);
         try {
           await moveCollection(collection.id, parentId);
+          requireSessionVersion(session);
           succeeded += 1;
           movedCollections.push(collection);
         } catch {
+          requireSessionVersion(session);
           failed += 1;
           failureDetails.push(
             uiText("Folder: {value1}", {
-              value1: String(
-                collectionDisplayPath(collections, collection.path) ?? collection.name,
-              ),
+              value1: collection.display_path,
             }),
           );
         }
       }
       if (succeeded)
         toast.undo(uiText("Moved {value1}", { value1: String(succeeded) }), async () => {
-          const groups = new Map<string, number[]>();
-          for (const id of movedModelIds) {
-            const original = originalModels.get(id)?.collection ?? "";
-            groups.set(original, [...(groups.get(original) ?? []), id]);
+          try {
+            requireSessionVersion(session);
+            const outcome = await modelReceipt?.undo();
+            requireSessionVersion(session);
+            if (outcome?.completion.status === "interrupted") {
+              reviewInterruptedBatch(
+                { ...outcome, undo: null },
+                [uiText("Undo result")],
+                selectedModels,
+              );
+              void refresh();
+              return;
+            }
+            const result = outcome?.result;
+            for (const collection of movedCollections) {
+              requireSessionVersion(session);
+              await moveCollection(collection.id, collection.parent_id);
+            }
+            requireSessionVersion(session);
+            refresh();
+            if (result?.failed_count)
+              toast.warning(
+                uiText("{value1} skipped", { value1: String(result.failed_count) }),
+                result.failed
+                  .map((failure) => `#${failure.model_id}: ${getErrorMessage(failure.reason)}`)
+                  .join(" · "),
+              );
+            else toast.success(uiText("Move undone"));
+          } catch (error) {
+            if (session === getSessionVersion()) toast.error(error);
           }
-          for (const [collection, ids] of groups)
-            for (let index = 0; index < ids.length; index += 500)
-              await batchMoveModels(ids.slice(index, index + 500), collection);
-          for (const collection of movedCollections)
-            await moveCollection(collection.id, collection.parent_id);
-          refresh();
-          toast.success(uiText("Move undone"));
         });
       if (failed)
         toast.warning(
@@ -1375,9 +1461,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       refresh();
       clearSelection();
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
     } finally {
-      setBatchBusy(false);
+      if (session === getSessionVersion()) setBatchBusy(false);
     }
   }
 
@@ -1410,9 +1496,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           failed += 1;
           failureDetails.push(
             uiText("Folder: {value1}", {
-              value1: String(
-                collectionDisplayPath(collections, collection.path) ?? collection.name,
-              ),
+              value1: collection.display_path,
             }),
           );
         }
@@ -1424,7 +1508,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             count: Number(deletedModelIds.length),
           }),
           async () => {
-            await Promise.all(deletedModelIds.map(restoreModel));
+            await Promise.all(deletedModelIds.map((id) => restoreModel(id)));
             refresh();
             toast.success(uiText("Models restored"));
           },
@@ -1446,32 +1530,71 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   async function tagSelection(add: string[], remove: string[]) {
     setBatchBusy(true);
-    const originalModels = new Map(selectedModelSnapshot.current);
+    const session = getSessionVersion();
     try {
-      const result = await batchInChunks((ids) => batchTagModels(ids, add, remove));
+      const selectedModels = selectedIdList.map((id) => {
+        const model = selectedModelSnapshot.current.get(id);
+        if (!model) throw new Error("selected_model_snapshot_missing");
+        return model;
+      });
+      const receipt = await tagLibraryModels(selectedModels, add, remove);
+      requireSessionVersion(session);
+      if (receipt.completion.status === "interrupted") {
+        reviewInterruptedBatch(
+          receipt,
+          [
+            uiText("Add tags: {value1}", { value1: add.join(", ") }),
+            uiText("Remove tags: {value1}", { value1: remove.join(", ") }),
+          ],
+          selectedModels,
+        );
+        void refresh();
+        return;
+      }
+      const result = receipt.result;
       if (result.succeeded_count)
         toast.undo(
           uiText("Tagged {value1}", { value1: String(result.succeeded_count) }),
           async () => {
-            for (const id of result.succeeded_ids) {
-              const original = originalModels.get(id);
-              if (original) await updateModel(id, { tags: original.tags });
+            try {
+              const outcome = await receipt.undo();
+              requireSessionVersion(session);
+              refresh();
+              if (outcome.completion.status === "interrupted") {
+                reviewInterruptedBatch(
+                  { ...outcome, undo: null },
+                  [uiText("Undo result")],
+                  selectedModels,
+                );
+                return;
+              }
+              const undone = outcome.result;
+              if (undone.failed_count)
+                toast.warning(
+                  uiText("{value1} skipped", { value1: String(undone.failed_count) }),
+                  undone.failed
+                    .map((failure) => `#${failure.model_id}: ${getErrorMessage(failure.reason)}`)
+                    .join(" · "),
+                );
+              else toast.success(uiText("Tags restored"));
+            } catch (error) {
+              if (session === getSessionVersion()) toast.error(error);
             }
-            refresh();
-            toast.success(uiText("Tags restored"));
           },
         );
       if (result.failed_count)
         toast.warning(
           uiText("{value1} skipped", { value1: String(result.failed_count) }),
-          result.failed.map((failure) => `#${failure.model_id}: ${failure.reason}`).join(" · "),
+          result.failed
+            .map((failure) => `#${failure.model_id}: ${getErrorMessage(failure.reason)}`)
+            .join(" · "),
         );
       refresh();
       clearSelection();
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
     } finally {
-      setBatchBusy(false);
+      if (session === getSessionVersion()) setBatchBusy(false);
     }
   }
   const hasActiveFilters =
@@ -1486,63 +1609,70 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     searchParams.has("uploaded_before") ||
     historyKeys.some((key) => searchParams.has(key));
   const displayCount = libraryItems.length;
-  // Build the return target from the selected view as well as the router
-  // snapshot. `router.replace()` is asynchronous, so a card clicked directly
-  // after changing Library view must not capture the previous URL.
-  const returnParams = new URLSearchParams(searchParams.toString());
-  returnParams.delete("v");
-  if (libraryView === "organized") returnParams.delete("type");
-  else returnParams.set("type", libraryView);
-  const currentLibraryHref = returnParams.size ? `/?${returnParams.toString()}` : "/";
+  // Links belong to the displayed result even while another destination loads.
+  const currentLibraryHref = snapshot?.entry.href ?? canonicalLibraryHref;
   // While searching, the grid is a global result list, not a folder view: show
   // only collections whose name matches the query (anywhere in the tree), to
   // mirror the matching models. Without a query we fall back to the normal
   // folder explorer (immediate children of the selected collection).
-  const visibleCollections = (() => {
-    const needle = query.trim().toLowerCase();
-    if (needle) {
-      return collections
-        .filter((c) => c.name.toLowerCase().includes(needle))
-        .sort((a, b) => a.name.localeCompare(b.name));
-    }
-    return childCollections(collections, selectedCollection);
-  })();
-  const availableRecentFolders = recentFolders.filter(
-    (path) =>
-      path !== selectedCollection && collections.some((collection) => collection.path === path),
-  );
-  const breadcrumbs = useMemo(
-    () => collectionBreadcrumbs(collections, selectedCollection),
-    [collections, selectedCollection],
-  );
-  const selectedName = useMemo(
-    () => selectedCollectionName(collections, selectedCollection),
-    [collections, selectedCollection],
-  );
-  const selectedCollectionRow = useMemo(
-    () => collections.find((c) => c.path === selectedCollection) ?? null,
-    [collections, selectedCollection],
-  );
-  // Warm a folder on hover/focus: the pointer's travel to the click hides most
-  // of the round-trip, so entering the folder renders from cache.
-  function prefetchFolder(path: string) {
-    if (path === selectedCollection) return;
-    void libraryPrefetch.modelList(folderModelFilters(path), PAGE_SIZE, sortKey);
-    if (multipartListEnabled) void libraryPrefetch.multipartModels(folderMultipartFilters(path));
-    void libraryPrefetch.modelFacets(folderModelFilters(path));
-    const target = collections.find((collection) => collection.path === path);
-    if (target?.has_readme) void libraryPrefetch.collectionReadme(target.id);
+  // The folder being viewed and the way to it, from one lookup by path.
+  // A folder view shows one bounded page of child folders at a time.
+  const { isFetchingNextPage: fetchingFolders, fetchNextPage: fetchMoreFolders } = folderPages;
+  // The open folder's names replace its provisional label once they load.
+  if (
+    selectedCollectionRow &&
+    recentFolders.some(
+      (folder) =>
+        folder.path === selectedCollectionRow.path &&
+        folder.label !== selectedCollectionRow.display_path,
+    )
+  ) {
+    setRecentFolders((current) =>
+      current.map((folder) =>
+        folder.path === selectedCollectionRow.path
+          ? { ...folder, label: selectedCollectionRow.display_path }
+          : folder,
+      ),
+    );
   }
+  const availableRecentFolders = recentFolders.filter(
+    (folder) => folder.path !== selectedCollection,
+  );
+  const prefetchFolder = useIntentPrefetch(
+    (path, signal) => {
+      if (path === selectedCollection) return;
+      const options = libraryBrowseOptions({
+        ...folderModelFilters(path),
+        view: libraryView,
+        limit: PAGE_SIZE,
+        sort: sortKey,
+      });
+      const cancel = () => {
+        const query = queryClient.getQueryCache().find({ queryKey: options.queryKey, exact: true });
+        if (query && query.getObserversCount() === 0)
+          void queryClient.cancelQueries({ queryKey: options.queryKey, exact: true });
+      };
+      signal.addEventListener("abort", cancel, { once: true });
+      void queryClient
+        .prefetchInfiniteQuery(options)
+        .finally(() => signal.removeEventListener("abort", cancel));
+    },
+    startup.complete && browseReady && !refreshing,
+  );
+  const warmModel = useModelOpenIntent(startup.complete && browseReady && !refreshing);
   const canAdminSelectedCollection =
     user?.is_superuser || selectedCollectionRow?.effective_role === "admin";
-  const hasWritableCollection = collections.some(canWriteCollection);
+  // Whether there is anywhere this reader may upload to, without listing it.
+  const writableProbe = useCollectionSearch("", "edit", {
+    enabled: auth.isAuthenticated && !user?.is_superuser,
+  });
+  const hasWritableCollection =
+    !!user?.is_superuser || (writableProbe.data?.pages[0]?.items.length ?? 0) > 0;
   const canUploadToVault =
     auth.isAuthenticated &&
     (user?.is_superuser || canWriteCollection(selectedCollectionRow) || hasWritableCollection);
   const uploadDefaultCollection =
     user?.is_superuser || canWriteCollection(selectedCollectionRow) ? selectedCollection : null;
-  // Collections + tags are fetched by useCollections()/useTags() above; the
-  // model grid + outliner come from useModelList()/useOutlinerModels() above.
 
   async function handleCreateCollection() {
     const name = newCollectionName.trim();
@@ -1555,11 +1685,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       toast.warning(uiText("Admin access required"));
       return;
     }
+    // Until the open folder has loaded, a new folder would land at the root.
+    if (selectedCollection !== null && selectedCollectionRow === null) return;
     try {
-      const parentId = selectedCollection
-        ? (collections.find((c) => c.path === selectedCollection)?.id ?? null)
-        : null;
-      await createCollection({ name, parent_id: parentId });
+      await createCollection({ name, parent_id: selectedCollectionRow?.id ?? null });
       setNewCollectionName("");
       setIsCreatingCollection(false);
       toast.success(uiText('Collection "{value1}" created', { value1: String(name) }));
@@ -1568,18 +1697,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     }
   }
 
-  async function handleMoveModel(modelId: number, targetCollection: string | null) {
+  function handleMoveModel(source: ModelDrag, targetCollection: string | null) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return;
     }
-    try {
-      await updateModel(modelId, { collection: targetCollection ?? "" });
-      toast.success(uiText("Moved"));
-      refresh();
-    } catch (e: any) {
-      toast.error(e);
-    }
+    void modelMoves.move(source, targetCollection);
   }
 
   async function handleMoveCollection(collectionId: number, newParentId: number | null) {
@@ -1612,8 +1735,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
   async function saveCollectionTags(collection: CollectionRead, nextTags: string[]) {
     try {
+      // The write invalidates every loaded collection query (request.ts).
       await replaceCollectionTags(collection.id, nextTags);
-      await collectionsQuery.refetch();
       toast.success(uiText("Tags updated for {value1}", { value1: String(collection.name) }));
     } catch (error) {
       toast.error(error);
@@ -1635,7 +1758,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const params = new URLSearchParams(searchParams.toString());
     if (next) params.set("favorites", "true");
     else params.delete("favorites");
-    router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+    router.replace(params.size ? `/?${params}` : "/");
   }
 
   function toggleSelectMode() {
@@ -1644,7 +1767,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   function selectSort(value: SortKey) {
-    setSortKey(value);
+    const params = new URLSearchParams(searchParams);
+    params.set("sort", value);
+    router.replace(`/?${params}`);
     localStorage.setItem("ps-vault-sort", value);
   }
 
@@ -1662,7 +1787,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("q");
     const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+    router.replace(qs ? `/?${qs}` : "/");
   }
 
   function clearAllFilters() {
@@ -1690,7 +1815,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     ])
       params.delete(key);
     const qs = params.toString();
-    router.replace(qs ? `/?${qs}` : "/", { scroll: false });
+    router.replace(qs ? `/?${qs}` : "/");
   }
 
   const activeFilterItems: { label: string; onRemove: () => void }[] = (() => {
@@ -1740,18 +1865,26 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onRemove: () => {
             const params = new URLSearchParams(searchParams.toString());
             params.delete(key);
-            router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+            router.replace(params.size ? `/?${params}` : "/");
           },
         });
     }
     return items;
   })();
 
+  if (authority.authorizationChanged || thumbnails.authorizationChanged)
+    return (
+      <div aria-busy="true">
+        <ModelGridSkeleton />
+      </div>
+    );
+
   return (
     <Localized>
       <>
+        <ModelMoveReview moves={modelMoves} />
         <Modal
-          open={saveViewOpen}
+          open={saveViewOpen && saveViewSession === savedViewsOwner.session}
           onClose={() => {
             if (!saveViewBusy) {
               setSaveViewOpen(false);
@@ -1773,7 +1906,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               <Input
                 autoFocus
                 value={saveViewName}
-                onChange={(event) => setSaveViewName(event.target.value)}
+                onChange={(event) => {
+                  saveViewRevision.current += 1;
+                  setSaveViewName(event.target.value);
+                }}
                 maxLength={128}
                 placeholder={uiText("Ready to print")}
               />
@@ -1796,31 +1932,46 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           </form>
         </Modal>
-        <UploadModal
+        <DeferredDialog
           open={uploadOpen}
-          onClose={() => {
-            setUploadOpen(false);
-            setDropPreload(null);
-            setDropCollection(null);
-          }}
-          onUploaded={refreshVaultAfterIngest}
-          defaultCollection={dropCollection ?? uploadDefaultCollection}
-          preloadFiles={dropPreload?.files ?? null}
-          preloadItems={dropPreload?.items ?? null}
-          initialMode={dropPreload?.mode}
-        />
-        <NewMultipartModelModal
-          key={selectedCollectionRow?.id ?? "vault"}
+          title={uiText("Upload")}
+          onClose={() => setUploadOpen(false)}
+        >
+          <UploadModal
+            open={uploadOpen}
+            onClose={() => {
+              setUploadOpen(false);
+              setDropPreload(null);
+              setDropCollection(null);
+            }}
+            onUploaded={refreshVaultAfterIngest}
+            defaultCollection={dropCollection ?? uploadDefaultCollection}
+            preloadFiles={dropPreload?.files ?? null}
+            preloadItems={dropPreload?.items ?? null}
+            initialMode={dropPreload?.mode}
+          />
+        </DeferredDialog>
+        <DeferredDialog
           open={multipartCreateOpen}
+          title={t("multipart.new")}
           onClose={() => setMultipartCreateOpen(false)}
-          collectionId={selectedCollectionRow?.id ?? null}
-          collections={collections}
-          returnTo={currentLibraryHref}
-        />
+        >
+          <NewMultipartModelModal
+            key={selectedCollectionRow?.id ?? "vault"}
+            open={multipartCreateOpen}
+            onClose={() => setMultipartCreateOpen(false)}
+            collection={
+              selectedCollectionRow
+                ? { id: selectedCollectionRow.id, path: selectedCollectionRow.path }
+                : null
+            }
+            returnTo={currentLibraryHref}
+          />
+        </DeferredDialog>
         <MobileFilterDrawer
+          outlinerFilters={baseFilters}
           open={filterDrawerOpen}
           onClose={closeDrawer}
-          collections={collections}
           tags={tags}
           printers={printers}
           selectedCollection={selectedCollection}
@@ -1833,7 +1984,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onPrinterPresenceChange={setSelectedPrinterPresence}
           onCreateCollection={handleOpenCreateCollection}
           canViewPrinters={canViewPrinters}
-          loading={facetsLoading || facetQuery.isLoading}
           structuredFilters={
             <StructuredFilters
               facets={facetQuery.data}
@@ -1848,7 +1998,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 const params = new URLSearchParams(searchParams.toString());
                 if (value) params.set(key, value);
                 else params.delete(key);
-                router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+                router.replace(params.size ? `/?${params}` : "/");
               }}
               onClearAll={clearAllFilters}
             />
@@ -1860,9 +2010,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         {/* Stitch layout: filter sidebar + main content */}
         <FilterSidebar
           filtersOpen={filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())}
-          collections={collections}
-          models={outlinerModels}
-          multipartModels={outlinerMultipartModels}
+          outlinerFilters={baseFilters}
           tags={tags}
           printers={printers}
           selectedCollection={selectedCollection}
@@ -1879,7 +2027,6 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           onMoveCollection={handleMoveCollection}
           onDeleteCollection={handleDeleteCollection}
           canViewPrinters={canViewPrinters}
-          loading={facetsLoading || facetQuery.isLoading}
           structuredFilters={
             <StructuredFilters
               facets={facetQuery.data}
@@ -1894,7 +2041,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 const params = new URLSearchParams(searchParams.toString());
                 if (value) params.set(key, value);
                 else params.delete(key);
-                router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+                router.replace(params.size ? `/?${params}` : "/");
               }}
               onClearAll={clearAllFilters}
             />
@@ -1904,6 +2051,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         />
 
         <main
+          ref={startupContent}
+          aria-busy={reading.status === "restoring"}
           className="flex-1 overflow-y-auto bg-background flex flex-col relative pb-24 md:pb-0"
           onDragEnter={onMainDragEnter}
           onDragOver={onMainDragOver}
@@ -1919,7 +2068,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           )}
           {/* Breadcrumb */}
           <nav className="px-4 sm:px-6 py-3 bg-background border-b border-border flex items-center space-x-2 text-sm tracking-tight">
-            {selectedCollection && breadcrumbs.length > 0 ? (
+            {breadcrumbs.length > 0 ? (
               <>
                 <button
                   onClick={() => handleCollectionChange(null)}
@@ -1969,19 +2118,19 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 <p className="px-2.5 py-1.5 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
                   {uiText("Recent folders")}
                 </p>
-                {availableRecentFolders.map((path) => (
+                {availableRecentFolders.map((folder) => (
                   <button
-                    key={path}
+                    key={folder.path}
                     role="menuitem"
                     type="button"
                     onClick={() => {
-                      handleCollectionChange(path);
+                      handleCollectionChange(folder.path);
                       setRecentFoldersOpen(false);
                     }}
                     className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-xs transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{collectionDisplayPath(collections, path)}</span>
+                    <span className="truncate">{folder.label}</span>
                   </button>
                 ))}
                 <button
@@ -2126,6 +2275,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           {favoritesOnly && <Check className="h-3.5 w-3.5" />}
                         </button>
                         <SavedViewSelector
+                          key={savedViewsOwner.session}
+                          readState={savedViewReadState}
                           views={savedViews}
                           activeId={activeSavedViewId}
                           modified={savedViewModified}
@@ -2135,31 +2286,39 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           }}
                           onCreate={() => {
                             setMoreOpen(false);
-                            setSaveViewOpen(true);
+                            openSaveView();
                           }}
                           onUpdate={(view) =>
                             manageSavedView(
-                              () => updateSavedView(view.id, { filters: currentViewFilters() }),
+                              {
+                                kind: "update",
+                                id: view.id,
+                                payload: { filters: currentFilters },
+                              },
                               "savedView.updateSuccess",
                             )
                           }
                           onRename={(view, name) =>
                             manageSavedView(
-                              () => updateSavedView(view.id, { name }),
+                              { kind: "update", id: view.id, payload: { name } },
                               "savedView.renameSuccess",
                             )
                           }
                           onDuplicate={(view) =>
                             manageSavedView(
-                              () => createSavedView(duplicateViewName(view.name), view.filters),
+                              {
+                                kind: "create",
+                                name: duplicateViewName(view.name),
+                                filters: effectiveLibraryView(view.filters, canViewPrinters),
+                              },
                               "savedView.duplicateSuccess",
                             )
                           }
                           onDelete={(view) =>
-                            manageSavedView(async () => {
-                              await deleteSavedView(view.id);
-                              if (activeSavedViewId === view.id) setActiveSavedViewId(null);
-                            }, "savedView.deleteSuccess")
+                            manageSavedView(
+                              { kind: "delete", id: view.id },
+                              "savedView.deleteSuccess",
+                            )
                           }
                           triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
                           triggerRole="menuitem"
@@ -2222,11 +2381,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     aria-expanded={
                       filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())
                     }
-                    onClick={() =>
+                    onClick={() => {
+                      startup.request("filters");
                       setFiltersExpanded(
                         !(filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())),
-                      )
-                    }
+                      );
+                    }}
                   >
                     <SlidersHorizontal className="h-4 w-4" aria-hidden />
                     {uiText("Filters")}
@@ -2311,23 +2471,27 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           </div>
 
-          {selectedCollectionRow && (
+          {displayedCollection && (
             <div className="space-y-3 border-b border-border px-4 py-3 sm:px-6">
               <EntityTagsDialog
-                entityLabel={selectedCollectionRow.name}
-                tags={selectedCollectionRow.tags}
+                entityLabel={displayedCollection.name}
+                tags={displayedCollection.tags}
                 availableTags={tags}
-                canEdit={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
+                canEdit={
+                  browseReady && (!!user?.is_superuser || canWriteCollection(displayedCollection))
+                }
                 help={uiText(
                   "Collection tags are inherited by Models in this collection and every descendant for search and filtering.",
                 )}
-                onSave={(nextTags) => saveCollectionTags(selectedCollectionRow, nextTags)}
+                onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
               />
               <CollectionReadme
-                key={selectedCollectionRow.id}
-                collectionId={selectedCollectionRow.id}
-                hasReadme={selectedCollectionRow.has_readme}
-                canEdit={!!user?.is_superuser || canWriteCollection(selectedCollectionRow)}
+                key={displayedCollection.id}
+                collectionId={displayedCollection.id}
+                hasReadme={displayedCollection.has_readme}
+                canEdit={
+                  browseReady && (!!user?.is_superuser || canWriteCollection(displayedCollection))
+                }
               />
             </div>
           )}
@@ -2365,11 +2529,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             ]}
             active={docView}
             onChange={(view) => {
-              setDocView(view);
               const params = new URLSearchParams(searchParams.toString());
-              if (view === "models") params.delete("v");
-              else params.set("v", view);
-              router.replace(params.size ? `/?${params}` : "/", { scroll: false });
+              params.set("v", view);
+              router.replace(params.size ? `/?${params}` : "/");
             }}
             className="border-b border-border px-4 pt-3 sm:px-6"
             tabClassName="px-3 py-2 text-sm font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -2429,6 +2591,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               className="space-y-3 border-b border-border bg-muted/20 px-4 py-3 sm:px-6"
             >
               <div className="flex flex-wrap items-center gap-2">
+                <Button variant="outline" size="xs" asChild className="h-9">
+                  <Link href="/library/similar">
+                    <ScanSearch className="h-4 w-4" aria-hidden />
+                    {t("similarity.title")}
+                  </Link>
+                </Button>
                 <Button
                   variant="outline"
                   size="xs"
@@ -2457,34 +2625,41 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       {uiText("Favorites")}
                     </Button>
                     <SavedViewSelector
+                      key={savedViewsOwner.session}
+                      readState={savedViewReadState}
                       views={savedViews}
                       activeId={activeSavedViewId}
                       modified={savedViewModified}
                       onSelect={applySavedView}
-                      onCreate={() => setSaveViewOpen(true)}
+                      onCreate={openSaveView}
                       onUpdate={(view) =>
                         manageSavedView(
-                          () => updateSavedView(view.id, { filters: currentViewFilters() }),
+                          {
+                            kind: "update",
+                            id: view.id,
+                            payload: { filters: currentFilters },
+                          },
                           "savedView.updateSuccess",
                         )
                       }
                       onRename={(view, name) =>
                         manageSavedView(
-                          () => updateSavedView(view.id, { name }),
+                          { kind: "update", id: view.id, payload: { name } },
                           "savedView.renameSuccess",
                         )
                       }
                       onDuplicate={(view) =>
                         manageSavedView(
-                          () => createSavedView(duplicateViewName(view.name), view.filters),
+                          {
+                            kind: "create",
+                            name: duplicateViewName(view.name),
+                            filters: effectiveLibraryView(view.filters, canViewPrinters),
+                          },
                           "savedView.duplicateSuccess",
                         )
                       }
                       onDelete={(view) =>
-                        manageSavedView(async () => {
-                          await deleteSavedView(view.id);
-                          if (activeSavedViewId === view.id) setActiveSavedViewId(null);
-                        }, "savedView.deleteSuccess")
+                        manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
                       }
                       triggerClassName="h-10 sm:h-8"
                     />
@@ -2540,7 +2715,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   type="button"
                   onClick={() => {
                     setSelectedIds(new Set());
-                    setSelectedCollectionIds(new Set());
+                    setSelectedCollectionRows(new Map());
                   }}
                   className="font-medium text-muted-foreground hover:text-foreground"
                 >
@@ -2559,9 +2734,64 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             />
           ) : (
             <div className="flex-1 flex flex-col bg-background">
+              {reading.status === "reset" && (
+                <p
+                  role="status"
+                  className="mx-6 mt-4 rounded-md border border-border bg-muted p-3 text-sm"
+                >
+                  {uiText("library.readingPositionReset")}
+                </p>
+              )}
+              {refreshRequired && (
+                <div
+                  role="status"
+                  className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted p-3 text-sm"
+                >
+                  <p>{uiText("library.updatesAvailable")}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    loading={refreshing}
+                    onClick={() =>
+                      void (currentRefresh
+                        ? snapshot
+                          ? reading.refresh(refresh)
+                          : refresh()
+                        : authority.refresh())
+                    }
+                  >
+                    {uiText("library.refresh")}
+                  </Button>
+                </div>
+              )}
+              {authority.error && (
+                <div
+                  role="status"
+                  className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-md border border-border p-3 text-sm"
+                >
+                  <p>{uiText("library.authorityCheckFailed")}</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    loading={authority.checking}
+                    onClick={() => void authority.recheck()}
+                  >
+                    {uiText("library.checkAgain")}
+                  </Button>
+                </div>
+              )}
               {error && (
                 <div className="mx-6 mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                   {error}
+                  {currentRefresh && currentRefresh.status !== "pending" && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void (snapshot ? reading.refresh(refresh) : refresh())}
+                    >
+                      {uiText("Retry")}
+                    </Button>
+                  )}
                 </div>
               )}
 
@@ -2571,9 +2801,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 ) : (
                   <ModelListSkeleton />
                 )
-              ) : sortedModels.length === 0 &&
+              ) : error && snapshot === null ? null : sortedModels.length === 0 &&
                 visibleMultipartModels.length === 0 &&
-                visibleCollections.length === 0 ? (
+                visibleCollections.length === 0 &&
+                !hasMore ? (
                 <EmptyState
                   title={uiText("No models found")}
                   description={
@@ -2626,12 +2857,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       </div>
                     )
                   }
-                  className="flex-1 py-20 animate-panel-in"
+                  className="flex-1 py-20"
                 />
               ) : viewMode === "grid" ? (
-                <div key="grid" className={`${compact ? "p-3" : "p-4 sm:p-6"} animate-panel-in`}>
+                <div key="grid" className={compact ? "p-3" : "p-4 sm:p-6"}>
                   <div
-                    className={`stagger-children grid grid-cols-1 ${compact ? "gap-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,260px))]" : "gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]"}`}
+                    className={`grid grid-cols-1 ${compact ? "gap-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,260px))]" : "gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]"}`}
                   >
                     {visibleCollections.map((collection) => (
                       <CollectionFolderCard
@@ -2641,7 +2872,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         onIntent={prefetchFolder}
                         onDropModel={canUploadToVault ? handleMoveModel : undefined}
                         selectable={selectMode}
-                        selected={selectedCollectionIds.has(collection.id)}
+                        selected={selectedCollectionRows.has(collection.id)}
                         onToggleSelect={toggleCollectionSelect}
                       />
                     ))}
@@ -2650,11 +2881,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         <MultipartModelCard
                           key={`multipart-${item.value.id}`}
                           item={item.value}
-                          collectionLabel={collectionDisplayPath(
-                            collections,
-                            item.value.collection,
-                          )}
+                          collectionLabel={item.value.collection_label}
                           returnTo={currentLibraryHref}
+                          origin={snapshot?.entry}
                           availableTags={tags}
                           onDataChange={refresh}
                         />
@@ -2662,23 +2891,34 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         <ModelCard
                           key={item.value.id}
                           model={item.value}
-                          collectionLabel={collectionDisplayPath(
-                            collections,
-                            item.value.collection,
-                          )}
+                          origin={snapshot?.entry}
+                          collectionLabel={item.value.collection_label}
                           selectable={selectMode}
                           selected={selectedIds.has(item.value.id)}
                           onToggleSelect={toggleSelect}
                           draggable={canUploadToVault && !selectMode}
                           onEditTags={openTagEditor}
+                          onIntent={warmModel}
                         />
                       ),
                     )}
                   </div>
-                  <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
+                  <LoadMore
+                    hasMore={snapshot?.moreFolders ?? false}
+                    loading={fetchingFolders || currentRefresh !== null}
+                    onClick={() => {
+                      if (currentRefresh === null) void fetchMoreFolders();
+                    }}
+                    folders
+                  />
+                  <LoadMore
+                    hasMore={hasMore && !refreshRequired}
+                    loading={loadingMore}
+                    onClick={loadMore}
+                  />
                 </div>
               ) : (
-                <div key="list" className="flex-1 overflow-y-auto animate-panel-in">
+                <div key="list" ref={listContent} className="flex-1 overflow-y-auto">
                   <div className="flex flex-col">
                     <div className="flex items-center gap-3 px-4 py-2 border-b border-border text-xs font-mono text-muted-foreground uppercase tracking-wider bg-muted/50">
                       <span className="w-10 flex-shrink-0">{uiText("Thumb")}</span>
@@ -2693,34 +2933,38 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       <CollectionListRow
                         key={collection.id}
                         collection={collection}
-                        displayPath={collectionDisplayPath(collections, collection.path)}
+                        displayPath={collection.display_path}
                         onSelect={handleCollectionChange}
                         onIntent={prefetchFolder}
                         onDropModel={canUploadToVault ? handleMoveModel : undefined}
                         selectable={selectMode}
-                        selected={selectedCollectionIds.has(collection.id)}
+                        selected={selectedCollectionRows.has(collection.id)}
                         onToggleSelect={toggleCollectionSelect}
                       />
                     ))}
+                    <LoadMore
+                      hasMore={snapshot?.moreFolders ?? false}
+                      loading={fetchingFolders || currentRefresh !== null}
+                      onClick={() => {
+                        if (currentRefresh === null) void fetchMoreFolders();
+                      }}
+                      folders
+                    />
                     {libraryItems.map((item) =>
                       item.kind === "multipart" ? (
                         <MultipartModelListRow
                           key={`multipart-${item.value.id}`}
                           item={item.value}
-                          collectionLabel={collectionDisplayPath(
-                            collections,
-                            item.value.collection,
-                          )}
+                          collectionLabel={item.value.collection_label}
                           returnTo={currentLibraryHref}
+                          origin={snapshot?.entry}
                         />
                       ) : (
                         <ModelListRow
                           key={item.value.id}
                           model={item.value}
-                          collectionLabel={collectionDisplayPath(
-                            collections,
-                            item.value.collection,
-                          )}
+                          origin={snapshot?.entry}
+                          collectionLabel={item.value.collection_label}
                           selectable={selectMode}
                           selected={selectedIds.has(item.value.id)}
                           onToggleSelect={toggleSelect}
@@ -2729,20 +2973,36 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       ),
                     )}
                   </div>
-                  <LoadMore hasMore={hasMore} loading={loadingMore} onClick={loadMore} />
+                  <LoadMore
+                    hasMore={hasMore && !refreshRequired}
+                    loading={loadingMore}
+                    onClick={loadMore}
+                  />
                 </div>
               )}
             </div>
           )}
         </main>
 
+        {currentBatchRecovery && (
+          <LibraryBatchRecovery
+            key={currentBatchRecovery.entry.key}
+            receipt={currentBatchRecovery.receipt}
+            intent={currentBatchRecovery.intent}
+            models={currentBatchRecovery.models}
+            onChanged={() => void refresh()}
+            onClose={() => {
+              setBatchRecovery(null);
+              clearSelection();
+            }}
+          />
+        )}
         {docView === "models" && (
           <BatchToolbar
             modelCount={selectedIds.size}
             selectedCollections={selectedCollections}
-            collections={collections}
             tags={tags}
-            busy={batchBusy}
+            busy={batchBusy || currentBatchRecovery !== null}
             canMoveToRoot={!!user?.is_superuser}
             onMoveSelection={moveSelection}
             onRenameCollections={(names) =>
@@ -2756,17 +3016,25 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           />
         )}
         {tagTarget && (
-          <ModelTagsDialog
-            key={`${tagTarget.id}:${tagDialogSession}`}
-            model={tagTarget}
-            suggestions={tags}
+          <DeferredDialog
             open={tagDialogOpen}
+            title={uiText("Model tags")}
             onClose={() => setTagDialogOpen(false)}
-            onSaved={(nextTags) => {
-              setTagTarget((current) => (current ? { ...current, tags: nextTags } : current));
-              refresh();
-            }}
-          />
+          >
+            <ModelTagsDialog
+              key={`${tagTarget.id}:${tagDialogSession}`}
+              model={tagTarget}
+              suggestions={tags}
+              open={tagDialogOpen}
+              onClose={() => setTagDialogOpen(false)}
+              onSaved={(nextTags, editVersion) => {
+                setTagTarget((current) =>
+                  current ? { ...current, tags: nextTags, ...editVersion } : current,
+                );
+                refresh();
+              }}
+            />
+          </DeferredDialog>
         )}
       </>
     </Localized>
@@ -2774,9 +3042,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 }
 
 // Makes a collection card accept a dragged model: highlights on hover and calls
-// onDropModel(modelId, path) on drop. Ignores OS file drags (no MODEL_DND_MIME)
+// onDropModel(source, path) on drop. Ignores OS file drags (no MODEL_DND_MIME)
 // so those still bubble to the main upload handler.
-function useModelDropTarget(path: string, onDropModel?: (modelId: number, path: string) => void) {
+function useModelDropTarget(path: string, onDropModel?: (source: ModelDrag, path: string) => void) {
   const [dragOver, setDragOver] = useState(false);
   const handlers = {
     onDragOver: (e: React.DragEvent) => {
@@ -2792,8 +3060,8 @@ function useModelDropTarget(path: string, onDropModel?: (modelId: number, path: 
       e.preventDefault();
       e.stopPropagation();
       setDragOver(false);
-      const id = Number(e.dataTransfer.getData(MODEL_DND_MIME));
-      if (id) onDropModel(id, path);
+      const source = readModelDrag(e.dataTransfer.getData(MODEL_DND_MIME));
+      if (source) onDropModel(source, path);
     },
   };
   return { dragOver, handlers };
@@ -2811,8 +3079,8 @@ function CollectionFolderCard({
   collection: CollectionRead;
   onSelect: (path: string) => void;
   /** The user is about to open this folder (hover or focus): warm its data. */
-  onIntent?: (path: string) => void;
-  onDropModel?: (modelId: number, path: string) => void;
+  onIntent?: (path: string | null) => void;
+  onDropModel?: (source: ModelDrag, path: string) => void;
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
@@ -2827,6 +3095,8 @@ function CollectionFolderCard({
         data-collection-path={collection.path}
         onPointerEnter={() => !selectable && onIntent?.(collection.path)}
         onFocus={() => !selectable && onIntent?.(collection.path)}
+        onPointerLeave={() => onIntent?.(null)}
+        onBlur={() => onIntent?.(null)}
         onClick={() => (selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path))}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
@@ -2837,7 +3107,7 @@ function CollectionFolderCard({
           }
         }}
         {...handlers}
-        className={`animate-card-in group flex flex-col text-left bg-muted border rounded-lg hover:shadow-sm transition-[border-color,box-shadow,transform] duration-fast active:scale-[0.99] relative overflow-hidden ${
+        className={`group flex flex-col text-left bg-muted border rounded-lg hover:shadow-sm transition-[border-color,box-shadow,transform] duration-fast active:scale-[0.99] relative overflow-hidden ${
           selected
             ? "border-primary bg-accent"
             : dragOver
@@ -2886,8 +3156,8 @@ function CollectionListRow({
   displayPath: string | null;
   onSelect: (path: string) => void;
   /** The user is about to open this folder (hover or focus): warm its data. */
-  onIntent?: (path: string) => void;
-  onDropModel?: (modelId: number, path: string) => void;
+  onIntent?: (path: string | null) => void;
+  onDropModel?: (source: ModelDrag, path: string) => void;
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number) => void;
@@ -2902,6 +3172,8 @@ function CollectionListRow({
         data-collection-path={collection.path}
         onPointerEnter={() => !selectable && onIntent?.(collection.path)}
         onFocus={() => !selectable && onIntent?.(collection.path)}
+        onPointerLeave={() => onIntent?.(null)}
+        onBlur={() => onIntent?.(null)}
         onClick={() => (selectable ? onToggleSelect?.(collection.id) : onSelect(collection.path))}
         onKeyDown={(event) => {
           if (event.target !== event.currentTarget) return;
@@ -2957,27 +3229,29 @@ function MultipartModelListRow({
   item,
   collectionLabel,
   returnTo,
+  origin,
 }: {
   item: MultipartModelListItem;
   collectionLabel: string | null;
   returnTo: string;
+  origin?: LibraryEntry;
 }) {
   useUiLocale();
   const { t } = useI18n();
-  const thumb = useAuthenticatedAssetUrl(item.cover_thumbnail_url);
   return (
-    <Link
+    <LibraryItemLink
+      origin={origin}
       href={`/multipart-models/${item.id}?${new URLSearchParams({ return: returnTo }).toString()}`}
       aria-label={item.name}
       className="group flex items-center gap-2 border-b border-border px-4 py-3 transition-colors hover:bg-muted active:bg-muted md:gap-3"
     >
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded border border-primary/30 bg-muted md:h-10 md:w-10">
-        {thumb ? (
-          <img src={thumb} alt="" className="h-full w-full object-cover" loading="lazy" />
-        ) : (
-          <Boxes className="h-4 w-4 text-primary" aria-hidden />
-        )}
-      </span>
+      <ProtectedThumbnail
+        path={item.cover_thumbnail_url}
+        alt=""
+        className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded border border-primary/30 bg-muted md:h-10 md:w-10"
+        imageClassName="h-full w-full object-cover"
+        placeholder={<Boxes className="h-4 w-4 text-primary" aria-hidden />}
+      />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-foreground">{item.name}</span>
         <span className="mt-0.5 inline-flex rounded border border-primary/30 bg-card px-1.5 py-px font-mono text-3xs font-semibold uppercase tracking-wider text-primary">
@@ -2993,12 +3267,13 @@ function MultipartModelListRow({
       <span className="hidden w-24 text-right font-mono text-xs text-muted-foreground md:block">
         {timeAgo(item.updated_at)}
       </span>
-    </Link>
+    </LibraryItemLink>
   );
 }
 
 function ModelListRow({
   model,
+  origin,
   collectionLabel,
   selectable = false,
   selected = false,
@@ -3006,6 +3281,7 @@ function ModelListRow({
   draggable = false,
 }: {
   model: ModelListItem;
+  origin?: LibraryEntry;
   collectionLabel: string | null;
   selectable?: boolean;
   selected?: boolean;
@@ -3013,23 +3289,21 @@ function ModelListRow({
   draggable?: boolean;
 }) {
   useUiLocale();
-  const router = useRouter();
-  const thumb = useAuthenticatedAssetUrl(model.thumbnail_url);
   const printerPresence = model.printer_presence ?? [];
   return (
     <Localized>
-      <Link
+      <LibraryItemLink
+        origin={origin}
         href={`/models/${model.id}`}
         draggable={draggable}
         onDragStart={
           draggable
             ? (e) => {
-                e.dataTransfer.setData(MODEL_DND_MIME, String(model.id));
+                e.dataTransfer.setData(MODEL_DND_MIME, JSON.stringify(captureModelDrag(model)));
                 e.dataTransfer.effectAllowed = "move";
               }
             : undefined
         }
-        onMouseEnter={() => router.prefetch(`/models/${model.id}`)}
         onClick={(e) => {
           if (selectable) {
             e.preventDefault();
@@ -3047,20 +3321,17 @@ function ModelListRow({
             ariaLabel={uiText("Select {value1}", { value1: String(model.name) })}
           />
         )}
-        <div className="w-8 h-8 md:w-10 md:h-10 rounded bg-muted flex-shrink-0 overflow-hidden border border-border">
-          {thumb ? (
-            <img
-              src={thumb}
-              alt={model.name}
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-          ) : (
+        <ProtectedThumbnail
+          path={model.thumbnail_url}
+          alt={model.name}
+          className="w-8 h-8 md:w-10 md:h-10 rounded bg-muted flex-shrink-0 overflow-hidden border border-border"
+          imageClassName="h-full w-full object-cover"
+          placeholder={
             <div className="flex h-full w-full items-center justify-center">
               <FileText className="h-4 w-4 text-muted-foreground/50" />
             </div>
-          )}
-        </div>
+          }
+        />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-medium text-foreground truncate">{model.name}</p>
           {model.tags.length > 0 && (
@@ -3098,7 +3369,7 @@ function ModelListRow({
         <span className="w-24 text-right text-xs font-mono text-muted-foreground hidden md:block">
           {timeAgo(model.updated_at)}
         </span>
-      </Link>
+      </LibraryItemLink>
     </Localized>
   );
 }
@@ -3107,10 +3378,12 @@ function LoadMore({
   hasMore,
   loading,
   onClick,
+  folders = false,
 }: {
   hasMore: boolean;
   loading: boolean;
   onClick: () => void;
+  folders?: boolean;
 }) {
   useUiLocale();
   if (!hasMore) return null;
@@ -3122,7 +3395,11 @@ function LoadMore({
           disabled={loading}
           className="px-4 py-2 rounded border border-border bg-background text-foreground hover:bg-muted disabled:opacity-50 font-mono text-[13px] uppercase tracking-wider transition-colors"
         >
-          {loading ? uiText("Loading...") : uiText("Load more")}
+          {loading
+            ? uiText("Loading...")
+            : folders
+              ? uiText("Show more folders")
+              : uiText("Load more")}
         </button>
       </div>
     </Localized>

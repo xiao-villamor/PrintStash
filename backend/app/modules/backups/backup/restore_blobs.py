@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import secrets
 import sqlite3
 from pathlib import Path
 
@@ -82,7 +83,7 @@ def _sync_restored_ownership(
                 """
                 SELECT object_kind FROM owned_storage_objects
                 WHERE backend = ? AND namespace = ? AND key = ?
-                  AND provider_ref = ? LIMIT 1
+                  AND provider_ref = ? AND state != 'retiring' LIMIT 1
                 """,
                 (receipt.backend, receipt.namespace, item.key, current_provider_ref),
             ).fetchone()
@@ -91,7 +92,7 @@ def _sync_restored_ownership(
             # created. Replace them with this operation's current receipt.
             connection.execute(
                 """
-                DELETE FROM owned_storage_objects
+                UPDATE owned_storage_objects SET state = 'retiring', next_recovery_at = NULL
                 WHERE backend = ? AND namespace = ? AND key = ?
                   AND provider_ref = ?
                 """,
@@ -102,8 +103,8 @@ def _sync_restored_ownership(
                 INSERT INTO owned_storage_objects (
                     backend, namespace, key, provider_ref, object_kind, state, token,
                     size_bytes, sha256, etag, version_id, device, inode, ctime_ns,
-                    committed_at, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    committed_at, created_at, publication_generation
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     receipt.backend,
@@ -124,11 +125,12 @@ def _sync_restored_ownership(
                     receipt.ctime_ns,
                     utcnow().isoformat(sep=" "),
                     utcnow().isoformat(sep=" "),
+                    secrets.token_hex(32),
                 ),
             )
         connection.execute(
             """
-            DELETE FROM owned_storage_objects
+            UPDATE owned_storage_objects SET state = 'retiring', next_recovery_at = NULL
             WHERE backend = ? AND namespace = ? AND key = ?
               AND provider_ref IS ?
             """,
@@ -144,8 +146,8 @@ def _sync_restored_ownership(
             INSERT INTO owned_storage_objects (
                 backend, namespace, key, provider_ref, object_kind, state, token,
                 size_bytes, sha256, etag, version_id, device, inode, ctime_ns,
-                committed_at, created_at, last_error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                committed_at, created_at, last_error, publication_generation
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 archive_ownership.backend,
@@ -165,6 +167,7 @@ def _sync_restored_ownership(
                 archive_ownership.committed_at,
                 archive_ownership.created_at,
                 archive_ownership.last_error,
+                archive_ownership.publication_generation,
             ),
         )
         if cache_ownership is not None:
@@ -174,7 +177,7 @@ def _sync_restored_ownership(
             # database swap instead of orphaning the private cache file.
             connection.execute(
                 """
-                DELETE FROM owned_storage_objects
+                UPDATE owned_storage_objects SET state = 'retiring', next_recovery_at = NULL
                 WHERE backend = ? AND namespace = ? AND key = ?
                   AND provider_ref IS ?
                 """,
@@ -190,8 +193,8 @@ def _sync_restored_ownership(
                 INSERT INTO owned_storage_objects (
                     backend, namespace, key, provider_ref, object_kind, state, token,
                     size_bytes, sha256, etag, version_id, device, inode, ctime_ns,
-                    committed_at, created_at, last_error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    committed_at, created_at, last_error, publication_generation
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     cache_ownership.backend,
@@ -211,6 +214,7 @@ def _sync_restored_ownership(
                     cache_ownership.committed_at,
                     cache_ownership.created_at,
                     cache_ownership.last_error,
+                    cache_ownership.publication_generation,
                 ),
             )
         connection.commit()

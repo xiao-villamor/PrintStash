@@ -25,6 +25,7 @@ from starlette.websockets import WebSocketState
 from app.core.security import require_auth, require_user
 from app.db.models import CollectionRole, JobKind, Model, User
 from app.db.session import get_session_factory
+from app.modules.derivatives import records as derivative_records
 from app.modules.identity import rbac, ws_tickets
 from app.modules.identity.auth import get_user_by_id
 from app.modules.work import service as work_service
@@ -115,6 +116,21 @@ def retry_job(job_id: str, current_user: User = Depends(require_user)) -> JobSta
     return work_service.retry(job_id, actor=current_user)
 
 
+@router.post(
+    "/{job_id}/discard-staging",
+    status_code=204,
+    dependencies=[Depends(require_auth)],
+    summary="Discard retained input of a terminal ingest Job",
+)
+def discard_staging(
+    job_id: str, current_user: User = Depends(require_user)
+) -> Response:
+    from app.modules.ingestion.staging_cleanup import discard
+
+    discard(job_id, actor=current_user)
+    return Response(status_code=204)
+
+
 @events_router.post(
     "/ticket",
     dependencies=[Depends(require_auth)],
@@ -156,7 +172,9 @@ async def events_ws(websocket: WebSocket) -> None:
     every Job) on connect, and may send ``{"subscribe": "model:<id>"}`` or
     ``{"unsubscribe": ...}`` for the Models it is viewing; each accepted
     subscription is acknowledged with ``{"type": "subscribed", "channel": ...}``
-    so the client can refetch what changed before it took effect. Messages are
+    so the client can refetch what changed before it took effect; a Model
+    channel's acknowledgement adds the ``revision`` that ``ModelRead`` reports
+    as ``derivatives_revision``, and equal values mean nothing changed. Messages are
     notices (``{"type": "job", "job_id": ...}``); ``{"type": "resync"}`` asks
     the client to refetch everything it shows.
     """
@@ -174,7 +192,9 @@ async def events_ws(websocket: WebSocket) -> None:
         return
     await websocket.accept()
     sink = websocket.send_json
-    channels = {f"jobs:{user.id}"} | ({"work:admin"} if user.is_superuser else set())
+    channels = {f"jobs:{user.id}", "derivatives:policy"} | (
+        {"work:admin"} if user.is_superuser else set()
+    )
     for channel in channels:
         await bus.subscribe(channel, sink)
     await sink({"type": "resync"})
@@ -199,16 +219,31 @@ async def events_ws(websocket: WebSocket) -> None:
                     channels.add(wanted)
                     await bus.subscribe(wanted, sink)
                     # Anything that changed before this point was announced to
-                    # nobody on this socket; the client refetches on the ack.
-                    await sink({"type": "subscribed", "channel": wanted})
+                    # nobody on this socket. A Model channel says which revision
+                    # of its derivatives the subscription starts from, so a
+                    # client already holding that revision need not refetch.
+                    acknowledgement = {"type": "subscribed", "channel": wanted}
+                    revision = await asyncio.to_thread(_model_revision, wanted)
+                    if revision is not None:
+                        acknowledgement["revision"] = revision
+                    await sink(acknowledgement)
             if isinstance(unwanted, str) and unwanted in channels:
                 channels.discard(unwanted)
                 await bus.unsubscribe(unwanted, sink)
-    except (WebSocketDisconnect, ValueError):
+    except WebSocketDisconnect, ValueError:
         pass
     finally:
         for channel in channels:
             await bus.unsubscribe(channel, sink)
+
+
+def _model_revision(channel: str) -> str | None:
+    """The derivative revision of a Model channel; other channels have none."""
+    prefix, _, value = channel.partition(":")
+    if prefix != "model" or not value.isdigit():
+        return None
+    with get_session_factory().scoped_session() as session:
+        return derivative_records.model_revision(session, int(value))
 
 
 def _subscription_allowed(user: User, channel: str) -> bool:

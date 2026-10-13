@@ -152,6 +152,11 @@ class TestPointIndex:
         proposal = generations.prepare(db_session, actor, point_proposal(point))
         advance_generation(proposal.id)
         original = visual_query.embedding_provider
+        # Building the point model can evict the idle thumbnail model under the
+        # shared residency limit. Restore the ready fallback this test requires.
+        original(db_session, clip.manifest.space()).validate(
+            context=InferenceContext.bounded(30, priority="background")
+        )
 
         def unavailable(session, space):
             if space.profile == "point_cloud":

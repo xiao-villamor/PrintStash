@@ -67,6 +67,13 @@ classes for each feature so none are silently skipped:
   (local default; S3 branch when the change touches storage keys)
 - **SQLite and PostgreSQL** — dialect-sensitive SQL (`postgres` marker) when
   the change adds a query, index, or migration
+- **Scale** — a read that grows with the library runs as many statements, and
+  binds as many parameters, at ten times the size. Register a
+  collection-scoped listing in `tests/_library_reads.py`, which puts it under
+  `tests/repo/test_read_scaling.py` (every PR) and the `scale` lane's budgets at
+  25,000 collections and 100,000 Models (Deep CI). Build big libraries with
+  `tests.factories.library_scale.build_library_at_scale`, never a loop of
+  `make_*` calls
 
 The fixtures make the Nth test nearly free — `db_session`, `client`,
 `auth_headers`, the provider emulators, and `_patch_engine` truncating every

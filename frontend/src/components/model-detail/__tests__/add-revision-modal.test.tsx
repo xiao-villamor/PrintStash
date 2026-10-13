@@ -31,12 +31,15 @@ const FROZEN_NOW = "2026-01-01T00:00:00Z";
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    edit_version: 1,
     id: 1,
     name: "Benchy",
     slug: "benchy",
     hash: "a".repeat(64),
     collection: null,
     collection_id: null,
+    collection_label: null,
     description: null,
     source_url: null,
     effective_role: null,
@@ -46,6 +49,7 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
     updated_at: FROZEN_NOW,
     files: [],
     starred: false,
+    derivatives_revision: "0",
     ...over,
   };
 }

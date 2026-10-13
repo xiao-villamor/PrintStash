@@ -2,6 +2,8 @@
 
 from enum import Enum, StrEnum
 
+from app.core.work_priority import WorkPriority as WorkPriority
+
 
 class FileType(str, Enum):
     STL = "stl"
@@ -147,6 +149,7 @@ class StorageObjectState(str, Enum):
     PENDING = "pending"
     COMMITTED = "committed"
     BLOCKED = "blocked"
+    RETIRING = "retiring"
 
 
 class JobState(StrEnum):
@@ -162,13 +165,6 @@ class JobState(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-
-
-class WorkPriority(StrEnum):
-    """Scheduling tier of a submission; children inherit it and may only lower it."""
-
-    INTERACTIVE = "interactive"
-    BACKFILL = "backfill"
 
 
 class JobKind(StrEnum):
@@ -188,6 +184,7 @@ class JobKind(StrEnum):
     DERIVATIVES_GCODE = "derivatives.gcode"
     DERIVATIVES_MESH = "derivatives.mesh"
     DERIVATIVES_TOOLPATH = "derivatives.toolpath"
+    DERIVATIVES_VIEWER_STL = "derivatives.viewer_stl"
     IDENTITY_RETENTION = "identity.retention"
     INFERENCE_MODEL_DOWNLOAD = "inference.model_download"
     INGESTION_ARCHIVE_INSPECT = "ingestion.archive_inspect"
@@ -202,6 +199,7 @@ class JobKind(StrEnum):
     INGESTION_UPLOAD_RECOVERY = "ingestion.upload_recovery"
     INGESTION_URL = "ingestion.url"
     INGESTION_URL_SELECTION = "ingestion.url_selection"
+    INGESTION_SCRATCH_CLEANUP = "ingestion.scratch_cleanup"
     NOTIFICATIONS_DELIVER = "notifications.deliver"
     NOTIFICATIONS_RETENTION = "notifications.retention"
     PRINTING_DISPATCH = "printing.dispatch"
@@ -242,6 +240,7 @@ class DerivativeKind(StrEnum):
     METADATA = "metadata"
     THUMBNAIL = "thumbnail"
     TOOLPATH = "toolpath"
+    VIEWER_STL = "viewer_stl"
 
 
 class DerivativeState(StrEnum):
@@ -251,6 +250,14 @@ class DerivativeState(StrEnum):
     SKIPPED = "skipped"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
+
+class IngestionEntryState(StrEnum):
+    PENDING = "pending"
+    IMPORTED = "imported"
+    DEDUPLICATED = "deduplicated"
+    FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 class IngestRequestKind(StrEnum):

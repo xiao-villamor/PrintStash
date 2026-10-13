@@ -38,6 +38,7 @@ from app.core.metrics import (
     storage_delete_intents,
 )
 from app.core.metrics import registry as _metrics_registry
+from app.core.request_timing import capture_sql_timing
 from app.db.session import get_session_factory
 from app.modules.administration.audit import (
     clear_audit_context,
@@ -186,37 +187,57 @@ async def log_requests(request: Request, call_next):
     request.state.request_id = request_id
     started = time.perf_counter()
     status_code = 500
-    try:
-        response = await call_next(request)
-        status_code = response.status_code
-        response.headers["X-Request-ID"] = request_id
-        return response
-    finally:
-        duration_ms = (time.perf_counter() - started) * 1000
-        # Record request latency, keyed by the matched route template (not the
-        # raw path) to bound label cardinality. Skip /metrics to avoid self-noise.
-        if request.url.path != "/metrics":
-            route = request.scope.get("route")
-            path_label = getattr(route, "path", None) or "unmatched"
-            observe_request(
-                request.method, path_label, status_code, duration_ms / 1000.0
+    duration_ms = None
+    with capture_sql_timing() as sql_stats:
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            duration_ms = (time.perf_counter() - started) * 1000
+            response.headers["X-Request-ID"] = request_id
+            response.headers["Server-Timing"] = (
+                f'app;dur={duration_ms:.1f}, '
+                f'sql;dur={sql_stats.duration_ms:.1f};desc="{sql_stats.statement_count} statements"'
             )
-        if request.url.path == "/api/v1/health" and status_code < 500:
-            log_fn = logger.debug
-        elif status_code >= 500:
-            log_fn = logger.error
-        elif status_code >= 400:
-            log_fn = logger.warning
-        else:
-            log_fn = logger.info
-        log_fn(
-            "request method=%s path=%s status=%s duration_ms=%.1f request_id=%s",
-            request.method,
-            request.url.path,
-            status_code,
-            duration_ms,
-            request_id,
-        )
+            return response
+        finally:
+            if duration_ms is None:
+                duration_ms = (time.perf_counter() - started) * 1000
+            # Record latency under the matched route template to bound label
+            # cardinality. Skip /metrics to avoid self-noise.
+            if request.url.path != "/metrics":
+                route = request.scope.get("route")
+                path_label = getattr(route, "path", None) or "unmatched"
+                observe_request(
+                    request.method, path_label, status_code, duration_ms / 1000.0
+                )
+            if request.url.path == "/api/v1/health" and status_code < 500:
+                log_fn = logger.debug
+            elif status_code >= 500:
+                log_fn = logger.error
+            elif status_code >= 400:
+                log_fn = logger.warning
+            else:
+                log_fn = logger.info
+            log_fn(
+                "request method=%s path=%s status=%s duration_ms=%.1f request_id=%s",
+                request.method,
+                request.url.path,
+                status_code,
+                duration_ms,
+                request_id,
+            )
+            if duration_ms >= settings.slow_request_ms:
+                logger.warning(
+                    "slow request method=%s path=%s status=%s duration_ms=%.1f "
+                    "sql_count=%s sql_ms=%.1f request_id=%s",
+                    request.method,
+                    request.url.path,
+                    status_code,
+                    duration_ms,
+                    sql_stats.statement_count,
+                    sql_stats.duration_ms,
+                    request_id,
+                )
 
 
 app.include_router(api_router)

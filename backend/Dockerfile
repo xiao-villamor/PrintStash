@@ -33,7 +33,7 @@ RUN curl -fsSL \
 FROM scratch AS opendal-wheel
 COPY --from=opendal-builder /wheels /
 
-FROM python:3.11-slim AS bgcode-builder
+FROM python:3.14.8-slim-trixie AS bgcode-builder
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl git cmake g++ make libboost-dev libboost-nowide-dev zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
@@ -43,7 +43,7 @@ RUN sh /tmp/build-bgcode.sh
 FROM scratch AS bgcode-binary
 COPY --from=bgcode-builder /opt/libbgcode/bin/bgcode /bgcode
 
-FROM python:3.11-slim AS base
+FROM python:3.14.8-slim-trixie AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -90,6 +90,28 @@ RUN uv sync --frozen --no-dev --no-editable --extra full \
  && uv cache clean \
  && rm -rf "$UV_CACHE_DIR"
 
+FROM dependencies-full AS dependencies-gpu-render
+COPY --from=opendal-builder /wheels /tmp/opendal-wheels
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libegl1 libgl1-mesa-dri libglx-mesa0 \
+ && rm -rf /var/lib/apt/lists/* \
+ && uv sync --frozen --no-dev --no-editable --extra full --extra gpu-render --no-install-package opendal \
+ && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
+ && rm -rf /tmp/opendal-wheels \
+ && uv cache clean \
+ && rm -rf "$UV_CACHE_DIR"
+
+FROM dependencies-full AS dependencies-gpu
+COPY --from=opendal-builder /wheels /tmp/opendal-wheels
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers libegl1 libgl1-mesa-dri libglx-mesa0 \
+ && rm -rf /var/lib/apt/lists/* \
+ && uv sync --frozen --no-dev --no-editable --extra full --extra gpu --no-install-package opendal \
+ && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
+ && rm -rf /tmp/opendal-wheels \
+ && uv cache clean \
+ && rm -rf "$UV_CACHE_DIR"
+
 FROM dependencies-${PRINTSTASH_VARIANT} AS runtime
 ARG PRINTSTASH_VARIANT
 
@@ -104,6 +126,9 @@ ENV UV_CACHE_DIR=/tmp/printstash-uv-cache \
     UV_NO_SYNC=1
 
 COPY --chown=printstash:printstash app ./app
+# Fresh guarded parsers share code bytes, never interpreter or parser state.
+# Runtime bytecode writes are disabled, so compile application sources at build.
+RUN .venv/bin/python -m compileall -q app
 COPY --chown=printstash:printstash --chmod=0644 alembic.ini ./alembic.ini
 COPY --chown=printstash:printstash alembic ./alembic
 COPY docker-entrypoint.sh ./docker-entrypoint.sh

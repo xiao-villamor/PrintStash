@@ -1,10 +1,17 @@
 "use client";
 
+import { refreshLibraryMetadata } from "@/features/library/metadata";
+
+import type { EditingBase } from "@/types/editing";
+
+import { LibraryBackLink } from "@/features/library/navigation";
+import { useMultipartPublication } from "@/features/library/multipart";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+import { ApiError } from "@/lib/errors";
 import { uiText } from "@/lib/locale";
-import { collectionDisplayPath } from "@/lib/collection-display";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   ChevronRight,
@@ -14,12 +21,10 @@ import {
   ArrowLeft,
   ArrowDown,
   ArrowUp,
-  Boxes,
   FileText,
   Pencil,
   Plus,
   Search,
-  Star,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -28,21 +33,21 @@ import { Modal } from "@/components/ui/modal";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CollectionPicker } from "@/components/collection-picker";
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
-import { Checkbox } from "@/components/ui/checkbox";
+import type { TagsReview } from "@/components/entity-tags-editor";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { useI18n } from "@/lib/i18n";
-import { useCollections, useMultipartModels, useTags } from "@/lib/queries";
+import { useCollectionChildren, useCollectionLookup, useTags } from "@/lib/queries";
 import {
-  createMultipartModel,
+  getMultipartModel,
   deleteDocument,
   deleteMultipartModel,
   deleteMultipartModelCover,
   replaceMultipartModelTags,
   saveMultipartModel,
-  starMultipartModel,
-  unstarMultipartModel,
   uploadDocument,
   uploadMultipartModelCover,
 } from "@/lib/api";
@@ -51,547 +56,22 @@ import {
   useMultipartModel,
   useMultipartModelCandidates,
 } from "@/lib/queries";
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { useAuth } from "@/lib/auth-context";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { Link } from "@/lib/link";
 import { useParams } from "react-router-dom";
 import type {
-  CollectionRead,
+  CollectionNodeRead,
   MultipartModelCandidate,
-  MultipartModelListItem,
   MultipartModelRead,
   MultipartPartRead,
-  TagRead,
 } from "@/types";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { parseApiError } from "@/lib/errors";
 import { queryKeys } from "@/lib/query-client";
 
-/**
- * Keep server details behind the same error translation seam as the rest of
- * the app. Multipart endpoints also have a few domain-specific detail codes;
- * those should get useful, localised copy instead of exposing the code itself.
- */
-function multipartError(
-  cause: unknown,
-  t: ReturnType<typeof useI18n>["t"],
-  fallback: Parameters<ReturnType<typeof useI18n>["t"]>[0],
-): string {
-  const parsed = parseApiError(cause);
-  // Multipart operations need copy from the active catalog. The global
-  // userMessage seam intentionally stays locale-neutral, so map the boundary
-  // categories here instead of exposing a server detail code or English copy
-  // in a Spanish vault.
-  if (parsed.code === "network_unreachable") return t("multipart.networkError");
-  if (parsed.status === 403 || parsed.code.endsWith("_permission_denied")) {
-    return t("multipart.permissionError");
-  }
-  if (parsed.status === 404 || parsed.code.endsWith("_not_found")) {
-    return t("multipart.notFoundError");
-  }
-  if (parsed.code === "unknown" || parsed.code === "offline") return t(fallback);
-  if (parsed.code.startsWith("multipart_") || parsed.code.startsWith("part_")) {
-    return t(fallback);
-  }
-  if (parsed.code.endsWith("_failed")) return t(fallback);
-  // Unknown details must remain operation-specific and localized. Do not fall
-  // through to userMessage(), whose generic catalog is deliberately English.
-  return t(fallback);
-}
-
-function Count({ count, one, many }: { count: number; one: string; many: string }) {
-  useUiLocale();
-  return <span>{(count === 1 ? one : many).replace("{count}", String(count))}</span>;
-}
-
-function Cover({ src, alt }: { src: string | null; alt: string }) {
-  useUiLocale();
-  const external = src?.startsWith("https://") || src?.startsWith("http://") ? src : null;
-  const authenticated = useAuthenticatedAssetUrl(external ? null : src);
-  const url = external ?? authenticated;
-  return url ? (
-    <img src={url} alt={alt} className="h-full w-full object-contain" />
-  ) : (
-    <div className="flex h-full w-full items-center justify-center bg-muted text-muted-foreground">
-      <Boxes className="h-10 w-10" aria-hidden />
-    </div>
-  );
-}
-
-function detailHref(id: number, returnTo?: string): string {
-  if (!returnTo) return `/multipart-models/${id}`;
-  const search = new URLSearchParams({ return: returnTo });
-  return `/multipart-models/${id}?${search.toString()}`;
-}
-
-export function MultipartModelCard({
-  item,
-  collectionLabel,
-  returnTo,
-  availableTags = [],
-  onDataChange,
-}: {
-  item: MultipartModelListItem;
-  collectionLabel?: string | null;
-  returnTo?: string;
-  availableTags?: TagRead[];
-  onDataChange?: () => void;
-}) {
-  useUiLocale();
-  const { t } = useI18n();
-  const [starOverride, setStarOverride] = useState<{
-    base: boolean;
-    value: boolean;
-  } | null>(null);
-  const [starBusy, setStarBusy] = useState(false);
-  const starred =
-    starOverride !== null && starOverride.base === item.starred ? starOverride.value : item.starred;
-  const canEditTags = item.effective_role === "edit" || item.effective_role === "admin";
-
-  async function toggleStar() {
-    if (starBusy) return;
-    const next = !starred;
-    setStarOverride({ base: item.starred, value: next });
-    setStarBusy(true);
-    try {
-      await (next ? starMultipartModel(item.id) : unstarMultipartModel(item.id));
-      onDataChange?.();
-    } catch (cause) {
-      setStarOverride({ base: item.starred, value: !next });
-      toast.error(multipartError(cause, t, "multipart.favoriteError"));
-    } finally {
-      setStarBusy(false);
-    }
-  }
-
-  async function saveCardTags(nextTags: string[]) {
-    try {
-      await replaceMultipartModelTags(item.id, nextTags);
-      onDataChange?.();
-      toast.success(t("multipart.tagsSaved"));
-    } catch (cause) {
-      toast.error(multipartError(cause, t, "multipart.tagsSaveError"));
-      throw cause;
-    }
-  }
-
-  return (
-    <article className="animate-card-in group relative flex aspect-square h-full min-w-0 max-w-full flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-fast hover:-translate-y-0.5 hover:border-primary active:scale-[0.99]">
-      <button
-        type="button"
-        onClick={() => void toggleStar()}
-        disabled={starBusy}
-        aria-label={
-          starred
-            ? uiText("Remove {value1} from favorites", { value1: String(item.name) })
-            : uiText("Add {value1} to favorites", { value1: String(item.name) })
-        }
-        className="absolute right-2 top-2 z-10 rounded bg-card/90 p-2 text-muted-foreground shadow-sm transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
-      >
-        <Star className={cn("h-4 w-4", starred && "fill-current text-primary")} />
-      </button>
-      {canEditTags && (
-        <div className="absolute right-2 top-12 z-10">
-          <EntityTagsDialog
-            entityLabel={item.name}
-            tags={item.tags}
-            availableTags={availableTags}
-            canEdit
-            help={t("multipart.tagsHelp")}
-            onSave={saveCardTags}
-            triggerMode="icon"
-            triggerClassName="bg-card/90 text-muted-foreground shadow-sm hover:bg-card hover:text-primary"
-          />
-        </div>
-      )}
-      <Link
-        href={detailHref(item.id, returnTo)}
-        aria-label={item.name}
-        className="flex h-full min-w-0 flex-col overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      >
-        <div className="relative h-3/5 shrink-0 overflow-hidden border-b border-border bg-muted/40">
-          <Cover src={item.cover_thumbnail_url} alt="" />
-          <span className="absolute left-2 top-2 max-w-[calc(100%-6rem)] truncate rounded border border-primary/30 bg-card/90 px-2 py-1 font-mono text-3xs font-semibold uppercase tracking-wider text-primary shadow-sm">
-            {t("multipart.badge")}
-          </span>
-        </div>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col p-3">
-          <h3
-            title={item.name}
-            className="line-clamp-2 break-words text-sm font-bold tracking-tight"
-          >
-            {item.name}
-          </h3>
-          <p className="mt-1 truncate text-xs text-muted-foreground">
-            <Count count={item.part_count} one={t("multipart.part")} many={t("multipart.parts")} />
-            {" · "}
-            <Count
-              count={item.model_count}
-              one={t("multipart.model")}
-              many={t("multipart.models")}
-            />
-            {item.guide_count > 0 && (
-              <>
-                {" · "}
-                {item.guide_count}{" "}
-                {item.guide_count === 1 ? t("multipart.guide") : t("multipart.guides")}
-              </>
-            )}
-          </p>
-          <div className="mt-auto flex min-w-0 items-center gap-1 overflow-hidden border-t border-border pt-2">
-            <div className="flex min-w-0 flex-1 gap-1 overflow-hidden">
-              {item.tags.slice(0, 2).map((tag) => (
-                <span
-                  key={tag}
-                  title={tag}
-                  className="max-w-24 truncate rounded border border-primary-soft bg-accent px-1.5 py-0.5 font-mono text-3xs font-semibold tracking-wider text-accent-foreground"
-                >
-                  {tag}
-                </span>
-              ))}
-              {item.tags.length > 2 && (
-                <span className="shrink-0 text-3xs text-muted-foreground">
-                  +{item.tags.length - 2}
-                </span>
-              )}
-            </div>
-            {collectionLabel && (
-              <span
-                title={collectionLabel}
-                className="max-w-[45%] shrink truncate text-xs text-muted-foreground"
-              >
-                {collectionLabel}
-              </span>
-            )}
-          </div>
-        </div>
-      </Link>
-    </article>
-  );
-}
-
-export function NewMultipartModelModal({
-  open,
-  onClose,
-  collectionId,
-  collections = [],
-  returnTo,
-}: {
-  open: boolean;
-  onClose: () => void;
-  collectionId: number | null;
-  collections?: CollectionRead[];
-  returnTo?: string;
-}) {
-  useUiLocale();
-  const { t } = useI18n();
-  const router = useRouter();
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [targetCollectionId, setTargetCollectionId] = useState<number | null>(collectionId);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const writableCollections = useMemo(
-    () =>
-      collections.filter(
-        (collection) =>
-          collection.effective_role === "edit" || collection.effective_role === "admin",
-      ),
-    [collections],
-  );
-
-  function closeModal() {
-    setName("");
-    setDescription("");
-    setTargetCollectionId(collectionId);
-    setError(null);
-    onClose();
-  }
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!name.trim() || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await createMultipartModel({
-        name: name.trim(),
-        description: description.trim() || null,
-        collection_id: targetCollectionId,
-      });
-      closeModal();
-      router.push(detailHref(created.id, returnTo));
-    } catch (cause) {
-      setError(multipartError(cause, t, "multipart.createError"));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Modal
-      open={open}
-      onClose={busy ? () => undefined : closeModal}
-      title={t("multipart.new")}
-      className="max-w-lg"
-    >
-      <form onSubmit={submit} className="space-y-5">
-        <p className="text-sm text-muted-foreground">{t("multipart.linkedNotice")}</p>
-        <label className="block space-y-1.5">
-          <span className="text-sm font-medium">{t("multipart.name")}</span>
-          <Input
-            autoFocus
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={t("multipart.namePlaceholder")}
-            maxLength={200}
-            required
-          />
-        </label>
-        <label className="block space-y-1.5">
-          <span className="text-sm font-medium">{t("multipart.collectionLabel")}</span>
-          <select
-            value={targetCollectionId ?? ""}
-            onChange={(event) =>
-              setTargetCollectionId(event.target.value ? Number(event.target.value) : null)
-            }
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="">{t("multipart.vaultOnly")}</option>
-            {writableCollections.map((collection) => (
-              <option key={collection.id} value={collection.id}>
-                {collectionDisplayPath(collections, collection.path)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block space-y-1.5">
-          <span className="text-sm font-medium">{t("multipart.descriptionLabel")}</span>
-          <textarea
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder={t("multipart.descriptionPlaceholder")}
-            rows={3}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-        </label>
-        {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          >
-            {error}
-          </p>
-        )}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={closeModal} disabled={busy}>
-            {t("multipart.cancel")}
-          </Button>
-          <Button type="submit" loading={busy} disabled={!name.trim()}>
-            {t("multipart.create")}
-          </Button>
-        </div>
-      </form>
-    </Modal>
-  );
-}
-
-export type MultipartStructureFilter = "variants" | "fixed" | "empty";
-
-const STRUCTURE_FILTERS: MultipartStructureFilter[] = ["variants", "fixed", "empty"];
-
-export function MultipartModelBrowser({
-  collection,
-  collections = [],
-  structures = [],
-  guidesOnly = false,
-  canCreate,
-  onCreate,
-  onStructuresChange,
-  onGuidesOnlyChange,
-}: {
-  collection: string | null;
-  collections?: CollectionRead[];
-  structures?: MultipartStructureFilter[];
-  guidesOnly?: boolean;
-  canCreate: boolean;
-  onCreate?: () => void;
-  onStructuresChange?: (value: MultipartStructureFilter[]) => void;
-  onGuidesOnlyChange?: (value: boolean) => void;
-}) {
-  useUiLocale();
-  const { t } = useI18n();
-  const queryClient = useQueryClient();
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<"updated" | "name" | "parts">("updated");
-  const [createOpen, setCreateOpen] = useState(false);
-  const collectionId = collections.find((item) => item.path === collection)?.id ?? null;
-  const { data: availableTags = [] } = useTags();
-  const requestCreate = onCreate ?? (() => setCreateOpen(true));
-  function toggleStructure(value: MultipartStructureFilter) {
-    onStructuresChange?.(
-      structures.includes(value)
-        ? structures.filter((current) => current !== value)
-        : [...structures, value],
-    );
-  }
-  const {
-    data: items = [],
-    isLoading,
-    error,
-  } = useMultipartModels({
-    collection: collection ?? undefined,
-    direct: true,
-    q: query || undefined,
-    limit: 100,
-  });
-  const sortedItems = useMemo(() => {
-    const rows = items.filter((item) => {
-      if (guidesOnly && item.guide_count === 0) return false;
-      if (structures.length > 0) {
-        const matchesStructure = structures.some((structure) => {
-          if (structure === "variants") return item.model_count > item.part_count;
-          if (structure === "fixed") {
-            return item.part_count > 0 && item.model_count === item.part_count;
-          }
-          return item.part_count === 0;
-        });
-        if (!matchesStructure) return false;
-      }
-      return true;
-    });
-    if (sort === "name") return rows.sort((a, b) => a.name.localeCompare(b.name));
-    if (sort === "parts") return rows.sort((a, b) => b.part_count - a.part_count);
-    return rows.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  }, [guidesOnly, items, sort, structures]);
-
-  return (
-    <section className="flex-1 px-4 py-5 sm:px-6">
-      {!onCreate && (
-        <NewMultipartModelModal
-          key={collectionId ?? "vault"}
-          open={createOpen}
-          onClose={() => setCreateOpen(false)}
-          collectionId={collectionId}
-          collections={collections}
-        />
-      )}
-      <div className="w-full space-y-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex w-full max-w-xl items-center gap-2">
-            <Search className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-            <Input
-              aria-label={t("multipart.searchModels")}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("multipart.searchModels")}
-            />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>{t("multipart.sort")}</span>
-            <select
-              value={sort}
-              onChange={(event) => {
-                const value = event.target.value;
-                if (value === "updated" || value === "name" || value === "parts") {
-                  setSort(value);
-                }
-              }}
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <option value="updated">{t("multipart.sortUpdated")}</option>
-              <option value="name">{t("multipart.sortName")}</option>
-              <option value="parts">{t("multipart.sortParts")}</option>
-            </select>
-          </label>
-          {!onCreate && (
-            <Button type="button" onClick={requestCreate} disabled={!canCreate}>
-              <Plus className="h-4 w-4" /> {t("multipart.new")}
-            </Button>
-          )}
-        </div>
-        <fieldset className="grid gap-1 rounded-md border border-border bg-muted/30 p-2 md:hidden">
-          <legend className="px-1 text-xs font-medium text-muted-foreground">
-            {t("multipart.filters")}
-          </legend>
-          <div className="grid grid-cols-2 gap-1">
-            {STRUCTURE_FILTERS.map((value) => (
-              <label
-                key={value}
-                className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm text-foreground transition-colors duration-press hover:bg-muted"
-              >
-                <Checkbox
-                  checked={structures.includes(value)}
-                  onChange={() => toggleStructure(value)}
-                />
-                <span>{t(`multipart.structure.${value}`)}</span>
-              </label>
-            ))}
-            <label className="flex min-h-10 cursor-pointer items-center gap-2 rounded px-2 text-sm text-foreground transition-colors duration-press hover:bg-muted">
-              <Checkbox checked={guidesOnly} onChange={() => onGuidesOnlyChange?.(!guidesOnly)} />
-              <span>{t("multipart.withGuides")}</span>
-            </label>
-          </div>
-        </fieldset>
-        {error && (
-          <p
-            role="alert"
-            className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
-          >
-            {multipartError(error, t, "multipart.loadError")}
-          </p>
-        )}
-        {isLoading ? (
-          <div
-            className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]"
-            aria-busy="true"
-          >
-            {[1, 2, 3].map((item) => (
-              <Card key={item} className="aspect-square animate-pulse bg-muted/40" />
-            ))}
-          </div>
-        ) : sortedItems.length === 0 ? (
-          <EmptyState
-            title={
-              query || structures.length > 0 || guidesOnly
-                ? t("multipart.noFilteredSets")
-                : t("multipart.empty")
-            }
-            description={
-              query || structures.length > 0 || guidesOnly
-                ? t("multipart.noFilteredSetsHelp")
-                : t("multipart.emptyDescription")
-            }
-            action={
-              !query && structures.length === 0 && !guidesOnly && canCreate ? (
-                <Button onClick={requestCreate}>{t("multipart.new")}</Button>
-              ) : undefined
-            }
-          />
-        ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]">
-            {sortedItems.map((item) => (
-              <MultipartModelCard
-                key={item.id}
-                item={item}
-                collectionLabel={collectionDisplayPath(collections, item.collection)}
-                availableTags={availableTags}
-                onDataChange={() => {
-                  void Promise.all([
-                    queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
-                    queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
-                  ]);
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
-  );
-}
+import { Count, Cover } from "@/components/multipart-model-presentation";
+import { multipartError } from "@/lib/multipart-model-presentation";
 
 function modelLabel(model: MultipartModelCandidate, unavailable: string): string {
   return model.available && model.name ? model.name : unavailable;
@@ -614,14 +94,11 @@ function ModelPicker({
 }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
-  const [collection, setCollection] = useState<CollectionRead | null>(null);
+  const [collection, setCollection] = useState<CollectionNodeRead | null>(null);
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<Map<number, MultipartModelCandidate>>(new Map());
-  const {
-    data: collections = [],
-    isError: collectionsError,
-    refetch: retryCollections,
-  } = useCollections();
+  const children = useCollectionChildren(collection?.id ?? null, { enabled: open });
+  const lookup = useCollectionLookup(collection?.path ?? null);
   const {
     data: candidates = [],
     isLoading,
@@ -633,20 +110,13 @@ function ModelPicker({
     direct: collection !== null,
     offset,
   });
-  const ancestors = collections
-    .filter(
-      (item) => collection?.path === item.path || collection?.path.startsWith(`${item.path}/`),
-    )
-    .sort((a, b) => a.path.length - b.path.length);
-  const collectionIds = new Set(collections.map((item) => item.id));
-  const folders = collections
-    .filter((item) =>
-      collection
-        ? item.parent_id === collection.id
-        : item.parent_id === null || !collectionIds.has(item.parent_id),
-    )
-    .sort((a, b) => a.name.localeCompare(b.name));
-  function navigate(next: CollectionRead | null) {
+  const ancestors = lookup.data
+    ? [...lookup.data.ancestors, lookup.data.collection]
+    : collection
+      ? [collection]
+      : [];
+  const folders = children.data?.pages.flatMap((page) => page.items) ?? [];
+  function navigate(next: CollectionNodeRead | null) {
     setCollection(next);
     setOffset(0);
   }
@@ -703,10 +173,10 @@ function ModelPicker({
           ))}
         </nav>
         <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
-          {collectionsError && (
+          {children.isError && (
             <div role="alert" className="mb-3 flex flex-wrap items-center gap-2 text-sm">
               <span>{t("multipart.collectionsError")}</span>
-              <Button variant="outline" size="sm" onClick={() => void retryCollections()}>
+              <Button variant="outline" size="sm" onClick={() => void children.refetch()}>
                 {t("multipart.retry")}
               </Button>
             </div>
@@ -729,6 +199,16 @@ function ModelPicker({
                 </li>
               ))}
             </ul>
+          )}
+          {children.hasNextPage && (
+            <Button
+              variant="outline"
+              size="sm"
+              loading={children.isFetchingNextPage}
+              onClick={() => void children.fetchNextPage()}
+            >
+              {uiText("Show more folders")}
+            </Button>
           )}
           {isLoading && (
             <p role="status" className="py-8 text-sm text-muted-foreground">
@@ -976,11 +456,9 @@ function MultipartMemberCard({ model }: { model: MultipartModelCandidate }) {
 
 function MultipartOverview({
   model,
-  collections,
   onAddFirst,
 }: {
   model: MultipartModelRead;
-  collections: CollectionRead[];
   onAddFirst?: () => void;
 }) {
   useUiLocale();
@@ -1067,7 +545,7 @@ function MultipartOverview({
                   {t("multipart.collectionLabel")}
                 </dt>
                 <dd className="mt-1 text-sm font-medium text-foreground">
-                  {collectionDisplayPath(collections, model.collection) || t("multipart.vaultOnly")}
+                  {model.collection_label || t("multipart.vaultOnly")}
                 </dd>
               </div>
             </dl>
@@ -1286,12 +764,16 @@ function PartEditorRow({
 }
 
 export function MultipartModelDetailPage() {
-  useUiLocale();
   const params = useParams<{ id: string }>();
-  const id = Number(params.id);
+  return <MultipartDetail key={params.id} id={Number(params.id)} />;
+}
+
+type CoverIntent = { kind: "upload"; file: File } | { kind: "remove" };
+
+function MultipartDetail({ id }: { id: number }) {
+  useUiLocale();
   const { t } = useI18n();
   const { user } = useAuth();
-  const { data: collections = [] } = useCollections();
   const { data: availableTags = [] } = useTags();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -1300,10 +782,24 @@ export function MultipartModelDetailPage() {
     data: serverModel,
     isLoading,
     error,
+    refetch,
   } = useMultipartModel(Number.isFinite(id) ? id : null);
-  const [persistedModel, setPersistedModel] = useState<MultipartModelRead | null>(null);
+  const { publish, active, isCurrent } = useMultipartPublication(id);
+  const [editProblem, setEditProblem] = useState<"conflict" | "unconfirmed" | null>(null);
+  const reviewPublication = useRef<typeof publish | null>(null);
+  const [reviewed, setReviewed] = useState<MultipartModelRead | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewDenied, setReviewDenied] = useState(false);
+  const [coverIntent, setCoverIntent] = useState<CoverIntent | null>(null);
+  const reviewRequest = useRef<AbortController | null>(null);
+  const writePending = useRef(false);
+  useEffect(() => () => reviewRequest.current?.abort(), []);
+  useEffect(() => {
+    if (!active) reviewRequest.current?.abort();
+  }, [active]);
   const [draft, setDraft] = useState<MultipartModelRead | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [collectionPickerOpen, setCollectionPickerOpen] = useState(false);
   const [picker, setPicker] = useState({ open: false, part: -1, session: 0 });
   function openPicker(part: number) {
     setPicker((current) => ({ open: true, part, session: current.session + 1 }));
@@ -1318,20 +814,10 @@ export function MultipartModelDetailPage() {
   const [coverBusy, setCoverBusy] = useState(false);
   const guideInput = useRef<HTMLInputElement>(null);
   const coverInput = useRef<HTMLInputElement>(null);
-  const savedModel = persistedModel ?? serverModel ?? null;
+  const savedModel = serverModel ?? null;
   const model = draft ?? savedModel;
   const canEdit =
-    !!user?.is_superuser || model?.effective_role === "edit" || model?.effective_role === "admin";
-  const writableCollections = useMemo(
-    () =>
-      collections.filter(
-        (collection) =>
-          !!user?.is_superuser ||
-          collection.effective_role === "edit" ||
-          collection.effective_role === "admin",
-      ),
-    [collections, user?.is_superuser],
-  );
+    active && (savedModel?.effective_role === "edit" || savedModel?.effective_role === "admin");
   const usedIds = useMemo(
     () => new Set((model?.parts ?? []).flatMap((part) => part.models.map((member) => member.id))),
     [model?.parts],
@@ -1340,18 +826,28 @@ export function MultipartModelDetailPage() {
     if (!savedModel || !canEdit) return;
     setDraft(savedModel);
     setSaveError(null);
+    setEditProblem(null);
+    setReviewed(null);
     setIsEditing(true);
   }
   function beginAddingFirst() {
     if (!savedModel || !canEdit) return;
     setDraft(savedModel);
     setSaveError(null);
+    setEditProblem(null);
+    setReviewed(null);
     setIsEditing(true);
     openPicker(-1);
   }
   function cancelEditing() {
+    if (writePending.current) return;
+    reviewRequest.current?.abort();
+    setReviewing(false);
+    setCoverIntent(null);
     setDraft(null);
     setSaveError(null);
+    setEditProblem(null);
+    setReviewed(null);
     closePicker();
     setIsEditing(false);
   }
@@ -1401,158 +897,281 @@ export function MultipartModelDetailPage() {
     });
   }
   async function uploadGuide(file: File) {
-    if (!model || !canEdit || guideBusy) return;
+    if (!model || !canEdit || guideBusy || !isCurrent()) return;
     setGuideBusy(true);
     setSaveError(null);
     try {
       const guide = await uploadDocument(file, model.collection_id, undefined, model.id);
-      setDraft({
-        ...model,
-        guides: [guide, ...model.guides],
-        guide_count: model.guide_count + 1,
+      if (!isCurrent()) return;
+      const add = (base: MultipartModelRead) => ({
+        ...base,
+        guides: [guide, ...base.guides.filter((item) => item.id !== guide.id)],
+        guide_count: base.guide_count + (base.guides.some((item) => item.id === guide.id) ? 0 : 1),
       });
-      setPersistedModel((current) => {
-        const base = current ?? serverModel;
-        if (!base) return current;
-        return {
-          ...base,
-          guides: [guide, ...base.guides],
-          guide_count: base.guide_count + 1,
-        };
-      });
+      if (!(await publish(add)) || !isCurrent()) return;
+      setDraft((current) => (current ? add(current) : current));
       toast.success(t("multipart.guideUploaded"));
     } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.guideUploadError"));
+      if (isCurrent()) setSaveError(multipartError(cause, t, "multipart.guideUploadError"));
     } finally {
-      setGuideBusy(false);
+      if (isCurrent()) setGuideBusy(false);
     }
   }
   async function removeGuide(guideId: number) {
-    if (!model || !canEdit || guideBusy) return;
+    if (!model || !canEdit || guideBusy || !isCurrent()) return;
     setGuideBusy(true);
     try {
       await deleteDocument(guideId);
-      setDraft({
-        ...model,
-        guides: model.guides.filter((guide) => guide.id !== guideId),
-        guide_count: Math.max(0, model.guide_count - 1),
+      if (!isCurrent()) return;
+      const remove = (base: MultipartModelRead) => ({
+        ...base,
+        guides: base.guides.filter((guide) => guide.id !== guideId),
+        guide_count: Math.max(
+          0,
+          base.guide_count - (base.guides.some((guide) => guide.id === guideId) ? 1 : 0),
+        ),
       });
-      setPersistedModel((current) => {
-        const base = current ?? serverModel;
-        if (!base) return current;
-        return {
-          ...base,
-          guides: base.guides.filter((guide) => guide.id !== guideId),
-          guide_count: Math.max(0, base.guide_count - 1),
-        };
-      });
+      if (!(await publish(remove)) || !isCurrent()) return;
+      setDraft((current) => (current ? remove(current) : current));
     } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.guideDeleteError"));
+      if (isCurrent()) setSaveError(multipartError(cause, t, "multipart.guideDeleteError"));
     } finally {
-      setGuideBusy(false);
+      if (isCurrent()) setGuideBusy(false);
     }
   }
-  function applySavedCover(saved: MultipartModelRead) {
-    setPersistedModel(saved);
+  function refreshRelated() {
+    if (!isCurrent()) return;
+    // A detail receipt is authoritative. Refresh the other projections without
+    // starting another detail GET that can replace that acknowledgement.
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.multipartModels,
+      predicate: (query) => query.queryKey[1] !== id,
+    });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.tags });
+    void queryClient.invalidateQueries({ queryKey: queryKeys.collections });
+    void queryClient.resetQueries({ queryKey: queryKeys.outliner });
+  }
+  async function applySavedCover(saved: MultipartModelRead, baseVersion: EditingBase) {
+    if (!(await publish(saved)) || !isCurrent()) return false;
     setDraft((current) =>
       current
         ? {
             ...current,
+            edit_version:
+              current.edit_epoch === baseVersion.edit_epoch &&
+              current.edit_version === baseVersion.edit_version
+                ? saved.edit_version
+                : current.edit_version,
             cover_image_url: saved.cover_image_url,
             cover_image_uploaded: saved.cover_image_uploaded,
             cover_thumbnail_url: saved.cover_thumbnail_url,
           }
         : current,
     );
-    void queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels });
+    refreshRelated();
+    return true;
+  }
+  function editFailed(
+    cause: unknown,
+    fallback: "multipart.saveError" | "multipart.coverUploadError" | "multipart.coverRemoveError",
+  ) {
+    if (cause instanceof ApiError && cause.status === 412) {
+      setEditProblem("conflict");
+      setReviewed(null);
+    } else if (
+      !(cause instanceof ApiError) ||
+      cause.status === 0 ||
+      cause.status === 408 ||
+      cause.status >= 500
+    ) {
+      setEditProblem("unconfirmed");
+      setReviewed(null);
+    } else {
+      setCoverIntent(null);
+      setSaveError(multipartError(cause, t, fallback));
+    }
+  }
+  async function saveCover(command: CoverIntent, version: EditingBase) {
+    if (!model || !canEdit || writePending.current || !isCurrent()) return;
+    writePending.current = true;
+    setCoverBusy(true);
+    setCoverIntent(command);
+    setSaveError(null);
+    try {
+      const saved =
+        command.kind === "upload"
+          ? await uploadMultipartModelCover(model.id, command.file, version)
+          : await deleteMultipartModelCover(model.id, version);
+      if (!(await applySavedCover(saved, version))) return;
+      setCoverIntent(null);
+      setReviewed(null);
+      setEditProblem(null);
+      toast.success(
+        t(command.kind === "upload" ? "multipart.coverUploaded" : "multipart.coverRemoved"),
+      );
+    } catch (cause) {
+      if (isCurrent())
+        editFailed(
+          cause,
+          command.kind === "upload" ? "multipart.coverUploadError" : "multipart.coverRemoveError",
+        );
+    } finally {
+      writePending.current = false;
+      if (isCurrent()) setCoverBusy(false);
+    }
   }
   async function uploadCover(file: File) {
-    if (!model || !canEdit || coverBusy) return;
-    setCoverBusy(true);
-    setSaveError(null);
-    try {
-      const saved = await uploadMultipartModelCover(model.id, file);
-      applySavedCover(saved);
-      toast.success(t("multipart.coverUploaded"));
-    } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.coverUploadError"));
-    } finally {
-      setCoverBusy(false);
-    }
+    if (!model || editProblem) return;
+    await saveCover({ kind: "upload", file }, model);
   }
   async function removeCover() {
-    if (!model || !canEdit || coverBusy) return;
-    setCoverBusy(true);
-    setSaveError(null);
-    try {
-      applySavedCover(await deleteMultipartModelCover(model.id));
-      toast.success(t("multipart.coverRemoved"));
-    } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.coverRemoveError"));
-    } finally {
-      setCoverBusy(false);
-    }
+    if (!model || editProblem) return;
+    await saveCover({ kind: "remove" }, model);
   }
-  async function save() {
-    if (!model || !canEdit || busy) return;
+  async function save(version = model) {
+    if (!model || !canEdit || writePending.current || version === null || !isCurrent()) return;
+    writePending.current = true;
+    const session = getSessionVersion();
     setBusy(true);
     setSaveError(null);
     try {
-      const saved = await saveMultipartModel(model.id, {
-        name: model.name,
-        description: model.description ?? null,
-        collection_id: model.collection_id,
-        cover_model_id:
-          model.cover_model_id !== null && usedIds.has(model.cover_model_id)
-            ? model.cover_model_id
-            : null,
-        cover_image_url: model.cover_image_url,
-        parts: model.parts.map((part) => ({
-          name: part.name.trim(),
-          quantity: part.quantity,
-          choices: part.models.map((member) => {
-            return { model_id: member.id, choice_id: member.choice_id ?? undefined };
-          }),
-        })),
-      });
-      setPersistedModel(saved);
+      const saved = await saveMultipartModel(
+        model.id,
+        {
+          name: model.name,
+          description: model.description ?? null,
+          collection_id: model.collection_id,
+          cover_model_id:
+            model.cover_model_id !== null && usedIds.has(model.cover_model_id)
+              ? model.cover_model_id
+              : null,
+          cover_image_url: model.cover_image_url,
+          parts: model.parts.map((part) => ({
+            name: part.name.trim(),
+            quantity: part.quantity,
+            choices: part.models.map((member) => {
+              return { model_id: member.id, choice_id: member.choice_id ?? undefined };
+            }),
+          })),
+        },
+        version,
+      );
+      requireSessionVersion(session);
+      if (!(await publish(saved)) || !isCurrent()) return;
+      refreshRelated();
+      setReviewed(null);
+      setEditProblem(null);
       setDraft(null);
       setIsEditing(false);
       toast.success(t("multipart.saved"));
     } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.saveError"));
+      if (!isCurrent() || session !== getSessionVersion()) return;
+      editFailed(cause, "multipart.saveError");
     } finally {
-      setBusy(false);
+      writePending.current = false;
+      if (isCurrent() && session === getSessionVersion()) setBusy(false);
     }
   }
-  async function saveTags(nextTags: string[]) {
-    if (!model || !canEdit) return;
+  async function reviewLatest() {
+    if (writePending.current || reviewing || !isCurrent()) return;
+    const controller = new AbortController();
+    reviewRequest.current?.abort();
+    reviewRequest.current = controller;
+    setReviewed(null);
+    setReviewing(true);
     try {
-      const saved = await replaceMultipartModelTags(model.id, nextTags);
-      setPersistedModel(saved);
-      setDraft((current) => (current ? { ...current, tags: saved.tags } : current));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.tags }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.multipartModels }),
-      ]);
-      toast.success(t("multipart.tagsSaved"));
+      reviewPublication.current = publish;
+      const latest = await getMultipartModel(id, { signal: controller.signal });
+      if (!isCurrent() || controller.signal.aborted) return;
+      setReviewDenied(false);
+      setReviewed(latest);
     } catch (cause) {
-      toast.error(multipartError(cause, t, "multipart.tagsSaveError"));
-      throw cause;
+      if (!isCurrent() || controller.signal.aborted) return;
+      if (cause instanceof ApiError && [401, 403, 404].includes(cause.status))
+        setReviewDenied(true);
+      else setSaveError(multipartError(cause, t, "multipart.detailError"));
+    } finally {
+      if (isCurrent() && !controller.signal.aborted) setReviewing(false);
     }
+  }
+  async function useReviewedVersion() {
+    if (
+      !reviewed ||
+      !reviewPublication.current ||
+      writePending.current ||
+      !(await reviewPublication.current(reviewed)) ||
+      !isCurrent()
+    )
+      return;
+    if (coverIntent) {
+      setDraft((current) =>
+        current
+          ? {
+              ...current,
+              cover_image_url: reviewed.cover_image_url,
+              cover_image_uploaded: reviewed.cover_image_uploaded,
+              cover_thumbnail_url: reviewed.cover_thumbnail_url,
+            }
+          : current,
+      );
+    } else setDraft(reviewed);
+    setCoverIntent(null);
+    setReviewed(null);
+    setEditProblem(null);
+    setSaveError(null);
+  }
+  async function saveTags(nextTags: string[], signal: AbortSignal, version = model) {
+    if (!model || !canEdit || !isCurrent() || signal.aborted || version === null)
+      throw new DOMException("Editor retired", "AbortError");
+    const saved = await replaceMultipartModelTags(model.id, nextTags, version);
+    if (!(await publish(saved, signal)) || !isCurrent()) return;
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            tags: saved.tags,
+            // An auxiliary retry must not rebase unrelated composition edits.
+            edit_version:
+              current.edit_epoch === version.edit_epoch &&
+              current.edit_version === version.edit_version
+                ? saved.edit_version
+                : current.edit_version,
+          }
+        : current,
+    );
+    refreshRelated();
+    toast.success(t("multipart.tagsSaved"));
+  }
+  async function reviewTags(signal: AbortSignal): Promise<TagsReview> {
+    const latest = await getMultipartModel(id, { signal });
+    return {
+      tags: latest.tags,
+      canEdit: latest.effective_role === "edit" || latest.effective_role === "admin",
+      save: (tags, commandSignal) => saveTags(tags, commandSignal, latest),
+      adopt: async (commandSignal) => {
+        if (!(await publish(latest, commandSignal)) || !isCurrent()) return;
+        setDraft((current) => (current ? { ...current, tags: latest.tags } : current));
+        refreshRelated();
+      },
+    };
   }
   async function remove() {
-    if (!model || busy) return;
+    if (!model || !canEdit || busy || !isCurrent()) return;
     setBusy(true);
     try {
+      const session = getSessionVersion();
       await deleteMultipartModel(model.id);
+      if (!isCurrent()) return;
+      refreshLibraryMetadata(queryClient, session);
       toast.success(t("multipart.deleted"));
       router.push(backHref);
     } catch (cause) {
-      setSaveError(multipartError(cause, t, "multipart.deleteError"));
+      if (isCurrent()) setSaveError(multipartError(cause, t, "multipart.deleteError"));
     } finally {
-      setBusy(false);
-      setDeleteOpen(false);
+      if (isCurrent()) {
+        setBusy(false);
+        setDeleteOpen(false);
+      }
     }
   }
   if (isLoading)
@@ -1561,14 +1180,24 @@ export function MultipartModelDetailPage() {
         <Card className="h-96 w-full max-w-5xl animate-pulse bg-muted/40" />
       </div>
     );
-  if (!model)
+  const denied = error instanceof ApiError && [401, 403, 404].includes(error.status);
+  if (!active || !model || denied || reviewDenied)
     return (
       <div className="flex h-full items-center justify-center p-6">
         <EmptyState
           title={
-            error ? multipartError(error, t, "multipart.detailError") : t("multipart.notFound")
+            reviewDenied
+              ? t("multipart.detailError")
+              : error
+                ? multipartError(error, t, "multipart.detailError")
+                : t("multipart.notFound")
           }
         />
+        {reviewDenied && (
+          <Button variant="outline" loading={reviewing} onClick={() => void reviewLatest()}>
+            {uiText("Retry")}
+          </Button>
+        )}
       </div>
     );
   const requestedReturn = searchParams.get("return");
@@ -1580,6 +1209,82 @@ export function MultipartModelDetailPage() {
         : "/";
   return (
     <div className="flex h-full min-h-0 flex-col bg-background">
+      {error && !denied && (
+        <div role="alert" className="border-b border-border bg-muted px-4 py-3">
+          <p>{t("multipart.detailError")}</p>
+          <Button variant="outline" onClick={() => void refetch()}>
+            {uiText("Retry")}
+          </Button>
+        </div>
+      )}
+      {editProblem && (
+        <div role="alert" className="border-b border-border bg-muted px-4 py-3">
+          <p>
+            {uiText(
+              editProblem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
+            )}
+          </p>
+          <Button variant="outline" loading={reviewing} onClick={() => void reviewLatest()}>
+            {uiText("library.reviewLatest")}
+          </Button>
+        </div>
+      )}
+      <Modal
+        open={reviewed !== null}
+        onClose={() => !writePending.current && setReviewed(null)}
+        title={uiText("library.latestVersion")}
+      >
+        {reviewed && (
+          <div className="space-y-4">
+            <h3 className="font-semibold">{reviewed.name}</h3>
+            <p className="whitespace-pre-wrap text-sm">{reviewed.description}</p>
+            <p className="text-sm">
+              {reviewed.collection_label ?? t("multipart.vaultOnly")} · {reviewed.tags.join(", ")}
+            </p>
+            {coverIntent && (
+              <div className="space-y-2">
+                <p className="text-sm">{t("multipart.coverImage")}</p>
+                <Cover src={reviewed.cover_thumbnail_url} alt={t("multipart.coverImage")} />
+              </div>
+            )}
+            <ol className="space-y-2">
+              {reviewed.parts.map((part) => (
+                <li key={part.id} className="text-sm">
+                  {part.name} × {part.quantity}:{" "}
+                  {part.models
+                    .map((member) => (member.available ? member.name : t("multipart.unavailable")))
+                    .join(", ")}
+                </li>
+              ))}
+            </ol>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                variant="outline"
+                disabled={busy || coverBusy}
+                onClick={() => setReviewed(null)}
+              >
+                {uiText("library.keepDraft")}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={busy || coverBusy}
+                onClick={() => void useReviewedVersion()}
+              >
+                {uiText("library.useLatest")}
+              </Button>
+              <Button
+                loading={busy || coverBusy}
+                disabled={reviewed.effective_role !== "edit" && reviewed.effective_role !== "admin"}
+                onClick={() =>
+                  void (coverIntent ? saveCover(coverIntent, reviewed) : save(reviewed))
+                }
+              >
+                {uiText("library.retryDraft")}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
       <ConfirmModal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
@@ -1591,13 +1296,13 @@ export function MultipartModelDetailPage() {
       />
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-outline-variant bg-surface-container-lowest px-4 py-3 md:px-6">
         <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
-          <Link
-            href={backHref}
+          <LibraryBackLink
+            href={model.collection ? `/?c=${encodeURIComponent(model.collection)}` : "/"}
             aria-label={t("multipart.title")}
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded text-on-surface-variant transition-colors duration-press hover:bg-surface-container-high"
           >
             <ArrowLeft className="h-5 w-5" />
-          </Link>
+          </LibraryBackLink>
           <div className="min-w-0">
             <h1 className="truncate text-xl font-semibold leading-tight text-on-surface">
               {model.name}
@@ -1631,7 +1336,7 @@ export function MultipartModelDetailPage() {
               variant="outline"
               size="sm"
               onClick={cancelEditing}
-              disabled={busy}
+              disabled={busy || coverBusy}
               className="h-11 sm:h-9"
             >
               {t("multipart.cancel")}
@@ -1752,39 +1457,53 @@ export function MultipartModelDetailPage() {
                     entityLabel={model.name}
                     tags={model.tags}
                     availableTags={availableTags}
-                    canEdit={canEdit}
+                    canEdit={canEdit && !busy && !coverBusy && !editProblem}
                     help={t("multipart.tagsHelp")}
                     onSave={saveTags}
+                    reviewLatest={reviewTags}
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label htmlFor="multipart-collection" className="block text-sm font-medium">
+                  <span className="block text-sm font-medium">
                     {t("multipart.collectionLabel")}
-                  </label>
-                  <select
-                    id="multipart-collection"
-                    aria-describedby="multipart-collection-help"
-                    value={model.collection_id ?? ""}
-                    onChange={(event) => {
-                      const collectionId = event.target.value ? Number(event.target.value) : null;
-                      setDraft({
-                        ...model,
-                        collection_id: collectionId,
-                        collection:
-                          writableCollections.find((collection) => collection.id === collectionId)
-                            ?.path ?? null,
-                      });
-                    }}
-                    disabled={!canEdit}
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                  </span>
+                  <DropdownMenu
+                    open={collectionPickerOpen}
+                    onOpenChange={setCollectionPickerOpen}
+                    role="dialog"
+                    align="start"
+                    contentClassName="w-80 max-w-[90vw] p-2"
+                    trigger={
+                      <button
+                        type="button"
+                        data-menu-trigger
+                        onClick={() => setCollectionPickerOpen((open) => !open)}
+                        disabled={!canEdit}
+                        aria-haspopup="dialog"
+                        aria-expanded={collectionPickerOpen}
+                        aria-label={t("multipart.collectionLabel")}
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-left text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                      >
+                        {model.collection_label || t("multipart.vaultOnly")}
+                      </button>
+                    }
                   >
-                    <option value="">{t("multipart.vaultOnly")}</option>
-                    {writableCollections.map((collection) => (
-                      <option key={collection.id} value={collection.id}>
-                        {collectionDisplayPath(collections, collection.path)}
-                      </option>
-                    ))}
-                  </select>
+                    <CollectionPicker
+                      minRole="edit"
+                      selectedPath={model.collection ?? ""}
+                      noneLabel={user?.is_superuser ? t("multipart.vaultOnly") : undefined}
+                      emptyLabel={uiText("No editable collections.")}
+                      onSelect={(collection) => {
+                        setDraft({
+                          ...model,
+                          collection_id: collection?.id ?? null,
+                          collection: collection?.path ?? null,
+                          collection_label: collection?.display_path ?? null,
+                        });
+                        setCollectionPickerOpen(false);
+                      }}
+                    />
+                  </DropdownMenu>
                   <span
                     id="multipart-collection-help"
                     className="block text-xs text-muted-foreground"
@@ -1815,7 +1534,7 @@ export function MultipartModelDetailPage() {
                       variant="outline"
                       size="sm"
                       onClick={() => coverInput.current?.click()}
-                      disabled={!canEdit || coverBusy}
+                      disabled={!canEdit || busy || coverBusy || editProblem !== null}
                       loading={coverBusy}
                     >
                       <Upload className="h-4 w-4" />
@@ -1829,7 +1548,7 @@ export function MultipartModelDetailPage() {
                         variant="ghost"
                         size="sm"
                         onClick={() => void removeCover()}
-                        disabled={!canEdit || coverBusy}
+                        disabled={!canEdit || busy || coverBusy || editProblem !== null}
                         aria-label={t("multipart.removeUploadedCover")}
                       >
                         <Trash2 className="h-4 w-4" /> {t("multipart.removeCover")}
@@ -1965,7 +1684,7 @@ export function MultipartModelDetailPage() {
               type="button"
               onClick={() => void save()}
               loading={busy}
-              disabled={!canEdit || !model.name.trim()}
+              disabled={!canEdit || coverBusy || !model.name.trim() || editProblem !== null}
               className="h-11 sm:h-10"
             >
               {t("multipart.save")}
@@ -1985,11 +1704,7 @@ export function MultipartModelDetailPage() {
           />
         </div>
       ) : (
-        <MultipartOverview
-          model={model}
-          collections={collections}
-          onAddFirst={canEdit ? beginAddingFirst : undefined}
-        />
+        <MultipartOverview model={model} onAddFirst={canEdit ? beginAddingFirst : undefined} />
       )}
     </div>
   );

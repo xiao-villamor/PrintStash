@@ -16,10 +16,321 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
+import { aModel, aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
 
 test.describe("vault route", () => {
+  test("preserves range selection across a page append", async ({ page }) => {
+    const models = Array.from({ length: 4 }, (_, index) =>
+      aModelListItem({ id: 100 + index, name: `Selection ${index + 1}` }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) => {
+      const next = new URL(route.request().url()).searchParams.has("cursor");
+      return route.fulfill({
+        json: {
+          items: (next ? models.slice(2) : models.slice(0, 2)).map((model) => ({
+            kind: "model",
+            model,
+          })),
+          total: 4,
+          next_cursor: next ? null : "second",
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/?type=all&sort=name-asc");
+    await page.getByRole("button", { name: "Library tools" }).click();
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Select Selection 2", exact: true }).click();
+    await page.getByRole("button", { name: "Load more", exact: true }).click();
+
+    await page.locator('main [data-library-entry="/models/103"]').click({ modifiers: ["Shift"] });
+
+    await expect(
+      page.getByRole("checkbox", { name: "Select Selection 1", exact: true }),
+    ).not.toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: "Select Selection 2", exact: true }),
+    ).toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: "Select Selection 3", exact: true }),
+    ).toBeChecked();
+    await expect(
+      page.getByRole("checkbox", { name: "Select Selection 4", exact: true }),
+    ).toBeChecked();
+  });
+
+  test("reviews an interrupted batch in the browser", async ({ page }) => {
+    let writes = 0;
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: [{ kind: "model", model: aModelListItem({ id: 1, name: "Review bracket" }) }],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.route("**/api/v1/models/batch/tags", (route) => {
+      writes += 1;
+      return route.abort("failed");
+    });
+    await page.route("**/api/v1/models/1", (route) =>
+      route.fulfill({
+        json: aModel({ id: 1, name: "Current bracket", tags: ["functional"], edit_version: 9 }),
+      }),
+    );
+    await page.goto("/");
+    await page.getByRole("button", { name: "Library tools" }).click();
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Select Review bracket" }).click();
+    await page.getByRole("button", { name: "Tag", exact: true }).click();
+    const editor = page.getByRole("dialog");
+    await editor.getByRole("combobox").first().fill("functional");
+    await editor.getByRole("combobox").first().press("Enter");
+
+    await editor.getByRole("button", { name: /Apply/ }).click();
+
+    const recovery = page.getByRole("dialog", { name: "Batch needs review" });
+    await expect(recovery.getByText("Add tags: functional", { exact: true })).toBeVisible();
+    await expect(recovery.getByText("1 unconfirmed", { exact: true })).toBeVisible();
+    await expect(recovery.getByRole("button", { name: "Undo confirmed changes" })).toHaveCount(0);
+    await recovery.getByRole("link", { name: "Review bracket" }).click();
+    await expect(page).toHaveURL((url) => url.pathname === "/models/1");
+    await expect(page.getByRole("heading", { name: "Current bracket", exact: true })).toBeVisible();
+    expect(writes).toBe(1);
+  });
+
+  test("refreshes a changed library deliberately", async ({ page }) => {
+    const browseRequests: string[] = [];
+    let changed = false;
+    await page.route("**/api/v1/models/browse/revision", (route) =>
+      route.fulfill({
+        json: { browse_revision: changed ? "r2" : "r1", authorization_revision: "a1" },
+      }),
+    );
+    await page.route("**/api/v1/models/browse?**", (route) => {
+      browseRequests.push(route.request().url());
+      return route.fulfill({
+        json: {
+          items: [
+            {
+              kind: "model",
+              model: aModelListItem({
+                name: changed ? "Current bracket" : "Original bracket",
+                thumbnail_url: null,
+              }),
+            },
+          ],
+          total: changed ? 1 : 2,
+          next_cursor: changed ? null : "old",
+          browse_revision: changed ? "r2" : "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/");
+    await expect(page.getByText("Original bracket", { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Load more", exact: true })).toBeVisible();
+    const initialReads = browseRequests.length;
+    changed = true;
+    const authorityRead = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/v1/models/browse/revision",
+    );
+    await page.evaluate(() =>
+      document.dispatchEvent(new Event("visibilitychange", { bubbles: true })),
+    );
+    await authorityRead;
+    await expect(
+      page.getByText("The library has changed. Refresh before loading more results."),
+    ).toBeVisible();
+    await expect(page.getByText("Original bracket", { exact: true })).toBeVisible();
+    expect(browseRequests).toHaveLength(initialReads);
+    await expect(page.getByRole("button", { name: "Load more", exact: true })).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Refresh library" }).click();
+
+    await expect(page.getByText("Current bracket", { exact: true })).toBeVisible();
+    await expect(page.getByText("Original bracket", { exact: true })).toHaveCount(0);
+    expect(browseRequests).toHaveLength(initialReads + 1);
+    expect(browseRequests.every((url) => !new URL(url).searchParams.has("cursor"))).toBe(true);
+  });
+
+  test("reports a conflicting batch undo", async ({ page }) => {
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: [
+            {
+              kind: "model",
+              model: aModelListItem({ id: 1, name: "Undo bracket", edit_version: 3 }),
+            },
+          ],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.route("**/api/v1/models/batch/tags", (route) => {
+      expect(route.request().postDataJSON().expected_versions).toEqual({
+        1: { edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 3 },
+      });
+      return route.fulfill({
+        json: {
+          succeeded_ids: [1],
+          succeeded_count: 1,
+          succeeded_versions: {
+            1: { edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 9 },
+          },
+          failed: [],
+          failed_count: 0,
+        },
+      });
+    });
+    const undoVersions: (string | undefined)[] = [];
+    await page.route("**/api/v1/models/1", (route) => {
+      if (route.request().method() !== "PATCH") return route.continue();
+      undoVersions.push(route.request().headers()["if-match"]);
+      return route.fulfill({ status: 412, json: { detail: "edit_conflict" } });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: "Library tools" }).click();
+    await page.getByRole("button", { name: "Select", exact: true }).click();
+    await page.getByRole("checkbox", { name: "Select Undo bracket" }).click();
+    await page.getByRole("button", { name: "Tag", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("combobox").first().fill("functional");
+    await dialog.getByRole("combobox").first().press("Enter");
+    await dialog.getByRole("button", { name: /Apply/ }).click();
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+
+    await expect(page.getByText("1 skipped", { exact: true })).toBeVisible();
+    await expect(page.getByText("Tags restored", { exact: true })).toHaveCount(0);
+    expect(undoVersions).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v9"']);
+  });
+
+  test("removes a favorite after browser confirmation", async ({ page }) => {
+    const confirmation = Promise.withResolvers<void>();
+    await page.route("**/api/v1/models/browse?**", (route) =>
+      route.fulfill({
+        json: {
+          items: [
+            {
+              kind: "model",
+              model: aModelListItem({ id: 1, name: "Favorite bracket", starred: true }),
+            },
+          ],
+          total: 1,
+          next_cursor: null,
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      }),
+    );
+    await page.route("**/api/v1/models/1/star", async (route) => {
+      await confirmation.promise;
+      await route.fulfill({ json: { model_id: 1, starred: false } });
+    });
+    await page.goto("/?favorites=true");
+
+    await page.getByRole("button", { name: "Remove Favorite bracket from favorites" }).click();
+
+    await expect(page.getByText("Favorite bracket", { exact: true })).toBeVisible();
+    confirmation.resolve();
+    await expect(page.getByText("Favorite bracket", { exact: true })).toHaveCount(0);
+  });
+
+  test("preserves mixed order through browser pagination", async ({ page }) => {
+    await page.route("**/api/v1/models/browse?**", async (route) => {
+      const continued = new URL(route.request().url()).searchParams.has("cursor");
+      await route.fulfill({
+        json: {
+          items: continued
+            ? [{ kind: "model", model: aModelListItem({ name: "Älpha", thumbnail_url: null }) }]
+            : [
+                {
+                  kind: "multipart",
+                  multipart: aMultipartModel({ name: "Zeta", cover_thumbnail_url: null }),
+                },
+              ],
+          total: 2,
+          next_cursor: continued ? null : "next",
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/?type=all&sort=name-asc");
+    await expect(page.getByRole("link", { name: /Zeta/ })).toBeVisible();
+
+    await page.getByRole("button", { name: "Load more" }).click();
+
+    const cards = page
+      .getByRole("main")
+      .locator("article")
+      .filter({ hasText: /Zeta|Älpha/ });
+    await expect(cards).toHaveCount(2);
+    await expect(cards.nth(0)).toContainText("Zeta");
+    await expect(cards.nth(1)).toContainText("Älpha");
+  });
+
+  test("continues an empty browse page in the browser", async ({ page }) => {
+    await page.route("**/api/v1/models/browse?**", async (route) => {
+      const continued = new URL(route.request().url()).searchParams.has("cursor");
+      await route.fulfill({
+        json: {
+          items: continued
+            ? [
+                {
+                  kind: "model",
+                  model: aModelListItem({ name: "Reached match", thumbnail_url: null }),
+                },
+              ]
+            : [],
+          total: 1,
+          next_cursor: continued ? null : "next",
+          browse_revision: "r1",
+          authorization_revision: "a1",
+        },
+      });
+    });
+    await page.goto("/?file_type=stl");
+
+    await page.getByRole("button", { name: "Load more" }).click();
+
+    await expect(page.getByText("Reached match", { exact: true })).toBeVisible();
+  });
+
+  test("restores library mode after collection history", async ({ page }) => {
+    await page.goto("/?type=multipart&sort=name-asc");
+    await expect(
+      page.getByRole("button", { name: "Multipart sets only", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Organized", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Parts only", exact: true })).toHaveCount(0);
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: /maraio/ })
+      .click();
+    await expect(page.getByRole("heading", { name: "maraio" })).toBeVisible();
+    await page.getByRole("button", { name: "Everything", exact: true }).click();
+    await expect(page).toHaveURL(/[?&]type=all(?:&|$)/);
+
+    await page.goBack();
+
+    await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Multipart sets only", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByRole("button", { name: "Sort models" })).toContainText("Name A–Z");
+  });
+
   test("browser Back returns through collection navigation", async ({ page }) => {
     await page.goto("/settings");
     await page.getByRole("link", { name: "PrintStash" }).click();
@@ -29,11 +340,11 @@ test.describe("vault route", () => {
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
       .click();
-    await expect(page).toHaveURL(/\?c=maraio$/);
+    await expect(page).toHaveURL(/[?&]c=maraio(?:&|$)/);
     await expect(page.getByRole("heading", { name: "maraio" })).toBeVisible();
 
     await page.goBack();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(/\/\?type=all&sort=date-desc$/);
     await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
 
     await page.goBack();
@@ -53,7 +364,7 @@ test.describe("vault route", () => {
     const pageRequests: string[] = [];
     page.on("request", (request) => {
       const url = new URL(request.url());
-      if (url.pathname === "/api/v1/models/page") pageRequests.push(url.search);
+      if (url.pathname === "/api/v1/models/browse") pageRequests.push(url.search);
     });
     await page.goto("/");
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
@@ -63,7 +374,8 @@ test.describe("vault route", () => {
       page.waitForRequest((request) => {
         const url = new URL(request.url());
         return (
-          url.pathname === "/api/v1/models/page" && url.searchParams.get("sort") === "success-desc"
+          url.pathname === "/api/v1/models/browse" &&
+          url.searchParams.get("sort") === "success-desc"
         );
       }),
       page.getByRole("menuitem", { name: "Best success rate" }).click(),
@@ -76,19 +388,24 @@ test.describe("vault route", () => {
     ).toHaveLength(1);
   });
 
-  test("mobile vault skips the desktop outliner request", async ({ page }) => {
+  test("mobile vault prepares bounded tree roots before opening the drawer", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    const outlinerRequests: string[] = [];
-    page.on("request", (request) => {
-      if (new URL(request.url()).pathname === "/api/v1/models/outliner") {
-        outlinerRequests.push(request.url());
-      }
+    const roots: URL[] = [];
+    page.on("response", (response) => {
+      const url = new URL(response.url());
+      if (url.pathname === "/api/v1/outliner/collections" && response.ok()) roots.push(url);
     });
 
     await page.goto("/");
     await expect(page.getByText("skadis_kitchen-roll_screw").first()).toBeVisible();
+    await expect.poll(() => roots.length).toBeGreaterThan(0);
+    expect(roots.every((url) => url.searchParams.get("limit") === "50")).toBe(true);
+    await expect(page.getByRole("dialog", { name: "Filters", exact: true })).toBeHidden();
+    const restoredReads = roots.length;
+    await page.getByRole("button", { name: "Filters", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Filters", exact: true })).toBeVisible();
     await page.waitForTimeout(200);
-    expect(outlinerRequests).toEqual([]);
+    expect(roots).toHaveLength(restoredReads);
   });
 });
 
@@ -302,6 +619,7 @@ test.describe("vault route on a phone-width viewport", () => {
               id: 7,
               name: "Ready to print",
               filters: {
+                library_view: "all",
                 collection: null,
                 direct: true,
                 tag: [],

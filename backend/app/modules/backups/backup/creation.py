@@ -8,6 +8,7 @@ import json
 import os
 import tarfile
 import tempfile
+import time
 import uuid
 from pathlib import Path
 
@@ -39,6 +40,7 @@ def create_backup(
     *,
     trigger: _backup_destination_module.BackupTrigger = _backup_destination_module.BackupTrigger.MANUAL,
     job_id: str | None = None,
+    progress: _contracts_module.BackupProgress | None = None,
 ) -> _contracts_module.BackupMeta:
     """Build one archive and durably account for every selected destination.
 
@@ -79,6 +81,7 @@ def create_backup(
                 archive_name=archive_name,
                 trigger=trigger,
                 capacity_claim=capacity_claim,
+                progress=progress,
             )
     except BaseException as exc:
         reason = (
@@ -97,7 +100,14 @@ def create_backup(
 
 
 def _create_selected_backup(
-    selected, *, backup_id, timestamp, archive_name, trigger, capacity_claim=None
+    selected,
+    *,
+    backup_id,
+    timestamp,
+    archive_name,
+    trigger,
+    capacity_claim=None,
+    progress: _contracts_module.BackupProgress | None = None,
 ):
     from app.modules.backups.backup_replication import prepare_destinations
 
@@ -107,9 +117,17 @@ def _create_selected_backup(
     backend_name = settings.storage_backend
 
     written_files = 0
+    if progress is not None:
+        progress(_contracts_module.BackupStage.SNAPSHOTTING)
     with _snapshot_module._sqlite_snapshot_file() as db_snapshot:
         censused_sizes = dict(_snapshot_module._find_snapshot_blobs(db_snapshot))
         file_entries = _snapshot_module._manifest_blobs(db_snapshot)
+        if progress is not None:
+            progress(
+                _contracts_module.BackupStage.ARCHIVING,
+                processed=0,
+                total=len(file_entries),
+            )
         for entry in file_entries:
             key = str(entry["key"])
             if key in censused_sizes and int(entry["size"]) != censused_sizes[key]:
@@ -158,6 +176,7 @@ def _create_selected_backup(
             prefix=".printstash-backup-build-", dir=settings.backup_dir
         )
         archive_temp = Path(raw_archive_temp)
+        last_reported_at = time.monotonic()
         try:
             with os.fdopen(fd, "wb") as archive_file:
                 with gzip.GzipFile(fileobj=archive_file, mode="wb") as gz:
@@ -178,6 +197,19 @@ def _create_selected_backup(
                             if written != expected:
                                 raise RuntimeError("backup_blob_size_changed")
                             written_files += 1
+                            if progress is not None:
+                                now = time.monotonic()
+                                if now - last_reported_at >= 1 or written_files == len(
+                                    file_entries
+                                ):
+                                    progress(
+                                        _contracts_module.BackupStage.ARCHIVING,
+                                        processed=written_files,
+                                        total=len(file_entries),
+                                    )
+                                    last_reported_at = now
+            if progress is not None:
+                progress(_contracts_module.BackupStage.VERIFYING)
             _snapshot_module._validate_created_archive_payload(archive_temp)
         except Exception:
             archive_temp.unlink(missing_ok=True)
@@ -195,6 +227,8 @@ def _create_selected_backup(
         file_count=len(file_entries),
     )
     try:
+        if progress is not None:
+            progress(_contracts_module.BackupStage.PUBLISHING)
         created_sources = backup_replication.publish_archive(
             selected,
             archive_temp=archive_temp,
@@ -209,6 +243,7 @@ def _create_selected_backup(
             archive_sha256=archive_sha256,
             target=target,
             remote_destinations=remote_destinations,
+            progress=progress,
         )
     finally:
         archive_temp.unlink(missing_ok=True)

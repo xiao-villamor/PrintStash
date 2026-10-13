@@ -18,9 +18,14 @@ export interface AuthApi {
 export interface AuthState {
   user: StoredUser | null;
   loading: boolean;
-  login: (username: string, password: string, remember_me?: boolean) => Promise<void>;
+  login: (
+    username: string,
+    password: string,
+    remember_me?: boolean,
+    signal?: AbortSignal,
+  ) => Promise<void>;
   logout: () => Promise<void>;
-  refresh: () => Promise<void>;
+  refresh: (signal?: AbortSignal) => Promise<void>;
 }
 
 /**

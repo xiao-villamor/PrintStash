@@ -67,6 +67,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -85,6 +86,21 @@ describe("CollectionReadme", () => {
 
       expect(await screen.findByRole("heading", { name: "Shelf rig" })).toBeInTheDocument();
     });
+
+    it.each([
+      { label: "at the collapsed height", height: 192, expandable: false },
+      { label: "one pixel beyond the collapsed height", height: 193, expandable: true },
+    ])(
+      "offers expansion only when text exceeds the limit: $label",
+      async ({ height, expandable }) => {
+        vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(height);
+        renderReadme({ readme: "Height boundary." });
+
+        await screen.findByText("Height boundary.");
+
+        expect(screen.queryByRole("button", { name: "Show more" }) !== null).toBe(expandable);
+      },
+    );
 
     it("offers editing to somebody who may write", async () => {
       renderReadme({ readme: "Brackets." });
@@ -141,6 +157,21 @@ describe("CollectionReadme", () => {
 
       expect(await screen.findByText("Brackets.")).toBeInTheDocument();
       expect(readmeReads(requestsWithMethod, 5)).toHaveLength(1);
+    });
+
+    it("collapses the next folder even when its description has identical text", async () => {
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(400);
+      const user = userEvent.setup();
+      const { rerender } = renderReadme({
+        readme: "Tall description.",
+        routes: { "GET /api/v1/collections/6/readme": json({ readme: "Tall description." }) },
+      });
+      await user.click(await screen.findByRole("button", { name: "Show more" }));
+      expect(screen.getByRole("button", { name: "Show less" })).toBeVisible();
+
+      rerender(<CollectionReadme collectionId={6} canEdit hasReadme />);
+
+      expect(await screen.findByRole("button", { name: "Show more" })).toBeVisible();
     });
 
     it("never shows the previous folder's description on the next one", async () => {

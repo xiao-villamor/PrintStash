@@ -3,7 +3,7 @@
 One mesh load extracts geometry and renders the thumbnail; tests drive that
 pipeline (``ThumbnailEngine``) directly and assert on its result: the image,
 the geometry, and which strategy produced them (a streamed or fallback render
-covers only part of a large file, and says whether it is complete).
+has explicit source scan, geometry representation and preview coverage facts).
 """
 
 from __future__ import annotations
@@ -11,12 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from app.modules.media.thumbnail_engine import (
-    ThumbnailEngine,
+from app.modules.media.mesh_contracts import (
     ThumbnailRequest,
     ThumbnailResult,
     ThumbnailStrategy,
 )
+from app.modules.media.thumbnail_engine import ThumbnailEngine
 
 PARTIAL_STRATEGIES = (ThumbnailStrategy.STREAMING, ThumbnailStrategy.FALLBACK)
 

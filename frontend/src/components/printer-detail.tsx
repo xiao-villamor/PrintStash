@@ -1,5 +1,8 @@
 "use client";
 
+import { usePrinterSettingsCommand } from "@/features/printers/settings-edit";
+import { PrinterSettingsReview } from "@/features/printers/settings-review";
+
 import {
   currentLocale,
   knownUiText,
@@ -10,13 +13,10 @@ import {
 import { formatNumber } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Link } from "@/lib/link";
 import type { ProviderJsonObject, ProviderJsonValue } from "@/types/printers";
 import {
-  MoonrakerConfigRead,
-  PrintJobRead,
-  PrinterDiagnostics,
   PrinterFileRead,
   PrinterRead,
   PrinterSnapshot,
@@ -25,22 +25,21 @@ import {
 } from "@/types";
 import {
   cancelPrinter,
-  deletePrinterFile,
   emergencyStopPrinter,
-  getMoonrakerConfig,
-  getPrinterDiagnostics,
-  getPrinter,
   homePrinter,
-  listPrinterFiles,
-  listPrinterJobs,
   openPrinterWS,
   pausePrinter,
   resumePrinter,
   setPrinterTemperature,
-  startPrinterFile,
-  syncPrinterFiles,
-  updatePrinter,
 } from "@/lib/api";
+import {
+  printerKeys,
+  usePrinterResources,
+  usePrinterFileMutation,
+} from "@/features/printers/queries";
+import { getSessionVersion } from "@/lib/session-transport";
+import { userMessage } from "@/lib/errors";
+import { isLoggedIn, onAuthChange } from "@/lib/auth-store";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { formatBytes, formatDuration } from "@/lib/format";
@@ -146,14 +145,40 @@ export function PrinterDetailPage({
   printerId: number;
   initialPrinter?: PrinterRead;
 }) {
+  const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
+  const [initialSession] = useState(session);
+  return (
+    <PrinterDetailView
+      key={`${printerId}:${session}`}
+      printerId={printerId}
+      initialPrinter={session === initialSession ? initialPrinter : undefined}
+    />
+  );
+}
+
+function PrinterDetailView({
+  printerId,
+  initialPrinter,
+}: {
+  printerId: number;
+  initialPrinter?: PrinterRead;
+}) {
   useUiLocale();
   const auth = useRequireAuth();
-  const [printer, setPrinter] = useState<PrinterRead | null>(initialPrinter ?? null);
-  const [diagnostics, setDiagnostics] = useState<PrinterDiagnostics | null>(null);
-  const [moonrakerConfig, setMoonrakerConfig] = useState<MoonrakerConfigRead | null>(null);
+  const resources = usePrinterResources(printerId, initialPrinter);
+  const fileMutation = usePrinterFileMutation();
+  const { refresh, refreshAll } = resources;
+  const {
+    printer,
+    accessDenied,
+    jobs,
+    files: printerFiles,
+    diagnostics,
+    config: moonrakerConfig,
+    checkingDiagnostics,
+    loadingConfig,
+  } = resources;
   const [snapshot, setSnapshot] = useState<PrinterSnapshot>({});
-  const [jobs, setJobs] = useState<PrintJobRead[]>([]);
-  const [printerFiles, setPrinterFiles] = useState<PrinterFileRead[]>([]);
   const [wsConnected, setWsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"pause" | "resume" | "cancel" | null>(null);
@@ -173,122 +198,129 @@ export function PrinterDetailPage({
   const [startingFileId, setStartingFileId] = useState<number | null>(null);
   const [deletingFileId, setDeletingFileId] = useState<number | null>(null);
   const [syncingFiles, setSyncingFiles] = useState(false);
-  const [checkingDiagnostics, setCheckingDiagnostics] = useState(false);
-  const [loadingConfig, setLoadingConfig] = useState(false);
   const [confirmEmergencyStop, setConfirmEmergencyStop] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<PrinterFileRead | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lifetime = useRef(0);
 
-  async function loadJobs() {
-    try {
-      setJobs(await listPrinterJobs(printerId));
-    } catch (e) {
-      console.warn("Failed to load jobs:", e);
+  const viewRequests = useRef(new AbortController());
+  const loadJobs = useCallback(() => refresh(printerKeys.jobs(printerId)), [refresh, printerId]);
+  const loadDiagnostics = () => resources.refresh(printerKeys.diagnostics(printerId));
+  const loadMoonrakerConfig = () => resources.refresh(printerKeys.config(printerId));
+
+  useEffect(() => {
+    let disposed = false;
+    let generation = 0;
+    let socket: WebSocket | null = null;
+    let controller: AbortController | null = null;
+    let reconnect: ReturnType<typeof setTimeout> | null = null;
+    let opened = false;
+
+    function retire() {
+      generation += 1;
+      lifetime.current += 1;
+      viewRequests.current.abort();
+      viewRequests.current = new AbortController();
+      controller?.abort();
+      controller = null;
+      if (reconnect !== null) clearTimeout(reconnect);
+      reconnect = null;
+      const previous = socket;
+      socket = null;
+      if (previous) {
+        previous.onopen = null;
+        previous.onclose = null;
+        previous.onmessage = null;
+        previous.onerror = null;
+        previous.close();
+      }
     }
-  }
 
-  async function loadPrinterFiles() {
-    try {
-      setPrinterFiles(await listPrinterFiles(printerId));
-    } catch (e) {
-      console.warn("Failed to load printer files:", e);
-    }
-  }
-
-  async function loadPrinter() {
-    try {
-      setPrinter(await getPrinter(printerId));
-    } catch (e: any) {
-      setError(e.message);
-    }
-  }
-
-  async function loadDiagnostics() {
-    setCheckingDiagnostics(true);
-    try {
-      setDiagnostics(await getPrinterDiagnostics(printerId));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setCheckingDiagnostics(false);
-    }
-  }
-
-  async function loadMoonrakerConfig() {
-    if (printer?.provider !== "moonraker" && initialPrinter?.provider !== "moonraker") return;
-    setLoadingConfig(true);
-    try {
-      setMoonrakerConfig(await getMoonrakerConfig(printerId));
-    } catch (e) {
-      toast.error(e);
-    } finally {
-      setLoadingConfig(false);
-    }
-  }
-
-  async function connect() {
-    try {
-      const ws = await openPrinterWS(printerId);
-      wsRef.current = ws;
-      ws.onopen = () => setWsConnected(true);
-      ws.onclose = () => {
-        setWsConnected(false);
-        if (reconnectRef.current) clearTimeout(reconnectRef.current);
-        reconnectRef.current = setTimeout(connect, 3000);
-      };
-      ws.onerror = () => {};
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === "snapshot") {
-            setSnapshot(msg.data || {});
-          } else if (msg.type === "update") {
-            setSnapshot((prev) => mergeSnapshot(prev, msg.data || {}));
-          }
-          const state = msg?.data?.print_stats?.state;
-          if (state) loadJobs();
-        } catch {
-          /* ignore */
+    async function connect() {
+      if (disposed || accessDenied || !isLoggedIn()) return;
+      const version = generation;
+      const ticket = new AbortController();
+      controller = ticket;
+      try {
+        const ws = await openPrinterWS(printerId, ticket.signal);
+        if (disposed || version !== generation) {
+          ws.close();
+          return;
         }
-      };
-    } catch (e: any) {
-      setError(uiText("WS error: {value1}", { value1: String(e.message) }));
+        controller = null;
+        socket = ws;
+        const current = () => !disposed && version === generation && socket === ws;
+        ws.onopen = () => {
+          if (!current()) return;
+          setWsConnected(true);
+          if (opened) void refreshAll();
+          opened = true;
+        };
+        ws.onclose = () => {
+          if (!current()) return;
+          socket = null;
+          ws.onopen = null;
+          ws.onclose = null;
+          ws.onmessage = null;
+          ws.onerror = null;
+          setWsConnected(false);
+          reconnect = setTimeout(() => {
+            reconnect = null;
+            void connect();
+          }, 3000);
+        };
+        ws.onerror = () => {};
+        ws.onmessage = (ev) => {
+          if (!current()) return;
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === "snapshot") {
+              setSnapshot(msg.data || {});
+            } else if (msg.type === "update") {
+              setSnapshot((prev) => mergeSnapshot(prev, msg.data || {}));
+            }
+            if (msg?.data?.print_stats?.state) void loadJobs();
+          } catch {
+            /* Ignore malformed frames. */
+          }
+        };
+      } catch (e) {
+        if (disposed || version !== generation) return;
+        controller = null;
+        setError(
+          uiText("WS error: {value1}", { value1: String(e instanceof Error ? e.message : e) }),
+        );
+      }
     }
-  }
 
-  useEffect(() => {
-    // Server-rendered pages pass the printer down; WS keeps it live after that.
-    if (!initialPrinter || initialPrinter.id !== printerId) loadPrinter();
-    loadJobs();
-    loadPrinterFiles();
-    connect();
+    retire();
+    void connect();
+    const stopAuth = onAuthChange(() => {
+      retire();
+      setSnapshot({});
+      setWsConnected(false);
+      setError(null);
+      if (isLoggedIn()) void connect();
+    });
     return () => {
-      if (reconnectRef.current) clearTimeout(reconnectRef.current);
-      wsRef.current?.close();
+      disposed = true;
+      stopAuth();
+      retire();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printerId]);
-
-  useEffect(() => {
-    if (!printer?.access.can_admin) return;
-    void loadDiagnostics();
-    if (printer.provider === "moonraker") void loadMoonrakerConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printer?.id, printer?.access.can_admin]);
+  }, [accessDenied, printerId, loadJobs, refreshAll]);
 
   async function control(action: "pause" | "resume" | "cancel", fn: () => Promise<void>) {
     if (!auth.isAuthenticated) {
       auth.showAuthRequiredToast();
       return;
     }
+    const version = lifetime.current;
     setBusy(action);
     try {
       await fn();
     } catch (e) {
-      toast.error(e);
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setBusy(null);
+      if (version === lifetime.current) setBusy(null);
     }
   }
 
@@ -297,14 +329,15 @@ export function PrinterDetailPage({
       auth.showAuthRequiredToast();
       return;
     }
+    const version = lifetime.current;
     setMachineBusy(key);
     try {
       await fn();
-      toast.success(uiText(success.key, success.values));
+      if (version === lifetime.current) toast.success(uiText(success.key, success.values));
     } catch (e) {
-      toast.error(e);
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setMachineBusy(null);
+      if (version === lifetime.current) setMachineBusy(null);
     }
   }
 
@@ -355,12 +388,13 @@ export function PrinterDetailPage({
   }
 
   async function confirmEmergencyStopAction() {
+    const version = lifetime.current;
     await machineAction(
       "estop",
       () => emergencyStopPrinter(printerId),
       uiMessage("printer.emergencyStopSuccess"),
     );
-    setConfirmEmergencyStop(false);
+    if (version === lifetime.current) setConfirmEmergencyStop(false);
   }
 
   async function syncFiles() {
@@ -368,17 +402,21 @@ export function PrinterDetailPage({
       auth.showAuthRequiredToast();
       return;
     }
+    const version = lifetime.current;
     setSyncingFiles(true);
     setError(null);
     try {
-      setPrinterFiles(await syncPrinterFiles(printerId));
-      await loadPrinter();
+      await fileMutation.mutateAsync({
+        kind: "sync",
+        printerId,
+        signal: viewRequests.current.signal,
+      });
+      if (version !== lifetime.current) return;
       toast.success(uiText("Printer files synced"));
     } catch (e) {
-      toast.error(e);
-      await loadPrinter();
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setSyncingFiles(false);
+      if (version === lifetime.current) setSyncingFiles(false);
     }
   }
 
@@ -387,20 +425,26 @@ export function PrinterDetailPage({
       auth.showAuthRequiredToast();
       return;
     }
+    const version = lifetime.current;
     setStartingFileId(file.id);
     setError(null);
     try {
-      const job = await startPrinterFile(printerId, {
-        remote_filename: file.remote_filename,
-        file_id: file.file_id,
+      const job = await fileMutation.mutateAsync({
+        kind: "start",
+        printerId,
+        signal: viewRequests.current.signal,
+        payload: {
+          remote_filename: file.remote_filename,
+          file_id: file.file_id,
+        },
       });
-      await loadJobs();
+      if (version !== lifetime.current || !job) return;
       toast.success(uiText("Print started (job #{value1})", { value1: String(job.id) }));
       setActiveTab("status");
     } catch (e) {
-      toast.error(e);
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setStartingFileId(null);
+      if (version === lifetime.current) setStartingFileId(null);
     }
   }
 
@@ -415,18 +459,25 @@ export function PrinterDetailPage({
   async function confirmDeleteRemoteFile() {
     if (!deleteTarget) return;
     const file = deleteTarget;
+    const version = lifetime.current;
     setDeletingFileId(file.id);
     setError(null);
     try {
-      setPrinterFiles(await deletePrinterFile(printerId, file.id));
-      await loadPrinter();
+      await fileMutation.mutateAsync({
+        kind: "delete",
+        printerId,
+        fileId: file.id,
+        signal: viewRequests.current.signal,
+      });
+      if (version !== lifetime.current) return;
       toast.success(uiText("Printer file deleted"));
     } catch (e) {
-      toast.error(e);
-      await loadPrinter();
+      if (version === lifetime.current) toast.error(e);
     } finally {
-      setDeletingFileId(null);
-      setDeleteTarget(null);
+      if (version === lifetime.current) {
+        setDeletingFileId(null);
+        setDeleteTarget(null);
+      }
     }
   }
 
@@ -440,6 +491,13 @@ export function PrinterDetailPage({
   const hasCurrentPrint = Boolean(ps.filename || ps.state === "printing" || ps.state === "paused");
 
   if (!printer) {
+    if (resources.error)
+      return (
+        <div role="alert">
+          {userMessage(resources.error)}
+          <Button onClick={() => void resources.refreshAll()}>{uiText("Retry")}</Button>
+        </div>
+      );
     return (
       <div className="w-full space-y-4">
         <div className="h-8 w-48 animate-pulse rounded bg-muted" />
@@ -544,9 +602,14 @@ export function PrinterDetailPage({
             </div>
           )}
 
-          {error && (
+          {(error || resources.error) && (
             <div className="rounded border border-red-300/50 bg-red-50/30 p-3 font-mono text-sm text-red-600 dark:bg-red-950/20">
-              {error}
+              {error ?? userMessage(resources.error)}
+              {resources.error && (
+                <Button size="xs" onClick={() => void resources.refreshAll()}>
+                  {uiText("Retry")}
+                </Button>
+              )}
             </div>
           )}
 
@@ -635,8 +698,6 @@ export function PrinterDetailPage({
               active={activeTab}
               onChange={(k) => {
                 setActiveTab(k);
-                if (k === "config" && !moonrakerConfig) loadMoonrakerConfig();
-                if (k === "diagnostics" && !diagnostics) loadDiagnostics();
               }}
               className="gap-1 overflow-x-auto -mb-px"
               tabClassName="px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors text-muted-foreground hover:text-foreground"
@@ -1032,7 +1093,7 @@ export function PrinterDetailPage({
             <PrinterSettings
               printer={printer}
               canEdit={printer.access.can_admin}
-              onSaved={(updated) => setPrinter(updated)}
+              key={printer.id}
             />
           )}
 
@@ -1043,7 +1104,7 @@ export function PrinterDetailPage({
               <FleetMaintenancePanel
                 printers={[printer]}
                 onPrintersChanged={() => {
-                  void loadPrinter();
+                  void resources.refresh(printerKeys.detail(printerId));
                 }}
               />
             </div>
@@ -1380,15 +1441,24 @@ function ConfigSummary({ title, data }: { title: string; data: ProviderJsonObjec
 }
 
 function PrinterSettings({
-  printer,
+  printer: initialPrinter,
   canEdit,
-  onSaved,
 }: {
   printer: PrinterRead;
   canEdit: boolean;
-  onSaved: (printer: PrinterRead) => void;
 }) {
   useUiLocale();
+  const [printer, setPrinter] = useState(initialPrinter);
+  const command = usePrinterSettingsCommand(printer.id);
+  const active = useRef(true);
+  const form = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    active.current = true;
+
+    return () => {
+      active.current = false;
+    };
+  }, []);
   const [name, setName] = useState(printer.name);
   const [modelName, setModelName] = useState(printer.model_name ?? "");
   const [group, setGroup] = useState(printer.group ?? "");
@@ -1399,12 +1469,12 @@ function PrinterSettings({
   const [mainboardId, setMainboardId] = useState(printer.elegoo_centauri_mainboard_id ?? "");
   const [secret, setSecret] = useState("");
   const [providerMaterialSync, setProviderMaterialSync] = useState(
-    printer.provider_material_sync_enabled ?? true,
+    printer.provider_material_sync_enabled,
   );
   const [operatorReleaseRequired, setOperatorReleaseRequired] = useState(
-    printer.operator_release_required ?? false,
+    printer.operator_release_required,
   );
-  const [saving, setSaving] = useState(false);
+  const saving = command.busy;
   const [error, setError] = useState<string | null>(null);
 
   const secretLabel =
@@ -1420,58 +1490,77 @@ function PrinterSettings({
             ? "API key"
             : "Moonraker API key";
 
-  async function save(e: React.FormEvent) {
-    e.preventDefault();
-    if (!canEdit || saving) return;
-    setSaving(true);
+  function adopt(snapshot: PrinterRead) {
+    setPrinter(snapshot);
+    setName(snapshot.name);
+    setModelName(snapshot.model_name ?? "");
+    setGroup(snapshot.group ?? "");
+    setNotes(snapshot.notes ?? "");
+    setAddress(providerAddress(snapshot));
+    setSerial(snapshot.bambu_serial ?? "");
+    setUsername(snapshot.prusalink_username ?? "");
+    setMainboardId(snapshot.elegoo_centauri_mainboard_id ?? "");
+    setProviderMaterialSync(snapshot.provider_material_sync_enabled);
+    setOperatorReleaseRequired(snapshot.operator_release_required);
+    setSecret("");
     setError(null);
-    const payload: PrinterUpdate = {
-      name: name.trim(),
-      model_name: modelName,
-      group,
-      notes,
-      provider_material_sync_enabled: providerMaterialSync,
-      operator_release_required: operatorReleaseRequired,
-    };
+  }
+
+  async function save(e?: React.FormEvent, revised = false) {
+    e?.preventDefault();
+    if (!canEdit || saving || (!revised && command.blocked)) return;
+    if (form.current && !form.current.reportValidity()) return;
+    const session = getSessionVersion();
+    const current = () => active.current && session === getSessionVersion();
+    setError(null);
+    const payload: PrinterUpdate = {};
+    if (name.trim() !== printer.name) payload.name = name.trim();
+    if (modelName !== (printer.model_name ?? "")) payload.model_name = modelName;
+    if (group !== (printer.group ?? "")) payload.group = group;
+    if (notes !== (printer.notes ?? "")) payload.notes = notes;
+    if (providerMaterialSync !== printer.provider_material_sync_enabled)
+      payload.provider_material_sync_enabled = providerMaterialSync;
+    if (operatorReleaseRequired !== printer.operator_release_required)
+      payload.operator_release_required = operatorReleaseRequired;
     if (printer.provider === "moonraker") {
-      payload.moonraker_url = address;
+      if (address !== providerAddress(printer)) payload.moonraker_url = address;
       if (secret) payload.api_key = secret;
     } else if (printer.provider === "bambu_lan") {
-      payload.bambu_host = address;
-      payload.bambu_serial = serial;
+      if (address !== providerAddress(printer)) payload.bambu_host = address;
+      if (serial !== (printer.bambu_serial ?? "")) payload.bambu_serial = serial;
       if (secret) payload.bambu_access_code = secret;
     } else if (printer.provider === "prusalink") {
-      payload.prusalink_url = address;
-      payload.prusalink_username = username;
+      if (address !== providerAddress(printer)) payload.prusalink_url = address;
+      if (username !== (printer.prusalink_username ?? "")) payload.prusalink_username = username;
       if (secret) {
         if (printer.prusalink_auth_mode === "api_key") payload.prusalink_api_key = secret;
         else payload.prusalink_password = secret;
       }
     } else if (printer.provider === "elegoo_centauri") {
-      payload.elegoo_centauri_host = address;
-      payload.elegoo_centauri_mainboard_id = mainboardId;
+      if (address !== providerAddress(printer)) payload.elegoo_centauri_host = address;
+      if (mainboardId !== (printer.elegoo_centauri_mainboard_id ?? ""))
+        payload.elegoo_centauri_mainboard_id = mainboardId;
       if (secret) payload.elegoo_centauri_access_code = secret;
     } else if (printer.provider === "octoprint") {
-      payload.octoprint_url = address;
+      if (address !== providerAddress(printer)) payload.octoprint_url = address;
       if (secret) payload.octoprint_api_key = secret;
     }
     try {
-      const updated = await updatePrinter(printer.id, payload);
-      onSaved(updated);
-      setSecret("");
+      const updated = await command.save(printer, payload, revised);
+      if (!current()) return;
+      adopt(updated);
       toast.success(uiText("Printer settings saved"));
     } catch (err) {
+      if (!current()) return;
       const message = err instanceof Error ? err.message : "Could not save printer settings";
       setError(message);
       toast.error(err);
-    } finally {
-      setSaving(false);
     }
   }
 
   return (
     <Localized>
-      <form onSubmit={save} className={`${SECTION_CLASS} animate-panel-in`}>
+      <form ref={form} onSubmit={save} className={`${SECTION_CLASS} animate-panel-in`}>
         <div className={SECTION_HEADER_CLASS}>
           <div className="flex items-center gap-2">
             <Settings className="h-4 w-4 text-muted-foreground" />
@@ -1484,7 +1573,12 @@ function PrinterSettings({
               </p>
             </div>
           </div>
-          <Button type="submit" size="sm" loading={saving} disabled={!canEdit || !name.trim()}>
+          <Button
+            type="submit"
+            size="sm"
+            loading={saving}
+            disabled={!canEdit || command.blocked || !name.trim()}
+          >
             {uiText("Save changes")}
           </Button>
         </div>
@@ -1495,7 +1589,7 @@ function PrinterSettings({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
               />
             </SettingsField>
             <SettingsField
@@ -1508,7 +1602,7 @@ function PrinterSettings({
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
                 placeholder={printer.detected_model ?? uiText("Auto-detected")}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
               />
               <datalist id="printer-model-options">
                 {PRINTER_MODEL_OPTIONS.map((model) => (
@@ -1521,7 +1615,7 @@ function PrinterSettings({
                 value={group}
                 onChange={(e) => setGroup(e.target.value)}
                 placeholder={uiText("Workshop")}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
               />
             </SettingsField>
             <SettingsField label={uiText("Notes")}>
@@ -1529,7 +1623,7 @@ function PrinterSettings({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 rows={4}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
                 className="w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               />
             </SettingsField>
@@ -1554,7 +1648,7 @@ function PrinterSettings({
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
                 required
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
               />
             </SettingsField>
             {printer.provider === "bambu_lan" && (
@@ -1563,7 +1657,7 @@ function PrinterSettings({
                   value={serial}
                   onChange={(e) => setSerial(e.target.value)}
                   required
-                  disabled={!canEdit}
+                  disabled={!canEdit || saving}
                 />
               </SettingsField>
             )}
@@ -1573,7 +1667,7 @@ function PrinterSettings({
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   required
-                  disabled={!canEdit}
+                  disabled={!canEdit || saving}
                 />
               </SettingsField>
             )}
@@ -1588,7 +1682,7 @@ function PrinterSettings({
                   <Input
                     value={mainboardId}
                     onChange={(e) => setMainboardId(e.target.value)}
-                    disabled={!canEdit}
+                    disabled={!canEdit || saving}
                   />
                 </SettingsField>
               )}
@@ -1598,7 +1692,7 @@ function PrinterSettings({
                 value={secret}
                 onChange={(e) => setSecret(e.target.value)}
                 placeholder={uiText("Unchanged")}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
               />
             </SettingsField>
             <label className="flex items-start gap-3 rounded-md border border-border bg-background p-3">
@@ -1606,7 +1700,7 @@ function PrinterSettings({
                 type="checkbox"
                 checked={providerMaterialSync}
                 onChange={(event) => setProviderMaterialSync(event.target.checked)}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
                 className="mt-0.5 h-4 w-4"
               />
               <span>
@@ -1625,7 +1719,7 @@ function PrinterSettings({
                 type="checkbox"
                 checked={operatorReleaseRequired}
                 onChange={(event) => setOperatorReleaseRequired(event.target.checked)}
-                disabled={!canEdit}
+                disabled={!canEdit || saving}
                 className="mt-0.5 h-4 w-4"
               />
               <span>
@@ -1649,6 +1743,20 @@ function PrinterSettings({
             )}
           </div>
         </div>
+        <PrinterSettingsReview
+          canSave={Boolean(name.trim())}
+          state={command.state}
+          original={printer}
+          onReview={() => {
+            void command.review().catch((err) => {
+              if (active.current) setError(userMessage(err));
+            });
+          }}
+          onAdopt={() => adopt(command.adopt())}
+          onSave={() => {
+            void save(undefined, true);
+          }}
+        />
       </form>
     </Localized>
   );

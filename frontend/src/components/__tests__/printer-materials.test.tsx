@@ -18,7 +18,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -283,5 +283,125 @@ describe("PrinterMaterials", () => {
         }),
       );
     });
+  });
+});
+
+describe("Material entry ownership", () => {
+  it("preserves manual material drafts after conflict", async () => {
+    const view = renderMaterials({
+      routes: {
+        "PUT /api/v1/printers/4/material-state/manual": json(
+          { detail: "material_state_changed" },
+          409,
+        ),
+      },
+    });
+    const material = await screen.findByDisplayValue("PLA");
+    await userEvent.clear(material);
+    await userEvent.type(material, "PETG");
+    await userEvent.click(screen.getByRole("button", { name: "Save state" }));
+    expect(await screen.findByRole("button", { name: "Review current values" })).toBeVisible();
+    expect(material).toHaveValue("PETG");
+    expect(
+      view.requestsWithMethod("GET").filter((r) => r.url.includes("material-state")),
+    ).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Save state" })).toBeDisabled();
+  });
+  it("retires material reads when changing printer", async () => {
+    const deferred = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const view = renderMaterials({
+      routes: {
+        "GET /api/v1/printers/4/material-state": (_url, init) => {
+          signal = init?.signal;
+          return deferred.promise;
+        },
+        "GET /api/v1/printers/5/material-state": json(
+          materialState({ printer_id: 5, slots: [aSlot({ material_type: "ABS" })] }),
+        ),
+      },
+    });
+    await waitFor(() => expect(signal).toBeDefined());
+    view.rerender(<PrinterMaterials printer={aPrinter({ id: 5 })} />);
+    expect(await screen.findByDisplayValue("ABS")).toBeVisible();
+    await act(async () => deferred.resolve(json(materialState())));
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByDisplayValue("PLA")).not.toBeInTheDocument();
+  });
+  it("separates material read failure from loading", async () => {
+    const view = renderMaterials({
+      routes: { "GET /api/v1/printers/4/material-state": json({ detail: "unavailable" }, 503) },
+    });
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    view.route({ "GET /api/v1/printers/4/material-state": json(materialState()) });
+    await userEvent.click(retry);
+    expect(await screen.findByDisplayValue("PLA")).toBeVisible();
+  });
+  it("adopts reviewed material state explicitly", async () => {
+    const view = renderMaterials({
+      routes: {
+        "PUT /api/v1/printers/4/material-state/manual": json(
+          { detail: "material_state_changed" },
+          409,
+        ),
+      },
+    });
+    const material = await screen.findByDisplayValue("PLA");
+    await userEvent.clear(material);
+    await userEvent.type(material, "PETG");
+    await userEvent.click(screen.getByRole("button", { name: "Save state" }));
+    view.route({
+      "GET /api/v1/printers/4/material-state": json(
+        materialState({
+          updated_at: "2026-01-02T00:00:00Z",
+          slots: [aSlot({ material_type: "ABS" })],
+        }),
+      ),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
+    expect(material).toHaveValue("PETG");
+    await userEvent.click(await screen.findByRole("button", { name: "Use current values" }));
+    expect(material).toHaveValue("ABS");
+    expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+  it("preserves manual draft during provider refresh", async () => {
+    const view = renderMaterials();
+    const material = await screen.findByDisplayValue("PLA");
+    await userEvent.clear(material);
+    await userEvent.type(material, "PETG");
+    view.route({
+      "GET /api/v1/printers/4/material-state": json(
+        materialState({
+          updated_at: "2026-01-02T00:00:00Z",
+          slots: [aSlot(), aSlot({ source: "bambu_ams", label: "Updated AMS" })],
+        }),
+      ),
+    });
+    await act(async () => {
+      await view.client.invalidateQueries();
+    });
+    expect(material).toHaveValue("PETG");
+    expect(await screen.findByText("Updated AMS")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Save state" }));
+    expect(
+      JSON.parse(view.requestsWithMethod("PUT").at(-1)?.body ?? "{}").expected_updated_at,
+    ).toBe(FROZEN_NOW);
+  });
+  it("retires material save feedback on unmount", async () => {
+    const deferred = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const view = renderMaterials({
+      routes: {
+        "PUT /api/v1/printers/4/material-state/manual": (_url, init) => {
+          signal = init?.signal;
+          return deferred.promise;
+        },
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Save state" }));
+    view.unmount();
+    await act(async () => deferred.resolve(json(materialState())));
+    expect(signal?.aborted).toBe(true);
+    expect(screen.queryByText("Materials and tools saved")).not.toBeInTheDocument();
   });
 });

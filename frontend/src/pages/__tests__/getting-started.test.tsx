@@ -1,5 +1,5 @@
 /* The authenticated guide preserves storage recovery and shows only verified Models. */
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import GettingStartedPage from "@/pages/getting-started";
@@ -64,6 +64,7 @@ function renderGuide(routes: RouteTable = {}, auth = adminSession()) {
         }),
         "GET /api/v1/models/page": json({ items: [], total: 0, next_cursor: null }),
         "GET /api/v1/libraries/locations": json([]),
+        "GET /api/v1/libraries": json([]),
         "GET /api/v1/collections": json([]),
         "GET /api/v1/tags": json([]),
         "GET /api/v1/artifact-uploads/": json({
@@ -117,6 +118,50 @@ afterEach(() => {
 });
 
 describe("Getting started", () => {
+  it("retires preparation before starting guide reads", async () => {
+    const response = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const guide = renderGuide({
+      "POST /api/v1/setup/prepare-storage": (_url, init) => {
+        signal = init?.signal;
+        return response.promise;
+      },
+    });
+    await waitFor(() => expect(guide.requestsWithMethod("POST")).toHaveLength(1));
+    guide.unmount();
+    await act(async () =>
+      response.resolve(json({ ready: true, storage_provider: "local", checks: [] })),
+    );
+    expect(signal?.aborted).toBe(true);
+    expect(
+      guide
+        .requestsWithMethod("GET")
+        .filter((r) => /models\/page|libraries\/locations/.test(r.url)),
+    ).toHaveLength(0);
+  });
+  it("retires guide catalog reads on unmount", async () => {
+    const models = Promise.withResolvers<Response>();
+    const locations = Promise.withResolvers<Response>();
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const guide = renderGuide({
+      "GET /api/v1/models/page": (_url, init) => {
+        signals.push(init?.signal);
+        return models.promise;
+      },
+      "GET /api/v1/libraries/locations": (_url, init) => {
+        signals.push(init?.signal);
+        return locations.promise;
+      },
+    });
+    await waitFor(() => expect(signals).toHaveLength(2));
+    guide.unmount();
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    await act(async () => {
+      models.resolve(json({ items: [], total: 0, next_cursor: null }));
+      locations.resolve(json([]));
+    });
+  });
+
   it("keeps uploads unavailable while storage needs preparation", async () => {
     renderGuide({
       "POST /api/v1/setup/prepare-storage": json({ detail: "storage_root_enrollment_failed" }, 503),
@@ -197,7 +242,7 @@ describe("Getting started", () => {
   it("preselects an accessible mounted folder without enabling sources", async () => {
     renderGuide({
       "GET /api/v1/libraries/locations": json(["/libraries/models"]),
-      "GET /api/v1/config": json({ external_libraries_enabled: false }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: false })),
       "GET /api/v1/libraries": json([]),
       "GET /api/v1/storage-connections": json([]),
     });
@@ -314,8 +359,10 @@ describe("Getting started", () => {
   it("connects a mounted folder in one submission", async () => {
     setJobSource(async () => [aJob({ job_id: "guide-folder-connect" })]);
     const guide = renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: false }),
-      "PUT /api/v1/config": json({ external_libraries_enabled: true }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: false })),
+      "PUT /api/v1/config": json(
+        aVaultConfig({ external_libraries_enabled: true, edit_version: 2 }),
+      ),
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ job_id: "guide-folder-connect", state: "queued" }),
     });
@@ -349,7 +396,7 @@ describe("Getting started", () => {
   it("retries a scan without creating another source", async () => {
     setJobSource(async () => [aJob({ job_id: "guide-scan-retry" })]);
     const guide = renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: true }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ detail: "unavailable" }, 503),
     });
@@ -373,7 +420,7 @@ describe("Getting started", () => {
   });
   it("retains the folder draft after connection failure", async () => {
     renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: true }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
       "POST /api/v1/libraries": json({ detail: "library_path_not_directory" }, 400),
     });
     await userEvent.click(
@@ -391,7 +438,7 @@ describe("Getting started", () => {
   it("explains an empty scan", async () => {
     setJobSource(async () => [aJob({ job_id: "guide-empty-scan", model_id: null, file_id: null })]);
     renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: true }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ job_id: "guide-empty-scan", state: "queued" }),
     });
@@ -412,7 +459,7 @@ describe("Getting started", () => {
       aJob({ job_id: "guide-partial-scan", completion: "partial", failed: 1 }),
     ]);
     const guide = renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: true }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ job_id: "guide-partial-scan", state: "queued" }),
     });
@@ -433,7 +480,7 @@ describe("Getting started", () => {
   });
   it("stops connection when sources cannot be enabled", async () => {
     const guide = renderGuide({
-      "GET /api/v1/config": json({ external_libraries_enabled: false }),
+      "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: false })),
       "PUT /api/v1/config": json({ detail: "unavailable" }, 503),
     });
     await userEvent.click(
@@ -442,8 +489,11 @@ describe("Getting started", () => {
     await userEvent.type(screen.getByLabelText("Folder name"), "My models");
     await userEvent.type(screen.getByLabelText("Folder path on the server"), "/libraries/models");
     await userEvent.click(screen.getByRole("button", { name: "Connect and find models" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("We could not connect this folder");
+    expect(
+      await screen.findByText("We could not connect this folder. Check the path and try again."),
+    ).toBeVisible();
     expect(guide.requestsWithMethod("POST").some((r) => r.url === "/api/v1/libraries")).toBe(false);
-    expect(screen.getByRole("button", { name: "Connect and find models" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Connect and find models" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Review latest version" })).toBeEnabled();
   });
 });

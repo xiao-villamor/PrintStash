@@ -52,6 +52,31 @@ def proposal(model, **kwargs):
 
 
 class TestVisualIndex:
+    @pytest.mark.parametrize("profile", ["thumbnail", "multiview"])
+    def test_generation_preserves_native_encoder_alignment(
+        self, db_session, visual_setup, profile
+    ):
+        from printstash_core.inference import EmbeddingSpace as Space
+
+        from app.db.models import EmbeddingSpace
+        from app.modules.inference.manifest import validate_space
+
+        actor, encoder, _, _ = visual_setup
+        generation = generations.prepare(
+            db_session,
+            actor,
+            GenerationProposal(
+                local_model_id=encoder.id, index_backend="numpy", profile=profile
+            ),
+        )
+        row = db_session.get(IndexGeneration, generation.id)
+        stored = db_session.get(EmbeddingSpace, row.space_id)
+        space = Space(**json.loads(stored.config_json))
+
+        assert space.alignment_identity == encoder.manifest.encoder_space().config_hash
+        assert space.config_hash != encoder.id
+        validate_space(encoder.manifest, space)
+
     def test_ignores_visual_legs_for_nonmodel_queries(
         self, db_session, visual_setup, advance_generation
     ):

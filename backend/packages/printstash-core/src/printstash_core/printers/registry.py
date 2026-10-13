@@ -79,5 +79,5 @@ class ProviderRegistry:
     def _provider_id(value: object) -> ProviderId:
         try:
             return ProviderId(cast(str, value))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             raise ProviderError("unknown_provider", code="unknown_provider") from None

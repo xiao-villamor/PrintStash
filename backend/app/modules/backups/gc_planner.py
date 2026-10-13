@@ -548,10 +548,12 @@ def _require_unchanged_identity(run: GcRun, source) -> None:
 def finalize_plan(session: Session, run_id: int) -> GcRun:
     """Finalize one quarantined plan after all evidence is revalidated."""
     from app.modules.library.trash import (
+        enqueue_purge_deletions,
         hard_delete_collection,
         hard_delete_document,
         hard_delete_file,
         hard_delete_model,
+        prepare_purge_deletions,
     )
     from app.modules.storage.storage_deletion import process_storage_delete_intents
 
@@ -577,18 +579,20 @@ def finalize_plan(session: Session, run_id: int) -> GcRun:
         run.updated_at = utcnow()
         session.add(run)
         session.commit()
-        for item in items:
-            resource = _resource(session, item)
+        resources = [_resource(session, item) for item in items]
+        prepared = prepare_purge_deletions(session, resources)
+        for resource in resources:
             if isinstance(resource, Model):
-                hard_delete_model(session, resource)
+                hard_delete_model(session, resource, prepared_deletions=prepared)
             elif isinstance(resource, Document):
-                hard_delete_document(session, resource)
+                hard_delete_document(session, resource, prepared_deletions=prepared)
             elif isinstance(resource, File):
-                hard_delete_file(session, resource)
+                hard_delete_file(session, resource, prepared_deletions=prepared)
             elif isinstance(resource, Collection):
-                hard_delete_collection(session, resource)
+                hard_delete_collection(session, resource, prepared_deletions=prepared)
             else:
                 raise GcSafetyError("gc_candidate_changed")
+        enqueue_purge_deletions(session, prepared)
         session.commit()
     except Exception as exc:
         session.rollback()

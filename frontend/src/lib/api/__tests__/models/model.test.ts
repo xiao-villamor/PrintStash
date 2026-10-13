@@ -13,6 +13,7 @@
  * The revision comparison is a single request carrying repeated `file_id` keys, so
  * the comparison table renders from one round trip rather than N.
  */
+import { anEditingBase } from "@/test-support/factories";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -28,14 +29,13 @@ import {
   replaceFileTags,
   updateModel,
 } from "@/lib/api/models";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "../_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -54,10 +54,56 @@ describe("getModel", () => {
 });
 
 describe("updateModel", () => {
-  it("PATCHes only what changed", async () => {
-    respondWith({ id: 1 });
+  it.each([
+    { label: "absent", epoch: undefined },
+    { label: "malformed", epoch: "not-an-epoch" },
+    { label: "different history", epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+  ])("rejects an acknowledgement with $label identity", async ({ epoch }) => {
+    if (epoch === undefined) respondWith({ id: 1, edit_version: 2 });
+    else respondWith({ id: 1, edit_version: 2, edit_epoch: epoch });
+    await expect(updateModel(1, { name: "Draft" }, anEditingBase())).rejects.toThrow(
+      /Invalid editing/,
+    );
+  });
 
-    await updateModel(1, { name: "Renamed" });
+  it.each([0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    "rejects invalid editing version %s before HTTP",
+    (version) => {
+      expect(() =>
+        updateModel(
+          1,
+          { collection: "parts" },
+          anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: version }),
+        ),
+      ).toThrow("Invalid editing base");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+  it("sends the editor's Model version", async () => {
+    respondWith({ id: 1, edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 8 });
+
+    await updateModel(
+      1,
+      { name: "Renamed" },
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
+    );
+
+    const headers = new Headers(lastCall().init?.headers);
+    expect(headers.get("If-Match")).toBe('"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"');
+    expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
+  });
+
+  it("PATCHes only what changed", async () => {
+    respondWith({
+      id: 1,
+      ...anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 8 }),
+    });
+
+    await updateModel(
+      1,
+      { name: "Renamed" },
+      anEditingBase({ edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", edit_version: 7 }),
+    );
 
     expectRequest("/api/v1/models/1", "PATCH");
     expect(lastBody()).toEqual({ name: "Renamed" });
@@ -153,5 +199,69 @@ describe("deleteFileRevision", () => {
     await deleteFileRevision(4, 9);
 
     expectRequest("/api/v1/models/4/files/9/revision", "DELETE");
+  });
+});
+
+describe("reader cancellation", () => {
+  it("aborts an active Model detail read", async () => {
+    const controller = new AbortController();
+    let delivered: AbortSignal | null = null;
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) throw new Error("Cancellation signal is required");
+          delivered = signal;
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+    const outcome = getModel(1, { signal: controller.signal }).catch((error: Error) => error);
+    controller.abort();
+    await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
+    expect(delivered).toMatchObject({ aborted: true });
+  });
+});
+
+describe("reader cancellation", () => {
+  it("aborts an active Model printer files read", async () => {
+    const controller = new AbortController();
+    let delivered: AbortSignal | null = null;
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) throw new Error("Cancellation signal is required");
+          delivered = signal;
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+    const outcome = getModelPrinterFiles(1, { signal: controller.signal }).catch(
+      (error: Error) => error,
+    );
+
+    controller.abort();
+
+    await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
+    expect(delivered).toMatchObject({ aborted: true });
+  });
+
+  it("aborts an active Model print jobs read", async () => {
+    const controller = new AbortController();
+    let delivered: AbortSignal | null = null;
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) throw new Error("Cancellation signal is required");
+          delivered = signal;
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+    const outcome = getModelPrintJobs(1, { signal: controller.signal }).catch(
+      (error: Error) => error,
+    );
+    controller.abort();
+    await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
+    expect(delivered).toMatchObject({ aborted: true });
   });
 });

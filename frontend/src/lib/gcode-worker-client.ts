@@ -1,9 +1,8 @@
 /** Canceling a preview terminates its parser, including an in-progress long arc. */
 import type { ToolpathData } from "./gcode";
+import type { ToolpathWorkerReply } from "./gcode-worker-protocol";
 
-export type ToolpathWorkerReply =
-  | { kind: "ready"; data: ToolpathData }
-  | { kind: "error"; code: "limit" | "invalid" };
+export type { ToolpathWorkerReply } from "./gcode-worker-protocol";
 export class ToolpathParseError extends Error {
   constructor(public readonly code: "limit" | "invalid") {
     super(`toolpath_${code}`);

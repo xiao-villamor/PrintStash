@@ -23,9 +23,28 @@ import {
   consumeSessionExpired,
   emitUnauthorized,
   getToken,
+  clearLogin,
   onUnauthorized,
+  onAuthChange,
   storeLogin,
+  getUser,
+  retirePrivateSessionScope,
 } from "@/lib/auth-store";
+
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+
+describe("retirePrivateSessionScope", () => {
+  it("retires private state without logging out", () => {
+    const user = { id: 1, username: "maker", email: null, is_superuser: false };
+    storeLogin("", user);
+    const version = getSessionVersion();
+
+    retirePrivateSessionScope();
+
+    expect(getUser()).toEqual(user);
+    expect(() => requireSessionVersion(version)).toThrow("request_session_changed");
+  });
+});
 
 describe("expireSession", () => {
   beforeEach(() => {
@@ -71,5 +90,75 @@ describe("expireSession", () => {
     expect(localStorage.getItem("printstash.token")).toBeNull();
     expect(sessionStorage.getItem("printstash.token")).toBeNull();
     expect(getToken()).toBeNull();
+  });
+});
+
+describe("auth change notifications", () => {
+  it("ignores unrelated storage events while recognizing cross-tab sessions", () => {
+    const listener = vi.fn<() => void>();
+    const off = onAuthChange(listener);
+    try {
+      window.dispatchEvent(new StorageEvent("storage", { key: "printstash.locale" }));
+      window.dispatchEvent(new StorageEvent("storage", { key: "printstash.theme" }));
+      expect(listener).not.toHaveBeenCalled();
+      window.dispatchEvent(new StorageEvent("storage", { key: "printstash.user" }));
+      expect(listener).toHaveBeenCalledTimes(1);
+      window.dispatchEvent(new StorageEvent("storage", { key: null }));
+      expect(listener).toHaveBeenCalledTimes(2);
+    } finally {
+      off();
+    }
+    window.dispatchEvent(new StorageEvent("storage", { key: "printstash.user" }));
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+});
+
+/** Storage is metadata persistence, never the session retirement mechanism. */
+describe("session retirement", () => {
+  it("retires sessions when browser storage is unavailable", () => {
+    const changes = vi.fn<() => void>();
+    const off = onAuthChange(changes);
+    const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("Blocked", "SecurityError");
+    });
+    try {
+      clearLogin();
+      expect(changes).toHaveBeenCalledOnce();
+    } finally {
+      remove.mockRestore();
+      off();
+    }
+  });
+
+  it("retires bootstrap when validated identity changes", () => {
+    storeLogin("", { id: 7, username: "maker", email: null, is_superuser: false });
+    const changes = vi.fn<() => void>();
+    const off = onAuthChange(changes);
+    try {
+      storeLogin(
+        "",
+        { id: 9, username: "new-owner", email: null, is_superuser: false },
+        { silent: true },
+      );
+      expect(changes).toHaveBeenCalledOnce();
+    } finally {
+      off();
+    }
+  });
+
+  it("keeps same-session metadata refresh silent", () => {
+    storeLogin("", { id: 7, username: "maker", email: null, is_superuser: false });
+    const changes = vi.fn<() => void>();
+    const off = onAuthChange(changes);
+    try {
+      storeLogin(
+        "",
+        { id: 7, username: "maker", email: null, is_superuser: true },
+        { silent: true },
+      );
+      expect(changes).not.toHaveBeenCalled();
+    } finally {
+      off();
+    }
   });
 });

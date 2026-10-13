@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Literal
 
 from printstash_core.imports import CaptureContractError, CaptureManifestV2
+from printstash_core.mesh.measurements import encode_volume
 from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic import Field as PydanticField
 from sqlmodel import Session, delete, select
@@ -48,7 +49,6 @@ from app.db.models import (
     PrintJob,
     ProvenanceCapture,
     SavedView,
-    StagingLease,
     Tag,
     User,
 )
@@ -62,11 +62,12 @@ from app.modules.library import (
     source_covers,
     taxonomy,
 )
+from app.modules.library.volume_metadata import read_volume
 from app.modules.storage import capacity_estimates, storage
 from app.modules.storage.artifact_content import ArtifactContentError, resolve
 from app.modules.storage.capacity import CapacityManager
 from app.modules.storage.storage_backend.runtime import get_backend
-from app.modules.work.contracts import JobOutcome
+from app.modules.work.contracts import JobContext, JobOutcome
 from app.modules.work.jobs import failure_of
 from app.modules.work.jobs import jobs as registry
 from app.schemas.models import PartGroupWrite, PartOptionWrite
@@ -251,9 +252,11 @@ class PortableMultipartModel(BaseModel):
 
 def _retired_group_filter(row: dict) -> bool:
     filters = row.get("filters", {})
-    return "family_export_id" in row or any(
-        key in filters for key in ("family_id", "family_role", "in_family")
-    ) or filters.get("browse") == "families_collapsed"
+    return (
+        "family_export_id" in row
+        or any(key in filters for key in ("family_id", "family_role", "in_family"))
+        or filters.get("browse") == "families_collapsed"
+    )
 
 
 def _export_saved_views(rows: list[SavedView]) -> list[dict]:
@@ -270,11 +273,14 @@ def _import_saved_views(session: Session, user: User, rows: list[dict]) -> None:
     for row in rows:
         if _retired_group_filter(row):
             continue
-        if session.exec(
-            select(SavedView.id).where(
-                SavedView.user_id == user.id, SavedView.name == row["name"]
-            )
-        ).first() is not None:
+        if (
+            session.exec(
+                select(SavedView.id).where(
+                    SavedView.user_id == user.id, SavedView.name == row["name"]
+                )
+            ).first()
+            is not None
+        ):
             continue
         session.add(
             SavedView(
@@ -527,14 +533,23 @@ def create_archive(session: Session, user: User, *, version: Literal[1, 2] = 2) 
                     "is_recommended": artifact.is_recommended,
                     "tags": tags_by_file.get(artifact.id, []),
                     "metadata": {
-                        key: _json_value(value)
-                        for key, value in md.model_dump(
-                            # created_at is set fresh by Metadata's
-                            # default_factory on import — carrying the source
-                            # instance's ISO string through crashes Artifact
-                            # persistence's SQLite datetime write.
-                            exclude={"id", "file_id", "created_at"}
-                        ).items()
+                        **{
+                            key: _json_value(value)
+                            for key, value in md.model_dump(
+                                # Timestamps are local to the imported row;
+                                # volume uses its public disjoint wire contract.
+                                exclude={
+                                    "id",
+                                    "file_id",
+                                    "created_at",
+                                    "volume_state",
+                                    "volume_method",
+                                    "volume_unavailable_cause",
+                                    "volume_not_calculated_cause",
+                                }
+                            ).items()
+                        },
+                        "volume_measurement": encode_volume(read_volume(md)),
                     }
                     if md
                     else {},
@@ -563,13 +578,11 @@ def create_archive(session: Session, user: User, *, version: Literal[1, 2] = 2) 
         )
     aggregate_stmt = select(MultipartModel)
     if not user.is_superuser:
-        aggregate_collection_ids = rbac.accessible_collection_ids(session, user)
-        if not aggregate_collection_ids:
-            aggregate_stmt = aggregate_stmt.where(MultipartModel.id == -1)
-        else:
-            aggregate_stmt = aggregate_stmt.where(
-                MultipartModel.collection_id.in_(aggregate_collection_ids)  # type: ignore[union-attr]
+        aggregate_stmt = aggregate_stmt.where(
+            MultipartModel.collection_id.in_(  # type: ignore[union-attr]
+                rbac.accessible_collection_ids_stmt(session, user)
             )
+        )
     aggregates = session.exec(aggregate_stmt.order_by(MultipartModel.id.asc())).all()  # type: ignore[attr-defined]
     aggregate_collection_paths = {
         row.id: row.path
@@ -1524,7 +1537,7 @@ def _restore_portable_covers(
             source = sources[0]
             data = archive.read(cover_data["entry"])
             writes.append(
-                source_covers.put(
+                source_covers.prepare_put(
                     session,
                     get_backend(),
                     provenance_source_id=source.id,
@@ -1908,6 +1921,7 @@ def import_archive(
                 for artifact_data in sorted(
                     model_data.get("artifacts", []), key=lambda row: row["version"]
                 ):
+                    provenance_retirements = []
                     existing = session.exec(
                         select(File).where(
                             File.model_id == model.id,
@@ -1926,6 +1940,7 @@ def import_archive(
                             merge = provenance.attach_existing_artifact(
                                 session, existing, context, imported_overrides=overrides
                             )
+                            provenance_retirements.extend(merge.storage_retirements)
                             provenance_conflicts += len(
                                 merge.conflicting_override_fields
                             )
@@ -1945,6 +1960,9 @@ def import_archive(
                                 session.add(
                                     FileTagLink(file_id=existing.id, tag_id=tag.id)
                                 )
+                        provenance.finish_storage_retirements(
+                            session, tuple(provenance_retirements)
+                        )
                         session.commit()
                         if progress is not None:
                             progress(
@@ -1995,7 +2013,13 @@ def import_archive(
                         merge = provenance.attach_existing_artifact(
                             session, file_row, context, imported_overrides=overrides
                         )
+                        provenance_retirements.extend(merge.storage_retirements)
                         provenance_conflicts += len(merge.conflicting_override_fields)
+                    if provenance_retirements:
+                        provenance.finish_storage_retirements(
+                            session, tuple(provenance_retirements)
+                        )
+                        session.commit()
                     created_files += 1
                     if progress is not None:
                         session.commit()
@@ -2325,6 +2349,11 @@ def import_archive(
             session, archive, sidecar, source_models, user
         )
         try:
+            session.flush()
+            for write in sorted(
+                cover_writes, key=lambda value: value.cover.storage_key
+            ):
+                source_covers.adopt_write(session, write)
             session.commit()
         except Exception:
             session.rollback()
@@ -2349,10 +2378,10 @@ def import_archive(
 
 
 def run_import_job(
-    *, job_id: str, archive_path: Path, user_id: int, session_factory
+    *, job_context: JobContext, archive_path: Path, user_id: int, session_factory
 ) -> None:
     """Durable job boundary for portable imports; partial progress remains visible."""
-    registry.update(job_id, stage="ingesting")
+    job_context.update(stage="ingesting")
 
     def report(
         processed: int,
@@ -2361,8 +2390,7 @@ def run_import_job(
         skipped: int,
         current_item: str | None,
     ) -> None:
-        registry.update(
-            job_id,
+        job_context.update(
             processed=processed,
             total=total,
             succeeded=succeeded,
@@ -2381,14 +2409,7 @@ def run_import_job(
                 user,
                 progress=report,
             )
-            lease = session.exec(
-                select(StagingLease).where(StagingLease.job_id == job_id)
-            ).first()
-            if lease is not None:
-                session.delete(lease)
-                session.commit()
-        registry.finish(
-            job_id,
+        job_context.finish(
             JobOutcome.COMPLETED,
             completion="complete",
             result=result,
@@ -2397,11 +2418,11 @@ def run_import_job(
             succeeded=result["created_files"],
             skipped=result["skipped_files"],
         )
-        archive_path.unlink(missing_ok=True)
+        from .ingestion import release_job_staging
+
+        release_job_staging(job_context)
     except Exception as exc:  # noqa: BLE001 - durable job boundary
-        registry.finish(
-            job_id, JobOutcome.FAILED, error=failure_of(exc), retryable=True
-        )
+        job_context.finish(JobOutcome.FAILED, error=failure_of(exc), retryable=True)
 
 
 def _import_step(ctx) -> None:
@@ -2414,10 +2435,10 @@ def _import_step(ctx) -> None:
         job = registry.row(session, job_id)
         owner = job.owner_user_id if job is not None else None
     if not leases or owner is None or not Path(leases[0].path).exists():
-        registry.finish(job_id, JobOutcome.FAILED, error="staging_expired")
+        ctx.finish(JobOutcome.FAILED, error="staging_expired")
         return
     run_import_job(
-        job_id=job_id,
+        job_context=ctx,
         archive_path=Path(leases[0].path),
         user_id=owner,
         session_factory=get_session_factory(),

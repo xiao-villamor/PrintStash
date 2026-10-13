@@ -16,6 +16,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
@@ -34,6 +35,11 @@ from app.modules.printing.printer_provider import (
 from tests.factories import a_gcode_artifact, build_printer
 from tests.fakes.mock_printer import create_app
 from tests.fakes.server import start_server
+
+
+@pytest.fixture(autouse=True)
+def _use_threaded_db(threaded_hub_db: None) -> None:
+    """Give concurrent printer workers independent SQLite connections."""
 
 
 class _Backend:

@@ -52,7 +52,6 @@ const fetchMock = vi.fn<typeof fetch>();
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache(); // request.ts keeps a 30s GET cache under TanStack Query
 });
 
 afterEach(() => {
@@ -120,9 +119,9 @@ Follow the anatomy in SKILL.md. In vitest:
 
 ```ts
 /**
- * request.ts keeps a 30s GET cache with in-flight dedup under TanStack Query.
- * These tests pin that contract: hits skip the network, concurrent calls share
- * one request, `fresh` bypasses, any mutation clears.
+ * Query owns freshness and deduplication; request.ts performs independent reads.
+ * Transport tests exercise cancellation and session isolation. Feature command
+ * tests assert the published result and affected readers after acknowledgement.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getJson, sendJson } from "@/lib/api/request";

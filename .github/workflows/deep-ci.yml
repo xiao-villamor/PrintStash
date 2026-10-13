@@ -18,6 +18,62 @@ env:
   OPENBLAS_NUM_THREADS: "1"
 
 jobs:
+  mesh-resources:
+    name: Mesh resources (${{ matrix.arch }}, ${{ matrix.memory }} GiB)
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            memory: 1
+          - arch: amd64
+            runner: ubuntu-latest
+            memory: 4
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            memory: 1
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            memory: 4
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14.8"
+      - name: Install corpus factories
+        working-directory: backend
+        run: uv sync --extra dev --extra full --frozen
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the production backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: backend
+          load: true
+          tags: printstash:mesh-resources
+          build-args: PRINTSTASH_VARIANT=full
+          cache-from: type=gha,scope=mesh-resources-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=mesh-resources-${{ matrix.arch }}
+      - name: Exercise production API and DBOS under the memory ceiling
+        working-directory: backend
+        run: >-
+          uv run python scripts/mesh_resource_gate.py
+          --image printstash:mesh-resources
+          --memory-gib ${{ matrix.memory }}
+          --report ${{ runner.temp }}/mesh-resources.json
+      - name: Publish resource and cleanup evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mesh-resources-${{ matrix.arch }}-${{ matrix.memory }}g
+          path: ${{ runner.temp }}/mesh-resources.json
+          if-no-files-found: error
+
   similarity-native:
     name: Similarity native (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
@@ -37,7 +93,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14.8"
       - name: Install full native dependencies
         working-directory: backend
         run: uv sync --extra dev --extra full --frozen
@@ -70,7 +126,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.11", "3.13"]
+        python: ["3.14.8"]
         resolution: ["lowest-direct", "highest"]
     defaults:
       run:
@@ -97,7 +153,7 @@ jobs:
             --editable ".[dev,mesh,printers-all,testkit]"
 
       - name: Test autonomous package
-        if: matrix.python != '3.11' || matrix.resolution != 'highest'
+        if: matrix.resolution != 'highest'
         run: .venv/bin/pytest tests -q -m "not coverage_gate"
 
       # Branch coverage plus a floor per module, from tests/repo/test_coverage_floors.py.
@@ -105,7 +161,7 @@ jobs:
       # that pass — hence two invocations rather than `--cov-fail-under`, which can
       # only check the aggregate.
       - name: Coverage gate for the autonomous package
-        if: matrix.python == '3.11' && matrix.resolution == 'highest'
+        if: matrix.resolution == 'highest'
         # `uv pip install --python .venv/...` rather than `.venv/bin/pip`: the
         # venv is created by `uv venv`, which does not install pip into it, so
         # calling it directly exits 127 and this gate never ran.
@@ -122,7 +178,7 @@ jobs:
         run: .venv/bin/pyright -p pyproject.toml
 
       - name: Verify generated frontend contract
-        if: matrix.python == '3.11' && matrix.resolution == 'highest'
+        if: matrix.resolution == 'highest'
         run: >-
           .venv/bin/python -m printstash_core.printers.codegen
           --output ../../../frontend/src/generated/printer-contracts.ts --check
@@ -145,10 +201,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
 
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
+
+      - name: Prepare PID namespace qualification
+        run: bash ../scripts/prepare-ci-pid-namespace.sh prepare
 
       - name: Test backend
         # The `coverage` lane is `full` under branch coverage plus the coverage gate
@@ -159,12 +218,32 @@ jobs:
         # branches, and the second number is the one that says something.
         run: ./scripts/test.sh coverage -q
 
-  backend-python313:
-    name: Backend compatibility (Python 3.13)
+      - name: Remove PID namespace qualification
+        if: always()
+        run: bash ../scripts/prepare-ci-pid-namespace.sh cleanup
+
+  backend-scale:
+    name: Backend at supported scale (${{ matrix.measurement }} / ${{ matrix.reader }})
     runs-on: ubuntu-latest
-    # The full lane includes a serial container-contract pass after the ordinary
-    # suite; the observed 19-minute first pass cannot fit both within 30 minutes.
-    timeout-minutes: 60
+    # A read that turns quadratic takes minutes per request at this size; the
+    # cap turns that into a failure instead of a job that runs for hours.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - measurement: budget
+            test: test_answers_within_budget_at_the_supported_scale
+            reader: administrator
+          - measurement: budget
+            test: test_answers_within_budget_at_the_supported_scale
+            reader: granted-viewer
+          - measurement: growth
+            test: test_grows_no_faster_than_the_library
+            reader: administrator
+          - measurement: growth
+            test: test_grows_no_faster_than_the_library
+            reader: granted-viewer
     defaults:
       run:
         working-directory: backend
@@ -180,14 +259,59 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.14.8"
 
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
 
-      - name: Run backend compatibility suite
-        run: ./scripts/test.sh full -q
+      - name: Time library reads at 25,000 collections and 100,000 Models
+        # Budgets and growth limits: tests/repo/test_read_scale_budgets.py.
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: >-
+          ./scripts/test.sh scale tests/repo/test_read_scale_budgets.py
+          -vv -s --durations=0 -o faulthandler_timeout=120
+          -k "${{ matrix.test }} and ${{ matrix.reader }}"
 
+  backend-python314:
+    name: Backend compatibility (Python 3.14.8 / ${{ matrix.phase }})
+    runs-on: ubuntu-latest
+    # Give ordinary and serial container contracts independent runner budgets.
+    # Both phases remain required; one failure must not cancel the other proof.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [full-ordinary, full-resources]
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14.8"
+
+      - name: Install backend dependencies
+        run: uv sync --extra dev --extra full --frozen
+
+      - name: Prepare PID namespace qualification
+        run: bash ../scripts/prepare-ci-pid-namespace.sh prepare
+
+      - name: Run backend compatibility suite
+        run: ./scripts/test.sh ${{ matrix.phase }} -q
+
+      - name: Remove PID namespace qualification
+        if: always()
+        run: bash ../scripts/prepare-ci-pid-namespace.sh cleanup
   frontend-coverage:
     name: Frontend branch coverage
     runs-on: ubuntu-latest
@@ -227,6 +351,10 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
+      - name: Verify production PWA cache contracts
+        env:
+          PLAYWRIGHT_PRODUCTION_PWA: "1"
+        run: pnpm test:e2e
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -252,7 +380,7 @@ jobs:
           enable-cache: true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
       - name: Install backend
         working-directory: backend
         run: uv sync --extra dev --extra full --frozen
@@ -290,6 +418,7 @@ jobs:
               ;;
             storage)
               pnpm exec playwright test --config=playwright.storage.config.ts
+              pnpm exec playwright test --config=playwright.storage-presets.config.ts
               pnpm exec playwright test --config=playwright.delivery.config.ts
               pnpm exec playwright test --config=playwright.critical-backup.config.ts
               ;;
@@ -343,7 +472,7 @@ jobs:
       - name: Set up Python for capture boundary
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.14.8"
 
       - name: Install backend dependencies for capture boundary
         working-directory: backend
@@ -372,6 +501,15 @@ jobs:
 
       - name: Run real backend extension capture boundary
         run: pnpm test:real-backend-capture
+
+      - name: Upload extension capture backend log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-extension-capture-backend-log
+          path: ${{ runner.temp }}/printstash-capture-backend.log
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Tear down ephemeral capture backend
         if: always()
@@ -445,3 +583,55 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
+
+  library-startup:
+    name: Production library startup (${{ matrix.distribution }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        distribution: [distributed, dense]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14.8"
+      - name: Install real backend and fixture dependencies
+        working-directory: backend
+        run: uv sync --extra dev --extra full --frozen
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend and browser
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Prepare the production nginx image
+        run: docker pull nginxinc/nginx-unprivileged:alpine
+      # Shared hosted runners record trends. Only the reference machine enforces
+      # the 500/800 ms budget through STARTUP_ENFORCE_BUDGET=1.
+      - name: Measure 30 warm and 20 fresh visits per language
+        working-directory: frontend
+        env:
+          STARTUP_DISTRIBUTION: ${{ matrix.distribution }}
+        run: pnpm test:startup
+      - name: Publish individual samples and browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: startup-${{ matrix.distribution }}
+          include-hidden-files: true
+          path: |
+            frontend/.startup-results/metrics/
+            frontend/.startup-results/browser/
+          if-no-files-found: error

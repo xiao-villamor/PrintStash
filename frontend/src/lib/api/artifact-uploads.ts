@@ -1,4 +1,4 @@
-import { authHeaders, getUrl, handleResponse, jsonHeaders } from "@/lib/api/request";
+import { authHeaders, getJson, requestApi, jsonHeaders } from "@/lib/api/request";
 
 export type ArtifactUploadMode = "api_chunks" | "native_parts" | "simple";
 export type ArtifactUploadState =
@@ -75,17 +75,16 @@ async function jsonRequest<T>(
   method: "POST",
   body?: ArtifactUploadJsonBody,
 ): Promise<T> {
-  const response = await fetch(getUrl(path), {
+  return requestApi<T>(path, {
     method,
     headers: body === undefined ? authHeaders() : jsonHeaders(),
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
   });
-  return handleResponse<T>(response);
 }
 
 export function createArtifactUpload(body: ArtifactUploadCreate): Promise<ArtifactUploadStatus> {
-  return fetch(getUrl("/api/v1/artifact-uploads"), {
+  return requestApi<ArtifactUploadStatus>("/api/v1/artifact-uploads", {
     method: "POST",
     headers: {
       ...jsonHeaders(),
@@ -93,23 +92,15 @@ export function createArtifactUpload(body: ArtifactUploadCreate): Promise<Artifa
     },
     body: JSON.stringify(body),
     cache: "no-store",
-  }).then(handleResponse<ArtifactUploadStatus>);
+  });
 }
 
-export async function getArtifactUpload(id: string): Promise<ArtifactUploadStatus> {
-  const response = await fetch(getUrl(`/api/v1/artifact-uploads/${id}`), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
-  return handleResponse<ArtifactUploadStatus>(response);
+export function getArtifactUpload(id: string): Promise<ArtifactUploadStatus> {
+  return getJson(`/api/v1/artifact-uploads/${id}`);
 }
 
-export async function getArtifactUploadPlan(id: string): Promise<ArtifactUploadPlan> {
-  const response = await fetch(getUrl(`/api/v1/artifact-uploads/${id}/plan`), {
-    headers: authHeaders(),
-    cache: "no-store",
-  });
-  return handleResponse<ArtifactUploadPlan>(response);
+export function getArtifactUploadPlan(id: string): Promise<ArtifactUploadPlan> {
+  return getJson(`/api/v1/artifact-uploads/${id}/plan`);
 }
 
 export async function putArtifactUploadChunk(
@@ -125,13 +116,15 @@ export async function putArtifactUploadChunk(
     length: String(bytes.size),
     sha256,
   });
-  const response = await fetch(getUrl(`/api/v1/artifact-uploads/${id}/chunks/${index}?${query}`), {
-    method: "PUT",
-    headers: authHeaders(),
-    body: bytes,
-    signal,
-  });
-  const result = await handleResponse<{ session: ArtifactUploadStatus }>(response);
+  const result = await requestApi<{ session: ArtifactUploadStatus }>(
+    `/api/v1/artifact-uploads/${id}/chunks/${index}?${query}`,
+    {
+      method: "PUT",
+      headers: authHeaders(),
+      body: bytes,
+      signal,
+    },
+  );
   return result.session;
 }
 
@@ -158,9 +151,5 @@ export function finalizeArtifactUpload(id: string): Promise<ArtifactUploadStatus
 }
 
 export async function abortArtifactUpload(id: string): Promise<ArtifactUploadStatus> {
-  const response = await fetch(getUrl(`/api/v1/artifact-uploads/${id}`), {
-    method: "DELETE",
-    headers: authHeaders(),
-  });
-  return handleResponse<ArtifactUploadStatus>(response);
+  return requestApi(`/api/v1/artifact-uploads/${id}`, { method: "DELETE" });
 }

@@ -18,12 +18,16 @@ export interface MultipartModelReference {
 }
 
 export interface MultipartModelListItem {
+  edit_epoch: string;
+  edit_version: number;
   id: number;
   name: string;
   slug: string;
   description: string | null;
   collection: string | null;
   collection_id: number | null;
+  /** Names of the collection's visible ancestors, e.g. `Parts/Brackets`; null outside one. */
+  collection_label: string | null;
   part_count: number;
   model_count: number;
   guide_count: number;

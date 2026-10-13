@@ -22,6 +22,7 @@
  */
 
 import assert from "node:assert/strict";
+import { createServer, type ServerResponse } from "node:http";
 
 import { installChromeExtension } from "./_chrome_extension";
 
@@ -29,12 +30,18 @@ interface LoadedExtensionElement {
   getText(): Promise<string>;
   waitForExist(): Promise<void>;
   click(): Promise<void>;
+  setValue(value: string): Promise<void>;
 }
 
 interface LoadedExtensionBrowser {
   $(selector: string): LoadedExtensionElement;
-  capabilities: { "goog:chromeOptions"?: { debuggerAddress?: string } };
-  execute<Result>(script: () => Result): Promise<Result>;
+  webExtensionInstall(parameters: {
+    extensionData: { type: "path"; path: string };
+  }): Promise<{ extension: string }>;
+  execute<Result, Arguments extends unknown[]>(
+    script: (...args: Arguments) => Result,
+    ...args: Arguments
+  ): Promise<Awaited<Result>>;
   /**
    * WebdriverIO 9 exposes the browser under test as a flag; the
    * `getCapabilities()` call earlier versions had no longer exists.
@@ -52,6 +59,13 @@ declare const browser: LoadedExtensionBrowser;
 declare const chrome: {
   permissions?: { contains?: unknown };
   scripting?: { executeScript?: unknown };
+  storage: {
+    local: {
+      set(values: Record<string, string>): Promise<void>;
+      get(keys: string[]): Promise<Record<string, string | null>>;
+    };
+  };
+  tabs: { create(options: { url: string; active: boolean }): Promise<{ id?: number }> };
 };
 
 const EXTENSION_NAME = "PrintStash";
@@ -112,4 +126,162 @@ describe("loaded extension", () => {
       /Source-site cookies and session credentials are never copied/,
     );
   });
+
+  if (process.env.PRINTSTASH_EXTENSION_BROWSER_NAME !== "firefox") {
+    it("cancels native connection verification before publication", async () => {
+      let heldResponse: ServerResponse | undefined;
+      let requestClosed = false;
+      const server = createServer((request, response) => {
+        if (request.url === "/second/api/v1/browser-pairings/claim") {
+          heldResponse = response;
+          response.on("close", () => {
+            requestClosed = true;
+          });
+          request.resume();
+          return;
+        }
+        response.setHeader("Content-Type", "application/json");
+        response.end(JSON.stringify({ status: "ok", name: "PrintStash" }));
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      assert.ok(address && typeof address !== "string");
+      const vault = `http://127.0.0.1:${address.port}`;
+      try {
+        const popupUrl = await browser.execute(async (base) => {
+          await chrome.storage.local.set({ vault: base, deviceCredential: "device-a" });
+          return new URL("popup.html", location.href).href;
+        }, vault);
+        await browser.url(popupUrl);
+        await browser.waitUntil(
+          async () => (await browser.$("#connection-title").getText()) === "Connected",
+        );
+        await browser.$("#edit-connection").click();
+        await browser.$("#vault").setValue(`${vault}/second`);
+        await browser.$("#pairing-code").setValue("test-cancelled-code");
+        await browser.$("#connect").click();
+        await browser.waitUntil(async () => heldResponse !== undefined);
+        await browser.$("#cancel-edit").click();
+        await browser.waitUntil(async () => requestClosed);
+        heldResponse?.end(JSON.stringify({ credential: "device-b" }));
+        const state = await browser.execute(async () => ({
+          stored: await chrome.storage.local.get(["vault", "deviceCredential"]),
+          title: document.querySelector("#connection-title")?.textContent,
+          statusHidden: document.querySelector<HTMLElement>("#status")?.hidden,
+          formHidden: document.querySelector<HTMLElement>("#connection-panel")?.hidden,
+        }));
+        assert.deepEqual(state.stored, { vault, deviceCredential: "device-a" });
+        assert.equal(state.title, "Connected");
+        assert.equal(state.statusHidden, true);
+        assert.equal(state.formHidden, true);
+      } finally {
+        heldResponse?.destroy();
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    });
+
+    it("retires an active native capture when the connection changes", async () => {
+      const writes: { path: string; authorization: string | undefined }[] = [];
+      let heldResponse: ServerResponse | undefined;
+      let heldRequestClosed = false;
+      let healthReads = 0;
+      const server = createServer((request, response) => {
+        const path = request.url || "";
+        if (path === "/api/v1/health") healthReads += 1;
+        if (request.method === "POST") {
+          writes.push({ path, authorization: request.headers.authorization });
+        }
+        if (path === "/api/v1/inbox") {
+          heldResponse = response;
+          response.on("close", () => {
+            heldRequestClosed = true;
+          });
+          request.resume();
+          return;
+        }
+        response.setHeader("Content-Type", "application/json");
+        response.end(JSON.stringify({ status: "ok", name: "PrintStash", credential: "device-b" }));
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      assert.ok(address && typeof address !== "string");
+      const vault = `http://127.0.0.1:${address.port}`;
+      try {
+        const previousHandles = await browser.getWindowHandles();
+        await browser.execute(async (base) => {
+          await chrome.storage.local.set({ vault: base, deviceCredential: "device-a" });
+          await chrome.tabs.create({ url: `${base}/part.stl`, active: true });
+          // Initialize against the real active source tab before the driver
+          // focuses this popup page. This uses native browser APIs throughout.
+          await chrome.tabs.create({
+            url: new URL("popup.html", location.href).href,
+            active: false,
+          });
+        }, vault);
+        await browser.waitUntil(async () => healthReads > 0);
+        let popupHandle: string | undefined;
+        await browser.waitUntil(async () => {
+          for (const handle of await browser.getWindowHandles()) {
+            if (previousHandles.includes(handle)) continue;
+            await browser.switchToWindow(handle);
+            if (/^chrome-extension:\/\/[^/]+\/popup\.html$/.test(await browser.getUrl())) {
+              popupHandle = handle;
+              return true;
+            }
+          }
+          return false;
+        });
+        assert.ok(popupHandle, "The installed extension must open its packaged popup context");
+        await browser.switchToWindow(popupHandle);
+        await browser.waitUntil(
+          async () => (await browser.$("#connection-title").getText()) === "Connected",
+        );
+        await browser.$("#capture").click();
+        await browser.waitUntil(async () => heldResponse !== undefined);
+        assert.deepEqual(writes, [{ path: "/api/v1/inbox", authorization: "Bearer device-a" }]);
+
+        await browser.$("#edit-connection").click();
+        await browser.$("#vault").setValue(`${vault}/second`);
+        await browser.$("#pairing-code").setValue("new-device-code");
+        await browser.$("#connect").click();
+        await browser.waitUntil(async () => heldRequestClosed);
+        await browser.waitUntil(
+          async () =>
+            (await browser.$("#status-message").getText()) ===
+            "Connection verified. This browser is ready to import.",
+        );
+        heldResponse?.end(JSON.stringify({ id: 1 }));
+        const state = await browser.execute(() => ({
+          status: document.querySelector("#status-message")?.textContent,
+          inboxHidden: document.querySelector<HTMLElement>("#open-inbox")?.hidden,
+        }));
+        assert.equal(state.status, "Connection verified. This browser is ready to import.");
+        assert.equal(state.inboxHidden, true);
+        await browser.$("#capture").click();
+        await browser.waitUntil(
+          async () =>
+            (await browser.$("#status-message").getText()) ===
+            "Model from Direct file sent to Pending Imports.",
+        );
+        const inboxUrl = await browser.execute(
+          () => document.querySelector<HTMLElement>("#open-inbox")?.dataset.url,
+        );
+        assert.equal(inboxUrl, `${vault}/second/inbox`);
+        assert.deepEqual(writes, [
+          { path: "/api/v1/inbox", authorization: "Bearer device-a" },
+          { path: "/second/api/v1/browser-pairings/claim", authorization: undefined },
+          { path: "/second/api/v1/inbox", authorization: "Bearer device-b" },
+        ]);
+      } finally {
+        heldResponse?.destroy();
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    });
+  }
 });

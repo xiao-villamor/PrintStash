@@ -14,7 +14,7 @@
 
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SavedViewSelector } from "@/components/saved-view-selector";
 import type { ComponentProps } from "react";
@@ -26,7 +26,7 @@ function view(id: number, name: string): SavedViewRead {
   return {
     id,
     name,
-    filters: { direct: true, tag: [], favorites: false },
+    filters: { library_view: "all", direct: true, tag: [], favorites: false },
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
   };
@@ -95,5 +95,108 @@ describe("SavedViewSelector", () => {
     const saved = view(1, "Workshop");
     render(<SavedViewSelector views={[saved]} activeId={1} modified {...handlerSpies()} />);
     expect(screen.getByLabelText("Modified saved view")).toBeInTheDocument();
+  });
+  it("shows loading while the first list is pending", async () => {
+    render(
+      <SavedViewSelector
+        views={[]}
+        activeId={null}
+        readState={{ status: "loading" }}
+        {...handlerSpies()}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    expect(screen.getByText("Loading saved views…")).toBeVisible();
+    expect(screen.queryByText("No saved views yet")).toBeNull();
+    expect(screen.getByRole("button", { name: /Save current view/ })).toBeDisabled();
+  });
+  it("offers retry after a failed list", async () => {
+    render(
+      <SavedViewSelector
+        views={[]}
+        activeId={null}
+        readState={{ status: "error", retry: () => {} }}
+        {...handlerSpies()}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    expect(screen.getByText("Could not load saved views")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Retry saved views" })).toBeEnabled();
+    expect(screen.queryByText("No saved views yet")).toBeNull();
+  });
+  it("preserves a newer rename draft after acknowledgement", async () => {
+    const pending = Promise.withResolvers<void>();
+    const handlers = handlerSpies();
+    handlers.onRename.mockReturnValue(pending.promise);
+    render(<SavedViewSelector views={[view(1, "Workshop")]} activeId={null} {...handlers} />);
+    await userEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Rename Workshop" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename saved view" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+    await userEvent.type(within(dialog).getByRole("textbox"), " later");
+    await act(async () => pending.resolve());
+    expect(screen.getByRole("dialog", { name: "Rename saved view" })).toBeVisible();
+    expect(within(dialog).getByRole("textbox")).toHaveValue("Workshop later");
+  });
+  it("preserves a reopened rename dialog after acknowledgement", async () => {
+    const pending = Promise.withResolvers<void>();
+    const handlers = handlerSpies();
+    handlers.onRename.mockReturnValue(pending.promise);
+    render(<SavedViewSelector views={[view(1, "Workshop")]} activeId={null} {...handlers} />);
+    await userEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Rename Workshop" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename saved view" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await userEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Rename Workshop" }));
+    await act(async () => pending.resolve());
+    expect(screen.getByRole("dialog", { name: "Rename saved view" })).toBeVisible();
+  });
+  it("retains rename input after failure", async () => {
+    const handlers = handlerSpies();
+    handlers.onRename.mockRejectedValue(new Error("saved_view_name_exists"));
+    render(<SavedViewSelector views={[view(1, "Workshop")]} activeId={null} {...handlers} />);
+    await userEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Rename Workshop" }));
+    const dialog = screen.getByRole("dialog", { name: "Rename saved view" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+    expect(within(dialog).getByRole("textbox")).toHaveValue("Workshop");
+    expect(dialog).toBeVisible();
+  });
+  it("retains delete confirmation after failure", async () => {
+    const handlers = handlerSpies();
+    handlers.onDelete.mockRejectedValue(new Error("delete_failed"));
+    render(<SavedViewSelector views={[view(1, "Workshop")]} activeId={null} {...handlers} />);
+    await userEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete Workshop" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete saved view?" });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    expect(dialog).toBeVisible();
+  });
+  it("preserves a reopened delete confirmation after acknowledgement", async () => {
+    const pending = Promise.withResolvers<void>();
+    const handlers = handlerSpies();
+    handlers.onDelete.mockReturnValue(pending.promise);
+    render(
+      <SavedViewSelector
+        views={[view(1, "Workshop"), view(2, "Next view")]}
+        activeId={null}
+        {...handlers}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete Workshop" }));
+    const first = screen.getByRole("dialog", { name: "Delete saved view?" });
+    await userEvent.click(within(first).getByRole("button", { name: "Delete" }));
+    await userEvent.keyboard("{Escape}");
+    await userEvent.click(screen.getByRole("button", { name: /Saved views/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete Next view" }));
+
+    await act(async () => pending.resolve());
+
+    expect(screen.getByRole("dialog", { name: "Delete saved view?" })).toHaveTextContent(
+      "Next view",
+    );
   });
 });

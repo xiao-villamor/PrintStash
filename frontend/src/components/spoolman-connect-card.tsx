@@ -3,15 +3,17 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useCallback, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, PlugZap, Save } from "lucide-react";
 
-import { testSpoolman, updateSpoolman } from "@/lib/api";
+import { useSpoolmanCommands } from "@/lib/queries/settings-spoolman";
+import { captureEditingBase } from "@/lib/api/editing";
+import { onAuthChange } from "@/lib/auth-store";
+import type { EditingBase } from "@/types/editing";
 import { useSpoolmanStatus, useSpools } from "@/lib/queries";
-import { queryKeys } from "@/lib/query-client";
+import { getSessionVersion } from "@/lib/session-transport";
 import { formatGrams } from "@/lib/format";
-import { userMessage } from "@/lib/errors";
+import { parseApiError, userMessage } from "@/lib/errors";
 import type { SpoolmanStatus } from "@/types";
 import { Localized } from "@/components/ui/localized";
 
@@ -22,10 +24,13 @@ const SECRET_MASK = "********";
 
 export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
   useUiLocale();
-  const qc = useQueryClient();
-  const { data: status, isLoading } = useSpoolmanStatus();
+  const commands = useSpoolmanCommands(canEdit);
+  const query = useSpoolmanStatus({ enabled: canEdit });
+  const denied = [401, 403].includes(parseApiError(query.error).status);
+  const status = denied ? undefined : query.data;
+  const isLoading = query.isLoading;
   const enabled = !!status?.enabled;
-  const { data: spools } = useSpools({ enabled });
+  const { data: spools } = useSpools({ enabled: enabled && canEdit });
 
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -33,81 +38,159 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  // Hydrate the form from server state once it loads (and after saves), during
-  // render rather than in an effect so the inputs never paint a stale value.
+  const [draftBase, setDraftBase] = useState<EditingBase | null>(null);
   const [hydratedFrom, setHydratedFrom] = useState<SpoolmanStatus | undefined>(undefined);
-  if (status && status !== hydratedFrom) {
-    setHydratedFrom(status);
-    setBaseUrl(status.base_url ?? "");
-    setApiKey(status.has_api_key ? SECRET_MASK : "");
-  }
-
-  const connected = !!status?.connected;
-
-  // Run a mutation, push the fresh status into the cache so the badge + form
-  // reflect it immediately, and surface a one-line outcome. `ok` is the success
-  // message (omit for silent toggles).
-  const mutate = useCallback(
-    async (body: Parameters<typeof updateSpoolman>[0], ok?: string) => {
-      setBusy(true);
+  const [review, setReview] = useState<
+    { phase: "idle" } | { phase: "required" } | { phase: "ready"; snapshot: SpoolmanStatus }
+  >({ phase: "idle" });
+  const [failedToggle, setFailedToggle] = useState<Parameters<typeof commands.save>[0] | null>(
+    null,
+  );
+  const live = useRef(true);
+  const connectionForm = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    live.current = true;
+    const retire = () => {
+      setBaseUrl("");
+      setApiKey("");
+      setDraftBase(null);
+      setHydratedFrom(undefined);
+      setReview({ phase: "idle" });
+      setFailedToggle(null);
       setError("");
       setNotice("");
-      try {
-        const updated = await updateSpoolman(body);
-        qc.setQueryData<SpoolmanStatus>(queryKeys.spoolmanStatus, updated);
-        if (ok) setNotice(ok);
-      } catch (e) {
-        setError(userMessage(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [qc],
-  );
+      setBusy(false);
+    };
+    const release = onAuthChange(retire);
+    if (!canEdit || denied) retire();
+    return () => {
+      live.current = false;
+      release();
+    };
+  }, [canEdit, denied]);
+  if (status && status !== hydratedFrom) {
+    setHydratedFrom(status);
+    if (!draftBase) {
+      setBaseUrl(status.base_url ?? "");
+      setApiKey(status.has_api_key ? SECRET_MASK : "");
+    }
+  }
+  const connected = !!status?.connected;
+  const historyChanged =
+    review.phase === "ready" && review.snapshot.edit_epoch !== (draftBase ?? status)?.edit_epoch;
 
-  const saveConnection = useCallback(
-    () =>
-      mutate(
-        {
-          base_url: baseUrl.trim(),
-          // Leave the stored key untouched when the mask is unchanged.
-          api_key: apiKey === SECRET_MASK ? undefined : apiKey,
-        },
-        uiText("Saved."),
-      ),
-    [mutate, baseUrl, apiKey],
-  );
-
-  const toggleEnabled = useCallback((next: boolean) => mutate({ enabled: next }), [mutate]);
-  const toggleWrite = useCallback((next: boolean) => mutate({ write_enabled: next }), [mutate]);
-  const toggleWriteForce = useCallback((next: boolean) => mutate({ write_force: next }), [mutate]);
-
-  const runTest = useCallback(async () => {
+  const beginDraft = () => {
+    if (status && !draftBase) setDraftBase(captureEditingBase(status));
+  };
+  const current = (session: number) => live.current && session === getSessionVersion();
+  async function mutate(
+    body: Parameters<typeof commands.save>[0],
+    ok?: string,
+    revised?: SpoolmanStatus,
+  ) {
+    if (
+      !canEdit ||
+      !status ||
+      busy ||
+      (review.phase !== "idle" && !revised) ||
+      (revised && historyChanged)
+    )
+      return;
+    const session = getSessionVersion();
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      // Test what's typed in (not just the saved config), so a connection can
-      // be verified before Save.
-      const res = await testSpoolman({
-        base_url: baseUrl.trim(),
-        api_key: apiKey === SECRET_MASK ? undefined : apiKey,
-      });
-      if (res.connected) {
+      const updated = await commands.save(body, revised ?? draftBase ?? status, session);
+      if (!current(session)) return;
+      if (ok) {
+        setDraftBase(null);
+        setBaseUrl(updated.base_url ?? "");
+        setApiKey(updated.has_api_key ? SECRET_MASK : "");
+        setNotice(ok);
+      }
+      setReview({ phase: "idle" });
+    } catch (e) {
+      if (!current(session)) return;
+      setError(userMessage(e));
+      const code = parseApiError(e).status;
+      if ([412, 428].includes(code) || code === 0 || code >= 500) {
+        setDraftBase((base) => base ?? captureEditingBase(status));
+        setFailedToggle(ok ? null : body);
+        setReview({ phase: "required" });
+      }
+    } finally {
+      if (current(session)) setBusy(false);
+    }
+  }
+  const saveConnection = (revised?: SpoolmanStatus) => {
+    if (!baseUrl.trim() || !connectionForm.current?.reportValidity()) return;
+    return mutate(
+      { base_url: baseUrl.trim(), api_key: apiKey === SECRET_MASK ? undefined : apiKey },
+      uiText("Saved."),
+      revised,
+    );
+  };
+  const toggleEnabled = (next: boolean) => mutate({ enabled: next });
+  const toggleWrite = (next: boolean) => mutate({ write_enabled: next });
+  const toggleWriteForce = (next: boolean) => mutate({ write_force: next });
+  async function reviewLatest() {
+    const session = getSessionVersion();
+    setBusy(true);
+    setError("");
+    try {
+      const snapshot = await commands.review(session);
+      if (current(session)) setReview({ phase: "ready", snapshot });
+    } catch (e) {
+      if (current(session)) setError(userMessage(e));
+    } finally {
+      if (current(session)) setBusy(false);
+    }
+  }
+  async function adoptLatest() {
+    const session = getSessionVersion();
+    setBusy(true);
+    setError("");
+    try {
+      const snapshot = await commands.adopt(session);
+      if (!current(session)) return;
+      setBaseUrl(snapshot.base_url ?? "");
+      setApiKey(snapshot.has_api_key ? SECRET_MASK : "");
+      setDraftBase(null);
+      setHydratedFrom(snapshot);
+      setReview({ phase: "idle" });
+      setFailedToggle(null);
+    } catch (error) {
+      if (current(session)) setError(userMessage(error));
+    } finally {
+      if (current(session)) setBusy(false);
+    }
+  }
+  async function runTest() {
+    if (!canEdit || !status || busy) return;
+    const session = getSessionVersion();
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await commands.test(
+        { base_url: baseUrl.trim(), api_key: apiKey === SECRET_MASK ? undefined : apiKey },
+        session,
+      );
+      if (!current(session)) return;
+      if (res.connected)
         setNotice(
           uiText("Connected{value1}.", {
             value1: String(res.version ? ` — Spoolman v${res.version}` : ""),
           }),
         );
-      } else {
-        setError(res.error || uiText("Spoolman did not respond."));
-      }
+      else setError(res.error || uiText("Spoolman did not respond."));
     } catch (e) {
-      setError(userMessage(e));
+      if (current(session)) setError(userMessage(e));
     } finally {
-      setBusy(false);
+      if (current(session)) setBusy(false);
     }
-  }, [baseUrl, apiKey]);
+  }
 
   return (
     <Localized>
@@ -137,14 +220,65 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
         </div>
 
         <div className="p-3 sm:p-4 lg:p-6 space-y-4">
-          {isLoading ? (
-            <p className="text-sm text-muted-foreground">{uiText("Loading…")}</p>
-          ) : !canEdit ? (
+          {!canEdit ? (
             <p className="text-xs text-muted-foreground italic">
               {uiText("Only an administrator can configure Spoolman.")}
             </p>
+          ) : isLoading ? (
+            <p className="text-sm text-muted-foreground">{uiText("Loading…")}</p>
+          ) : !status ? (
+            <div role="alert">
+              <p>{userMessage(query.error)}</p>
+              <button type="button" onClick={() => void query.refetch()}>
+                {uiText("Retry")}
+              </button>
+            </div>
           ) : (
             <>
+              {review.phase !== "idle" && (
+                <div role="alert" className="space-y-2">
+                  <p>{uiText("library.editConflict")}</p>
+                  <button type="button" disabled={busy} onClick={() => void reviewLatest()}>
+                    {uiText("library.reviewLatest")}
+                  </button>
+                  {review.phase === "ready" && (
+                    <>
+                      <p>{uiText("library.latestVersion")}</p>
+                      {historyChanged && (
+                        <p>
+                          {uiText(
+                            "The database history changed. Use current values before trying again.",
+                          )}
+                        </p>
+                      )}
+
+                      <p>{review.snapshot.base_url}</p>
+                      <dl>
+                        <dt>{uiText("Enable Spoolman integration")}</dt>
+                        <dd>{uiText(review.snapshot.enabled ? "Enabled" : "Disabled")}</dd>
+                        <dt>{uiText("Write consumption back to Spoolman")}</dt>
+                        <dd>{uiText(review.snapshot.write_enabled ? "Enabled" : "Disabled")}</dd>
+                        <dt>{uiText("Write back anyway (I disabled Moonraker's hook)")}</dt>
+                        <dd>{uiText(review.snapshot.write_force ? "Enabled" : "Disabled")}</dd>
+                      </dl>
+                      <button
+                        type="button"
+                        disabled={busy || historyChanged}
+                        onClick={() =>
+                          void (failedToggle
+                            ? mutate(failedToggle, undefined, review.snapshot)
+                            : saveConnection(review.snapshot))
+                        }
+                      >
+                        {uiText("library.retryDraft")}
+                      </button>
+                      <button type="button" disabled={busy} onClick={() => void adoptLatest()}>
+                        {uiText("library.useLatest")}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
               {/* Master switch */}
               <label className="flex items-center justify-between gap-3 cursor-pointer">
                 <span className="text-sm text-foreground">
@@ -153,7 +287,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                 <input
                   type="checkbox"
                   checked={enabled}
-                  disabled={busy}
+                  disabled={busy || review.phase !== "idle"}
                   onChange={(e) => toggleEnabled(e.target.checked)}
                   className="h-4 w-4"
                 />
@@ -161,6 +295,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
 
               {/* Connection */}
               <form
+                ref={connectionForm}
                 className="space-y-3"
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -174,7 +309,11 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                   <input
                     type="url"
                     value={baseUrl}
-                    onChange={(e) => setBaseUrl(e.target.value)}
+                    disabled={busy}
+                    onChange={(e) => {
+                      beginDraft();
+                      setBaseUrl(e.target.value);
+                    }}
                     placeholder="http://spoolman.local:7912"
                     className={INPUT_CLASS}
                   />
@@ -188,7 +327,11 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                     type="password"
                     autoComplete="off"
                     value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
+                    disabled={busy}
+                    onChange={(e) => {
+                      beginDraft();
+                      setApiKey(e.target.value);
+                    }}
                     placeholder={uiText("Only if Spoolman sits behind an authenticating proxy")}
                     className={INPUT_CLASS}
                   />
@@ -196,7 +339,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                 <div className="flex items-center gap-2">
                   <button
                     type="submit"
-                    disabled={busy || !baseUrl.trim()}
+                    disabled={busy || !baseUrl.trim() || review.phase !== "idle"}
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                   >
                     {busy ? (
@@ -209,7 +352,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                   <button
                     type="button"
                     onClick={runTest}
-                    disabled={busy || !baseUrl.trim()}
+                    disabled={busy || !baseUrl.trim() || review.phase !== "idle"}
                     className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground font-mono text-xs uppercase tracking-wider hover:bg-muted disabled:opacity-50 transition-colors"
                   >
                     <PlugZap className="h-3.5 w-3.5" />
@@ -233,7 +376,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                     <input
                       type="checkbox"
                       checked={!!status?.write_enabled}
-                      disabled={busy}
+                      disabled={busy || review.phase !== "idle"}
                       onChange={(e) => toggleWrite(e.target.checked)}
                       className="h-4 w-4 flex-shrink-0"
                     />
@@ -252,7 +395,7 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                         <input
                           type="checkbox"
                           checked={!!status?.write_force}
-                          disabled={busy}
+                          disabled={busy || review.phase !== "idle"}
                           onChange={(e) => toggleWriteForce(e.target.checked)}
                           className="h-3.5 w-3.5 flex-shrink-0"
                         />

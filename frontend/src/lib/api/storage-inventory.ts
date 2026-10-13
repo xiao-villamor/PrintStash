@@ -118,7 +118,7 @@ export interface CleanupOpportunity {
 }
 
 export const getStorageInventory = () =>
-  getJson<StorageInventoryReport>("/api/v1/storage/inventory", { fresh: true });
+  getJson<StorageInventoryReport>("/api/v1/storage/inventory", {});
 export const sampleStorageInventory = () =>
   sendJson<StorageInventory>("/api/v1/storage/inventory/sample", "POST", {});
 export const cleanupStorageStaging = () =>
@@ -134,20 +134,18 @@ export const cleanupStorageCache = () =>
     {},
   );
 export const getStorageCapacityActivity = () =>
-  getJson<StorageCapacityActivity>("/api/v1/storage/inventory/activity", { fresh: true });
+  getJson<StorageCapacityActivity>("/api/v1/storage/inventory/activity", {});
 export const getStorageCleanupOpportunities = () =>
-  getJson<CleanupOpportunity[]>("/api/v1/storage/inventory/cleanup-opportunities", {
-    fresh: true,
-  });
+  getJson<CleanupOpportunity[]>("/api/v1/storage/inventory/cleanup-opportunities", {});
 export const getCollectionStorage = (offset = 0, limit = 10) =>
   getJson<CollectionStorageRow[]>(
     `/api/v1/storage/inventory/collections?offset=${offset}&limit=${limit}`,
-    { fresh: true },
+    {},
   );
 export const getModelStorage = (collectionId: number | null, offset = 0, limit = 10) => {
   const collection = collectionId === null ? "" : `&collection_id=${collectionId}`;
   return getJson<ModelStorageRow[]>(
     `/api/v1/storage/inventory/models?offset=${offset}&limit=${limit}${collection}`,
-    { fresh: true },
+    {},
   );
 };

@@ -49,7 +49,7 @@ def main() -> None:
         SimilarityRun,
     )
     from app.db.session import get_engine, get_session_factory
-    from app.modules.media.fingerprints import extract
+    from app.modules.media.fingerprints import FingerprintResultState, extract
     from app.modules.media.geometry_analysis import _load, verify_paths
     from app.modules.media.mesh_resources import prepare_loaded_mesh
     from app.modules.similarity import (
@@ -119,7 +119,10 @@ def main() -> None:
         mesh.apply_scale([1 + 0.13 * variant, 1 + 0.07 * variant, 1 + 0.19 * variant])
         tick = time.perf_counter()
         result = extract(prepare_loaded_mesh(mesh, file_type="stl"))
-        assert result.state == "ready", (path.name, result.failure_code)
+        assert result.state is FingerprintResultState.READY, (
+            path.name,
+            result.failure_code,
+        )
         prototypes.append((mesh.export(file_type="stl"), result))
         measurements.append(
             {

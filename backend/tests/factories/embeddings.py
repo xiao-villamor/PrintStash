@@ -8,7 +8,9 @@ import math
 from pathlib import Path
 
 
-def local_embedding_assets(directory: Path, *, family: str = "clip") -> Path:
+def local_embedding_assets(
+    directory: Path, *, family: str = "clip", dynamic_batch: bool = False
+) -> Path:
     """RGB channel means and an explicit color-token table share three dimensions.
 
     This proves native loading, tensor signatures, tokenization and Space wiring.
@@ -19,6 +21,7 @@ def local_embedding_assets(directory: Path, *, family: str = "clip") -> Path:
     from onnx import TensorProto, helper, numpy_helper
     from tokenizers import Tokenizer, models, pre_tokenizers
 
+    batch = "batch" if dynamic_batch else 1
     directory.mkdir(parents=True, exist_ok=True)
     image = helper.make_model(
         helper.make_graph(
@@ -29,10 +32,14 @@ def local_embedding_assets(directory: Path, *, family: str = "clip") -> Path:
             "original-rgb-contract",
             [
                 helper.make_tensor_value_info(
-                    "pixel_values", TensorProto.FLOAT, [1, 3, 32, 32]
+                    "pixel_values", TensorProto.FLOAT, [batch, 3, 32, 32]
                 )
             ],
-            [helper.make_tensor_value_info("image_embeds", TensorProto.FLOAT, [1, 3])],
+            [
+                helper.make_tensor_value_info(
+                    "image_embeds", TensorProto.FLOAT, [batch, 3]
+                )
+            ],
         ),
         opset_imports=[helper.make_opsetid("", 17)],
         ir_version=9,
@@ -74,10 +81,14 @@ def local_embedding_assets(directory: Path, *, family: str = "clip") -> Path:
                     ),
                 ],
                 "original-token-contract",
-                [helper.make_tensor_value_info("input_ids", TensorProto.INT64, [1, 8])],
                 [
                     helper.make_tensor_value_info(
-                        "text_embeds", TensorProto.FLOAT, [1, 3]
+                        "input_ids", TensorProto.INT64, [batch, 8]
+                    )
+                ],
+                [
+                    helper.make_tensor_value_info(
+                        "text_embeds", TensorProto.FLOAT, [batch, 3]
                     )
                 ],
                 [table, axis],
@@ -286,7 +297,7 @@ def point_embedding_assets(directory: Path) -> Path:
             "checkpoint_sha256": "3" * 64,
             "license": "CC0-1.0",
             "paired": paired.model_dump(),
-            "paired_space_hash": paired.space().config_hash,
+            "paired_space_hash": paired.encoder_space().config_hash,
             "point": {
                 "graph": {
                     "filename": "points.onnx",
@@ -302,7 +313,7 @@ def point_embedding_assets(directory: Path) -> Path:
     return directory
 
 
-def sparse_embedding_assets(directory: Path) -> Path:
+def sparse_embedding_assets(directory: Path, *, dynamic_batch: bool = False) -> Path:
     """Original CC0 token-to-logit contract; not a pretrained quality fixture."""
     import numpy as np
     import onnx
@@ -331,12 +342,18 @@ def sparse_embedding_assets(directory: Path) -> Path:
             [helper.make_node("Gather", ["logits", "input_ids"], ["output"])],
             "original-sparse-contract",
             [
-                helper.make_tensor_value_info(name, TensorProto.INT64, [1, "sequence"])
+                helper.make_tensor_value_info(
+                    name,
+                    TensorProto.INT64,
+                    ["batch" if dynamic_batch else 1, "sequence"],
+                )
                 for name in ("input_ids", "input_mask", "segment_ids")
             ],
             [
                 helper.make_tensor_value_info(
-                    "output", TensorProto.FLOAT, [1, "sequence", 8]
+                    "output",
+                    TensorProto.FLOAT,
+                    ["batch" if dynamic_batch else 1, "sequence", 8],
                 )
             ],
             [numpy_helper.from_array(logits, name="logits")],

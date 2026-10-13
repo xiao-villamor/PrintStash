@@ -608,6 +608,7 @@ class TestHardDelete:
         assert result["resources_blocked"] == 1
         db_session.expire_all()
         assert db_session.get(File, artifact.id) is not None
+        assert db_session.exec(select(StorageDeleteIntent)).all() == []
         assert (detached_root / "unmounted" / "v1" / "unmounted.stl").exists()
 
     def test_leaves_the_row_in_place_when_storage_is_read_only(
@@ -642,6 +643,7 @@ class TestHardDelete:
         assert result["resources_blocked"] == 1
         db_session.expire_all()
         assert db_session.get(File, artifact.id) is not None
+        assert db_session.exec(select(StorageDeleteIntent)).all() == []
         assert Path(artifact.path).exists()
 
     def test_hard_delete_resolves_share_link_before_model_delete(

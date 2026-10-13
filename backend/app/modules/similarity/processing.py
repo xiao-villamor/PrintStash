@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from contextlib import AbstractContextManager, ExitStack, nullcontext
+from contextlib import AbstractContextManager, nullcontext
 
 from printstash_core.mesh.similarity import GeometryError
 from sqlmodel import Session, col, select
@@ -12,9 +12,11 @@ from sqlmodel import Session, col, select
 from app.core.errors import OperationError
 from app.db.models import File, GeometryFingerprint, SimilarityRun, User
 from app.db.session import SessionFactory
-from app.modules.media import geometry_analysis
-from app.modules.media.fingerprints import FingerprintResult
-from app.modules.media.thumbnail_engine import ThumbnailEngine, ThumbnailRequest
+from app.modules.media import mesh_isolation, verification_isolation
+from app.modules.media.fingerprints import FingerprintResult, FingerprintResultState
+from app.modules.media.mesh_contracts import ThumbnailRequest
+from app.modules.media.mesh_facts import FingerprintFailureCode
+from app.modules.media.source_preparation import prepare_sources
 from app.modules.similarity import (
     candidates,
     fingerprints,
@@ -25,6 +27,7 @@ from app.modules.similarity import (
 from app.modules.similarity.configuration import SimilaritySettings, read_settings
 from app.modules.storage import artifact_content
 from app.modules.storage.storage_backend.contracts import StorageBackend
+from app.runtime.native_admission import AdmissionTooLarge
 
 
 class SimilarityProcessor:
@@ -116,7 +119,7 @@ class SimilarityProcessor:
                     run,
                     token,
                     state="failed",
-                    failure_code="analysis_unavailable",
+                    failure_code=FingerprintFailureCode.ANALYSIS_UNAVAILABLE,
                 )
             except Exception:
                 session.rollback()
@@ -171,16 +174,17 @@ class SimilarityProcessor:
         else:
             try:
                 try:
-                    with artifact_content.resolve(
-                        file, backend=self.backend
-                    ).materialize() as path:
+                    with prepare_sources(
+                        (artifact_content.resolve(file, backend=self.backend),)
+                    ) as (path,):
                         if fingerprints.source_digest(path) != file.sha256:
                             result = FingerprintResult(
-                                "failed", failure_code="source_changed"
+                                FingerprintResultState.FAILED,
+                                failure_code=FingerprintFailureCode.SOURCE_CHANGED,
                             )
                             metrics = None
                         else:
-                            metrics = ThumbnailEngine().generate(
+                            metrics = mesh_isolation.generate(
                                 ThumbnailRequest(
                                     path=path,
                                     file_type=file.file_type.value,
@@ -192,16 +196,37 @@ class SimilarityProcessor:
                                 )
                             )
                             result = metrics.fingerprint_result or FingerprintResult(
-                                "failed", failure_code="analysis_unavailable"
+                                FingerprintResultState.FAILED,
+                                failure_code=FingerprintFailureCode.ANALYSIS_UNAVAILABLE,
                             )
                 except artifact_content.ArtifactContentChangedError:
                     result, metrics = (
-                        FingerprintResult("failed", failure_code="source_changed"),
+                        FingerprintResult(
+                            FingerprintResultState.FAILED,
+                            failure_code=FingerprintFailureCode.SOURCE_CHANGED,
+                        ),
+                        None,
+                    )
+                except (mesh_isolation.MeshWorkerError, AdmissionTooLarge) as exc:
+                    # The worker died or was killed for this file's bytes. The run
+                    # walks the whole library, so the file fails alone.
+                    result, metrics = (
+                        FingerprintResult(
+                            FingerprintResultState.FAILED,
+                            failure_code=(
+                                FingerprintFailureCode.RESOURCE_LIMIT
+                                if isinstance(exc, AdmissionTooLarge)
+                                else FingerprintFailureCode(exc.reason.value)
+                            ),
+                        ),
                         None,
                     )
                 except artifact_content.ArtifactContentError:
                     result, metrics = (
-                        FingerprintResult("failed", failure_code="source_unavailable"),
+                        FingerprintResult(
+                            FingerprintResultState.FAILED,
+                            failure_code=FingerprintFailureCode.SOURCE_UNAVAILABLE,
+                        ),
                         None,
                     )
                 published = fingerprints.publish(
@@ -213,7 +238,7 @@ class SimilarityProcessor:
                     duration_ms=metrics.duration_ms if metrics else None,
                     peak_rss_bytes=metrics.peak_rss_bytes if metrics else None,
                 )
-                state = result.state if published else "stale"
+                state = result.state.value if published else "stale"
                 counters[state] = counters.get(state, 0) + 1
             finally:
                 fingerprints.release(session, claimed[0], claimed[1])
@@ -245,7 +270,7 @@ class SimilarityProcessor:
             return
         sources = (
             runs.source_query(session, run, actor)
-            .with_only_columns(File.id)
+            .with_only_columns(col(File.id))
             .order_by(None)
         )
         row = session.exec(
@@ -260,7 +285,7 @@ class SimilarityProcessor:
                     select(File.sha256).where(File.id == GeometryFingerprint.file_id)
                 ),
             )
-            .order_by(GeometryFingerprint.id)
+            .order_by(col(GeometryFingerprint.id))
             .limit(1)
         ).first()
         if row is None:
@@ -306,20 +331,17 @@ class SimilarityProcessor:
         if fa.model_id > fb.model_id:
             first, second, fa, fb = second, first, fb, fa
         for file, fp in ((fa, first), (fb, second)):
-            if not fingerprints.current_source(session, file.id, fp.source_sha256):
+            if not fingerprints.current_source(session, fp.file_id, fp.source_sha256):
                 counters["stale"] = counters.get("stale", 0) + 1
                 return
             runs.normalize_scope(session, actor, "models", [file.model_id])
         try:
-            with ExitStack() as stack:
-                path_a, path_b = (
-                    stack.enter_context(
-                        artifact_content.resolve(
-                            file, backend=self.backend
-                        ).materialize()
-                    )
+            with prepare_sources(
+                tuple(
+                    artifact_content.resolve(file, backend=self.backend)
                     for file in (fa, fb)
                 )
+            ) as (path_a, path_b):
                 if (
                     fingerprints.source_digest(path_a) != first.source_sha256
                     or fingerprints.source_digest(path_b) != second.source_sha256
@@ -333,7 +355,7 @@ class SimilarityProcessor:
                         counters.get("verification_cached", 0) + 1
                     )
                     return
-                evidence = geometry_analysis.verify_paths(
+                evidence = verification_isolation.verify_paths(
                     path_a,
                     path_b,
                     first_type=fa.file_type.value,
@@ -343,7 +365,13 @@ class SimilarityProcessor:
                     sample_points=config.sample_points,
                     triangle_cap=config.triangle_cap,
                 )
-        except (GeometryError, artifact_content.ArtifactContentError):
+        except (
+            GeometryError,
+            AdmissionTooLarge,
+            mesh_isolation.MeshWorkerError,
+            artifact_content.ArtifactContentError,
+        ):
+            # A worker killed for this pair's bytes fails the pair, not the run.
             counters["verification_failed"] = counters.get("verification_failed", 0) + 1
             return
         counters["verified"] = counters.get("verified", 0) + 1

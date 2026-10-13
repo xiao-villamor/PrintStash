@@ -1,20 +1,26 @@
 "use client";
 
+import { captureEditingBase, requireEditingReceipt } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
+
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Plus, Tag, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Localized } from "@/components/ui/localized";
 import { Modal } from "@/components/ui/modal";
-import { batchTagModels } from "@/lib/api";
+import { getSessionVersion } from "@/lib/session-transport";
+import { batchTagModels, getModel } from "@/lib/api/models";
+import { onAuthChange } from "@/lib/auth-store";
+import { ApiError } from "@/lib/errors";
 import { toast } from "@/lib/toast";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
-import type { TagRead } from "@/types";
+import type { ModelRead, TagRead } from "@/types";
 
-interface TaggedModel {
+interface TaggedModel extends EditingBase {
   id: number;
   name: string;
   tags: string[];
@@ -35,15 +41,43 @@ export function ModelTagsDialog({
   suggestions: TagRead[];
   open: boolean;
   onClose: () => void;
-  onSaved: (tags: string[]) => void;
+  onSaved: (tags: string[], base: EditingBase) => void;
 }) {
   useUiLocale();
+  const [base, setBase] = useState(model);
   const [selected, setSelected] = useState<string[]>(() => [...model.tags]);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState(false);
+  const [session] = useState(getSessionVersion);
+  const currentSession = useSyncExternalStore(onAuthChange, getSessionVersion);
+  const mounted = useRef(true);
+  const pending = useRef(false);
+  const intent = useRef(0);
+  const reviewRequest = useRef<AbortController | null>(null);
+  const [problem, setProblem] = useState<"conflict" | "unconfirmed" | null>(null);
+  const [reviewed, setReviewed] = useState<ModelRead | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const [editDenied, setEditDenied] = useState(false);
+  const [readDenied, setReadDenied] = useState(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      intent.current += 1;
+      reviewRequest.current?.abort();
+    };
+  }, []);
+  useEffect(() => {
+    if (!open || session !== currentSession) {
+      intent.current += 1;
+      reviewRequest.current?.abort();
+    }
+  }, [open, session, currentSession]);
+  const isCurrent = (generation: number) =>
+    mounted.current && open && generation === intent.current && session === getSessionVersion();
   const needle = normalized(query);
   const selectedNames = useMemo(() => new Set(selected.map(normalized)), [selected]);
-  const originalNames = useMemo(() => new Set(model.tags.map(normalized)), [model.tags]);
+  const originalNames = useMemo(() => new Set(base.tags.map(normalized)), [base.tags]);
   const matching = useMemo(
     () =>
       needle
@@ -64,11 +98,20 @@ export function ModelTagsDialog({
     [...originalNames].some((name) => !selectedNames.has(name));
 
   function reset() {
+    setBase(model);
     setSelected([...model.tags]);
     setQuery("");
+    setProblem(null);
+    setReviewed(null);
+    setEditDenied(false);
+    setReadDenied(false);
+    setReviewing(false);
   }
 
   function close() {
+    if (pending.current) return;
+    intent.current += 1;
+    reviewRequest.current?.abort();
     reset();
     onClose();
   }
@@ -87,30 +130,151 @@ export function ModelTagsDialog({
     onCommitInput: () => commit(exactMatch?.name ?? query),
   });
 
-  async function save() {
-    if (!hasChanges || busy) return;
-    const add = selected.filter((name) => !originalNames.has(normalized(name)));
-    const remove = model.tags.filter((name) => !selectedNames.has(normalized(name)));
+  async function save(reviewBase?: ModelRead) {
+    if (pending.current || editDenied || session !== getSessionVersion()) return;
+    if (!reviewBase && (!hasChanges || problem)) return;
+    if (reviewBase && reviewBase.effective_role !== "edit" && reviewBase.effective_role !== "admin")
+      return;
+    const capturedBase = reviewBase ?? base;
+    const capturedNames = new Set(capturedBase.tags.map(normalized));
+    const submitted = [...selected];
+    const add = submitted.filter((name) => !capturedNames.has(normalized(name)));
+    const remove = capturedBase.tags.filter((name) => !selectedNames.has(normalized(name)));
+    const generation = intent.current;
+    pending.current = true;
     setBusy(true);
     try {
-      const result = await batchTagModels([model.id], add, remove);
-      if (result.succeeded_count !== 1) {
-        throw new Error(result.failed[0]?.reason ?? "Could not update tags");
+      const result = await batchTagModels([capturedBase.id], add, remove, {
+        [capturedBase.id]: captureEditingBase(capturedBase),
+      });
+      if (!isCurrent(generation)) return;
+      if (
+        result.failed.some(
+          (failure) => failure.model_id === capturedBase.id && failure.reason === "edit_conflict",
+        )
+      ) {
+        setProblem("conflict");
+        setReviewed(null);
+        return;
       }
-      onSaved([...selected]);
+      if (result.succeeded_count !== 1 || result.succeeded_ids[0] !== capturedBase.id) {
+        throw new Error(result.failed[0]?.reason ?? "invalid_edit_acknowledgment");
+      }
+      const version = result.succeeded_versions[capturedBase.id];
+      requireEditingReceipt(version, capturedBase);
+      onSaved(submitted, version);
       toast.success(uiText("Tags updated"));
       setQuery("");
+      setProblem(null);
+      setReviewed(null);
       onClose();
     } catch (error) {
-      toast.error(error);
+      if (!isCurrent(generation)) return;
+      if (error instanceof ApiError && error.status === 412) {
+        setProblem("conflict");
+        setReviewed(null);
+      } else if (
+        !(error instanceof ApiError) ||
+        error.status === 0 ||
+        error.status === 408 ||
+        error.status >= 500
+      ) {
+        setProblem("unconfirmed");
+        setReviewed(null);
+      } else toast.error(error);
     } finally {
-      setBusy(false);
+      pending.current = false;
+      if (isCurrent(generation)) setBusy(false);
     }
   }
+
+  async function reviewLatest() {
+    if (reviewing || pending.current || session !== getSessionVersion()) return;
+    const generation = intent.current;
+    const controller = new AbortController();
+    reviewRequest.current?.abort();
+    reviewRequest.current = controller;
+    setReviewing(true);
+    try {
+      const latest = await getModel(model.id, { signal: controller.signal });
+      if (!isCurrent(generation) || controller.signal.aborted) return;
+      setReadDenied(false);
+      setReviewed(latest);
+      setEditDenied(latest.effective_role !== "edit" && latest.effective_role !== "admin");
+    } catch (error) {
+      if (!isCurrent(generation) || controller.signal.aborted) return;
+      if (error instanceof ApiError && [401, 403, 404].includes(error.status)) {
+        setReadDenied(true);
+        setReviewed(null);
+      } else toast.error(error);
+    } finally {
+      if (isCurrent(generation) && !controller.signal.aborted) setReviewing(false);
+    }
+  }
+
+  function useLatest() {
+    if (!reviewed) return;
+    setBase(reviewed);
+    setSelected([...reviewed.tags]);
+    setQuery("");
+    setProblem(null);
+    setReviewed(null);
+  }
+
+  if (session !== currentSession) return null;
+  if (readDenied)
+    return (
+      <Modal open={open} onClose={close} title={uiText("Model tags")} className="max-w-md">
+        <div role="alert" className="space-y-3">
+          <p>{uiText("Couldn’t load this model")}</p>
+          <Button variant="outline" loading={reviewing} onClick={() => void reviewLatest()}>
+            {uiText("Retry")}
+          </Button>
+        </div>
+      </Modal>
+    );
 
   return (
     <Localized>
       <Modal open={open} onClose={close} title={uiText("Model tags")} className="max-w-md">
+        {problem && (
+          <div
+            role="alert"
+            className="mb-4 space-y-3 rounded border border-border bg-muted p-3 text-sm"
+          >
+            <p>
+              {uiText(problem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed")}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              loading={reviewing}
+              disabled={busy}
+              onClick={() => void reviewLatest()}
+            >
+              {uiText("library.reviewLatest")}
+            </Button>
+            {reviewed && (
+              <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+                <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
+                <p>{reviewed.tags.join(", ") || uiText("No tags assigned yet.")}</p>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" disabled={busy} onClick={useLatest}>
+                    {uiText("library.useLatest")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    loading={busy}
+                    disabled={editDenied || reviewing}
+                    onClick={() => void save(reviewed)}
+                  >
+                    {uiText("library.retryDraft")}
+                  </Button>
+                </div>
+              </section>
+            )}
+          </div>
+        )}
         <div className="space-y-5">
           <div className="rounded border border-border bg-muted/40 p-3">
             <div className="flex items-start gap-2.5">
@@ -138,6 +302,7 @@ export function ModelTagsDialog({
                 id={`model-tags-${model.id}`}
                 value={query}
                 maxLength={255}
+                disabled={busy || editDenied}
                 placeholder={uiText("Type a tag name…")}
                 onChange={(event) => {
                   setQuery(event.target.value);
@@ -200,6 +365,7 @@ export function ModelTagsDialog({
                     {name}
                     <button
                       type="button"
+                      disabled={busy || editDenied}
                       onClick={() =>
                         setSelected((current) =>
                           current.filter((tag) => normalized(tag) !== normalized(name)),
@@ -225,7 +391,13 @@ export function ModelTagsDialog({
           <Button type="button" variant="outline" size="sm" disabled={busy} onClick={close}>
             {uiText("Cancel")}
           </Button>
-          <Button type="button" size="sm" loading={busy} disabled={!hasChanges} onClick={save}>
+          <Button
+            type="button"
+            size="sm"
+            loading={busy}
+            disabled={!hasChanges || problem !== null || editDenied || reviewing}
+            onClick={() => void save()}
+          >
             {uiText("Save tags")}
           </Button>
         </div>

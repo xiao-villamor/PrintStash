@@ -1,4 +1,6 @@
-import { getJson, sendJson } from "@/lib/api/request";
+import { requireEditingBase, requireEditingReceipt } from "@/lib/api/editing";
+import type { EditingBase } from "@/types/editing";
+import { getJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
 import {
   SetupRequest,
   SetupResponse,
@@ -12,51 +14,85 @@ import {
   StorageRootRole,
 } from "@/types";
 
-export function getSetupStatus(): Promise<SetupStatus> {
-  return getJson<SetupStatus>("/api/v1/setup/status", { fresh: true });
+export function getSetupStatus(options?: GetJsonOptions): Promise<SetupStatus> {
+  return getJson<SetupStatus>("/api/v1/setup/status", options);
 }
 
-export function getStorageProviders(): Promise<StorageProvider[]> {
-  return getJson<StorageProvider[]>("/api/v1/storage/providers");
+export function getStorageProviders(options?: GetJsonOptions): Promise<StorageProvider[]> {
+  return getJson<StorageProvider[]>("/api/v1/storage/providers", options);
 }
 
-export function beginSetup(): Promise<{ csrf: string; expires_in: number }> {
-  return sendJson("/api/v1/setup/session", "POST", {});
+export function beginSetup(options?: {
+  signal?: AbortSignal;
+}): Promise<{ csrf: string; expires_in: number }> {
+  return requestApi("/api/v1/setup/session", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options?.signal,
+  });
 }
 
 export function checkSetupStorage(
   body: SetupStorageRequest,
   csrf: string,
+  options?: { signal?: AbortSignal },
 ): Promise<SetupStorageCheck> {
-  return sendJson("/api/v1/setup/check-storage", "POST", body, { "X-PrintStash-Setup-CSRF": csrf });
+  return requestApi("/api/v1/setup/check-storage", {
+    method: "POST",
+    headers: { ...jsonHeaders(), "X-PrintStash-Setup-CSRF": csrf },
+    body: JSON.stringify(body),
+    signal: options?.signal,
+  });
 }
 
 /**
  * Finish pending storage. With a body, choose it: the owner provisioned from
  * VAULT_SETUP_ADMIN_* signs in before any storage exists.
  */
-export function prepareSetupStorage(body: SetupStorageRequest = {}): Promise<SetupStorageCheck> {
-  return sendJson("/api/v1/setup/prepare-storage", "POST", body);
-}
-
-export function completeSetup(body: SetupRequest, csrf: string): Promise<SetupResponse> {
-  return sendJson<SetupResponse>("/api/v1/setup", "POST", body, {
-    "X-PrintStash-Setup-CSRF": csrf,
+export function prepareSetupStorage(
+  body: SetupStorageRequest = {},
+  options: GetJsonOptions = {},
+): Promise<SetupStorageCheck> {
+  return requestApi("/api/v1/setup/prepare-storage", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options.signal,
   });
 }
 
-export function getVaultConfig(): Promise<VaultConfigRead> {
-  return getJson<VaultConfigRead>("/api/v1/config");
+export function completeSetup(
+  body: SetupRequest,
+  csrf: string,
+  options?: { signal?: AbortSignal },
+): Promise<SetupResponse> {
+  return requestApi<SetupResponse>("/api/v1/setup", {
+    method: "POST",
+    headers: { ...jsonHeaders(), "X-PrintStash-Setup-CSRF": csrf },
+    body: JSON.stringify(body),
+    signal: options?.signal,
+  });
 }
 
-export function getHealthDetails<T>(): Promise<T> {
-  return getJson<T>("/api/v1/health/details", { fresh: true });
+export function getVaultConfig(options: GetJsonOptions = {}): Promise<VaultConfigRead> {
+  return getJson<VaultConfigRead>("/api/v1/config", { ...options });
 }
 
-export function enrollStorageRoot(role: StorageRootRole): Promise<StorageRootEnrollmentRead> {
-  return sendJson<StorageRootEnrollmentRead>("/api/v1/config/storage-roots/enroll", "POST", {
-    role,
-    confirm: true,
+export function getHealthDetails<T>(options: GetJsonOptions = {}): Promise<T> {
+  return getJson<T>("/api/v1/health/details", { ...options });
+}
+
+export function enrollStorageRoot(
+  role: StorageRootRole,
+  expectedPath: string,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<StorageRootEnrollmentRead> {
+  return requestApi<StorageRootEnrollmentRead>("/api/v1/config/storage-roots/enroll", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ role, confirm: true, expected_path: expectedPath }),
+    signal: options.signal,
   });
 }
 
@@ -70,11 +106,31 @@ export interface ReleaseStatus {
   checked_at: string;
 }
 
-export function getLatestRelease(refresh = false): Promise<ReleaseStatus> {
+export function getLatestRelease(
+  refresh = false,
+  options: GetJsonOptions = {},
+): Promise<ReleaseStatus> {
   const query = refresh ? "?refresh=true" : "";
-  return getJson<ReleaseStatus>(`/api/v1/health/releases/latest${query}`, { fresh: true });
+  return getJson<ReleaseStatus>(`/api/v1/health/releases/latest${query}`, {
+    ...options,
+  });
 }
 
-export function updateVaultConfig(body: VaultConfigUpdate): Promise<VaultConfigRead> {
-  return sendJson<VaultConfigRead>("/api/v1/config", "PUT", body);
+export async function updateVaultConfig(
+  body: VaultConfigUpdate,
+  options: Pick<GetJsonOptions, "signal"> & { base: EditingBase },
+): Promise<VaultConfigRead> {
+  const base = options.base;
+  requireEditingBase(base);
+  const headers = jsonHeaders();
+  headers["If-Match"] = `"vault-config-e${base.edit_epoch}-v${base.edit_version}"`;
+  headers["X-PrintStash-Edit-Contract"] = "conditional-v1";
+  const row = await requestApi<VaultConfigRead>("/api/v1/config", {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
+  requireEditingReceipt(row, base);
+  return row;
 }

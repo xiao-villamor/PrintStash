@@ -26,6 +26,31 @@ async function createLinkAndGetUrl(page: import("@playwright/test").Page): Promi
 }
 
 test.describe("share links", () => {
+  test("keeps anonymous share access separate from the private library", async ({
+    page,
+    browser,
+  }) => {
+    const name = `e2e-anonymous-share-${Date.now()}`;
+    await uploadGcodeModel(page, name);
+    await openShareDialog(page, name);
+    const url = await createLinkAndGetUrl(page);
+    const guest = await browser.newContext();
+    try {
+      const visitor = await guest.newPage();
+      await visitor.goto(url);
+      await expect(visitor.getByRole("heading", { name, exact: true })).toBeVisible();
+      await visitor.goto(new URL("/", url).href);
+      await expect(visitor).toHaveURL(/\/login/);
+      await expect(visitor.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+      await expect(visitor.getByRole("heading", { name, exact: true })).toHaveCount(0);
+      const denied = await guest.request.get(new URL("/api/v1/models", url).href);
+      expect(denied.status()).toBe(401);
+      expect(await denied.text()).not.toContain(name);
+    } finally {
+      await guest.close();
+    }
+  });
+
   test("view-only vs downloadable public share links", async ({ page }) => {
     const name = `e2e-lnk-${Date.now()}`;
     await uploadGcodeModel(page, name);
@@ -49,6 +74,35 @@ test.describe("share links", () => {
     await expect(page.getByRole("heading", { name })).toBeVisible();
     await expect(page.getByRole("link", { name: /download/i }).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "G-code" })).toBeEnabled();
+  });
+
+  test("opens a working capability after a denied token without private credentials", async ({
+    page,
+  }) => {
+    const name = `e2e-public-scope-${Date.now()}`;
+    await uploadGcodeModel(page, name);
+    await openShareDialog(page, name);
+    const url = await createLinkAndGetUrl(page);
+    const publicRequests: Array<Promise<Record<string, string>>> = [];
+    page.on("request", (request) => {
+      if (request.url().includes("/api/v1/share/")) publicRequests.push(request.allHeaders());
+    });
+    await page.goto("/share/e2e-unissued-token");
+    await expect(page.getByText("This share link is invalid, expired, or revoked.")).toBeVisible();
+    // Browser-history navigation stays in the mounted public route, exercising token replacement.
+    await page.evaluate((target) => {
+      window.history.pushState({}, "", target);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    }, new URL(url).pathname);
+    await expect(page.getByRole("heading", { name })).toBeVisible();
+    await expect(page.getByText("This share link is invalid, expired, or revoked.")).toHaveCount(0);
+    await expect(page).toHaveTitle(new RegExp(name));
+    await expect(page.getByRole("link", { name: /download/i })).toHaveCount(0);
+    expect(publicRequests.length).toBeGreaterThanOrEqual(2);
+    for (const headers of await Promise.all(publicRequests)) {
+      expect(headers.cookie).toBeUndefined();
+      expect(headers.authorization).toBeUndefined();
+    }
   });
 
   test("revoking a share link breaks the public page", async ({ page }) => {

@@ -23,6 +23,7 @@ from app.api.v1 import (
     multipart_builds,
     multipart_models,
     notifications,
+    outliner,
     printer_profiles,
     printers,
     provider_connections,
@@ -60,6 +61,7 @@ api_router.include_router(work.router)
 api_router.include_router(inbox.router)
 api_router.include_router(maintenance.router)
 api_router.include_router(models.router)
+api_router.include_router(outliner.router)
 
 install_optional_routes(api_router)
 api_router.include_router(multipart_models.router)

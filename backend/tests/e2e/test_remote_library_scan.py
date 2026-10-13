@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import boto3
 import pytest
+import pytest_asyncio
 from botocore.config import Config as BotoConfig
 from sqlmodel import select
 
@@ -283,10 +284,16 @@ class TestRemoteLibraryScan:
 class TestDurableScanPages:
     @pytest.mark.s3
     @pytest.mark.asyncio
-    async def test_public_scans_resume_committed_inventory_until_completion(
+    async def test_one_public_scan_finishes_committed_inventory(
         self, api, superuser_headers, e2e_db, monkeypatch
     ):
-        from app.db.models import ExternalLibraryCheckpoint, RemoteDiscoveryInventory
+        from app.db.models import (
+            ExternalLibraryCheckpoint,
+            Job,
+            JobKind,
+            JobState,
+            RemoteDiscoveryInventory,
+        )
         from app.modules.sources import external_library
 
         monkeypatch.setattr(external_library, "_REMOTE_PAGE_LIMIT", 2)
@@ -337,22 +344,15 @@ class TestDurableScanPages:
                 ExternalLibraryCheckpoint.library_id == library_id
             )
         ).one()
-        assert checkpoint.complete is False
-        assert checkpoint.cursor is not None
-        assert (
-            len(
-                e2e_db.exec(
-                    select(File).where(File.external_library_id == library_id)
-                ).all()
-            )
-            == 2
-        )
-        epoch = checkpoint.epoch
-        assert (await api.post(url, headers=superuser_headers)).status_code == 202
-        settle()
-        e2e_db.expire_all()
         assert checkpoint.complete is True
-        assert checkpoint.epoch == epoch
+        scan_jobs = e2e_db.exec(
+            select(Job).where(
+                Job.kind == JobKind.SOURCES_SCAN,
+                Job.subject_key == f"library/{library_id}",
+            )
+        ).all()
+        assert len(scan_jobs) == 2
+        assert {job.state for job in scan_jobs} == {JobState.COMPLETED}
         rows = e2e_db.exec(
             select(File).where(File.external_library_id == library_id)
         ).all()
@@ -365,4 +365,108 @@ class TestDurableScanPages:
                 f"/api/v1/files/{row.id}/download", headers=superuser_headers
             )
             assert downloaded.status_code == 200
-            assert downloaded.content.startswith(payload)
+            index = row.source_key.rsplit("/", 1)[-1].removesuffix(".gcode")
+            assert downloaded.content == payload + f"\n; page {index}\n".encode()
+
+
+@pytest_asyncio.fixture
+async def refused_remote_mesh(api, superuser_headers, e2e_db, remote_provider):
+    original = b"invalid 3mf package"
+    source_key = "models/refused.3mf"
+    await asyncio.to_thread(
+        remote_provider.backend.create_bytes,
+        original,
+        remote_provider.backend.source_key(source_key),
+    )
+    enabled = await api.put(
+        "/api/v1/config",
+        headers=superuser_headers,
+        json={"external_libraries_enabled": True},
+    )
+    assert enabled.status_code == 200, enabled.text
+    connection = await api.post(
+        "/api/v1/storage-connections",
+        headers=superuser_headers,
+        json={
+            "name": f"refused-{remote_provider.kind}-{uuid4().hex}",
+            "kind": remote_provider.kind,
+            "configuration": remote_provider.configuration,
+            "secrets": remote_provider.secrets,
+        },
+    )
+    assert connection.status_code == 201, connection.text
+    library = await api.post(
+        "/api/v1/libraries",
+        headers=superuser_headers,
+        json={
+            "name": f"Refused {remote_provider.kind}",
+            "source_kind": remote_provider.kind,
+            "connection_id": connection.json()["id"],
+            "source_prefix": "models",
+            "scan_schedule": "",
+        },
+    )
+    assert library.status_code == 201, library.text
+    await completed_job(
+        api,
+        await api.post(
+            f"/api/v1/libraries/{library.json()['id']}/scan",
+            headers=superuser_headers,
+        ),
+        superuser_headers,
+    )
+    e2e_db.expire_all()
+    row = e2e_db.exec(select(File).where(File.source_key == source_key)).one()
+    listed = await api.get(
+        f"/api/v1/files/{row.id}/derivatives", headers=superuser_headers
+    )
+    assert listed.status_code == 200, listed.text
+    metadata = next(item for item in listed.json() if item["kind"] == "metadata")
+    assert (metadata["state"], metadata["failure_reason"]) == (
+        "failed",
+        "invalid_source",
+    )
+    return row.id, original
+
+
+@pytest.mark.parametrize(
+    "remote_provider",
+    [
+        pytest.param(
+            _nextcloud_provider, id="nextcloud", marks=pytest.mark.remote_storage
+        ),
+        pytest.param(_sftp_provider, id="sftp", marks=pytest.mark.remote_storage),
+        pytest.param(_s3_provider, id="s3", marks=pytest.mark.s3),
+    ],
+    indirect=True,
+)
+class TestRefusedRemoteMesh:
+    @pytest.mark.asyncio
+    async def test_original_download_survives_geometry_failure(
+        self, api, superuser_headers, refused_remote_mesh
+    ):
+        file_id, original = refused_remote_mesh
+        downloaded = await api.get(
+            f"/api/v1/files/{file_id}/download", headers=superuser_headers
+        )
+        assert downloaded.status_code == 200, downloaded.text
+        assert (
+            hashlib.sha256(downloaded.content).digest()
+            == hashlib.sha256(original).digest()
+        )
+
+    @pytest.mark.asyncio
+    async def test_signed_slicer_download_survives_geometry_failure(
+        self, api, superuser_headers, refused_remote_mesh
+    ):
+        file_id, original = refused_remote_mesh
+        signed = await api.get(
+            f"/api/v1/files/{file_id}/slicer-url", headers=superuser_headers
+        )
+        assert signed.status_code == 200, signed.text
+        downloaded = await api.get(signed.json()["url"])
+        assert downloaded.status_code == 200, downloaded.text
+        assert (
+            hashlib.sha256(downloaded.content).digest()
+            == hashlib.sha256(original).digest()
+        )

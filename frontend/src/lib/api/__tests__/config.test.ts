@@ -23,17 +23,19 @@ import {
   getHealthDetails,
   getLatestRelease,
   getSetupStatus,
+  getStorageProviders,
   getVaultConfig,
   updateVaultConfig,
 } from "@/lib/api/config";
-import { invalidateApiCache } from "@/lib/api/request";
+import { aVaultConfig } from "@/test-support/factories";
+import { json } from "@/test-support/render";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -70,19 +72,55 @@ describe("completeSetup", () => {
 
 describe("getVaultConfig", () => {
   it("reads the current vault configuration", async () => {
-    respondWith({ storage_backend: "local" });
+    const config = aVaultConfig({ currency: "EUR" });
+    fetchMock.mockResolvedValueOnce(json(config));
 
-    await getVaultConfig();
+    expect(await getVaultConfig()).toEqual(config);
 
     expectRequest("/api/v1/config");
+    expect(lastCall().init).toMatchObject({ cache: "no-store" });
   });
 });
 
 describe("updateVaultConfig", () => {
+  it("sends the reviewed configuration base", async () => {
+    const base = aVaultConfig({ edit_version: 4 });
+    const saved = aVaultConfig({ edit_version: 5, currency: "EUR" });
+    fetchMock.mockResolvedValueOnce(json(saved));
+    expect(await updateVaultConfig({ currency: "EUR" }, { base })).toEqual(saved);
+    const headers = new Headers(lastCall().init?.headers);
+    expect(headers.get("If-Match")).toBe(`"vault-config-e${base.edit_epoch}-v4"`);
+    expect(headers.get("X-PrintStash-Edit-Contract")).toBe("conditional-v1");
+  });
+  it.each([
+    { edit_epoch: "invalid" },
+    { edit_version: 0 },
+    { edit_version: -1 },
+    { edit_version: Number.MAX_SAFE_INTEGER + 1 },
+  ])("rejects an invalid configuration base before dispatch: %j", async (over) => {
+    await expect(
+      updateVaultConfig({ currency: "EUR" }, { base: aVaultConfig(over) }),
+    ).rejects.toThrow("Invalid editing base");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it.each([
+    { edit_version: 4 },
+    { edit_version: 3 },
+    { edit_epoch: "b".repeat(32) },
+    { edit_epoch: "invalid" },
+  ])("rejects an invalid conditional configuration receipt: %j", async (over) => {
+    fetchMock.mockResolvedValueOnce(json(aVaultConfig({ edit_version: 5, ...over })));
+    await expect(
+      updateVaultConfig({ currency: "EUR" }, { base: aVaultConfig({ edit_version: 4 }) }),
+    ).rejects.toThrow(/Invalid editing (acknowledgement|base)/);
+  });
   it("PUTs a change", async () => {
-    respondWith({ storage_backend: "s3" });
+    const acknowledged = aVaultConfig({ edit_version: 2, storage_backend: "s3" });
+    fetchMock.mockResolvedValueOnce(json(acknowledged));
 
-    await updateVaultConfig({ storage_backend: "s3" });
+    expect(await updateVaultConfig({ storage_backend: "s3" }, { base: aVaultConfig() })).toEqual(
+      acknowledged,
+    );
 
     expectRequest("/api/v1/config", "PUT");
     expect(lastBody()).toEqual({ storage_backend: "s3" });
@@ -106,10 +144,10 @@ describe("enrollStorageRoot", () => {
   it("POSTs an explicit confirmation for the selected root role", async () => {
     respondWith({ enrolled: true, role: "data", restart_required: true });
 
-    await enrollStorageRoot("data");
+    await enrollStorageRoot("data", "/reviewed/files");
 
     expectRequest("/api/v1/config/storage-roots/enroll", "POST");
-    expect(lastBody()).toEqual({ role: "data", confirm: true });
+    expect(lastBody()).toEqual({ role: "data", confirm: true, expected_path: "/reviewed/files" });
   });
 });
 
@@ -161,5 +199,80 @@ describe("browser preparation contracts", () => {
     respondWith({ ready: true, checks: [] });
     await prepareSetupStorage({ storage_backend: "local" });
     expect(lastBody()).toEqual({ storage_backend: "local" });
+  });
+});
+
+describe("entry endpoint cancellation", () => {
+  it.each([
+    { label: "status", send: (signal: AbortSignal) => getSetupStatus({ signal }) },
+    { label: "catalog", send: (signal: AbortSignal) => getStorageProviders({ signal }) },
+    { label: "session", send: (signal: AbortSignal) => beginSetup({ signal }) },
+    {
+      label: "check",
+      send: (signal: AbortSignal) =>
+        checkSetupStorage({ storage_provider: "local" }, "automatic-proof", { signal }),
+    },
+    {
+      label: "complete",
+      send: (signal: AbortSignal) =>
+        completeSetup(
+          { username: "maker", password: "password", storage_provider: "local" },
+          "automatic-proof",
+          { signal },
+        ),
+    },
+  ])("aborts the $label setup endpoint", async ({ send }) => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const caller = new AbortController();
+
+    const pending = send(caller.signal);
+    caller.abort();
+
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    finish(new Response(JSON.stringify({ acknowledged: true })));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+describe("configuration caller cancellation", () => {
+  it("cancels an active configuration read", async () => {
+    const controller = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const read = getVaultConfig({ signal: controller.signal });
+    controller.abort();
+    await expect(read).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
+  });
+});
+
+describe("storage provider caller boundary", () => {
+  it("cancels a provider read at its caller boundary", async () => {
+    const controller = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const read = getStorageProviders({ signal: controller.signal });
+    controller.abort();
+    await expect(read).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
+    expect(lastCall().init).toMatchObject({ cache: "no-store" });
   });
 });

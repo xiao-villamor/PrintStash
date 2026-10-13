@@ -1,0 +1,289 @@
+{
+  "corpus_id": "mesh-contract-v1",
+  "expectation_scope": "target_contract_not_observed_compliance",
+  "fixtures": [
+    {
+      "expectation": {
+        "absolute_tolerance": 0.0,
+        "bbox_mm": [
+          20,
+          20,
+          20
+        ],
+        "outcome": "accept",
+        "relative_tolerance": 1e-06,
+        "triangle_count": 12,
+        "volume_mm3": 8000
+      },
+      "file_type": "stl",
+      "filename": "cube-binary.stl",
+      "input_bytes": 684,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": null,
+      "sha256": "57eb7cb449efb43ad80f696e74c3b9a448783498da388242a6189dc1b35be1f4",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "absolute_tolerance": 0.0,
+        "bbox_mm": [
+          20,
+          20,
+          20
+        ],
+        "outcome": "accept",
+        "relative_tolerance": 1e-06,
+        "triangle_count": 12,
+        "volume_mm3": 8000
+      },
+      "file_type": "stl",
+      "filename": "binary-solid.stl",
+      "input_bytes": 684,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": null,
+      "sha256": "abdf24aaa743204b81c92cf8d75bb4a3330411fd3f0064f80b155b73bc3a6296",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "outcome": "refuse",
+        "rule": "truncated_facet"
+      },
+      "file_type": "stl",
+      "filename": "binary-truncated.stl",
+      "input_bytes": 674,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": null,
+      "sha256": "11dd68d7f56f5e956a90a49ce964d53377ba04e9561a689dd4410fca0b665ae3",
+      "source_faces": 11
+    },
+    {
+      "expectation": {
+        "outcome": "refuse",
+        "rule": "count_mismatch"
+      },
+      "file_type": "stl",
+      "filename": "binary-count-mismatch.stl",
+      "input_bytes": 684,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": null,
+      "sha256": "b3618350bea15c2214f521b60922a78516d7bd6911f2a6fc901bdb6020016f39",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "absolute_tolerance": 0.0,
+        "bbox_mm": [
+          20,
+          20,
+          20
+        ],
+        "outcome": "accept",
+        "relative_tolerance": 1e-06,
+        "triangle_count": 12,
+        "volume_mm3": 8000
+      },
+      "file_type": "stl",
+      "filename": "ascii-whitespace.stl",
+      "input_bytes": 2511,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": null,
+      "sha256": "e8bf81c70fd3f1638d43c83de93bd8d2ce5cf20aabe8ed323b6f1991cde16f35",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "outcome": "refuse",
+        "rule": "incomplete_ascii_facet"
+      },
+      "file_type": "stl",
+      "filename": "ascii-incomplete.stl",
+      "input_bytes": 110,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": null,
+      "sha256": "4604d67b952d0ec4f21a71020d834360111881ac712ea4104d54be2bb2b5aed0",
+      "source_faces": 0
+    },
+    {
+      "expectation": {
+        "absolute_tolerance": 0.0,
+        "bbox_mm": [
+          20,
+          20,
+          20
+        ],
+        "outcome": "accept",
+        "relative_tolerance": 1e-06,
+        "triangle_count": 12,
+        "volume_mm3": 8000
+      },
+      "file_type": "3mf",
+      "filename": "cube-mm.3mf",
+      "input_bytes": 1705,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": 1,
+      "sha256": "2c5266d3f9f5f0367994ac916f1934d5d212cf7d1adf24165c1d930f379121ca",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "absolute_tolerance": 0.0,
+        "bbox_mm": [
+          25.4,
+          25.4,
+          25.4
+        ],
+        "outcome": "accept",
+        "relative_tolerance": 1e-06,
+        "triangle_count": 12,
+        "volume_mm3": 16387.064
+      },
+      "file_type": "3mf",
+      "filename": "cube-inch.3mf",
+      "input_bytes": 1687,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": 1,
+      "sha256": "5970eda4f2b88664030dd151a01bcfdb0f13437446a72964c6d72a95ab959bfc",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "absolute_tolerance": 0.0,
+        "bbox_mm": [
+          0.001,
+          0.001,
+          0.001
+        ],
+        "outcome": "accept",
+        "relative_tolerance": 1e-06,
+        "triangle_count": 12,
+        "volume_mm3": 1e-09
+      },
+      "file_type": "3mf",
+      "filename": "cube-micron.3mf",
+      "input_bytes": 1689,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": 1,
+      "sha256": "a1c3da70e3aa89b8c3b90d5e3bbfaec4ab5de085c8d699e3266916d0b04959bb",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "absolute_tolerance": 0.0,
+        "bbox_mm": [
+          60,
+          20,
+          20
+        ],
+        "outcome": "accept",
+        "relative_tolerance": 1e-06,
+        "triangle_count": 24,
+        "volume_mm3": 16000
+      },
+      "file_type": "3mf",
+      "filename": "multiple-build.3mf",
+      "input_bytes": 1762,
+      "instances": 2,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": 1,
+      "sha256": "355214e84fafed849e2523a31bc03f140b78e5e396c7238ced8dabdbc1e57b8d",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "absolute_tolerance": 0.0,
+        "bbox_mm": [
+          20,
+          20,
+          20
+        ],
+        "outcome": "accept",
+        "relative_tolerance": 1e-06,
+        "triangle_count": 12,
+        "volume_mm3": 8000
+      },
+      "file_type": "3mf",
+      "filename": "unused-vertex.3mf",
+      "input_bytes": 1759,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": 1,
+      "sha256": "3912865b20561b9b682270e6cbf93a99ff4b3aeedb198fc9144967a2c4c6f7c9",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "absolute_tolerance": 0.0,
+        "bbox_mm": [
+          20,
+          20,
+          20
+        ],
+        "outcome": "accept",
+        "relative_tolerance": 1e-06,
+        "triangle_count": 12,
+        "volume_mm3": 8000
+      },
+      "file_type": "3mf",
+      "filename": "reflected-build.3mf",
+      "input_bytes": 1742,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": 1,
+      "sha256": "c073c31f7b13519f11f1e856417415a59a5df468a88c268c974e10e7f1408d2f",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "outcome": "refuse",
+        "rule": "component_cycle"
+      },
+      "file_type": "3mf",
+      "filename": "cyclic-components.3mf",
+      "input_bytes": 1792,
+      "instances": null,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": 2,
+      "sha256": "1fc1cdb68764f8e74a317d51832b19ee0f01d0799d5b1adc027e6ebd2645c677",
+      "source_faces": 12
+    },
+    {
+      "expectation": {
+        "outcome": "refuse",
+        "rule": "unsupported_required_extension"
+      },
+      "file_type": "3mf",
+      "filename": "unsupported-required.3mf",
+      "input_bytes": 1786,
+      "instances": 1,
+      "license": "AGPL-3.0",
+      "origin": "generated:scripts.mesh_benchmark_corpus/v1",
+      "resources": 1,
+      "sha256": "c0811fa2abed4a8ba2f5e211ae54c5b5f94c5df25fafbe7faef8f06c56210165",
+      "source_faces": 12
+    }
+  ],
+  "schema_version": 1
+}

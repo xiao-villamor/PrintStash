@@ -38,3 +38,20 @@ def vault_environment(tmp_path: Path, db_url: str) -> dict[str, str]:
         environment[f"VAULT_{key}"] = str(directory)
     environment["VAULT_ARTIFACT_CACHE_ROOT"] = str(tmp_path / "cache")
     return environment
+
+
+def worker_roles(environment: dict[str, str]) -> list[str]:
+    from sqlalchemy import create_engine, text
+
+    from app.db.url import normalize_database_url
+
+    engine = create_engine(normalize_database_url(environment["VAULT_DB_URL"]))
+    try:
+        with engine.connect() as connection:
+            return list(
+                connection.execute(
+                    text("SELECT role FROM work_executors ORDER BY role")
+                ).scalars()
+            )
+    finally:
+        engine.dispose()

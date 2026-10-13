@@ -38,7 +38,7 @@ def _remote_size(raw: dict[str, Any]) -> int | None:
     value = raw.get("size") or raw.get("size_bytes")
     try:
         return int(value) if value is not None else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -51,16 +51,28 @@ def _remote_modified(raw: dict[str, Any]) -> datetime | None:
         # server-local naive time (off by the host's UTC offset), matching the
         # aware-UTC convention used everywhere else.
         return datetime.fromtimestamp(float(value), tz=timezone.utc)
-    except (TypeError, ValueError, OSError):
+    except TypeError, ValueError, OSError:
         return None
 
 
 def build_traceable_remote_filename(file: File) -> str:
     """Return a Moonraker-safe filename with a Vault revision marker."""
-    suffix = PurePosixPath(file.original_filename).suffix
-    if suffix.lower() not in {".gcode", ".bgcode", ".g", ".gco"}:
-        suffix = ".gcode"
-    stem = PurePosixPath(file.original_filename).stem or "print"
+    filename = PurePosixPath(file.original_filename)
+    recognized_suffixes = {".gcode", ".bgcode", ".g", ".gco"}
+    extension_only_suffix = "." + filename.name.lstrip(".")
+    if (
+        filename.name.startswith(".")
+        and extension_only_suffix.lower() in recognized_suffixes
+    ):
+        # A recognized extension with no named stem uses the display fallback,
+        # independently of pathlib's treatment of leading dots.
+        suffix = extension_only_suffix
+        stem = "print"
+    else:
+        suffix = filename.suffix
+        if suffix.lower() not in recognized_suffixes:
+            suffix = ".gcode"
+        stem = filename.stem or "print"
     safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip(".-_") or "print"
     marker = f"vault-f{file.id}-{file.sha256[:12]}"
     max_stem_len = max(1, 512 - len(marker) - len(suffix) - 2)

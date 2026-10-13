@@ -1,3 +1,5 @@
+import type { EditingBase } from "@/types/editing";
+import { editHeaders, requireEditingReceipt } from "./editing";
 import { getJson, sendAction, sendForm, sendJson, type GetJsonOptions } from "@/lib/api/request";
 import type { DocumentListItem, DocumentRead } from "@/types";
 
@@ -9,8 +11,8 @@ export function listDocuments(
   return getJson<DocumentListItem[]>(`/api/v1/documents${qs}`, options);
 }
 
-export function getDocument(id: number): Promise<DocumentRead> {
-  return getJson<DocumentRead>(`/api/v1/documents/${id}`, { fresh: true });
+export function getDocument(id: number, signal?: AbortSignal): Promise<DocumentRead> {
+  return getJson<DocumentRead>(`/api/v1/documents/${id}`, { signal });
 }
 
 export function createDocument(payload: {
@@ -39,8 +41,18 @@ export function uploadDocument(
 export function updateDocument(
   id: number,
   payload: { name?: string; body?: string },
+  base: EditingBase,
 ): Promise<DocumentRead> {
-  return sendJson<DocumentRead>(`/api/v1/documents/${id}`, "PUT", payload);
+  return sendJson<DocumentRead>(
+    `/api/v1/documents/${id}`,
+    "PUT",
+    payload,
+    editHeaders("document", id, base),
+  ).then((saved) => {
+    if (saved.id !== id) throw new Error("Invalid Document acknowledgement");
+    requireEditingReceipt(saved, base);
+    return saved;
+  });
 }
 
 export function deleteDocument(id: number): Promise<void> {

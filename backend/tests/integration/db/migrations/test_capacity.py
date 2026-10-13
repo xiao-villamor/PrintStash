@@ -2,10 +2,10 @@
 
 from alembic.config import Config
 from sqlalchemy import inspect, text
-from sqlmodel import Session, create_engine
+from sqlmodel import create_engine
 
 from alembic import command
-from tests.factories import build_model
+from tests.factories.migration_rows import seed_schema_row
 from tests.paths import ALEMBIC_DIR, ALEMBIC_INI
 
 
@@ -17,10 +17,16 @@ class TestCapacityUpgrade:
         config.set_main_option("sqlalchemy.url", f"sqlite:///{database}")
         command.upgrade(config, "0a6b1f868ae0")
         engine = create_engine(f"sqlite:///{database}")
-        with Session(engine) as session:
-            model = build_model(session, name="Preserved model")
-            identity = model.id
+        identity = 1
         with engine.begin() as connection:
+            seed_schema_row(
+                connection,
+                "models",
+                id=identity,
+                name="Preserved model",
+                slug="preserved-model",
+                hash="a" * 64,
+            )
             connection.execute(
                 text(
                     "INSERT INTO vault_audit_runs "

@@ -2,16 +2,18 @@
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from printstash_core.inference import EmbeddingError
 from sqlmodel import Session
 
+from app.api.edit_preconditions import edit_precondition
 from app.core.errors import ErrorKind, OperationError
 from app.core.security import get_current_user, require_auth, require_superuser
 from app.db.models import IndexGeneration, User
 from app.db.session import get_session
 from app.modules.inference.configuration import create
-from app.modules.search import configuration, generations
+from app.modules.search import configuration, generations, settings_edits
+from app.schemas.editing import EditPrecondition
 from app.schemas.inference import (
     EndpointProposal,
     EndpointRead,
@@ -37,17 +39,25 @@ search_router = APIRouter(
 
 @router.get("", response_model=SearchSettingsRead)
 @search_router.get("/settings", response_model=SearchSettingsRead)
-def read_settings(session: Session = Depends(get_session)):
-    return configuration.read(session)
+def read_settings(response: Response, session: Session = Depends(get_session)):
+    result = configuration.read(session)
+    response.headers["ETag"] = settings_edits.etag(result)
+    return result
 
 
 @router.put("", response_model=SearchSettingsRead, dependencies=[Depends(require_auth)])
 def update_settings(
     body: SearchSettings,
+    response: Response,
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ):
-    return configuration.update(session, body, actor_id=user.id)
+    result = configuration.update(
+        session, body, actor=user, base=settings_edits.expected_base(precondition)
+    )
+    response.headers["ETag"] = settings_edits.etag(result)
+    return result
 
 
 @search_router.patch(
@@ -55,15 +65,20 @@ def update_settings(
 )
 def patch_settings(
     body: SearchSettings,
+    response: Response,
     session: Session = Depends(get_session),
     user: User = Depends(get_current_user),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ):
-    merged = configuration.settings(session).model_dump() | body.model_dump(
-        exclude_unset=True
+    result = configuration.update(
+        session,
+        body,
+        actor=user,
+        base=settings_edits.expected_base(precondition),
+        partial=True,
     )
-    return configuration.update(
-        session, SearchSettings.model_validate(merged), actor_id=user.id
-    )
+    response.headers["ETag"] = settings_edits.etag(result)
+    return result
 
 
 @router.post(

@@ -14,9 +14,9 @@ Design notes:
   engine port itself is held to the same contract on DBOS in
   ``tests/contract/modules/work/test_contracts.py``, and ``test_job_engine.py``
   drives real DBOS.
-- The DB is the in-memory engine from the parent ``conftest`` (shared in-process
-  via ``StaticPool``); ``data_dir`` and friends are redirected to a tmp dir
-  through the ``_overlay`` (every ``Settings`` field is overlay-resolvable).
+- The DB is a private on-disk SQLite engine with production connection pragmas;
+  ``data_dir`` and friends are redirected to a tmp dir through the ``_overlay``
+  (every ``Settings`` field is overlay-resolvable).
 - ``is_public_url`` is relaxed for loopback — real targets are public, the fake
   is on 127.0.0.1. This is the only monkeypatch; everything else is configuration.
 """
@@ -35,13 +35,18 @@ from urllib.request import urlopen
 import httpx
 import pytest
 import pytest_asyncio
+from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 
 import app.modules.storage.storage_backend.runtime as storage_runtime
 import app.runtime.maintenance as backup_maintenance
 from app.core import url_safety
 from app.core.config import _overlay
-from app.db.session import SQLiteSessionFactory, override_session_factory
+from app.db.session import (
+    SQLiteSessionFactory,
+    _set_sqlite_pragmas,
+    override_session_factory,
+)
 from app.modules.notifications import notification_renderers as renderers
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_backend.runtime import bind_backend
@@ -89,6 +94,9 @@ def e2e_db(tmp_path: Path) -> Iterator[Session]:
     engine = create_engine(
         f"sqlite:///{db_file}", connect_args={"check_same_thread": False}
     )
+    # Configure the first connection before schema creation or concurrent reads.
+    # Switching DELETE journals to WAL after work starts can fail immediately.
+    event.listen(engine, "connect", _set_sqlite_pragmas)
     SQLModel.metadata.create_all(engine)
     override_session_factory(SQLiteSessionFactory(engine))
     _overlay["db_url"] = f"sqlite:///{db_file}"

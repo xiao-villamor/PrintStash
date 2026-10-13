@@ -53,5 +53,5 @@ bytes, fill count and bounded hit/miss/error/eviction counters. Root changes do 
 move old cache data; after restart the former dedicated cache directory can be
 removed once no process uses it.
 
-[Consumer eligibility, recovery and performance](artifact-cache-design.md) explain
-the storage boundary and measured behavior.
+[Consumer eligibility and recovery](artifact-cache-design.md) explain the storage
+boundary and cache lifecycle.

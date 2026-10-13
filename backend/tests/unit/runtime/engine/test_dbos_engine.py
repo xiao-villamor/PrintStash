@@ -17,7 +17,7 @@ from dbos import error as dbos_error
 
 from app.db.models import LaneName
 from app.modules.work.catalog import WorkCatalog, default_lanes
-from app.modules.work.contracts import Lane, RetryPolicy
+from app.modules.work.contracts import Lane, LanePace, RetryPolicy
 from app.runtime.engine import dbos_engine
 from app.runtime.engine.dbos_engine import DbosJobEngine, system_database_url
 
@@ -59,10 +59,10 @@ class TestSystemDatabase:
 
 
 class TestConfig:
-    def test_sqlite_waits_out_a_locked_file(self) -> None:
+    def test_sqlite_opens_its_own_connections(self) -> None:
         config = _engine()._config()
 
-        assert config["db_engine_kwargs"] == {"connect_args": {"timeout": 30}}
+        assert set(config["db_engine_kwargs"]) == {"creator"}
         assert "dbos_system_schema" not in config
 
     def test_postgres_names_its_schema(self) -> None:
@@ -78,7 +78,6 @@ class TestConfig:
             "9.9.9",
             "api-test",
         )
-        assert config["run_admin_server"] is False
 
 
 @pytest.fixture
@@ -94,11 +93,58 @@ def registered(monkeypatch) -> dict[str, dict]:
 
 
 class TestQueues:
+    def test_dispatch_cadence_uses_the_deployment_setting(
+        self, registered, monkeypatch
+    ):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "jobs_queue_poll_interval_seconds", 0.25)
+        _engine()._register_queue(Lane(LaneName.DERIVE_NATIVE, 4))
+
+        assert registered["derive.native"]["polling_interval_sec"] == 0.25
+
+    def test_explicit_cadence_overrides_the_deployment_default(self, registered):
+        engine = DbosJobEngine(
+            WorkCatalog(lanes=default_lanes()),
+            system_database_url="sqlite:////data/db/engine.sqlite",
+            schema=None,
+            executor_id="test",
+            polling_interval_seconds=0.05,
+        )
+        engine._register_queue(Lane(LaneName.INGEST, 2))
+
+        assert registered["ingest"]["polling_interval_sec"] == 0.05
+
+    def test_a_relaxed_lane_is_polled_at_the_relaxed_cadence(
+        self, registered, monkeypatch
+    ):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "jobs_queue_poll_interval_seconds", 0.25)
+        monkeypatch.setitem(_overlay, "jobs_relaxed_queue_poll_interval_seconds", 2.0)
+        _engine()._register_queue(
+            Lane(LaneName.SEARCH, 1, scope="global", pace=LanePace.RELAXED)
+        )
+
+        assert registered["search"]["polling_interval_sec"] == 2.0
+
+    def test_a_relaxed_lane_is_never_polled_faster_than_a_prompt_one(
+        self, registered, monkeypatch
+    ):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "jobs_queue_poll_interval_seconds", 3.0)
+        monkeypatch.setitem(_overlay, "jobs_relaxed_queue_poll_interval_seconds", 2.0)
+        _engine()._register_queue(
+            Lane(LaneName.SEARCH, 1, scope="global", pace=LanePace.RELAXED)
+        )
+
+        assert registered["search"]["polling_interval_sec"] == 3.0
+
     def test_a_worker_lane_bounds_each_process(self, registered) -> None:
         _engine()._register_queue(Lane(LaneName.INGEST, 2))
 
         assert registered["ingest"]["worker_concurrency"] == 2
-        assert registered["ingest"]["priority_enabled"] is True
 
     def test_a_global_lane_bounds_the_deployment(self, registered) -> None:
         _engine()._register_queue(Lane(LaneName.SIMILARITY, 1, scope="global"))
@@ -236,3 +282,206 @@ class TestDetached:
         import threading
 
         assert dbos_engine._detached(threading.get_ident) == threading.get_ident()
+
+
+class TestFifoQueueConfiguration:
+    @pytest.mark.parametrize(
+        ("scope", "partitioned", "bound"),
+        [
+            ("worker", False, "worker_concurrency"),
+            ("global", False, "global_concurrency"),
+            ("worker", True, "partition_concurrency"),
+        ],
+    )
+    def test_fifo_preserves_one_queue_with_its_configured_limits(
+        self, registered, scope, partitioned, bound
+    ):
+        from app.modules.work.contracts import LaneOrder
+
+        lane = Lane(
+            LaneName.DERIVE_NATIVE,
+            3,
+            scope=scope,
+            partitioned=partitioned,
+            rate_limit=(10, 60.0),
+            queue_order=LaneOrder.FIFO,
+        )
+        _engine()._register_queue(lane)
+
+        assert set(registered) == {LaneName.DERIVE_NATIVE.value}
+        options = registered[LaneName.DERIVE_NATIVE.value]
+        assert options[bound] == 3
+        limiter = "partition_limiter" if partitioned else "limiter"
+        assert options[limiter] == {"limit": 10, "period": 60.0}
+        assert options["on_conflict"] == "always_update"
+
+
+class TestFifoStartup:
+    @pytest.mark.parametrize("existing_empty", [False, True])
+    def test_a_fresh_sqlite_database_needs_no_legacy_inspection(
+        self, tmp_path, monkeypatch, existing_empty
+    ):
+        from app.modules.work.contracts import LaneOrder
+
+        path = tmp_path / "fresh.sqlite"
+        if existing_empty:
+            path.touch()
+        engine = _engine(Lane(LaneName.DERIVE_NATIVE, 1, queue_order=LaneOrder.FIFO))
+        engine.url = f"sqlite:///{path}"
+
+        def forbidden_client(**kwargs):
+            raise AssertionError("fresh database has no persisted queue")
+
+        monkeypatch.setattr(dbos_engine, "DBOSClient", forbidden_client)
+        engine._require_fifo_queues_drained()
+
+    @pytest.mark.parametrize("case", ["legacy", "overflow", "query_failure"])
+    def test_unverified_persisted_queue_fails_closed(self, tmp_path, monkeypatch, case):
+        from types import SimpleNamespace
+
+        from app.modules.work.contracts import LaneOrder
+
+        path = tmp_path / "existing.sqlite"
+        path.write_bytes(b"existing system database")
+        engine = _engine(Lane(LaneName.DERIVE_NATIVE, 1, queue_order=LaneOrder.FIFO))
+        engine.url = f"sqlite:///{path}"
+        destroyed = []
+        calls = []
+
+        class Client:
+            def __init__(self, **options):
+                assert options["lazy"] is True
+                assert options["retry_connection_errors"] is False
+                assert options["observability_query_timeout_sec"] == 5
+
+            def list_workflows(self, **options):
+                calls.append(options)
+                assert options["limit"] <= 100
+                assert options["load_input"] is False
+                assert options["load_output"] is False
+                if case == "query_failure":
+                    raise OSError("corrupt system database")
+                if case == "legacy":
+                    return [SimpleNamespace(priority=1000)]
+                return [SimpleNamespace(priority=1) for _ in range(options["limit"])]
+
+            def destroy(self):
+                destroyed.append(True)
+
+        monkeypatch.setattr(dbos_engine, "DBOSClient", Client)
+
+        with pytest.raises(RuntimeError, match="derivation_queue_requires_drain"):
+            engine._require_fifo_queues_drained()
+
+        assert destroyed == [True]
+        assert len(calls) <= 5
+
+    def test_neutral_persisted_queue_is_inspected_without_payloads(
+        self, tmp_path, monkeypatch
+    ):
+        from types import SimpleNamespace
+
+        from app.modules.work.contracts import LaneOrder
+
+        path = tmp_path / "existing.sqlite"
+        path.write_bytes(b"existing system database")
+        engine = _engine(Lane(LaneName.DERIVE_NATIVE, 1, queue_order=LaneOrder.FIFO))
+        engine.url = f"sqlite:///{path}"
+        destroyed = []
+        calls = []
+
+        class Client:
+            def __init__(self, **options):
+                assert options["system_database_url"] == engine.url
+
+            def list_workflows(self, **options):
+                calls.append(options)
+                return [SimpleNamespace(priority=1)]
+
+            def destroy(self):
+                destroyed.append(True)
+
+        monkeypatch.setattr(dbos_engine, "DBOSClient", Client)
+        engine._require_fifo_queues_drained()
+
+        assert destroyed == [True]
+        assert {call["queue_name"] for call in calls} == {
+            LaneName.DERIVE_NATIVE.value,
+            LaneName.DERIVE_LIGHT.value,
+        }
+        assert all(
+            call["status"] == ["ENQUEUED", "DELAYED", "PENDING"] for call in calls
+        )
+        assert all(
+            call["load_input"] is False and call["load_output"] is False
+            for call in calls
+        )
+
+
+class TestFifoPostgresStartup:
+    def test_an_absent_schema_is_fresh(self, monkeypatch):
+        engine = _engine(schema="dbos")
+        engine.url = "postgresql+psycopg://vault:pw@localhost/vault"
+        disposed = []
+        inspected = []
+
+        class Database:
+            def dispose(self):
+                disposed.append(True)
+
+        database = Database()
+
+        def create(url, **options):
+            assert url == engine.url
+            assert options["connect_args"]["connect_timeout"] == 5
+            return database
+
+        class Inspector:
+            def has_schema(self, schema):
+                inspected.append(schema)
+                return False
+
+        monkeypatch.setattr(dbos_engine, "create_engine", create)
+        monkeypatch.setattr(dbos_engine, "inspect", lambda value: Inspector())
+
+        def forbidden_client(**kwargs):
+            raise AssertionError("absent schema has no persisted queues")
+
+        monkeypatch.setattr(dbos_engine, "DBOSClient", forbidden_client)
+        engine._require_fifo_queues_drained()
+
+        assert inspected == ["dbos"]
+        assert disposed == [True]
+
+    def test_schema_inspection_failure_fails_closed(self, monkeypatch):
+        engine = _engine(schema="dbos")
+        engine.url = "postgresql+psycopg://vault:pw@localhost/vault"
+        disposed = []
+
+        class Database:
+            def dispose(self):
+                disposed.append(True)
+
+        class Inspector:
+            def has_schema(self, schema):
+                raise OSError("database unavailable")
+
+        monkeypatch.setattr(
+            dbos_engine, "create_engine", lambda *args, **kw: Database()
+        )
+        monkeypatch.setattr(dbos_engine, "inspect", lambda value: Inspector())
+
+        with pytest.raises(RuntimeError, match="derivation_queue_requires_drain"):
+            engine._require_fifo_queues_drained()
+
+        assert disposed == [True]
+
+
+class TestReset:
+    def test_refuses_postgres_without_a_system_schema(self, monkeypatch):
+        engine = _engine()
+        engine.url = "postgresql+psycopg://vault:pw@db:5432/vault"
+        monkeypatch.setattr(engine, "shutdown", lambda: None)
+
+        with pytest.raises(ValueError, match="engine_requires_system_schema"):
+            engine.reset()

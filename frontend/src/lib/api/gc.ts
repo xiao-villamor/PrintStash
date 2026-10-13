@@ -1,4 +1,4 @@
-import { getJson, sendJson } from "@/lib/api/request";
+import { getJson, requestApi, jsonHeaders, type GetJsonOptions } from "@/lib/api/request";
 
 export type GcPlanState =
   | "preview"
@@ -31,22 +31,52 @@ export interface GcPlan {
   items: GcPlanItem[];
 }
 
-export function getActiveGcPlan(): Promise<GcPlan | null> {
-  return getJson<GcPlan | null>("/api/v1/admin/gc", { fresh: true });
+export function getActiveGcPlan(options: GetJsonOptions = {}): Promise<GcPlan | null> {
+  return getJson<GcPlan | null>("/api/v1/admin/gc", { ...options });
 }
 
-export function createGcPlan(): Promise<GcPlan> {
-  return sendJson<GcPlan>("/api/v1/admin/gc", "POST", {});
+export function createGcPlan(options: Pick<GetJsonOptions, "signal"> = {}): Promise<GcPlan> {
+  return requestApi<GcPlan>("/api/v1/admin/gc", {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
 }
 
-export function approveGcPlan(id: number, digest: string): Promise<GcPlan> {
-  return sendJson<GcPlan>(`/api/v1/admin/gc/${id}/approve`, "POST", { digest });
+export function approveGcPlan(
+  id: number,
+  digest: string,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<GcPlan> {
+  return requestApi<GcPlan>(`/api/v1/admin/gc/${id}/approve`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ digest }),
+    signal: options.signal,
+  });
 }
 
-export function abortGcPlan(id: number): Promise<GcPlan> {
-  return sendJson<GcPlan>(`/api/v1/admin/gc/${id}/abort`, "POST", {});
+export function abortGcPlan(
+  id: number,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<GcPlan> {
+  return requestApi<GcPlan>(`/api/v1/admin/gc/${id}/abort`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
 }
 
-export function finalizeGcPlan(id: number): Promise<GcPlan> {
-  return sendJson<GcPlan>(`/api/v1/admin/gc/${id}/finalize`, "POST", {});
+export function finalizeGcPlan(
+  id: number,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<GcPlan> {
+  return requestApi<GcPlan>(`/api/v1/admin/gc/${id}/finalize`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
 }

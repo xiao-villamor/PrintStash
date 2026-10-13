@@ -77,7 +77,7 @@ def get_shared_stl(
     f = share.share_file_or_404(session, link, file_id)
     if f.file_type not in _MESH_TYPES:
         raise HTTPException(status_code=404, detail="not_found")
-    return stl_response(f, request, DeliveryPurpose.PUBLIC_SHARE)
+    return stl_response(session, f, request, DeliveryPurpose.PUBLIC_SHARE)
 
 
 @router.get(

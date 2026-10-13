@@ -171,3 +171,101 @@ describe("createCompletionChainedPoller", () => {
     expect(request).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("polling consumer lifecycle", () => {
+  it("starts only one delayed polling chain", async () => {
+    vi.useFakeTimers();
+    const results: string[] = [];
+    const request = vi.fn<() => Promise<string>>().mockResolvedValue("done");
+    const poller = createCompletionChainedPoller({
+      request,
+      intervalMs: 100,
+      shouldContinue: () => false,
+      onResult: (value) => results.push(value),
+    });
+    poller.start();
+    poller.start();
+    await vi.advanceTimersByTimeAsync(99);
+    expect(request).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(results).toEqual(["done"]);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+  it("forces polling until explicitly stopped", async () => {
+    vi.useFakeTimers();
+    const results: string[] = [];
+    const poller = createCompletionChainedPoller({
+      request: async () => "done",
+      intervalMs: 100,
+      shouldContinue: (_result, forced) => forced,
+      onResult: (value) => results.push(value),
+    });
+    poller.start(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(results).toEqual(["done", "done"]);
+    poller.stop();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(results).toEqual(["done", "done"]);
+  });
+  it("stops when a result callback disposes its consumer", async () => {
+    vi.useFakeTimers();
+    const results: string[] = [];
+    const poller = createCompletionChainedPoller({
+      request: async () => "ready",
+      intervalMs: 100,
+      shouldContinue: () => true,
+      onResult: (value) => {
+        results.push(value);
+        poller.stop();
+      },
+    });
+    poller.refresh();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(results).toEqual(["ready"]);
+  });
+  it("suppresses errors from retired polling work", async () => {
+    vi.useFakeTimers();
+    const old = Promise.withResolvers<string>();
+    const errors: Error[] = [];
+    const results: string[] = [];
+    const request = vi
+      .fn<() => Promise<string>>()
+      .mockReturnValueOnce(old.promise)
+      .mockResolvedValue("current");
+    const poller = createCompletionChainedPoller({
+      request,
+      intervalMs: 100,
+      shouldContinue: () => false,
+      onResult: (value) => results.push(value),
+      onError: (error) => errors.push(error),
+    });
+    poller.refresh();
+    poller.stop();
+    poller.start();
+    old.reject(new Error("obsolete"));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(errors).toEqual([]);
+    expect(results).toEqual(["current"]);
+  });
+  it("reports an opaque polling rejection safely", async () => {
+    vi.useFakeTimers();
+    const errors: Error[] = [];
+    const results: string[] = [];
+    const request = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce("private remote details")
+      .mockResolvedValue("recovered");
+    const poller = createCompletionChainedPoller({
+      request,
+      intervalMs: 100,
+      shouldContinue: () => false,
+      onResult: (value) => results.push(value),
+      onError: (error) => errors.push(error),
+    });
+    poller.refresh();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(errors).toEqual([new Error("Polling request failed.")]);
+    expect(results).toEqual(["recovered"]);
+  });
+});

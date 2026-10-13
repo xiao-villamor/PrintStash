@@ -293,3 +293,47 @@ class TestVaultAuditResults:
         assert db_session.exec(select(NotificationDelivery)).all() == []
         db_session.refresh(run)
         assert run.result_recorded is False
+
+
+class TestDisabledRepairs:
+    def test_disabled_derivative_repair_keeps_the_audit_finding_open(
+        self,
+        db_session,
+        make_user,
+        make_model,
+        make_file,
+        make_audit_run,
+        make_audit_finding,
+        make_system_config,
+    ):
+        import hashlib
+
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from tests.factories.content import binary_stl
+
+        content = binary_stl()
+        key = "disabled-audit.stl"
+        get_backend().write_bytes(content, key)
+        file = make_file(
+            make_model(),
+            filename="part.stl",
+            path=key,
+            size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+        )
+        make_system_config(derivatives_mesh_enabled=False)
+        run = make_audit_run(
+            make_user(),
+            repair_actions_json='["reparse_metadata"]',
+            finished_at=utcnow(),
+        )
+        finding = make_audit_finding(
+            run,
+            code="metadata_missing",
+            repair_action="reparse_metadata",
+            details_json=json.dumps({"file_id": file.id}),
+        )
+        repair_safe_findings(db_session, run)
+        db_session.refresh(finding)
+        assert finding.state is VaultAuditFindingState.OPEN
+        assert db_session.exec(select(VaultAuditEvent)).all() == []

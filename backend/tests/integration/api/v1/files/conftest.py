@@ -15,8 +15,9 @@ from typing import Any
 import pytest
 from sqlmodel import Session
 
-from app.db.models import File, Model
+from app.db.models import File, FileType, Model
 from app.modules.storage.storage_backend.runtime import get_backend
+from tests.factories.library import build_file, build_model
 
 
 @pytest.fixture
@@ -24,11 +25,9 @@ def make_model(db_session: Session):
     def build(
         slug: str, *, name: str = "M", hash_: str | None = None, **fields: Any
     ) -> Model:
-        row = Model(name=name, slug=slug, hash=hash_ or f"{slug:h<64}"[:64], **fields)
-        db_session.add(row)
-        db_session.commit()
-        db_session.refresh(row)
-        return row
+        if hash_ is not None:
+            fields["hash"] = hash_
+        return build_model(db_session, name=name, slug=slug, **fields)
 
     return build
 
@@ -42,23 +41,22 @@ def make_file(db_session: Session):
         ftype: str = "stl",
         path: str | None = None,
         size_bytes: int = 10,
-        sha256: str = "a" * 64,
+        sha256: str | None = None,
         **fields: Any,
     ) -> File:
-        row = File(
-            model_id=model.id,
+        if sha256 is not None:
+            fields["sha256"] = sha256
+        external = fields.pop("is_external", False)
+        return build_file(
+            db_session,
+            model,
+            filename=filename,
+            file_type=FileType(ftype),
             path=path or f"/nonexistent/{filename}",
-            original_filename=filename,
-            file_type=ftype,
-            version=1,
             size_bytes=size_bytes,
-            sha256=sha256,
+            external=external,
             **fields,
         )
-        db_session.add(row)
-        db_session.commit()
-        db_session.refresh(row)
-        return row
 
     return build
 

@@ -1,6 +1,6 @@
 {
   "name": "printstash-frontend",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -25,7 +25,9 @@
     "test:e2e:real": "playwright test --config=playwright.real.config.ts && playwright test --config=playwright.onboarding.config.ts && PLAYWRIGHT_ONBOARDING_LOST_RESPONSE=1 playwright test --config=playwright.onboarding.config.ts && playwright test --config=playwright.environment-admin.config.ts && playwright test --config=playwright.migration.config.ts && playwright test --config=playwright.ai-search.config.ts",
     "test:e2e:pr": "playwright test --config=playwright.real.config.ts --grep @pr-smoke",
     "test:e2e:critical": "playwright test --config=playwright.real.config.ts --grep @critical && playwright test --config=playwright.storage.config.ts --grep @critical && playwright test --config=playwright.critical-backup.config.ts --grep @critical",
-    "test:e2e:storage": "playwright test --config=playwright.storage.config.ts && playwright test --config=playwright.delivery.config.ts",
+    "test:e2e:storage": "playwright test --config=playwright.storage.config.ts && playwright test --config=playwright.storage-presets.config.ts && playwright test --config=playwright.delivery.config.ts",
+    "perf:accept": "node scripts/library-performance/accept.mjs",
+    "test:startup": "playwright test --config=playwright.startup.config.ts",
     "test:perf": "playwright test --config=playwright.performance.config.ts",
     "test:perf:react-compiler": "PERF_BUILD_MODE=react-compiler playwright test --config=playwright.performance.config.ts",
     "test:frontend": "node scripts/frontend-smoke.mjs",
@@ -34,7 +36,8 @@
     "media:readme": "node scripts/generate-readme-media.mjs",
     "lint:fix": "oxlint --fix --deny-warnings",
     "format": "oxfmt .",
-    "format:check": "oxfmt --check ."
+    "format:check": "oxfmt --check .",
+    "test:mesh": "playwright test --config=playwright.mesh.config.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -46,11 +49,11 @@
     "@printstash/ui": "workspace:*",
     "@radix-ui/react-icons": "^1.3.2",
     "@radix-ui/react-separator": "^1.1.8",
-    "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.6.1",
+    "@react-three/drei": "^10.7.9",
+    "@react-three/fiber": "^9.8.1",
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-query-devtools": "^5.101.0",
-    "@types/three": "0.182.0",
+    "@types/three": "0.186.0",
     "lucide-react": "^1.17.0",
     "pdfjs-dist": "5.4.296",
     "react": "^19.2.7",
@@ -62,7 +65,7 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
-    "three": "0.182.0",
+    "three": "0.186.1",
     "three-stdlib": "^2.36.1"
   },
   "devDependencies": {
@@ -99,7 +102,7 @@
   "packageManager": "pnpm@10.18.1",
   "pnpm": {
     "overrides": {
-      "three": "0.182.0"
+      "three": "0.186.1"
     }
   }
 }

@@ -78,6 +78,10 @@ _EXPORT_CSV_FIELDS = [
     "bbox_z_mm",
     "volume_mm3",
     "triangle_count",
+    "volume_state",
+    "volume_unit",
+    "volume_method",
+    "volume_cause",
 ]
 
 
@@ -317,6 +321,7 @@ def export_csv(payload: dict) -> str:
         tags = ",".join(model["tags"])
         for file_row in model["files"]:
             metadata = file_row.get("metadata") or {}
+            volume = metadata["volume_measurement"] if metadata else None
             writer.writerow(
                 {
                     "model_id": model["id"],
@@ -366,6 +371,18 @@ def export_csv(payload: dict) -> str:
                     "bbox_z_mm": _csv_cell(metadata.get("bbox_z_mm")),
                     "volume_mm3": _csv_cell(metadata.get("volume_mm3")),
                     "triangle_count": _csv_cell(metadata.get("triangle_count")),
+                    "volume_state": _csv_cell(
+                        volume["state"] if volume is not None else None
+                    ),
+                    "volume_unit": _csv_cell(
+                        volume["unit"] if volume is not None else None
+                    ),
+                    "volume_method": _csv_cell(
+                        volume["method"] if volume is not None else None
+                    ),
+                    "volume_cause": _csv_cell(
+                        volume["cause"] if volume is not None else None
+                    ),
                 }
             )
     return out.getvalue()

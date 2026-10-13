@@ -1,6 +1,6 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { ExternalLink } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -10,15 +10,11 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  deleteModelSourceCover,
-  getModelProvenance,
-  getModelSourceCover,
-  getModelSourceCoverContentPath,
-  patchModelProvenance,
-  putModelSourceCover,
-  updateModel as updateModelApi,
-} from "@/lib/api";
-import { invalidateCachedAsset } from "@/lib/asset-cache";
+  sourceApi,
+  useSourceEditing,
+  type SourceCommand,
+  type SourceApi,
+} from "@/features/library/provenance";
 import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
 import { toast } from "@/lib/toast";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
@@ -31,25 +27,7 @@ import type {
 } from "@/types";
 import { provenanceOriginKey, type ProvenanceOrigin } from "@printstash/domain";
 
-export interface SourceTabApi {
-  getProvenance: typeof getModelProvenance;
-  patchProvenance: typeof patchModelProvenance;
-  getCover: typeof getModelSourceCover;
-  putCover: typeof putModelSourceCover;
-  deleteCover: typeof deleteModelSourceCover;
-  getCoverContentPath: typeof getModelSourceCoverContentPath;
-  updateModel: typeof updateModelApi;
-}
-
-const sourceTabApi: SourceTabApi = {
-  getProvenance: getModelProvenance,
-  patchProvenance: patchModelProvenance,
-  getCover: getModelSourceCover,
-  putCover: putModelSourceCover,
-  deleteCover: deleteModelSourceCover,
-  getCoverContentPath: getModelSourceCoverContentPath,
-  updateModel: updateModelApi,
-};
+type SubmitSource = ReturnType<typeof useSourceEditing>["submit"];
 
 const LABELS = {
   title: "source.field.title",
@@ -81,22 +59,20 @@ function provenanceOriginLabel(
 }
 
 function SourceField({
-  modelId,
   source,
   field,
   canEdit,
-  patchProvenance,
-  updateModel,
-  onSaved,
+  blocked,
+  snapshot,
+  submit,
   last = false,
 }: {
-  modelId: number;
   source: ProvenanceSourceRead;
   field: ProvenanceFieldRead;
   canEdit: boolean;
-  patchProvenance: typeof patchModelProvenance;
-  updateModel: typeof updateModelApi;
-  onSaved: (next: ModelProvenanceRead) => void;
+  blocked: boolean;
+  snapshot: ModelProvenanceRead;
+  submit: SubmitSource;
   last?: boolean;
 }) {
   useUiLocale();
@@ -107,27 +83,39 @@ function SourceField({
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(field.effective_value);
   const [restoreOpen, setRestoreOpen] = useState(false);
+  const [base, setBase] = useState(snapshot);
+  const finish = () => {
+    setRestoreOpen(false);
+    setEditing(false);
+  };
   const save = () =>
-    void patchProvenance(modelId, source.id, {
-      overrides: { [field.field_name]: value },
-      clear_overrides: [],
-    })
-      .then((next) => {
-        onSaved(next);
-        setEditing(false);
-      })
-      .catch(toast.error);
-  const restore = () =>
-    void patchProvenance(modelId, source.id, {
-      overrides: {},
-      clear_overrides: [field.field_name],
-    })
-      .then((next) => {
-        onSaved(next);
-        setRestoreOpen(false);
-        setEditing(false);
-      })
-      .catch(toast.error);
+    submit(
+      {
+        kind: "override",
+        sourceId: source.id,
+        payload: {
+          overrides: { [field.field_name]: value },
+          clear_overrides: [],
+        },
+      },
+      base,
+      finish,
+    );
+  const restore = () => {
+    setRestoreOpen(false);
+    submit(
+      {
+        kind: "override",
+        sourceId: source.id,
+        payload: {
+          overrides: {},
+          clear_overrides: [field.field_name],
+        },
+      },
+      base,
+      finish,
+    );
+  };
   const isLink = field.field_name === "creator_url" || field.field_name === "license_url";
   const safeLink = isLink ? safeHttpUrl(field.effective_value) : null;
   const applyToModel = () => {
@@ -135,9 +123,7 @@ function SourceField({
       field.field_name === "title"
         ? { name: field.effective_value }
         : { description: field.effective_value };
-    void updateModel(modelId, payload)
-      .then(() => toast.success(t("source.modelUpdated")))
-      .catch(toast.error);
+    submit({ kind: "apply", payload }, snapshot, () => {});
   };
   return (
     <div
@@ -152,17 +138,19 @@ function SourceField({
       {editing ? (
         <div className="space-y-2">
           <Input
+            disabled={blocked || !canEdit}
             value={value}
             onChange={(event) => setValue(event.target.value)}
             aria-label={t("source.override", { label })}
           />
           <div className="flex flex-wrap gap-2">
-            <Button size="xs" onClick={save}>
+            <Button size="xs" disabled={blocked || !canEdit} onClick={save}>
               {t("source.save")}
             </Button>
             <Button
               size="xs"
               variant="outline"
+              disabled={blocked}
               onClick={() => {
                 setValue(field.effective_value);
                 setEditing(false);
@@ -171,7 +159,12 @@ function SourceField({
               {t("source.cancel")}
             </Button>
             {field.user_override_set && (
-              <Button size="xs" variant="ghost" onClick={() => setRestoreOpen(true)}>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={blocked || !canEdit}
+                onClick={() => setRestoreOpen(true)}
+              >
                 {t("source.restore")}
               </Button>
             )}
@@ -213,7 +206,11 @@ function SourceField({
                 size="xs"
                 variant="ghost"
                 aria-label={t("source.editField", { field: label })}
-                onClick={() => setEditing(true)}
+                onClick={() => {
+                  setValue(field.effective_value);
+                  setBase(snapshot);
+                  setEditing(true);
+                }}
               >
                 {t("source.edit")}
               </Button>
@@ -235,6 +232,7 @@ function SourceField({
         title={t("source.restoreTitle")}
         description={t("source.restoreDescription")}
         confirmLabel={t("source.restoreConfirm")}
+        busy={blocked}
         onConfirm={restore}
       />
     </div>
@@ -271,12 +269,18 @@ function SourceCover({
   modelId,
   source,
   canEdit,
+  blocked,
+  snapshot,
+  submit,
   api,
 }: {
   modelId: number;
   source: ProvenanceSourceRead;
   canEdit: boolean;
-  api: SourceTabApi;
+  api: SourceApi;
+  blocked: boolean;
+  snapshot: ModelProvenanceRead;
+  submit: SubmitSource;
 }) {
   useUiLocale();
   const i18n = useOptionalI18n();
@@ -296,47 +300,25 @@ function SourceCover({
       | "source.coverEmpty"
       | "source.coverUnavailable",
   ) => i18n?.t(key) ?? uiText(key);
-  const [cover, setCover] = useState<ModelSourceCoverRead | null>(null);
-  const [busy, setBusy] = useState<"upload" | "delete" | null>(null);
+  const cover = source.cover;
+  const [deleteBase, setDeleteBase] = useState(snapshot);
   const [replaceOpen, setReplaceOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const pendingFile = useRef<File | null>(null);
+  const pendingFile = useRef<{ file: File; base: ModelProvenanceRead } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const contentPath = api.getCoverContentPath(modelId, source.id);
-  const imageUrl = useAuthenticatedAssetUrl(cover ? contentPath : null);
 
-  useEffect(() => {
-    let active = true;
-    void api
-      .getCover(modelId, source.id)
-      .then((next) => {
-        if (active) setCover(next);
-      })
-      // Covers are optional and private. A missing or unauthorized cover must
-      // not disclose anything in the Source tab.
-      .catch(() => {
-        if (active) setCover(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [api, modelId, source.id]);
-
-  const upload = (file: File) => {
-    setBusy("upload");
-    void api
-      .putCover(modelId, source.id, file)
-      .then((next) => {
-        invalidateCachedAsset(contentPath);
-        setCover(next);
-        pendingFile.current = null;
-        setReplaceOpen(false);
-      })
-      .catch(toast.error)
-      .finally(() => setBusy(null));
+  const finish = () => {
+    pendingFile.current = null;
+    setReplaceOpen(false);
+    setDeleteOpen(false);
+  };
+  const upload = (file: File, base: ModelProvenanceRead) => {
+    setReplaceOpen(false);
+    submit({ kind: "upload", sourceId: source.id, file }, base, finish);
   };
   const selectFile = (file: File | undefined) => {
-    if (!file) return;
+    if (!file || blocked || !canEdit) return;
     if (!ACCEPTED_COVER_TYPES.has(file.type)) {
       toast.error(t("source.coverInvalid"));
       return;
@@ -346,23 +328,15 @@ function SourceCover({
       return;
     }
     if (cover) {
-      pendingFile.current = file;
+      pendingFile.current = { file, base: snapshot };
       setReplaceOpen(true);
     } else {
-      upload(file);
+      upload(file, snapshot);
     }
   };
   const remove = () => {
-    setBusy("delete");
-    void api
-      .deleteCover(modelId, source.id)
-      .then(() => {
-        invalidateCachedAsset(contentPath);
-        setCover(null);
-        setDeleteOpen(false);
-      })
-      .catch(toast.error)
-      .finally(() => setBusy(null));
+    setDeleteOpen(false);
+    submit({ kind: "delete", sourceId: source.id }, deleteBase, finish);
   };
 
   return (
@@ -376,13 +350,7 @@ function SourceCover({
       <div className="overflow-hidden rounded border border-outline-variant bg-surface">
         <div className="flex flex-col gap-2 px-3 py-2.5 @lg/source:flex-row @lg/source:items-center @lg/source:justify-between">
           <p className="text-sm text-on-surface-variant" aria-live="polite" role="status">
-            {busy === "upload"
-              ? t("source.coverUpload")
-              : busy === "delete"
-                ? t("source.coverDelete")
-                : cover
-                  ? t("source.coverAvailable")
-                  : t("source.coverEmpty")}
+            {cover ? t("source.coverAvailable") : t("source.coverEmpty")}
           </p>
           {canEdit && (
             <div className="flex flex-wrap gap-2">
@@ -400,7 +368,7 @@ function SourceCover({
               <Button
                 size="xs"
                 variant="outline"
-                loading={busy === "upload"}
+                disabled={blocked}
                 onClick={() => inputRef.current?.click()}
               >
                 {cover ? t("source.coverReplace") : t("source.coverUpload")}
@@ -409,8 +377,11 @@ function SourceCover({
                 <Button
                   size="xs"
                   variant="destructive"
-                  loading={busy === "delete"}
-                  onClick={() => setDeleteOpen(true)}
+                  disabled={blocked}
+                  onClick={() => {
+                    setDeleteBase(snapshot);
+                    setDeleteOpen(true);
+                  }}
                 >
                   {t("source.coverDelete")}
                 </Button>
@@ -420,15 +391,11 @@ function SourceCover({
         </div>
         {cover && (
           <div className="border-t border-surface-container-high bg-surface-container-low p-3">
-            {imageUrl ? (
-              <img
-                src={imageUrl}
-                alt={`${t("source.cover")} - ${source.provider}`}
-                className="max-h-64 w-full rounded object-contain"
-              />
-            ) : (
-              <p className="text-sm text-muted-foreground">{t("source.coverUnavailable")}</p>
-            )}
+            <SourceCoverImage
+              cover={cover}
+              path={contentPath}
+              alt={`${t("source.cover")} - ${source.provider}`}
+            />
           </div>
         )}
       </div>
@@ -441,9 +408,9 @@ function SourceCover({
         title={t("source.coverReplaceTitle")}
         description={t("source.coverReplaceDescription")}
         confirmLabel={t("source.coverReplace")}
-        busy={busy === "upload"}
+        busy={blocked}
         onConfirm={() => {
-          if (pendingFile.current) upload(pendingFile.current);
+          if (pendingFile.current) upload(pendingFile.current.file, pendingFile.current.base);
         }}
       />
       <ConfirmModal
@@ -452,7 +419,7 @@ function SourceCover({
         title={t("source.coverDeleteTitle")}
         description={t("source.coverDeleteDescription")}
         confirmLabel={t("source.coverDelete")}
-        busy={busy === "delete"}
+        busy={blocked}
         onConfirm={remove}
       />
     </section>
@@ -481,38 +448,99 @@ function SourceIdentityRow({
   );
 }
 
-export function SourceTab({
+export function SourceTab(props: { modelId: number; canEdit: boolean; api?: SourceApi }) {
+  return <SourceTabContent key={props.modelId} {...props} />;
+}
+
+function SourceTabContent({
   modelId,
   canEdit,
-  api = sourceTabApi,
+  api = sourceApi,
 }: {
   modelId: number;
   canEdit: boolean;
-  api?: SourceTabApi;
+  api?: SourceApi;
 }) {
   useUiLocale();
   const i18n = useOptionalI18n();
   const t = (key: MessageKey, values?: Record<string, string>) =>
     i18n?.t(key, values) ?? uiText(key, values);
-  const [data, setData] = useState<ModelProvenanceRead | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    void api
-      .getProvenance(modelId)
-      .then(setData)
-      .catch(() => setFailed(true));
-  }, [api, modelId]);
-  if (!data && !failed)
+  const editor = useSourceEditing(modelId, api);
+  const { data, state } = editor;
+  if (!editor.active) return null;
+  if (editor.denied || (!data && editor.query.isError))
+    return (
+      <div role="alert" className="space-y-3">
+        <p>{uiText("Couldn’t load this model")}</p>
+        <Button
+          variant="outline"
+          loading={editor.reviewing || editor.query.isFetching}
+          onClick={() => (state.phase === "blocked" ? void editor.review() : editor.retryRead())}
+        >
+          {uiText("Retry")}
+        </Button>
+      </div>
+    );
+  if (!data)
     return (
       <div className="space-y-3">
         <Skeleton className="h-20 w-full" />
         <Skeleton className="h-40 w-full" />
       </div>
     );
-  if (failed || !data?.sources.length)
-    return <EmptyState title={t("source.emptyTitle")} description={t("source.emptyDescription")} />;
+  const blocked = state.phase !== "idle";
+  const editable = canEdit && !editor.editDenied && !blocked;
+  const reviewed = state.phase === "blocked" ? state.reviewed : null;
   return (
     <div className="@container/source space-y-8">
+      {editor.query.isError && (
+        <div role="alert">
+          <p>{uiText("Couldn’t load this model")}</p>
+          <Button onClick={editor.retryRead}>{uiText("Retry")}</Button>
+        </div>
+      )}
+      {state.phase === "blocked" && (
+        <div role="alert" className="space-y-3 rounded border border-border bg-muted p-3 text-sm">
+          <p>
+            {uiText(
+              state.problem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
+            )}
+          </p>
+          <Button variant="outline" loading={editor.reviewing} onClick={() => void editor.review()}>
+            {uiText("library.reviewLatest")}
+          </Button>
+          {reviewed && (
+            <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+              <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
+              <SourceReview
+                modelId={modelId}
+                api={api}
+                command={state.pending.command}
+                model={reviewed.model}
+                data={reviewed.provenance}
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="outline"
+                  disabled={editor.reviewing}
+                  onClick={() => void editor.adopt()}
+                >
+                  {uiText("library.useLatest")}
+                </Button>
+                <Button
+                  disabled={!canEdit || editor.editDenied || editor.reviewing}
+                  onClick={editor.retry}
+                >
+                  {uiText("library.retryDraft")}
+                </Button>
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+      {!data.sources.length && (
+        <EmptyState title={t("source.emptyTitle")} description={t("source.emptyDescription")} />
+      )}
       {data.sources.map((source) => {
         const canonicalUrl = safeHttpUrl(source.canonical_url);
         const fieldCount = source.fields.length + (source.tags?.length ? 1 : 0);
@@ -564,7 +592,15 @@ export function SourceTab({
                 </SourceIdentityRow>
               </dl>
             </section>
-            <SourceCover modelId={modelId} source={source} canEdit={canEdit} api={api} />
+            <SourceCover
+              modelId={modelId}
+              source={source}
+              canEdit={editable}
+              blocked={blocked}
+              snapshot={data}
+              submit={editor.submit}
+              api={api}
+            />
             {fieldCount > 0 && (
               <section aria-labelledby={`metadata-heading-${source.id}`}>
                 <h2
@@ -578,13 +614,12 @@ export function SourceTab({
                   {source.fields.map((field, index) => (
                     <SourceField
                       key={field.field_name}
-                      modelId={modelId}
                       source={source}
                       field={field}
-                      canEdit={canEdit}
-                      patchProvenance={api.patchProvenance}
-                      updateModel={api.updateModel}
-                      onSaved={setData}
+                      canEdit={editable}
+                      blocked={blocked}
+                      snapshot={data}
+                      submit={editor.submit}
                       last={index === source.fields.length - 1}
                     />
                   ))}
@@ -595,5 +630,74 @@ export function SourceTab({
         );
       })}
     </div>
+  );
+}
+
+function SourceReview({
+  modelId,
+  api,
+  command,
+  model,
+  data,
+}: {
+  modelId: number;
+  api: SourceApi;
+  command: SourceCommand;
+  model: import("@/types").ModelRead;
+  data: ModelProvenanceRead;
+}) {
+  if (command.kind === "apply")
+    return <p>{"name" in command.payload ? model.name : model.description}</p>;
+  const source = data.sources.find((item) => item.id === command.sourceId);
+  if (!source) return <p>{uiText("source.emptyTitle")}</p>;
+  if (command.kind === "override")
+    return (
+      <dl>
+        {source.fields
+          .filter(
+            (field) =>
+              Object.hasOwn(command.payload.overrides, field.field_name) ||
+              command.payload.clear_overrides.includes(field.field_name),
+          )
+          .map((field) => (
+            <div key={field.field_name}>
+              <dt>{uiText(LABELS[field.field_name])}</dt>
+              <dd className="whitespace-pre-wrap">{field.effective_value}</dd>
+            </div>
+          ))}
+      </dl>
+    );
+  return (
+    <div className="space-y-2">
+      <p>{uiText(source.cover ? "source.coverAvailable" : "source.coverEmpty")}</p>
+      {source.cover && (
+        <SourceCoverImage
+          cover={source.cover}
+          path={api.getCoverContentPath(modelId, source.id)}
+          alt={uiText("source.cover")}
+        />
+      )}
+    </div>
+  );
+}
+
+function SourceCoverImage({
+  cover,
+  path,
+  alt,
+}: {
+  cover: ModelSourceCoverRead;
+  path: string;
+  alt: string;
+}) {
+  // Metadata identifies the displayed bytes. A reviewed replacement must not
+  // reuse a blob fetched for the old cover at the same content endpoint.
+  const imageUrl = useAuthenticatedAssetUrl(
+    `${path}?v=${cover.id}-${encodeURIComponent(cover.updated_at)}`,
+  );
+  return imageUrl ? (
+    <img src={imageUrl} alt={alt} className="max-h-64 w-full rounded object-contain" />
+  ) : (
+    <p className="text-sm text-muted-foreground">{uiText("source.coverUnavailable")}</p>
   );
 }

@@ -21,7 +21,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -31,7 +31,10 @@ import {
 } from "@/components/external-libraries-panel";
 import { ApiError } from "@/lib/errors";
 import { aJob as aSharedJob, aStorageConnection } from "@/test-support/factories";
-import { renderApp } from "@/test-support/render";
+import { renderApp, json, memberSession } from "@/test-support/render";
+import * as taskCenter from "@/lib/task-center";
+import { clearLogin } from "@/lib/auth-store";
+import { aVaultConfig } from "@/test-support/factories";
 import type {
   ExternalLibrary,
   ExternalLibraryCreate,
@@ -59,6 +62,8 @@ function aSummary(over: Partial<ExternalLibraryScanSummary> = {}): ExternalLibra
 
 function aVolume(over: Partial<ExternalLibrary> = {}): ExternalLibrary {
   return {
+    edit_epoch: "a".repeat(32),
+    edit_version: 1,
     id: 7,
     name: "NAS models",
     root_path: "/mnt/nas/3d",
@@ -96,8 +101,17 @@ function aJob(over: Partial<JobStatus> = {}): JobStatus {
  */
 function stubApi(over: Partial<ExternalLibrariesApi> = {}): ExternalLibrariesApi {
   return {
-    isFeatureEnabled: vi.fn<() => Promise<boolean>>().mockResolvedValue(true),
-    setFeatureEnabled: vi.fn<(enabled: boolean) => Promise<void>>().mockResolvedValue(undefined),
+    getConfig: vi
+      .fn<ExternalLibrariesApi["getConfig"]>()
+      .mockResolvedValue(aVaultConfig({ external_libraries_enabled: true })),
+    updateConfig: vi
+      .fn<ExternalLibrariesApi["updateConfig"]>()
+      .mockImplementation(async (payload, options) =>
+        aVaultConfig({
+          external_libraries_enabled: payload.external_libraries_enabled ?? true,
+          edit_version: (options?.base?.edit_version ?? 1) + 1,
+        }),
+      ),
     list: vi.fn<() => Promise<ExternalLibrary[]>>().mockResolvedValue([aVolume()]),
     enroll: vi
       .fn<(id: number, body: { confirm_root_path: string }) => Promise<ExternalLibrary>>()
@@ -112,22 +126,33 @@ function stubApi(over: Partial<ExternalLibrariesApi> = {}): ExternalLibrariesApi
     scan: vi
       .fn<(id: number) => Promise<JobAccepted>>()
       .mockResolvedValue({ job_id: "job-1", state: "queued", message: "queued" }),
-    jobStatus: vi.fn<(id: string) => Promise<JobStatus>>().mockResolvedValue(aJob()),
+    listConnections: vi.fn<ExternalLibrariesApi["listConnections"]>().mockResolvedValue([]),
     ...over,
   };
 }
 
-function renderPanel(over: Partial<ExternalLibrariesApi> = {}, canEdit = true) {
-  const api = stubApi(over);
-  const result = renderApp(<ExternalLibrariesPanel canEdit={canEdit} api={api} />);
+function renderPanel(
+  over: Partial<ExternalLibrariesApi> & { jobStatus?: (id: string) => Promise<JobStatus> } = {},
+  canEdit = true,
+) {
+  const { jobStatus, ...ports } = over;
+  const api = stubApi(ports);
+  const result = renderApp(<ExternalLibrariesPanel canEdit={canEdit} api={api} />, {
+    routes: {
+      "GET /api/v1/jobs": async () => json([await (jobStatus ?? (async () => aJob()))("job-1")]),
+    },
+  });
   return { ...result, api };
 }
 
 beforeEach(() => {
   window.localStorage.clear();
+  taskCenter.resetTasksForNewSetup();
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
+  taskCenter.resetTasksForNewSetup();
   vi.unstubAllGlobals();
 });
 
@@ -137,7 +162,9 @@ describe("ExternalLibrariesPanel", () => {
       // Rendering the "off" state first and correcting it makes an enabled
       // vault flicker through a screen saying it has no library sources.
       renderPanel({
-        isFeatureEnabled: vi.fn<() => Promise<boolean>>().mockReturnValue(new Promise(() => {})),
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockReturnValue(new Promise(() => {})),
       });
 
       expect(screen.queryByRole("switch")).toBeNull();
@@ -145,7 +172,9 @@ describe("ExternalLibrariesPanel", () => {
 
     it("reads as off when the vault has it disabled", async () => {
       renderPanel({
-        isFeatureEnabled: vi.fn<() => Promise<boolean>>().mockResolvedValue(false),
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValue(aVaultConfig({ external_libraries_enabled: false })),
       });
 
       const toggle = await screen.findByRole("switch");
@@ -154,11 +183,15 @@ describe("ExternalLibrariesPanel", () => {
 
     it("presents sources as externally owned indexes", async () => {
       renderPanel({
-        isFeatureEnabled: vi.fn<() => Promise<boolean>>().mockResolvedValue(false),
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValue(aVaultConfig({ external_libraries_enabled: false })),
       });
 
       expect(await screen.findByText("Library sources")).toBeInTheDocument();
-      expect(screen.getByText(/without copying them into Vault storage/)).toBeInTheDocument();
+      expect(
+        await screen.findByText(/without copying them into Vault storage/),
+      ).toBeInTheDocument();
       expect(screen.getByText(/never deleted by PrintStash/)).toBeInTheDocument();
     });
 
@@ -166,22 +199,169 @@ describe("ExternalLibrariesPanel", () => {
       // Volumes are only fetched once the feature is on, so a disabled vault
       // never asks the server about folders it will not mirror.
       const { api } = renderPanel({
-        isFeatureEnabled: vi.fn<() => Promise<boolean>>().mockResolvedValue(false),
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValue(aVaultConfig({ external_libraries_enabled: false })),
       });
 
       await screen.findByRole("switch");
       expect(api.list).not.toHaveBeenCalled();
     });
 
+    it("sends the observed configuration base when enabling sources", async () => {
+      const { api } = renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValue(aVaultConfig({ edit_version: 4, external_libraries_enabled: false })),
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      await waitFor(() =>
+        expect(api.updateConfig).toHaveBeenCalledWith(
+          { external_libraries_enabled: true },
+          expect.objectContaining({
+            base: { edit_epoch: aVaultConfig().edit_epoch, edit_version: 4 },
+          }),
+        ),
+      );
+    });
+    it.each([412, 503])("%s: reviews a rejected source toggle before retrying", async (status) => {
+      const updateConfig = vi
+        .fn<ExternalLibrariesApi["updateConfig"]>()
+        .mockRejectedValueOnce(new Error(`HTTP ${status}: {"detail":"edit_conflict"}`))
+        .mockResolvedValue(aVaultConfig({ edit_version: 3, external_libraries_enabled: true }));
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValueOnce(aVaultConfig({ external_libraries_enabled: false }))
+          .mockResolvedValue(aVaultConfig({ edit_version: 2, external_libraries_enabled: false })),
+        updateConfig,
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      const review = await screen.findByRole("button", { name: "Review latest version" });
+      expect(screen.getByRole("switch", { name: "Library sources enabled" })).toBeDisabled();
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+      await userEvent.click(review);
+      await userEvent.click(
+        await screen.findByRole("button", { name: "Save my draft against this version" }),
+      );
+      await waitFor(() =>
+        expect(screen.getByRole("switch", { name: "Library sources enabled" })).toHaveAttribute(
+          "aria-checked",
+          "true",
+        ),
+      );
+      expect(updateConfig).toHaveBeenLastCalledWith(
+        { external_libraries_enabled: true },
+        expect.objectContaining({
+          base: { edit_epoch: aVaultConfig().edit_epoch, edit_version: 2 },
+        }),
+      );
+    });
+    it("retains a blocked source toggle when review fails", async () => {
+      const updateConfig = vi
+        .fn<ExternalLibrariesApi["updateConfig"]>()
+        .mockRejectedValue(new Error('HTTP 412: {"detail":"edit_conflict"}'));
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValueOnce(aVaultConfig({ external_libraries_enabled: false }))
+          .mockRejectedValue(new Error('HTTP 503: {"detail":"unavailable"}')),
+        updateConfig,
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByText("Library source settings could not be loaded.");
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("switch", { name: "Library sources enabled" })).toBeDisabled();
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+    });
+    it("adopts the reviewed source setting without another write", async () => {
+      const updateConfig = vi
+        .fn<ExternalLibrariesApi["updateConfig"]>()
+        .mockRejectedValue(new Error('HTTP 412: {"detail":"edit_conflict"}'));
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValueOnce(aVaultConfig({ external_libraries_enabled: false }))
+          .mockResolvedValue(aVaultConfig({ edit_version: 2, external_libraries_enabled: true })),
+        updateConfig,
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Use latest version" }));
+      expect(screen.getByRole("switch", { name: "Library sources enabled" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      expect(screen.getByRole("switch", { name: "Library sources enabled" })).toBeEnabled();
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+    });
+    it("hides source review after access is denied", async () => {
+      const updateConfig = vi
+        .fn<ExternalLibrariesApi["updateConfig"]>()
+        .mockRejectedValue(new Error('HTTP 412: {"detail":"edit_conflict"}'));
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValueOnce(aVaultConfig({ external_libraries_enabled: false }))
+          .mockRejectedValue(new Error('HTTP 403: {"detail":"forbidden"}')),
+        updateConfig,
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByText("Library source settings could not be loaded.");
+      expect(
+        screen.queryByRole("switch", { name: "Library sources enabled" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+    });
+    it("retires a pending source review on logout", async () => {
+      const pending = Promise.withResolvers<ReturnType<typeof aVaultConfig>>();
+      const updateConfig = vi
+        .fn<ExternalLibrariesApi["updateConfig"]>()
+        .mockRejectedValue(new Error('HTTP 412: {"detail":"edit_conflict"}'));
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValueOnce(aVaultConfig({ external_libraries_enabled: false }))
+          .mockReturnValue(pending.promise),
+        updateConfig,
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Library sources enabled" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await act(async () => {
+        clearLogin();
+        pending.resolve(aVaultConfig({ edit_version: 2, external_libraries_enabled: true }));
+      });
+      expect(
+        screen.queryByRole("region", { name: "Latest saved version" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(updateConfig).toHaveBeenCalledTimes(1);
+    });
     it("enables the feature when the operator turns it on", async () => {
       const user = userEvent.setup();
       const { api } = renderPanel({
-        isFeatureEnabled: vi.fn<() => Promise<boolean>>().mockResolvedValue(false),
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValue(aVaultConfig({ external_libraries_enabled: false })),
       });
 
       await user.click(await screen.findByRole("switch"));
 
-      await waitFor(() => expect(api.setFeatureEnabled).toHaveBeenCalledWith(true));
+      await waitFor(() =>
+        expect(api.updateConfig).toHaveBeenCalledWith(
+          { external_libraries_enabled: true },
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
     });
 
     it("puts the switch back when the server refuses", async () => {
@@ -189,9 +369,11 @@ describe("ExternalLibrariesPanel", () => {
       // operator only discovers when nothing scans.
       const user = userEvent.setup();
       renderPanel({
-        isFeatureEnabled: vi.fn<() => Promise<boolean>>().mockResolvedValue(false),
-        setFeatureEnabled: vi
-          .fn<(enabled: boolean) => Promise<void>>()
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockResolvedValue(aVaultConfig({ external_libraries_enabled: false })),
+        updateConfig: vi
+          .fn<ExternalLibrariesApi["updateConfig"]>()
           .mockRejectedValue(new Error("nope")),
       });
 
@@ -319,7 +501,11 @@ describe("ExternalLibrariesPanel", () => {
       await user.click(screen.getByRole("button", { name: "Enroll root" }));
 
       await waitFor(() =>
-        expect(api.enroll).toHaveBeenCalledWith(7, { confirm_root_path: "/mnt/nas/3d" }),
+        expect(api.enroll).toHaveBeenCalledWith(
+          7,
+          { confirm_root_path: "/mnt/nas/3d" },
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
       );
     });
 
@@ -336,7 +522,7 @@ describe("ExternalLibrariesPanel", () => {
       await user.click(await screen.findByRole("button", { name: "Enroll root" }));
 
       expect(await screen.findByText("Root verified. Rescan to resume indexing.")).toBeVisible();
-      await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2));
+      expect(api.list).toHaveBeenCalledTimes(1);
     });
 
     it("surfaces an enrollment refusal", async () => {
@@ -418,7 +604,11 @@ describe("ExternalLibrariesPanel", () => {
       await user.selectOptions(screen.getAllByRole("combobox")[0], "0 0 * * *");
 
       await waitFor(() =>
-        expect(api.update).toHaveBeenCalledWith(7, { scan_schedule: "0 0 * * *" }),
+        expect(api.update).toHaveBeenCalledWith(
+          7,
+          { scan_schedule: "0 0 * * *" },
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
       );
     });
 
@@ -429,7 +619,13 @@ describe("ExternalLibrariesPanel", () => {
 
       await user.click(screen.getByRole("switch", { name: "Auto-scan enabled" }));
 
-      await waitFor(() => expect(api.update).toHaveBeenCalledWith(7, { enabled: false }));
+      await waitFor(() =>
+        expect(api.update).toHaveBeenCalledWith(
+          7,
+          { enabled: false },
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
     });
   });
 
@@ -487,7 +683,12 @@ describe("ExternalLibrariesPanel", () => {
 
       await user.click(screen.getByRole("button", { name: /Scan now/ }));
 
-      await waitFor(() => expect(api.scan).toHaveBeenCalledWith(7));
+      await waitFor(() =>
+        expect(api.scan).toHaveBeenCalledWith(
+          7,
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
     });
 
     it("reports success only once the job has terminated", async () => {
@@ -589,13 +790,16 @@ describe("ExternalLibrariesPanel", () => {
       await user.click(screen.getByRole("button", { name: /Add source/ }));
 
       await waitFor(() =>
-        expect(api.create).toHaveBeenCalledWith({
-          name: "Attic NAS",
-          root_path: "/mnt/attic",
-          scan_schedule: "0 * * * *",
-          watch_mode: "auto",
-          collection_mode: "mirror",
-        }),
+        expect(api.create).toHaveBeenCalledWith(
+          {
+            name: "Attic NAS",
+            root_path: "/mnt/attic",
+            scan_schedule: "0 * * * *",
+            watch_mode: "auto",
+            collection_mode: "mirror",
+          },
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
       );
     });
 
@@ -635,16 +839,19 @@ describe("ExternalLibrariesPanel", () => {
       await user.click(screen.getByRole("button", { name: /Add source/ }));
 
       await waitFor(() =>
-        expect(api.create).toHaveBeenCalledWith({
-          name: "Remote catalogue",
-          root_path: undefined,
-          scan_schedule: "0 * * * *",
-          watch_mode: "off",
-          collection_mode: "mirror",
-          source_kind: "s3",
-          connection_id: 41,
-          source_prefix: "production",
-        }),
+        expect(api.create).toHaveBeenCalledWith(
+          {
+            name: "Remote catalogue",
+            root_path: undefined,
+            scan_schedule: "0 * * * *",
+            watch_mode: "off",
+            collection_mode: "mirror",
+            source_kind: "s3",
+            connection_id: 41,
+            source_prefix: "production",
+          },
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
       );
     });
 
@@ -662,6 +869,7 @@ describe("ExternalLibrariesPanel", () => {
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
           expect.objectContaining({ name: "Attic", root_path: "/mnt/attic" }),
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
         ),
       );
     });
@@ -679,6 +887,7 @@ describe("ExternalLibrariesPanel", () => {
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
           expect.objectContaining({ collection_mode: "single" }),
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
         ),
       );
     });
@@ -696,6 +905,7 @@ describe("ExternalLibrariesPanel", () => {
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
           expect.objectContaining({ scan_schedule: "0 */2 * * *" }),
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
         ),
       );
     });
@@ -751,46 +961,348 @@ describe("ExternalLibrariesPanel", () => {
 
       await user.click(await screen.findByRole("button", { name: "Remove" }));
 
-      await waitFor(() => expect(api.remove).toHaveBeenCalledWith(7));
+      await waitFor(() =>
+        expect(api.remove).toHaveBeenCalledWith(
+          7,
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
+      );
     });
   });
 
-  describe("a viewer who cannot administer the vault", () => {
-    it("offers no way to turn the feature on", async () => {
-      renderPanel({}, false);
+  describe("read ownership and command lifetimes", () => {
+    it("keeps failed configuration visibly unavailable", async () => {
+      renderPanel({
+        getConfig: vi
+          .fn<ExternalLibrariesApi["getConfig"]>()
+          .mockRejectedValue(new ApiError(503, "Unavailable", "unavailable")),
+      });
 
-      const [featureToggle] = await screen.findAllByRole("switch");
-      expect(featureToggle).toBeDisabled();
+      expect(await screen.findByRole("alert")).toHaveTextContent(/could not|unavailable/i);
+      expect(screen.queryByRole("switch")).toBeNull();
     });
+    it("distinguishes failed source reads from empty sources", async () => {
+      renderPanel({
+        list: vi
+          .fn<ExternalLibrariesApi["list"]>()
+          .mockRejectedValue(new ApiError(503, "Unavailable", "unavailable")),
+      });
 
-    it("offers no way to scan a volume", async () => {
-      renderPanel({}, false);
-
-      expect(await screen.findByRole("button", { name: /Scan now/ })).toBeDisabled();
+      expect(await screen.findByRole("alert")).toHaveTextContent(/could not|unavailable/i);
+      expect(screen.queryByText("No library sources yet")).toBeNull();
+      expect(screen.getByRole("button", { name: /Retry/i })).toBeEnabled();
     });
+    it("recovers source reads without an empty-state claim", async () => {
+      renderPanel({
+        list: vi
+          .fn<ExternalLibrariesApi["list"]>()
+          .mockRejectedValueOnce(new ApiError(503, "Unavailable", "unavailable"))
+          .mockResolvedValue([aVolume()]),
+      });
+      const retry = await screen.findByRole("button", { name: "Retry" });
+      expect(screen.queryByText("No library sources yet")).toBeNull();
 
-    it("offers no way to remove one", async () => {
-      renderPanel({}, false);
+      await userEvent.click(retry);
 
-      expect(await screen.findByRole("button", { name: "Remove library source" })).toBeDisabled();
+      expect(await screen.findByText("NAS models")).toBeVisible();
+      expect(screen.queryByRole("alert")).toBeNull();
     });
-
-    it("offers no per-volume schedule controls", async () => {
-      // The per-volume row is not merely disabled — a viewer who cannot change
-      // a schedule is never shown the control for it. Only the add-a-folder
-      // form below stays on screen, disabled.
-      renderPanel({}, false);
-
+    it("preserves healthy source rows read-only during transient failure", async () => {
+      const api = stubApi({
+        list: vi
+          .fn<ExternalLibrariesApi["list"]>()
+          .mockResolvedValueOnce([aVolume()])
+          .mockRejectedValueOnce(new ApiError(503, "Unavailable", "unavailable"))
+          .mockResolvedValue([aVolume()]),
+      });
+      const app = renderApp(<ExternalLibrariesPanel canEdit api={api} />);
       await screen.findByText("NAS models");
-      expect(screen.getAllByRole("combobox")).toHaveLength(4);
+
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: ["library-sources"] });
+      });
+
+      await screen.findByRole("alert");
+      expect(screen.getByText("NAS models")).toBeVisible();
+      expect(screen.getByRole("button", { name: "Scan now" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Add source" })).toBeDisabled();
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Scan now" })).toBeEnabled());
     });
+    it("hides denied private source state", async () => {
+      const api = stubApi({
+        list: vi
+          .fn<ExternalLibrariesApi["list"]>()
+          .mockResolvedValueOnce([aVolume()])
+          .mockRejectedValueOnce(new ApiError(403, "Forbidden", "forbidden"))
+          .mockResolvedValue([aVolume()]),
+      });
+      const app = renderApp(<ExternalLibrariesPanel canEdit api={api} />);
+      await screen.findByText("NAS models");
+      await userEvent.click(screen.getByRole("button", { name: "Remove library source" }));
+      await screen.findByRole("dialog");
 
-    it("still shows what each volume is doing", async () => {
-      // Read-only means read-only, not blind: the status is the whole reason a
-      // non-admin opens this panel.
-      renderPanel({}, false);
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: ["library-sources"] });
+      });
 
-      expect(await screen.findByText("Watching (real-time)")).toBeInTheDocument();
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Library sources could not be loaded.",
+      );
+      expect(screen.queryByText("NAS models")).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(await screen.findByText("NAS models")).toBeVisible();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    it("shares current compatible connection projections", async () => {
+      const old = aStorageConnection({
+        id: 4,
+        name: "Old connection",
+        kind: "s3",
+        purpose: "library",
+      });
+      const current = aStorageConnection({
+        id: 5,
+        name: "Current connection",
+        kind: "s3",
+        purpose: "library",
+      });
+      const api = stubApi({
+        listConnections: vi.fn<ExternalLibrariesApi["listConnections"]>().mockResolvedValue([old]),
+      });
+      const app = renderApp(<ExternalLibrariesPanel canEdit api={api} />);
+      await screen.findByText("NAS models");
+      await userEvent.selectOptions(screen.getByLabelText("Library source type"), "s3");
+      expect(await screen.findByRole("option", { name: "Old connection" })).toBeInTheDocument();
+
+      await act(async () => app.client.setQueryData(["storage-connections"], [current]));
+
+      expect(await screen.findByRole("option", { name: "Current connection" })).toBeInTheDocument();
+      expect(screen.queryByRole("option", { name: "Old connection" })).toBeNull();
+      expect(
+        app.client.getQueryCache().findAll({ queryKey: ["storage-connections"] }),
+      ).toHaveLength(1);
+    });
+    it("preserves a refused source removal", async () => {
+      renderPanel({
+        remove: vi
+          .fn<ExternalLibrariesApi["remove"]>()
+          .mockRejectedValue(new ApiError(409, "Remove refused", "remove_refused")),
+      });
+      await screen.findByText("NAS models");
+      await userEvent.click(screen.getByRole("button", { name: "Remove library source" }));
+      await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+      await waitFor(() =>
+        expect(screen.getByRole("dialog")).toHaveTextContent(
+          "Something went wrong reaching the server.",
+        ),
+      );
+      expect(screen.getByText("NAS models")).toBeVisible();
+      expect(screen.getByRole("dialog")).toBeVisible();
+    });
+    it("reports honest member capability", async () => {
+      const api = stubApi();
+      renderApp(<ExternalLibrariesPanel canEdit={false} api={api} />, { auth: memberSession() });
+
+      expect(await screen.findByText(/Superuser access is required/)).toBeVisible();
+      expect(screen.queryByText("NAS models")).toBeNull();
+      expect(api.list).not.toHaveBeenCalled();
+      expect(api.getConfig).not.toHaveBeenCalled();
+    });
+    it("hides private source rows immediately after permission loss", async () => {
+      const api = stubApi();
+      const app = renderApp(<ExternalLibrariesPanel canEdit api={api} />);
+      await screen.findByText("NAS models");
+      await userEvent.click(screen.getByRole("button", { name: "Remove library source" }));
+      await screen.findByRole("dialog");
+
+      app.rerender(<ExternalLibrariesPanel canEdit={false} api={api} />);
+
+      expect(screen.queryByText("NAS models")).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    it("preserves a newer create draft", async () => {
+      const receipt = Promise.withResolvers<ExternalLibrary>();
+      renderPanel({
+        create: vi.fn<ExternalLibrariesApi["create"]>().mockReturnValue(receipt.promise),
+      });
+      await screen.findByText("NAS models");
+      await userEvent.type(screen.getByLabelText("Source name"), "First source");
+      await userEvent.type(screen.getByLabelText("Mounted folder path"), "/mnt/first");
+      await userEvent.click(screen.getByRole("button", { name: "Add source" }));
+      await userEvent.clear(screen.getByLabelText("Source name"));
+      await userEvent.type(screen.getByLabelText("Source name"), "Next source");
+
+      await act(async () => receipt.resolve(aVolume({ id: 8, name: "First source" })));
+
+      expect(screen.getByLabelText("Source name")).toHaveValue("Next source");
+      expect(await screen.findByText("First source")).toBeVisible();
+    });
+    it("rejects a retired create acknowledgement", async () => {
+      const receipt = Promise.withResolvers<ExternalLibrary>();
+      renderPanel({
+        create: vi.fn<ExternalLibrariesApi["create"]>().mockReturnValue(receipt.promise),
+      });
+      await screen.findByText("NAS models");
+      await userEvent.type(screen.getByLabelText("Source name"), "Retired source");
+      await userEvent.type(screen.getByLabelText("Mounted folder path"), "/mnt/old");
+      await userEvent.click(screen.getByRole("button", { name: "Add source" }));
+
+      await act(async () => {
+        clearLogin();
+        receipt.resolve(aVolume({ id: 8, name: "Retired source" }));
+      });
+
+      expect(screen.queryByText("Library source added.")).toBeNull();
+      expect(screen.queryByText("NAS models")).toBeNull();
+    });
+    it("aborts a disposed native source read", async () => {
+      let delivered: AbortSignal | null | undefined;
+      const app = renderApp(<ExternalLibrariesPanel canEdit />, {
+        routes: {
+          "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+          "GET /api/v1/libraries": (_url, options) => {
+            delivered = options?.signal;
+            return new Promise(() => {});
+          },
+        },
+      });
+      await waitFor(() => expect(delivered).toBeTruthy());
+
+      app.unmount();
+
+      expect(delivered).toMatchObject({ aborted: true });
     });
   });
+});
+
+describe("Source editing preconditions", () => {
+  it.each([412, 503])("%s: reviews a source intent before revising", async (status) => {
+    const original = aVolume();
+    const latest = aVolume({
+      name: "Other administrator",
+      scan_schedule: "0 0 * * *",
+      edit_version: 2,
+    });
+    let reads = 0;
+    const headers: Headers[] = [];
+    const app = renderApp(<ExternalLibrariesPanel canEdit />, {
+      routes: {
+        "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+        "GET /api/v1/storage-connections": json([]),
+        "GET /api/v1/libraries": () => json([++reads === 1 ? original : latest]),
+        "PATCH /api/v1/libraries/7": (_url, init) => {
+          headers.push(new Headers(init?.headers));
+          return headers.length === 1
+            ? json({ detail: "edit_conflict" }, status)
+            : json({ ...latest, enabled: false, edit_version: 3 });
+        },
+      },
+    });
+    await userEvent.click(await screen.findByRole("switch", { name: "Auto-scan enabled" }));
+    await screen.findByRole("button", { name: "Review current values" });
+    expect(screen.getByRole("switch", { name: "Auto-scan enabled" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Auto-scan enabled" })).toBeDisabled();
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+    const preview = await screen.findByRole("region", { name: "Latest saved version" });
+    expect(within(preview).getByText("Other administrator")).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Save revised changes" }));
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "Auto-scan enabled" })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText("Scan schedule Other administrator")).toHaveValue("0 0 * * *");
+    expect(headers.map((value) => value.get("If-Match"))).toEqual([
+      `"library-source-7-e${original.edit_epoch}-v1"`,
+      `"library-source-7-e${original.edit_epoch}-v2"`,
+    ]);
+    expect(app.requestsWithMethod("PATCH").map((request) => JSON.parse(request.body))).toEqual([
+      { enabled: false },
+      { enabled: false },
+    ]);
+  });
+  it("adopts current source values after a replaced preview", async () => {
+    let reads = 0;
+    const app = renderApp(<ExternalLibrariesPanel canEdit />, {
+      routes: {
+        "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+        "GET /api/v1/storage-connections": json([]),
+        "GET /api/v1/libraries": () =>
+          json([
+            aVolume({
+              name:
+                ++reads === 1
+                  ? "Original"
+                  : reads === 2
+                    ? "Replacement preview"
+                    : "Current replacement",
+              edit_epoch: reads === 1 ? "a".repeat(32) : "b".repeat(32),
+            }),
+          ]),
+        "PATCH /api/v1/libraries/7": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(await screen.findByRole("switch", { name: "Auto-scan enabled" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
+    await screen.findByText("Replacement preview");
+    expect(screen.getByRole("button", { name: "Save revised changes" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Use current values" }));
+    await screen.findByText("Current replacement");
+    expect(screen.getByRole("switch", { name: "Auto-scan enabled" })).toBeChecked();
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+  });
+  it.each([403, 404])("%s: retires unavailable source review", async (status) => {
+    const app = renderApp(<ExternalLibrariesPanel canEdit />, {
+      routes: {
+        "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+        "GET /api/v1/storage-connections": json([]),
+        "GET /api/v1/libraries": json([aVolume()]),
+        "PATCH /api/v1/libraries/7": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(await screen.findByRole("switch", { name: "Auto-scan enabled" }));
+    await screen.findByRole("button", { name: "Review current values" });
+    app.route({ "GET /api/v1/libraries": json({ detail: "unavailable" }, status) });
+    await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Review current values" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("NAS models")).not.toBeInTheDocument();
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+  });
+});
+
+describe("Source review lifetime", () => {
+  it.each(["logout", "disposal"] as const)(
+    "discards a held source review on %s",
+    async (retirement) => {
+      const response = Promise.withResolvers<Response>();
+      const app = renderApp(<ExternalLibrariesPanel canEdit />, {
+        routes: {
+          "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+          "GET /api/v1/storage-connections": json([]),
+          "GET /api/v1/libraries": json([aVolume()]),
+          "PATCH /api/v1/libraries/7": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      await userEvent.click(await screen.findByRole("switch", { name: "Auto-scan enabled" }));
+      await screen.findByRole("button", { name: "Review current values" });
+      app.route({ "GET /api/v1/libraries": () => response.promise });
+      await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+      if (retirement === "logout") act(() => clearLogin());
+      else app.unmount();
+      await act(async () =>
+        response.resolve(json([aVolume({ name: "Retired source", edit_version: 2 })])),
+      );
+      expect(screen.queryByText("Retired source")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: "Save revised changes" }),
+      ).not.toBeInTheDocument();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    },
+  );
 });

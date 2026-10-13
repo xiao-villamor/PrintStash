@@ -30,7 +30,8 @@ from app.modules.work.contracts import (
     SubmitOutcome,
 )
 from app.modules.work.jobs import jobs
-from app.modules.work.submission import dedupe_key, execution_id, nudge
+from app.modules.work.submission import dedupe_key, nudge
+from app.modules.work.submission import execution_id as _execution_id
 from tests.contract.modules.work._harness import (
     DISCOVERED,
     FAST,
@@ -47,6 +48,34 @@ from tests.contract.modules.work._harness import (
 )
 
 
+def _epoch(job_id: str) -> str:
+    from app.db.models import Job
+    from app.db.session import get_session_factory
+
+    with get_session_factory().scoped_session() as session:
+        row = session.get(Job, job_id)
+        return row.execution_epoch if row is not None else "engine-contract"
+
+
+def execution_id(job_id: str, attempt: int) -> str:
+    return _execution_id(job_id, attempt, _epoch(job_id))
+
+
+def _wait_for_succeeded(harness: Harness, execution: str) -> None:
+    try:
+        harness.wait_for(
+            lambda: (
+                harness.engine.evidence([execution])[execution].status
+                is EngineStatus.SUCCEEDED
+            ),
+            timeout=30.0,
+        )
+    except AssertionError as exc:
+        raise AssertionError(
+            f"execution did not finish: {harness.engine.evidence([execution])}"
+        ) from exc
+
+
 def _submission(
     job_id: str, definition: JobKind, subject: str, lane: LaneName, **kw
 ) -> JobSubmission:
@@ -60,10 +89,28 @@ def _submission(
         attempt=1,
         routing=Deduplicated(kw.pop("dedupe", dedupe_key(definition, subject))),
         **kw,
+        execution_epoch=_epoch(job_id),
     )
 
 
 class TestRunning:
+    def test_exposes_progress_reported_inside_a_step(self, harness: Harness) -> None:
+        def report(ctx) -> None:
+            ctx.update(stage="archiving", processed=3, total=8)
+
+        job_id = harness.job(PLAIN, "progress/1", behaviour=report)
+        seen: list[tuple[str, str | None, int, int | None]] = []
+        jobs.subscribe(
+            lambda status: seen.append(
+                (status.job_id, status.stage, status.processed, status.total)
+            )
+        )
+
+        work_submission.submit(job_id)
+        harness.settle()
+
+        assert (job_id, "archiving", 3, 8) in seen
+
     def test_runs_a_jobs_steps_in_order_to_completion(self, harness: Harness) -> None:
         job_id = harness.job(PLAIN, "plain/1")
 
@@ -272,11 +319,11 @@ class TestScheduling:
 
     def test_reports_each_lanes_depth(self, harness: Harness) -> None:
         gate = threading.Event()
-        work_submission.submit(
-            harness.job(SERIAL_JOB, "depth/0", behaviour=gated(gate))
-        )
+        first = harness.job(SERIAL_JOB, "depth/0", behaviour=gated(gate))
+        work_submission.submit(first)
         harness.started("depth/0")
-        work_submission.submit(harness.job(SERIAL_JOB, "depth/1"))
+        second = harness.job(SERIAL_JOB, "depth/1")
+        work_submission.submit(second)
 
         depth = harness.engine.lane_depth(SERIAL)
         active = harness.engine.active()
@@ -285,6 +332,10 @@ class TestScheduling:
 
         assert depth.queued + depth.running == 2
         assert len([a for a in active if a.kind is ExecutionKind.JOB]) >= 2
+        # Application terminal state precedes the engine's workflow completion.
+        # Queue depth is engine evidence, so synchronize on those executions.
+        _wait_for_succeeded(harness, execution_id(first, 1))
+        _wait_for_succeeded(harness, execution_id(second, 1))
         after = harness.engine.lane_depth(SERIAL)
         assert (after.queued, after.running) == (0, 0)
 
@@ -319,6 +370,7 @@ class TestCancelling:
         job_id = harness.job(PLAIN, "cancel/done")
         work_submission.submit(job_id)
         harness.settle()
+        _wait_for_succeeded(harness, execution_id(job_id, 1))
 
         harness.engine.cancel(execution_id(job_id, 1))
 
@@ -359,6 +411,7 @@ class TestEvidence:
         job_id = harness.job(PLAIN, "prune/1")
         work_submission.submit(job_id)
         harness.settle()
+        _wait_for_succeeded(harness, execution_id(job_id, 1))
 
         removed = harness.engine.prune_history(older_than=utcnow() + timedelta(days=1))
 

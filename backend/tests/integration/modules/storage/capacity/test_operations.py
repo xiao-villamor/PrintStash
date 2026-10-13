@@ -32,13 +32,16 @@ class TestOperationAdmission:
         self, db_session, make_model, make_file, monkeypatch
     ):
         from app.modules.derivatives import producers
+        from app.modules.media.source_preparation import SourceBatch
 
         artifact = make_file(make_model(), file_type=FileType.STL)
         monkeypatch.setitem(_overlay, "storage_min_free_bytes", 10**18)
         monkeypatch.setattr(
-            producers,
-            "resolve",
-            lambda _file: pytest.fail("artifact materialized without capacity"),
+            SourceBatch,
+            "materialize",
+            lambda *_args, **_kwargs: pytest.fail(
+                "artifact materialized without capacity"
+            ),
         )
         with pytest.raises(OperationError, match="storage_capacity_exceeded"):
             producers._derive_mesh(artifact.id)

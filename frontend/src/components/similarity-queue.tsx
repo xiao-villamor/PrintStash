@@ -1,26 +1,28 @@
 import { useEffect, useState } from "react";
-import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ArrowLeftRight, Box, ScanSearch } from "lucide-react";
 
 import { SimilaritySearch } from "@/components/similarity-search";
+import { CollectionPicker } from "@/components/collection-picker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
-  findModelSimilar,
-  getSimilarityRun,
-  getSimilarityStatus,
-  listSimilarityCandidates,
-} from "@/lib/api/similarity";
-import { listCollections } from "@/lib/api/taxonomy";
-import { collectionDisplayPath } from "@/lib/collection-display";
+  similarityCandidatesOptions,
+  similarityRunOptions,
+  similarityStatusOptions,
+  useSimilarityCommands,
+} from "@/lib/queries/similarity";
+import { getSessionVersion } from "@/lib/session-transport";
+import { uiText } from "@/lib/locale";
 import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import { evidenceDescription, evidenceLabel, isSimilarityRunActive } from "@/lib/similarity";
 import { toast } from "@/lib/toast";
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
+import { useViewportAssetUrl } from "@/lib/use-viewport-admission";
+import type { CollectionNodeRead } from "@/types";
 import {
   EVIDENCE_CLASSES,
   type ReviewState,
@@ -33,7 +35,7 @@ const REVIEW_STATES: ReviewState[] = ["open", "confirmed", "later", "rejected"];
 const FILTER_DEBOUNCE_MS = 250;
 
 function ModelLabel({ model }: { model: SimilarityModel }) {
-  const image = useAuthenticatedAssetUrl(
+  const { url: image, ref } = useViewportAssetUrl(
     model.thumbnail_file_id ? `/api/v1/files/${model.thumbnail_file_id}/thumbnail` : null,
   );
   return (
@@ -41,7 +43,10 @@ function ModelLabel({ model }: { model: SimilarityModel }) {
       href={`/models/${model.id}`}
       className="flex min-w-0 items-center gap-3 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <span className="flex h-10 w-10 sm:h-12 sm:w-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted">
+      <span
+        ref={ref}
+        className="flex h-10 w-10 sm:h-12 sm:w-12 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted"
+      >
         {image ? (
           <img src={image} alt="" className="h-full w-full object-contain" />
         ) : (
@@ -95,41 +100,20 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
     freshness: "current",
   });
   const [threshold, setThreshold] = useState<number | null>(null);
-  const [runId, setRunId] = useState<number | null>(null);
-  const status = useQuery({ queryKey: ["similarity", "status"], queryFn: getSimilarityStatus });
-  const collections = useQuery({
-    queryKey: ["similarity", "collections"],
-    queryFn: () => listCollections(),
-    enabled: modelId === undefined,
-  });
-  const run = useQuery({
-    queryKey: ["similarity", "run", runId],
-    queryFn: () => getSimilarityRun(runId ?? 0),
-    enabled: runId !== null,
-    refetchInterval: (query) =>
-      !query.state.data || isSimilarityRunActive(query.state.data) ? 1500 : false,
-  });
-  const queue = useInfiniteQuery({
-    queryKey: ["similarity", "candidates", modelId, filters],
-    queryFn: ({ pageParam }: { pageParam: string | null }) =>
-      listSimilarityCandidates({
-        ...filters,
-        model_id: modelId,
-        cursor: pageParam ?? undefined,
-        limit: 25,
-      }),
-    initialPageParam: null,
-    getNextPageParam: (page) => page.next_cursor,
-    refetchInterval: run.data && isSimilarityRunActive(run.data) ? 1500 : false,
-  });
-  const find = useMutation({
-    mutationFn: () => findModelSimilar(modelId ?? 0),
-    onSuccess: (result) => {
-      setRunId(result.run.id);
-      void queue.refetch();
-    },
-    onError: toast.error,
-  });
+  const [startedRun, setStartedRun] = useState<{ modelId: number; id: number } | null>(null);
+  const runId = startedRun?.modelId === modelId ? (startedRun?.id ?? null) : null;
+  const [collectionChoice, setCollectionChoice] = useState<CollectionNodeRead | null>(null);
+  const [choosingCollection, setChoosingCollection] = useState(false);
+  const status = useQuery(similarityStatusOptions());
+  const run = useQuery(similarityRunOptions(runId));
+  const queue = useInfiniteQuery(
+    similarityCandidatesOptions(
+      filters,
+      modelId,
+      Boolean(run.data && isSimilarityRunActive(run.data)),
+    ),
+  );
+  const { find } = useSimilarityCommands();
   useEffect(() => {
     if (threshold === null) return;
     const timer = setTimeout(
@@ -170,8 +154,23 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
           </label>
           {modelId !== undefined && (
             <Button
-              onClick={() => find.mutate()}
-              loading={find.isPending}
+              onClick={() => {
+                if (modelId === undefined) throw new Error("A Model is required");
+                const session = getSessionVersion();
+                find.mutate(
+                  { id: modelId, session },
+                  {
+                    onSuccess: (result) => {
+                      if (session === getSessionVersion())
+                        setStartedRun({ modelId, id: result.run.id });
+                    },
+                    onError: (error) => {
+                      if (session === getSessionVersion()) toast.error(error);
+                    },
+                  },
+                );
+              }}
+              loading={find.isPending && find.variables?.id === modelId}
               disabled={!status.data?.enabled}
             >
               {t("similarity.find")}
@@ -247,26 +246,41 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
                 />
               </label>
               {!modelId && (
-                <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
+                <div className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
                   {t("similarity.collection")}
                   <select
                     className="block rounded-md border border-input bg-background p-2 text-sm"
-                    value={filters.collection_id ?? ""}
-                    onChange={(event) =>
-                      setFilters({
-                        ...filters,
-                        collection_id: event.target.value ? Number(event.target.value) : undefined,
-                      })
-                    }
+                    aria-label={t("similarity.collection")}
+                    value={choosingCollection ? "pick" : (filters.collection_id ?? "")}
+                    onChange={(event) => {
+                      if (event.target.value === "pick") setChoosingCollection(true);
+                      else {
+                        setChoosingCollection(false);
+                        setCollectionChoice(null);
+                        setFilters({ ...filters, collection_id: undefined });
+                      }
+                    }}
                   >
                     <option value="">{t("similarity.library")}</option>
-                    {collections.data?.map((row) => (
-                      <option key={row.id} value={row.id}>
-                        {collectionDisplayPath(collections.data ?? [], row.path)}
-                      </option>
-                    ))}
+                    <option value="pick">{uiText("Choose existing collection")}</option>
+                    {collectionChoice && (
+                      <option value={collectionChoice.id}>{collectionChoice.display_path}</option>
+                    )}
                   </select>
-                </label>
+                  {choosingCollection && (
+                    <CollectionPicker
+                      minRole="view"
+                      selectedPath={null}
+                      emptyLabel={uiText("No collections found.")}
+                      onSelect={(collection) => {
+                        if (collection === null) throw new Error("A collection is required");
+                        setCollectionChoice(collection);
+                        setFilters({ ...filters, collection_id: collection.id });
+                        setChoosingCollection(false);
+                      }}
+                    />
+                  )}
+                </div>
               )}
               <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
                 {t("similarity.allFormats")}
@@ -320,6 +334,22 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
             </div>
           </details>
         </div>
+        {status.isError && (
+          <div role="alert" className="border-b p-3 text-sm text-destructive">
+            {t("similarity.loadError")}{" "}
+            <Button variant="ghost" size="sm" onClick={() => void status.refetch()}>
+              {t("similarity.retry")}
+            </Button>
+          </div>
+        )}
+        {run.isError && (
+          <div role="alert" className="border-b p-3 text-sm text-destructive">
+            {t("similarity.loadError")}{" "}
+            <Button variant="ghost" size="sm" onClick={() => void run.refetch()}>
+              {t("similarity.retry")}
+            </Button>
+          </div>
+        )}
         {run.data && (
           <div role="status" className="space-y-1 border-b px-4 py-3 text-sm">
             <p>
@@ -351,7 +381,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
           <p role="status" className="p-6 text-sm text-muted-foreground">
             {t("similarity.loading")}
           </p>
-        ) : queue.isError ? (
+        ) : queue.isError && !queue.data ? (
           <EmptyState
             title={t("similarity.loadError")}
             action={<Button onClick={() => void queue.refetch()}>{t("similarity.retry")}</Button>}
@@ -371,7 +401,20 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
             )}
           />
         )}
-        {queue.hasNextPage && (
+        {queue.isError && queue.data && (
+          <div role="alert" className="space-y-2 border-t p-3 text-sm text-destructive">
+            <p>{t("similarity.loadError")}</p>
+            <Button
+              variant="outline"
+              onClick={() =>
+                void (queue.isFetchNextPageError ? queue.fetchNextPage() : queue.refetch())
+              }
+            >
+              {t("similarity.retry")}
+            </Button>
+          </div>
+        )}
+        {queue.hasNextPage && !queue.isFetchNextPageError && (
           <div className="border-t p-3">
             <Button
               variant="outline"

@@ -26,7 +26,7 @@ import io
 import struct
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -339,34 +339,6 @@ class TestIngestOrca:
             select(Metadata).where(Metadata.file_id == file_row.id)
         ).one()
         assert metadata.file_id == file_row.id
-
-    def test_ingest_orca_stages_upload_in_threadpool(
-        self,
-        tmp_path: Path,
-        client: TestClient,
-        auth_headers: dict[str, str],
-        monkeypatch,
-    ) -> None:
-        use_local_storage(tmp_path)
-        called: dict[str, str] = {}
-
-        async def fake_threadpool(
-            func: Callable[..., Any], *args: Any, **kwargs: Any
-        ) -> Any:
-            called["func"] = func.__name__
-            return func(*args, **kwargs)
-
-        monkeypatch.setattr("app.api.v1.ingest.run_in_threadpool", fake_threadpool)
-
-        response = client.post(
-            "/api/v1/ingest/orca",
-            headers=auth_headers,
-            files={"file": ("sample.gcode", b"G28\n", "text/plain")},
-            data={"model_name": "Threadpool Check"},
-        )
-
-        assert response.status_code == 202
-        assert called == {"func": "_stage_upload"}
 
     def test_ingest_orca_rejects_missing_filename(
         self, client: TestClient, auth_headers: dict[str, str]
@@ -706,35 +678,67 @@ class TestIngestModel:
         )
         file_id = payload["file_id"]
         model_id = payload["model_id"]
-        replacement_buffer = io.BytesIO()
-        Image.new("RGB", (12, 10), (220, 30, 20)).save(replacement_buffer, format="PNG")
-        replacement = replacement_buffer.getvalue()
+        from tests.factories import content
 
-        from app.modules.media.thumbnail_engine import (
-            ThumbnailEngine,
+        replacement = content.rendered_thumbnail(color=(220, 30, 20, 255))
+
+        from printstash_core.mesh.measurements import (
+            VolumeNotCalculated,
+            VolumeNotCalculatedCause,
+        )
+
+        from app.modules.derivatives import producers
+        from app.modules.media.mesh_contracts import (
+            GeometryNotLoaded,
+            GeometryNotRequested,
+            MeshCoverage,
+            PreviewCoverage,
+            SourceScanState,
             ThumbnailResult,
             ThumbnailStrategy,
         )
+        from app.modules.media.mesh_protocol import ThumbnailOutput
 
-        monkeypatch.setattr(
-            ThumbnailEngine,
-            "generate",
-            lambda _engine, _request: ThumbnailResult(
-                image=replacement,
-                geometry={
-                    "bbox_x_mm": None,
-                    "bbox_y_mm": None,
-                    "bbox_z_mm": None,
-                    "volume_mm3": None,
-                    "triangle_count": None,
-                },
-                strategy=ThumbnailStrategy.FULL,
-                complete=True,
-                failure_reason=None,
-                duration_ms=0,
-                peak_rss_bytes=None,
+        # Replace the native boundary while preserving its publication callback.
+        reply = ThumbnailResult(
+            image=replacement,
+            geometry_outcome=GeometryNotRequested(),
+            volume=VolumeNotCalculated(VolumeNotCalculatedCause.NOT_REQUESTED),
+            geometry={
+                "bbox_x_mm": None,
+                "bbox_y_mm": None,
+                "bbox_z_mm": None,
+                "volume_mm3": None,
+                "triangle_count": None,
+            },
+            strategy=ThumbnailStrategy.FULL,
+            coverage=MeshCoverage(
+                SourceScanState.COMPLETE,
+                GeometryNotLoaded(),
+                PreviewCoverage.COMPLETE,
             ),
+            failure_reason=None,
+            duration_ms=0,
+            peak_rss_bytes=None,
         )
+        emitted = []
+
+        def replacement_thumbnail(request, *, on_output):
+            assert request.include_thumbnail
+            assert not request.include_geometry
+            frame = ThumbnailOutput(
+                reply.image,
+                reply.strategy,
+                reply.coverage,
+                reply.failure_reason,
+                reply.duration_ms,
+                reply.peak_rss_bytes,
+            )
+            on_output(frame)
+            emitted.append(frame)
+            return reply
+
+        monkeypatch.setattr(producers.mesh_isolation, "generate", replacement_thumbnail)
 
         response = client.post(
             "/api/v1/admin/work/derivatives/thumbnail/regenerate",
@@ -745,6 +749,8 @@ class TestIngestModel:
         assert response.status_code == 202, response.text
         drain_work()
         db_session.expire_all()
+        assert len(emitted) == 1
+        assert emitted[0].image == replacement
         assert db_session.get(Model, model_id).thumbnail_file_id == file_id
 
         thumbnail = client.get(
@@ -755,7 +761,7 @@ class TestIngestModel:
         with Image.open(io.BytesIO(thumbnail.content)) as refreshed:
             assert refreshed.convert("RGB").getpixel(
                 (refreshed.width // 2, refreshed.height // 2)
-            ) == (220, 30, 20)
+            ) == pytest.approx((220, 30, 20), abs=3)
 
     def test_ingest_refuses_an_upload_when_staging_is_full(
         self,

@@ -3,7 +3,7 @@
 This module intentionally has no FastAPI or database dependencies.  The parent
 process supplies all budgets on the command line and accepts output only when
 the worker exits successfully and writes a complete manifest.  A pass keeps
-only bounded chunk arrays and a tiny deterministic framing reservoir.
+only bounded chunk arrays and exact source bounds.
 """
 
 from __future__ import annotations
@@ -18,13 +18,29 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import TYPE_CHECKING, Callable
 
-_BINARY_HEADER_BYTES = 84
-_BINARY_RECORD_BYTES = 50
-_FLOAT32_MAX = 3.4028234663852886e38
+from app.modules.media.stl_reader import (
+    InvalidSTL as _InvalidSTL,
+)
+from app.modules.media.stl_reader import (
+    STLBudgetExceeded as _BudgetExceeded,
+)
+from app.modules.media.stl_reader import (
+    STLMeasurements,
+    STLReadLimits,
+    STLSourceChanged,
+    STLSourceSnapshot,
+    iter_stl_blocks,
+    snapshot_stl,
+)
+
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
+
+
 _WORKER_VERSION = 1
-_RESERVOIR_SIZE = 4096
 _MAX_RENDER_DIMENSION = 2048
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _MAX_TRIANGLES = 20_000_000
@@ -35,14 +51,6 @@ _MAX_LINES = 10_000_000
 _MAX_LINE_BYTES = 64 * 1024
 _MAX_TIMEOUT_SECONDS = 45.0
 _MAX_ADDRESS_SPACE_BYTES = 512 * 1024 * 1024
-
-
-class _InvalidSTL(Exception):
-    pass
-
-
-class _BudgetExceeded(_InvalidSTL):
-    pass
 
 
 def _apply_worker_limits(
@@ -95,32 +103,11 @@ class _Limits:
 
 @dataclass(frozen=True)
 class _PassStats:
+    snapshot: STLSourceSnapshot
     triangle_count: int
     scanned_bytes: int
     bounds_min: tuple[float, float, float]
     bounds_max: tuple[float, float, float]
-
-
-class _FramingReservoir:
-    """Deterministic bounded reservoir of triangle centroids."""
-
-    def __init__(self) -> None:
-        self.values: list[tuple[float, float, float]] = []
-        self.seen = 0
-        self._state = 0x9E3779B9
-
-    def add(self, centers) -> None:
-        for center in centers:
-            self.seen += 1
-            value = (float(center[0]), float(center[1]), float(center[2]))
-            if len(self.values) < _RESERVOIR_SIZE:
-                self.values.append(value)
-                continue
-            # Deterministic LCG instead of the process-global random module.
-            self._state = (1664525 * self._state + 1013904223) & 0xFFFFFFFF
-            index = self._state % self.seen
-            if index < _RESERVOIR_SIZE:
-                self.values[index] = value
 
 
 def _check_deadline(limits: _Limits) -> None:
@@ -128,222 +115,14 @@ def _check_deadline(limits: _Limits) -> None:
         raise _BudgetExceeded("deadline")
 
 
-def _valid_value(value: float) -> bool:
-    return math.isfinite(value) and abs(value) <= _FLOAT32_MAX
-
-
-def _source_is_binary(path: Path) -> tuple[int, int] | None:
-    try:
-        size = path.stat().st_size
-        if size < _BINARY_HEADER_BYTES:
-            return None
-        with path.open("rb") as stream:
-            header = stream.read(_BINARY_HEADER_BYTES)
-        if len(header) != _BINARY_HEADER_BYTES:
-            return None
-        count = struct.unpack_from("<I", header, 80)[0]
-        if count <= 0 or count > 20_000_000:
-            return None
-        if size != _BINARY_HEADER_BYTES + count * _BINARY_RECORD_BYTES:
-            return None
-        return count, size
-    except (OSError, struct.error):
-        return None
-
-
-def _read_binary(
-    path: Path,
-    limits: _Limits,
-    callback: Callable[[object], None],
-) -> _PassStats:
-    try:
-        import numpy as np
-    except ImportError as exc:  # pragma: no cover - deployment dependency
-        raise _InvalidSTL("numpy unavailable") from exc
-
-    info = _source_is_binary(path)
-    if info is None:
-        raise _InvalidSTL("not an exact binary STL")
-    declared, size = info
-    if declared > limits.max_triangles or size > limits.max_source_bytes:
-        raise _BudgetExceeded("source budget")
-    dtype = np.dtype(
-        [
-            ("normal", "<f4", (3,)),
-            ("vertices", "<f4", (3, 3)),
-            ("attribute", "<u2"),
-        ],
-        align=False,
-    )
-    lower = np.full(3, np.inf, dtype=np.float64)
-    upper = np.full(3, -np.inf, dtype=np.float64)
-    scanned = _BINARY_HEADER_BYTES
-    with path.open("rb") as stream:
-        header = stream.read(_BINARY_HEADER_BYTES)
-        if len(header) != _BINARY_HEADER_BYTES:
-            raise _InvalidSTL("truncated header")
-        parsed = 0
-        while parsed < declared:
-            _check_deadline(limits)
-            count = min(max(limits.chunk_triangles, 1), declared - parsed)
-            raw = stream.read(count * _BINARY_RECORD_BYTES)
-            scanned += len(raw)
-            if len(raw) != count * _BINARY_RECORD_BYTES:
-                raise _InvalidSTL("truncated record")
-            records = np.frombuffer(raw, dtype=dtype, count=count)
-            vertices = records["vertices"]
-            if not np.isfinite(vertices).all():
-                raise _InvalidSTL("non-finite coordinate")
-            callback(vertices)
-            lower = np.minimum(lower, vertices.min(axis=(0, 1)))
-            upper = np.maximum(upper, vertices.max(axis=(0, 1)))
-            parsed += count
-    return _PassStats(
-        triangle_count=parsed,
-        scanned_bytes=scanned,
-        bounds_min=(float(lower[0]), float(lower[1]), float(lower[2])),
-        bounds_max=(float(upper[0]), float(upper[1]), float(upper[2])),
-    )
-
-
-def _parse_float(token: str) -> float:
-    try:
-        value = float(token)
-    except ValueError as exc:
-        raise _InvalidSTL("invalid number") from exc
-    if not _valid_value(value):
-        raise _InvalidSTL("non-finite coordinate")
-    return value
-
-
-def _iter_ascii_facets(
-    stream, limits: _Limits
-) -> Iterator[tuple[tuple[float, float, float], ...]]:
-    state = "outside"
-    vertices: list[tuple[float, float, float]] = []
-    lines = 0
-    scanned = 0
-    saw_facet = False
-    ended = False
-    while True:
-        _check_deadline(limits)
-        if lines >= limits.max_lines:
-            raise _BudgetExceeded("line budget")
-        raw = stream.readline(limits.max_line_bytes + 1)
-        if not raw:
-            break
-        scanned += len(raw)
-        lines += 1
-        if scanned > limits.max_source_bytes:
-            raise _BudgetExceeded("source budget")
-        if len(raw) > limits.max_line_bytes:
-            raise _InvalidSTL("line too long")
-        try:
-            text = raw.decode("ascii").strip()
-        except UnicodeDecodeError as exc:
-            raise _InvalidSTL("non-ascii input") from exc
-        if not text or text.startswith("#") or text.startswith("//"):
-            continue
-        parts = text.split()
-        keyword = parts[0].lower()
-        if state == "outside":
-            if ended:
-                raise _InvalidSTL("content after endsolid")
-            if keyword == "solid":
-                continue
-            if keyword == "facet":
-                if len(parts) != 5 or parts[1].lower() != "normal":
-                    raise _InvalidSTL("invalid facet normal")
-                for token in parts[2:]:
-                    _parse_float(token)
-                state = "facet"
-                saw_facet = True
-                continue
-            if keyword == "endsolid":
-                ended = True
-                continue
-            raise _InvalidSTL("unexpected ASCII STL token")
-        if state == "facet":
-            if keyword != "outer" or len(parts) != 2 or parts[1].lower() != "loop":
-                raise _InvalidSTL("missing outer loop")
-            vertices = []
-            state = "loop"
-            continue
-        if state == "loop":
-            if keyword != "vertex" or len(parts) != 4:
-                raise _InvalidSTL("invalid vertex")
-            vertices.append(
-                (
-                    _parse_float(parts[1]),
-                    _parse_float(parts[2]),
-                    _parse_float(parts[3]),
-                )
-            )
-            if len(vertices) > 3:
-                raise _InvalidSTL("too many vertices")
-            if len(vertices) == 3:
-                state = "endloop"
-            continue
-        if state == "endloop":
-            if keyword != "endloop" or len(parts) != 1:
-                raise _InvalidSTL("missing endloop")
-            state = "endfacet"
-            continue
-        if state == "endfacet":
-            if keyword != "endfacet" or len(parts) != 1:
-                raise _InvalidSTL("missing endfacet")
-            yield (vertices[0], vertices[1], vertices[2])
-            vertices = []
-            state = "outside"
-            continue
-    # ``endsolid`` is required by the formal grammar but a number of slicers
-    # omit it while still emitting complete facets. EOF at a facet boundary is
-    # unambiguous and safe to accept; an unfinished loop/facet remains invalid.
-    if state != "outside" or not saw_facet:
-        raise _InvalidSTL("truncated ASCII STL")
-
-
-def _read_ascii(
-    path: Path,
-    limits: _Limits,
-    callback: Callable[[object], None],
-) -> _PassStats:
-    try:
-        import numpy as np
-    except ImportError as exc:  # pragma: no cover - deployment dependency
-        raise _InvalidSTL("numpy unavailable") from exc
-    lower = np.full(3, np.inf, dtype=np.float64)
-    upper = np.full(3, -np.inf, dtype=np.float64)
-    parsed = 0
-    batch: list[tuple[tuple[float, float, float], ...]] = []
-    with path.open("rb") as stream:
-        for facet in _iter_ascii_facets(stream, limits):
-            _check_deadline(limits)
-            if parsed >= limits.max_triangles:
-                raise _BudgetExceeded("triangle budget")
-            batch.append(facet)
-            vertices = np.asarray(facet, dtype=np.float32)
-            lower = np.minimum(lower, vertices.min(axis=0))
-            upper = np.maximum(upper, vertices.max(axis=0))
-            parsed += 1
-            if len(batch) >= max(limits.chunk_triangles, 1):
-                chunk = np.asarray(batch, dtype=np.float32)
-                if not np.isfinite(chunk).all():
-                    raise _InvalidSTL("non-finite coordinate")
-                callback(chunk)
-                batch.clear()
-        if batch:
-            chunk = np.asarray(batch, dtype=np.float32)
-            if not np.isfinite(chunk).all():
-                raise _InvalidSTL("non-finite coordinate")
-            callback(chunk)
-    if parsed == 0:
-        raise _InvalidSTL("empty ASCII STL")
-    return _PassStats(
-        triangle_count=parsed,
-        scanned_bytes=int(path.stat().st_size),
-        bounds_min=(float(lower[0]), float(lower[1]), float(lower[2])),
-        bounds_max=(float(upper[0]), float(upper[1]), float(upper[2])),
+def _reader_limits(limits: _Limits) -> STLReadLimits:
+    return STLReadLimits(
+        max_triangles=limits.max_triangles,
+        max_source_bytes=limits.max_source_bytes,
+        chunk_triangles=limits.chunk_triangles,
+        max_lines=limits.max_lines,
+        max_line_bytes=limits.max_line_bytes,
+        deadline=limits.deadline,
     )
 
 
@@ -351,16 +130,78 @@ def _read_pass(
     path: Path,
     limits: _Limits,
     callback: Callable[[object], None],
+    *,
+    snapshot: STLSourceSnapshot | None = None,
 ) -> _PassStats:
-    if _source_is_binary(path) is not None:
-        return _read_binary(path, limits, callback)
-    return _read_ascii(path, limits, callback)
+    import numpy as np
+
+    lower = np.full(3, np.inf, dtype=np.float64)
+    upper = np.full(3, -np.inf, dtype=np.float64)
+    parsed = 0
+    source = snapshot if snapshot is not None else snapshot_stl(path)
+    for vertices in iter_stl_blocks(path, _reader_limits(limits), snapshot=source):
+        # Preserve source precision until the relative visual projection.
+        callback(vertices)
+        lower = np.minimum(lower, vertices.min(axis=(0, 1)))
+        upper = np.maximum(upper, vertices.max(axis=(0, 1)))
+        parsed += len(vertices)
+    return _PassStats(
+        source,
+        parsed,
+        source.size,
+        (float(lower[0]), float(lower[1]), float(lower[2])),
+        (float(upper[0]), float(upper[1]), float(upper[2])),
+    )
+
+
+def _reuse_measurements(
+    measured: STLMeasurements, source: STLSourceSnapshot, limits: _Limits
+) -> _PassStats:
+    """Reuse only a complete scan of the current source within preview budgets."""
+    _check_deadline(limits)
+    if not isinstance(measured, STLMeasurements):
+        raise _InvalidSTL("invalid source measurements")
+    if measured.snapshot != source:
+        raise STLSourceChanged("source changed after measurement")
+    if (
+        type(measured.triangle_count) is not int
+        or measured.triangle_count <= 0
+        or type(measured.scanned_bytes) is not int
+        or measured.scanned_bytes != source.size
+    ):
+        raise _InvalidSTL("invalid measured source counts")
+    if measured.triangle_count > limits.max_triangles:
+        raise _BudgetExceeded("triangle budget")
+    if measured.scanned_bytes > limits.max_source_bytes:
+        raise _BudgetExceeded("source budget")
+    if (
+        type(measured.bounds_min) is not tuple
+        or type(measured.bounds_max) is not tuple
+        or len(measured.bounds_min) != 3
+        or len(measured.bounds_max) != 3
+    ):
+        raise _InvalidSTL("invalid measured source bounds")
+    for lower, upper in zip(measured.bounds_min, measured.bounds_max, strict=True):
+        if (
+            type(lower) not in (int, float)
+            or type(upper) not in (int, float)
+            or not math.isfinite(lower)
+            or not math.isfinite(upper)
+            or lower > upper
+        ):
+            raise _InvalidSTL("invalid measured source bounds")
+    return _PassStats(
+        source,
+        measured.triangle_count,
+        measured.scanned_bytes,
+        measured.bounds_min,
+        measured.bounds_max,
+    )
 
 
 def _frame(
     bounds_min: tuple[float, float, float],
     bounds_max: tuple[float, float, float],
-    reservoir: _FramingReservoir,
 ):
     from itertools import product
 
@@ -368,37 +209,29 @@ def _frame(
 
     from app.modules.media.mesh_render import _select_view_rotation
 
-    sampled = np.asarray(reservoir.values, dtype=np.float64)
     exact_min = np.asarray(bounds_min, dtype=np.float64)
     exact_max = np.asarray(bounds_max, dtype=np.float64)
-    if sampled.ndim != 2 or sampled.shape[0] == 0:
-        sampled = np.asarray([exact_min, exact_max], dtype=np.float64)
-    # Percentiles reject a tiny number of finite outliers while preserving the
-    # exact bounds separately for metadata.
-    robust_min = np.percentile(sampled, 0.5, axis=0)
-    robust_max = np.percentile(sampled, 99.5, axis=0)
-    exact_extent = exact_max - exact_min
-    robust_extent = robust_max - robust_min
-    for axis in range(3):
-        if robust_extent[axis] <= max(exact_extent[axis] * 0.01, 1e-9):
-            robust_min[axis] = exact_min[axis]
-            robust_max[axis] = exact_max[axis]
-    center = (robust_min + robust_max) * 0.5
-    corners = np.asarray(list(product(*zip(robust_min, robust_max, strict=True))))
+    center = exact_min + (exact_max - exact_min) * 0.5
+    corners = np.asarray(
+        list(product(*zip(exact_min, exact_max, strict=True))), dtype=np.float64
+    )
     rotation = _select_view_rotation(corners - center, np)
     view_corners = (corners - center) @ rotation.T
     extent_x = max(float(np.ptp(view_corners[:, 0])), 1e-6)
     extent_y = max(float(np.ptp(view_corners[:, 1])), 1e-6)
     projected_mid = (view_corners.max(axis=0) + view_corners.min(axis=0)) * 0.5
-    return (
-        center.astype(np.float32),
-        rotation.astype(np.float32),
-        robust_min,
-        robust_max,
-        projected_mid.astype(np.float32),
-        extent_x,
-        extent_y,
-    )
+    return center, rotation, projected_mid, extent_x, extent_y
+
+
+def _nondegenerate_triangles(
+    view: NDArray[np.float32] | NDArray[np.float64],
+) -> NDArray[np.bool_]:
+    """Classify source facets by differences between their three vertices."""
+    import numpy as np
+
+    raw = np.cross(view[:, 1] - view[:, 0], view[:, 2] - view[:, 0])
+    length = np.linalg.norm(raw, axis=1)
+    return np.isfinite(length) & (length > 1e-12)
 
 
 def _render(
@@ -408,7 +241,6 @@ def _render(
     height: int,
     limits: _Limits,
     first: _PassStats,
-    reservoir: _FramingReservoir,
 ) -> int:
     import io
 
@@ -426,15 +258,12 @@ def _render(
     (
         center,
         rotation,
-        robust_min,
-        robust_max,
         projected_mid,
         extent_x,
         extent_y,
-    ) = _frame(first.bounds_min, first.bounds_max, reservoir)
-    # The robust bounds already discard only the extreme centroid outliers and
-    # the render bounds below retain a 5% safety expansion.  A 10% frame margin
-    # gives small previews useful scale without clipping normal STL geometry.
+    ) = _frame(first.bounds_min, first.bounds_max)
+    # Every finite source facet contributes to the camera bounds. The standard
+    # margin accommodates the complete scene, including small remote components.
     from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
     margin = PREVIEW_PROFILE.margin_fraction
@@ -456,12 +285,6 @@ def _render(
     def shade(normals):
         return np.ones_like(normals, dtype=np.float32)
 
-    robust_span = np.maximum(robust_max - robust_min, 1e-6)
-    # A triangle with an extreme vertex can otherwise expand to the whole frame
-    # and consume the candidate budget. Such facets are omitted from framing,
-    # while the exact source bounds remain available in the manifest.
-    expanded_min = robust_min - robust_span * 0.05
-    expanded_max = robust_max + robust_span * 0.05
     rendered = 0
 
     def draw(vertices) -> None:
@@ -469,29 +292,23 @@ def _render(
         _check_deadline(limits)
         import numpy as np
 
-        tri = np.asarray(vertices, dtype=np.float32)
+        tri = np.asarray(vertices, dtype=np.float64)
+        # Source coordinates remain float64 until translation is removed.
         view = (tri - center) @ rotation.T
-        screen = np.empty_like(view)
+        # Apply the bounded image scale before converting projected coordinates.
+        # Finite source values near float32 max can overflow after rotation.
+        screen = np.empty(view.shape, dtype=np.float32)
         screen[:, :, 0] = (
             view[:, :, 0] - float(projected_mid[0])
         ) * scale + coverage_width * 0.5
         screen[:, :, 1] = (
             coverage_height * 0.5 - (view[:, :, 1] - float(projected_mid[1])) * scale
         )
-        screen[:, :, 2] = view[:, :, 2]
+        screen[:, :, 2] = view[:, :, 2] * scale
         valid = np.isfinite(screen).all(axis=(1, 2))
-        valid &= (tri >= expanded_min).all(axis=(1, 2)) & (tri <= expanded_max).all(
-            axis=(1, 2)
-        )
-        if not valid.any():
-            return
-        tri = tri[valid]
-        screen = screen[valid]
-        raw = np.cross(
-            view[valid, :, 1] - view[valid, :, 0], view[valid, :, 2] - view[valid, :, 0]
-        )
-        length = np.linalg.norm(raw, axis=1)
-        valid_normal = np.isfinite(length) & (length > 1e-12)
+        if not valid.all():
+            raise _InvalidSTL("non-finite projection")
+        valid_normal = _nondegenerate_triangles(view[valid])
         if not valid_normal.any():
             return
         screen = screen[valid_normal]
@@ -520,7 +337,7 @@ def _render(
         ):
             raise _BudgetExceeded("candidate budget")
 
-    second = _read_pass(path, limits, draw)
+    second = _read_pass(path, limits, draw, snapshot=first.snapshot)
     if second.triangle_count != first.triangle_count:
         raise _InvalidSTL("source changed between passes")
     if not np.allclose(first.bounds_min, second.bounds_min, rtol=0, atol=0):
@@ -567,10 +384,10 @@ def _render(
         (down - up) * 0.5,
         np.where(down_ok, down - safe_depth, np.where(up_ok, safe_depth - up, 0.0)),
     )
-    # One screen pixel is 1/scale model units.  Screen rows grow downwards,
-    # hence the sign on the Y component for the view-space normal.
-    slope_x = np.clip(dz_dx * scale, -8.0, 8.0)
-    slope_y = np.clip(dz_drow * scale, -8.0, 8.0)
+    # Depth is scaled into screen units before float32 conversion. Rows grow
+    # downwards, hence the sign on Y for the view-space normal.
+    slope_x = np.clip(dz_dx, -8.0, 8.0)
+    slope_y = np.clip(dz_drow, -8.0, 8.0)
     normals = np.stack((-slope_x, slope_y, np.ones_like(slope_x)), axis=-1)
     normal_length = np.linalg.norm(normals, axis=2, keepdims=True)
     normals /= np.maximum(normal_length, 1e-6)
@@ -652,7 +469,16 @@ def _write_manifest(path: Path, manifest: dict[str, object]) -> None:
     os.replace(temporary, path)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    *,
+    apply_limits: bool = True,
+    measurements: STLMeasurements | None = None,
+) -> int:
+    if measurements is not None and apply_limits:
+        # A hint never crosses the subprocess wire. The outer native worker
+        # already owns containment before requesting in-process scan reuse.
+        return 2
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
     parser.add_argument("output", type=Path)
@@ -701,11 +527,12 @@ def main(argv: list[str] | None = None) -> int:
     ):
         return 2
     try:
-        _apply_worker_limits(
-            args.address_space_bytes,
-            args.cpu_seconds,
-            expected_parent_pid=args.expected_parent_pid,
-        )
+        if apply_limits:
+            _apply_worker_limits(
+                args.address_space_bytes,
+                args.cpu_seconds,
+                expected_parent_pid=args.expected_parent_pid,
+            )
     except _InvalidSTL:
         return 3
     limits = _Limits(
@@ -718,24 +545,18 @@ def main(argv: list[str] | None = None) -> int:
         deadline=time.monotonic() + args.timeout_seconds,
     )
     try:
-        source_stat = args.source.stat()
-        if source_stat.st_size > limits.max_source_bytes:
+        source = snapshot_stl(args.source)
+        if source.size > limits.max_source_bytes:
             raise _BudgetExceeded("source budget")
-        reservoir = _FramingReservoir()
-
-        def collect(vertices) -> None:
-            reservoir.add(vertices.mean(axis=1))
-
-        first = _read_pass(args.source, limits, collect)
+        first = (
+            _reuse_measurements(measurements, source, limits)
+            if measurements is not None
+            else _read_pass(
+                args.source, limits, lambda _vertices: None, snapshot=source
+            )
+        )
         if first.triangle_count > limits.max_triangles:
             raise _BudgetExceeded("triangle budget")
-        first_after = args.source.stat()
-        if (
-            first_after.st_size != source_stat.st_size
-            or first_after.st_mtime_ns != source_stat.st_mtime_ns
-        ):
-            raise _InvalidSTL("source changed during first pass")
-        before = first_after
         candidates = _render(
             args.source,
             args.output,
@@ -743,11 +564,9 @@ def main(argv: list[str] | None = None) -> int:
             args.height,
             limits,
             first,
-            reservoir,
         )
-        after = args.source.stat()
-        if before.st_size != after.st_size or before.st_mtime_ns != after.st_mtime_ns:
-            raise _InvalidSTL("source changed during render")
+        if snapshot_stl(args.source) != source:
+            raise STLSourceChanged("source changed before publication")
         _write_manifest(
             args.manifest,
             {
@@ -766,6 +585,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except (_InvalidSTL, OSError, ValueError, struct.error):
         return 3
+    except MemoryError:
+        raise
     except Exception:
         return 4
 

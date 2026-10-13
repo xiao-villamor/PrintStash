@@ -1,4 +1,11 @@
-import { getJson, sendAction, sendJson } from "@/lib/api/request";
+import {
+  getJson,
+  requestApi,
+  jsonHeaders,
+  sendAction,
+  sendJson,
+  type GetJsonOptions,
+} from "@/lib/api/request";
 import type {
   FleetSummary,
   MaintenanceLog,
@@ -13,7 +20,7 @@ import type {
 } from "@/types";
 
 export function getFleetSummary(): Promise<FleetSummary> {
-  return getJson<FleetSummary>("/api/v1/fleet/summary", { fresh: true });
+  return getJson<FleetSummary>("/api/v1/fleet/summary", {});
 }
 
 export function listFleetQueue(historyLimit = 20, historyOffset = 0): Promise<PrintJobRead[]> {
@@ -21,7 +28,7 @@ export function listFleetQueue(historyLimit = 20, historyOffset = 0): Promise<Pr
     history_limit: String(historyLimit),
     history_offset: String(historyOffset),
   });
-  return getJson<PrintJobRead[]>(`/api/v1/fleet/queue?${params}`, { fresh: true });
+  return getJson<PrintJobRead[]>(`/api/v1/fleet/queue?${params}`, {});
 }
 
 export function enqueueFleetJob(payload: QueueJobCreate): Promise<PrintJobRead> {
@@ -69,41 +76,57 @@ export function resolveFleetJob(
 }
 
 export function updatePrinterRouting(id: number, payload: PrinterRoutingUpdate) {
-  return sendJson(`/api/v1/fleet/printers/${id}/routing`, "PATCH", payload);
+  return requestApi(`/api/v1/fleet/printers/${id}/routing`, {
+    method: "PATCH",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+  });
 }
 
-export function listMaintenanceWindows(id: number): Promise<MaintenanceWindow[]> {
-  return getJson<MaintenanceWindow[]>(`/api/v1/fleet/printers/${id}/maintenance-windows`, {
-    fresh: true,
-  });
+export function listMaintenanceWindows(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<MaintenanceWindow[]> {
+  return getJson<MaintenanceWindow[]>(`/api/v1/fleet/printers/${id}/maintenance-windows`, options);
 }
 
 export function createMaintenanceWindow(
   id: number,
   payload: { starts_at: string; ends_at: string; reason?: string | null },
 ): Promise<MaintenanceWindow> {
-  return sendJson<MaintenanceWindow>(
-    `/api/v1/fleet/printers/${id}/maintenance-windows`,
-    "POST",
-    payload,
-  );
+  return requestApi<MaintenanceWindow>(`/api/v1/fleet/printers/${id}/maintenance-windows`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+  });
 }
 
 export function deleteMaintenanceWindow(id: number, windowId: number): Promise<void> {
-  return sendAction(`/api/v1/fleet/printers/${id}/maintenance-windows/${windowId}`, "DELETE");
+  return requestApi<void>(`/api/v1/fleet/printers/${id}/maintenance-windows/${windowId}`, {
+    method: "DELETE",
+  });
 }
 
-export function listMaintenanceLog(id: number): Promise<MaintenanceLog[]> {
-  return getJson<MaintenanceLog[]>(`/api/v1/fleet/printers/${id}/maintenance-log`, { fresh: true });
+export function listMaintenanceLog(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<MaintenanceLog[]> {
+  return getJson<MaintenanceLog[]>(`/api/v1/fleet/printers/${id}/maintenance-log`, options);
 }
 
 export function createMaintenanceLog(
   id: number,
   payload: { category: string; note: string; performed_at?: string },
 ): Promise<MaintenanceLog> {
-  return sendJson<MaintenanceLog>(`/api/v1/fleet/printers/${id}/maintenance-log`, "POST", payload);
+  return requestApi<MaintenanceLog>(`/api/v1/fleet/printers/${id}/maintenance-log`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+  });
 }
 
 export function deleteMaintenanceLog(id: number, logId: number): Promise<void> {
-  return sendAction(`/api/v1/fleet/printers/${id}/maintenance-log/${logId}`, "DELETE");
+  return requestApi<void>(`/api/v1/fleet/printers/${id}/maintenance-log/${logId}`, {
+    method: "DELETE",
+  });
 }

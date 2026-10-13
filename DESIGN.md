@@ -237,6 +237,9 @@ the user is watching. **Nothing in the app may exceed 300ms.**
 7. **High-frequency actions do not animate.** Route navigation happens hundreds
    of times a day — there is deliberately **no page transition**, and none should
    be added. Animation is for occasional events: overlays, state swaps, feedback.
+   Commit a folder's description with its browsing result, so it cannot arrive
+   afterward and push the cards down. Clamp long descriptions before the first
+   paint. Cached library thumbnails stay visible when their cards remount.
 8. **Press feedback on anything pressable**: `active:scale-[0.98]` (cards use
    `0.99`) over `duration-press`. `Button` already does this.
 

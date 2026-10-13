@@ -15,6 +15,11 @@ trash, scans and remote storage), run the repository-level lane instead:
 ./scripts/test-critical.sh
 ```
 
+`backup-recovery.spec.ts` leaves a completed ZIP inspection unselected before
+purging a Model and restoring it through Settings, then compares the recovered
+Artifact bytes. Historical release archives are checked separately by the
+[local backup recovery jobs](../../../docs/backup-recovery-testing.md).
+
 `playwright.real.config.ts` boots the application plus its printer emulator:
 
 - `scripts/start-backend.sh` — wipes state, runs Alembic, launches uvicorn on
@@ -86,22 +91,22 @@ the storage step from any page, choose storage, then upload a first Model.
 
 auth (UI login, wrong-password, username + API-key login then revoke) ·
 vault (search, tag filter, list/grid toggle, empty state, narrow responsive toolbar) · collections
-(create / nest / subtree count / delete / recursive-delete non-empty from the sidebar) ·
+(create / nest / subtree count / delete / recursive-delete non-empty from the sidebar / lazy child expansion and Model move) ·
 documents (markdown editor, collection README, GFM tables) · tags (quick create/assign from a card,
 global delete) ·
-uploads (mesh-only source, BGCODE metadata, into a collection, ZIP preparation in Tasks → select all or select a folder → selected import) · full backup recovery
+uploads (real Job recovery after lost event/read delivery without reload, resumable transfer pause/reload, viewport-admitted bulk previews, legacy browser queue recovery and clearing across reloads, mesh-only source, BGCODE metadata, into a collection, ZIP preparation in Tasks → select all or select a folder → selected import) · full backup recovery
 (purge → UI restore → byte-for-byte download) · filament & printer presets
 (create / edit / delete) · model lifecycle (upload → edit → trash → restore →
 purge) · model detail (edit tags with save/cancel, log a manual print, download
 a revision) · G-code revisions (add, auto-recommend, re-recommend,
 status, compare) · public share links (view-only vs downloadable, revoke → 404) ·
-multipart sets (empty-set first action, external cover, tags, favorites, reusable members, collection browsing with multiple part selection) ·
-RBAC (create user, grant collection access, non-admin sees only granted
+multipart sets (real tag/cover conflict review without silently rebasing composition drafts, empty-set first action, external cover, tags, favorites, reusable members, collection browsing with multiple part selection) ·
+RBAC (create user, search a nested collection and grant access without a whole-tree read, non-admin sees only granted
 collections, view vs edit role gates editing + deleting) · user management
 (promote/disable/reset password) · API keys · settings overview (system status
 and vault stats) · supervised API restart · display currency · auto-mark-known-good toggle · metadata
 export (JSON/CSV) · manual and uploaded backups · reusable remote storage
-connection for backups and Library sources · notification channels (add webhook + delete) ·
+connection for backups and Library sources · notification channels (add webhook + delete; competing channel drafts and master-switch intents with explicit review/revised save) ·
 remote storage loading layout and provider choice at desktop and mobile widths ·
 About (running version + changelog) · design customization (metadata visibility,
 card-metric slots + reset) · printer add/remove · cross-cutting (theme
@@ -146,3 +151,38 @@ Only the test certificate's trust check is relaxed; browser CORS remains enabled
 Search clarity: the AI-search flow verifies that Enter preserves the live library filter, explicit AI search opens results, and retrieval explanations stay hidden. Library workflows reveal secondary commands through Library tools.
 
 AI Search settings: the Settings browser flow waits for loaded AI data, visits guided setup, search types, AI servers and technical options, captures desktop and mobile views, and checks visible choices and horizontal fit.
+
+- ZIP uploads: a failed preparation retains input capacity; Tasks confirms and discards it safely.
+
+`viewer-stl.spec.ts`: an adversarial 3MF displays a persisted memory refusal across browser reloads while its original remains downloadable. A 17 MB STL opens on its thumbnail with no mesh request until the viewer asks for the 3D preview.
+
+`provenance.spec.ts` imports an actual browser capture, edits its Source metadata,
+creates a competing conditional edit, and verifies that the retained draft is
+persisted only after reviewing the current source version and explicitly retrying.
+
+`library-navigation.spec.ts` returns from real Model detail to a paginated Library,
+checking entry identity and scroll geometry in desktop grid and mobile list layouts,
+including browser Forward/Back. It seeds and cleans up a unique scale fixture. It also
+opens a Model and returns, checking that the page keeps one events connection and
+sends no further setup probe.
+
+- `sso-settings.spec.ts`: conditional edits across two tabs preserve the losing
+  draft and require explicit review before saving against the latest version;
+  SSO configuration still persists without returning client secrets.
+
+- `external-libraries.spec.ts`: conditional source activation detects a competing
+  configuration edit and requires explicit review before the revised command.
+
+- `onboarding/first-model.spec.ts`: first-folder activation sends the reviewed
+  configuration precondition before source creation and scan.
+
+- `storage/storage-provider.spec.ts`: the WebDAV lifecycle includes a competing
+  configuration edit, retained credential draft and explicit conditional retry.
+
+- `printers.spec.ts`: two settings editors detect a stale save, retain the losing
+  draft and explicitly save revised changes without replacing untouched settings.
+
+- `profiles.spec.ts`: two editors per preset kind recover a conditional conflict
+  while preserving the other editor’s notes, verified after reload.
+
+- `provider-connections.spec.ts`: issue a pairing code, claim without an account session, resolve competing browser-name drafts through explicit review, then confirm revocation.

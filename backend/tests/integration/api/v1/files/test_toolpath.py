@@ -193,3 +193,77 @@ class TestBinaryToolpath:
         )
 
         assert (response.status_code, response.json()) == (202, {"state": "pending"})
+
+
+class TestDisabledDelivery:
+    def test_missing_binary_toolpath_returns_policy_conflict(
+        self, client, auth_headers, bgcode, make_system_config
+    ):
+        make_system_config(derivatives_toolpath_enabled=False)
+        response = client.get(
+            f"/api/v1/files/{bgcode.id}/toolpath", headers=auth_headers
+        )
+        assert (response.status_code, response.json()["detail"]) == (
+            409,
+            "derivative_group_disabled",
+        )
+
+    def test_serves_a_ready_prior_recipe_while_disabled(
+        self, client, auth_headers, bgcode, make_system_config, make_derivative
+    ):
+        make_system_config(derivatives_toolpath_enabled=False)
+        data = b"G1 X42 E1\n"
+        key = "_derivatives/prior-recipe.gcode"
+        get_backend().write_bytes(data, key)
+        make_derivative(
+            bgcode, DerivativeKind.TOOLPATH, recipe_version=0, storage_key=key
+        )
+        response = client.get(
+            f"/api/v1/files/{bgcode.id}/toolpath", headers=auth_headers
+        )
+        assert (response.status_code, response.content) == (200, data)
+
+    def test_ascii_delivery_ignores_binary_processing_policy(
+        self, client, auth_headers, make_model, make_file, make_system_config
+    ):
+        make_system_config(derivatives_toolpath_enabled=False)
+        data = b"G90\nG1 X10 E1\n"
+        key = "ascii-disabled.gcode"
+        get_backend().write_bytes(data, key)
+        file = make_file(
+            make_model("ascii-disabled"),
+            filename="ascii.gcode",
+            ftype=FileType.GCODE,
+            path=key,
+            size_bytes=len(data),
+        )
+        response = client.get(f"/api/v1/files/{file.id}/toolpath", headers=auth_headers)
+        assert (response.status_code, response.content) == (200, data)
+
+
+class TestDisabledRetry:
+    def test_artifact_retry_is_rejected_before_reset_while_disabled(
+        self,
+        client,
+        auth_headers,
+        make_model,
+        make_file,
+        make_system_config,
+        make_derivative,
+        db_session,
+    ):
+        make_system_config(derivatives_mesh_enabled=False)
+        file = make_file(make_model("disabled-retry"), filename="retry.stl")
+        row = make_derivative(
+            file, DerivativeKind.THUMBNAIL, state=DerivativeState.FAILED, exhausted=True
+        )
+        response = client.post(
+            f"/api/v1/files/{file.id}/derivatives/thumbnail/retry", headers=auth_headers
+        )
+        assert (response.status_code, response.json()["detail"]) == (
+            409,
+            "derivative_group_disabled",
+        )
+        db_session.refresh(row)
+        assert row.state is DerivativeState.FAILED
+        assert row.next_attempt_at is None

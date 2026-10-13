@@ -1,5 +1,9 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+import { refreshFleet } from "@/features/printers/queries";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+
 import { knownUiText } from "@/lib/locale";
 import { uiMessage } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -96,6 +100,7 @@ export function SendToButtons({
   commands?: SendToCommands;
 }) {
   useUiLocale();
+  const commandClient = useQueryClient();
   const auth = useRequireAuth();
   const { user } = useAuth();
   const [internalOpen, setInternalOpen] = useState(false);
@@ -201,6 +206,7 @@ export function SendToButtons({
   }
 
   async function send(allowMismatch = false) {
+    const session = getSessionVersion();
     if (!selectedFile) return;
     const targetPrinterIds =
       deliveryMode === "send" || routingStrategy === "manual"
@@ -209,6 +215,7 @@ export function SendToButtons({
     if (!allowMismatch && targetPrinterIds.length > 0) {
       try {
         const report = await commands.checkFleetCompatibility(selectedFile, targetPrinterIds);
+        requireSessionVersion(session);
         setCompatibility(report);
         if (
           report.printers.some((row) => row.verdict === "mismatch") &&
@@ -218,6 +225,7 @@ export function SendToButtons({
           return;
         }
       } catch (e: any) {
+        if (session !== getSessionVersion()) return;
         setError(e.message || uiText("Compatibility check failed"));
         return;
       }
@@ -257,6 +265,8 @@ export function SendToButtons({
           }
           await commands.createFleetBatch(batch);
         } else await commands.enqueueFleetJob(payload);
+        requireSessionVersion(session);
+        refreshFleet(commandClient, session);
         setShowSend(false);
         toast.success(
           quantity > 1
@@ -264,9 +274,10 @@ export function SendToButtons({
             : uiText("Added to fleet queue"),
         );
       } catch (e: any) {
+        if (session !== getSessionVersion()) return;
         setError(e.message || uiText("Queue failed"));
       } finally {
-        setSending(false);
+        if (session === getSessionVersion()) setSending(false);
       }
       return;
     }
@@ -305,6 +316,8 @@ export function SendToButtons({
             spool_filament_id: spool ? spool.filament_id : null,
             compatibility_policy: allowMismatch ? "allow_mismatch" : "safe",
           });
+          requireSessionVersion(session);
+          refreshFleet(commandClient, session);
           completed += 1;
           updateTask(taskId, {
             detail: uiMessage("{value1}/{value2} printers completed", {
@@ -318,6 +331,7 @@ export function SendToButtons({
         }),
       );
 
+      requireSessionVersion(session);
       const successes = results.filter((result) => result.status === "fulfilled");
       const failures = results
         .map((result, index) => ({ result, printer: selectedPrinters[index] }))
@@ -371,6 +385,7 @@ export function SendToButtons({
         );
       }
     } catch (e: any) {
+      if (session !== getSessionVersion()) return;
       const message = e.message || "Send failed";
       setError(message);
       updateTask(taskId, {
@@ -379,7 +394,7 @@ export function SendToButtons({
         progress: 100,
       });
     } finally {
-      setSending(false);
+      if (session === getSessionVersion()) setSending(false);
     }
   }
 

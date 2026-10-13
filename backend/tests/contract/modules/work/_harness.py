@@ -1,4 +1,4 @@
-"""One harness, two engines: the inline test engine and DBOS on SQLite.
+"""One harness, two engines: inline and DBOS on SQLite or PostgreSQL.
 
 Every other tier runs background work on ``InlineJobEngine``. That is only
 sound if it keeps the same promises as the engine production runs, so this
@@ -21,11 +21,13 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sqlmodel import SQLModel
+from sqlalchemy import event
+from sqlmodel import SQLModel, create_engine
 
 from app.db import session as db_session_module
 from app.db.models import Job, JobKind, JobState, LaneName, WorkPriority
@@ -273,11 +275,22 @@ class InlineHarness(Harness):
 class DbosHarness(Harness):
     kind = "dbos"
 
-    def __init__(self, catalog: WorkCatalog, system_db: str) -> None:
+    def __init__(
+        self,
+        catalog: WorkCatalog,
+        system_db: str,
+        *,
+        schema: str | None = None,
+        app_version: str | None = None,
+        tick_seconds: int = 3600,
+        listen_lanes: list[LaneName] | None = None,
+    ) -> None:
         super().__init__(catalog)
         self.system_db = system_db
-        self.engine = self._build(app_version=None)
-        self.engine.launch(listen_lanes=None)
+        self.schema = schema
+        self.tick_seconds = tick_seconds
+        self.engine = self._build(app_version=app_version)
+        self.engine.launch(listen_lanes=listen_lanes)
 
     def _build(self, *, app_version: str | None) -> JobEngine:
         from app.runtime.engine.dbos_engine import DbosJobEngine
@@ -285,11 +298,11 @@ class DbosHarness(Harness):
         return DbosJobEngine(
             self.catalog,
             system_database_url=self.system_db,
-            schema=None,
+            schema=self.schema,
             executor_id="contract-executor",
             app_version=app_version,
             polling_interval_seconds=0.1,
-            tick_seconds=3600,
+            tick_seconds=self.tick_seconds,
         )
 
     def settle(self, timeout: float = 30.0) -> None:
@@ -323,17 +336,42 @@ class DbosHarness(Harness):
 
 
 @contextmanager
-def shared_app_db() -> Iterator[None]:
-    """The application schema on the default database, used by every thread."""
-    default = db_session_module._default_factory
-    engine = db_session_module.get_engine()
-    SQLModel.metadata.create_all(engine)
-    _empty(engine)
-    override_session_factory(default)
+def shared_app_db(path: Path | None = None) -> Iterator[None]:
+    """One application database shared by callers and DBOS-created threads.
+
+    A supplied path creates an isolated current schema. Replacing the ContextVar
+    itself gives threads created by DBOS the same default factory as the test;
+    restoring the original object preserves the caller's previous override.
+    """
+    if path is None:
+        default = db_session_module._default_factory
+        engine = db_session_module.get_engine()
+        SQLModel.metadata.create_all(engine)
+        _empty(engine)
+        override_session_factory(default)
+        try:
+            yield
+        finally:
+            _empty(engine)
+        return
+
+    engine = create_engine(
+        f"sqlite:///{path}", connect_args={"check_same_thread": False}
+    )
+    event.listen(engine, "connect", db_session_module._set_sqlite_pragmas)
+    factory = db_session_module.SQLiteSessionFactory(engine)
+    previous_factory = db_session_module._default_factory
+    previous_context = db_session_module._factory_ctx
+    db_session_module._default_factory = factory
+    db_session_module._factory_ctx = ContextVar("session_factory", default=factory)
+    override_session_factory(factory)
     try:
+        SQLModel.metadata.create_all(engine)
         yield
     finally:
-        _empty(engine)
+        db_session_module._factory_ctx = previous_context
+        db_session_module._default_factory = previous_factory
+        factory.dispose()
 
 
 def _empty(engine) -> None:

@@ -21,7 +21,7 @@ tail, and retention never removes a Job that still owns staged bytes.
 from __future__ import annotations
 
 import json
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -485,6 +485,23 @@ class TestFinish:
 
 
 class TestListForUser:
+    def test_an_administrator_sees_scheduled_backups_in_tasks(
+        self, store: JobStore, owner: User, make_job
+    ) -> None:
+        automatic = make_job(kind=JobKind.BACKUPS_AUTOMATIC)
+        make_job(kind=JobKind.DERIVATIVES_MESH)
+
+        listed = store.list_for_user(owner.id, is_superuser=True)  # type: ignore[arg-type]
+
+        assert [job.job_id for job in listed] == [automatic.id]
+
+    def test_a_regular_user_cannot_see_scheduled_backups(
+        self, store: JobStore, owner: User, make_job
+    ) -> None:
+        make_job(kind=JobKind.BACKUPS_AUTOMATIC)
+
+        assert store.list_for_user(owner.id) == []  # type: ignore[arg-type]
+
     def test_reconnect_listing_respects_owner_permissions(
         self, store: JobStore, owner: User, other_owner: User, make_job
     ) -> None:
@@ -662,6 +679,49 @@ class TestCounts:
 
 
 class TestPrune:
+    @pytest.mark.parametrize("policy", ["user-age", "system-age", "user-cap"])
+    def test_retains_source_authority_until_scratch_custody_is_released(
+        self,
+        policy,
+        store,
+        owner,
+        make_job,
+        make_ingestion_scratch_window,
+        db_session,
+    ) -> None:
+        from app.db.models.ingestion_scratch import IngestionScratchWindow
+
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        expired = now - timedelta(days=365)
+        job = make_job(
+            owner=None if policy == "system-age" else owner,
+            state=JobState.CANCELLED,
+            updated_at=expired if policy != "user-cap" else now - timedelta(minutes=1),
+        )
+        job_id = job.id
+        if policy == "user-cap":
+            _overlay["jobs_retention_per_user"] = 1
+            make_job(owner=owner, state=JobState.COMPLETED, updated_at=now)
+        receipt = make_ingestion_scratch_window(
+            job=job,
+            execution_epoch="retired-reader-epoch",
+            job_id=None,
+        )
+        receipt_id = receipt.id
+
+        assert store.prune(now=now) == 0
+        db_session.expire_all()
+        assert db_session.get(Job, job_id) is not None
+        assert (
+            db_session.get(IngestionScratchWindow, receipt_id).origin_job_id == job_id
+        )
+
+        db_session.delete(db_session.get(IngestionScratchWindow, receipt_id))
+        db_session.commit()
+        assert store.prune(now=now) == 1
+        db_session.expire_all()
+        assert db_session.get(Job, job_id) is None
+
     def test_drops_a_user_job_past_retention(
         self, store: JobStore, owner: User, make_job, db_session: Session
     ) -> None:
@@ -809,3 +869,383 @@ class TestPrune:
         store.prune(now=now)
 
         assert db_session.get(Job, active.id) is not None
+
+
+class TestSettleAttempt:
+    @pytest.mark.parametrize(
+        ("observed_attempt", "observed_state", "old_epoch"),
+        [
+            pytest.param(1, JobState.RUNNING, False, id="older-attempt"),
+            pytest.param(2, JobState.QUEUED, False, id="older-state"),
+            pytest.param(2, JobState.RUNNING, True, id="older-epoch"),
+        ],
+    )
+    def test_stale_engine_evidence_leaves_current_derivatives_running(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_job,
+        make_derivative,
+        observed_attempt,
+        observed_state,
+        old_epoch,
+    ):
+        from app.db.models import DerivativeKind, DerivativeState
+        from app.modules.derivatives.jobs import definitions
+
+        file = make_file(make_model(), filename="retry.stl")
+        job = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=f"file/{file.id}",
+            state=JobState.RUNNING,
+            attempts=2,
+        )
+        derivative = make_derivative(
+            file, DerivativeKind.THUMBNAIL, state=DerivativeState.RUNNING
+        )
+        definition = next(
+            d for d in definitions() if d.name is JobKind.DERIVATIVES_MESH
+        )
+
+        status = JobStore().settle_attempt(
+            job.id,
+            observed_attempt,
+            JobOutcome.FAILED,
+            expected_state=observed_state,
+            error="old_engine_failure",
+            on_failure=definition.on_failure,
+            execution_epoch="previous-epoch" if old_epoch else job.execution_epoch,
+        )
+
+        assert status is None
+        db_session.refresh(job)
+        db_session.refresh(derivative)
+        assert job.state is JobState.RUNNING
+        assert (derivative.state, derivative.failure_reason) == (
+            DerivativeState.RUNNING,
+            None,
+        )
+
+    def test_matching_queued_policy_cancellation_settles_its_derivatives(
+        self, db_session, make_model, make_file, make_job, make_derivative
+    ):
+        from app.db.models import DerivativeKind, DerivativeState
+        from app.modules.derivatives.jobs import definitions
+
+        file = make_file(make_model(), filename="disabled.stl")
+        job = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=f"file/{file.id}",
+            state=JobState.QUEUED,
+            attempts=0,
+        )
+        derivative = make_derivative(
+            file, DerivativeKind.THUMBNAIL, state=DerivativeState.RUNNING
+        )
+        definition = next(
+            d for d in definitions() if d.name is JobKind.DERIVATIVES_MESH
+        )
+
+        status = JobStore().settle_attempt(
+            job.id,
+            0,
+            JobOutcome.CANCELLED,
+            expected_state=JobState.QUEUED,
+            error="derivative_group_disabled",
+            on_failure=definition.on_failure,
+            execution_epoch=job.execution_epoch,
+        )
+
+        assert status.state is JobState.CANCELLED
+        db_session.refresh(derivative)
+        assert (derivative.state, derivative.failure_reason) == (
+            DerivativeState.FAILED,
+            "derivative_group_disabled",
+        )
+
+    def test_replayed_failure_does_not_settle_a_later_job_for_the_subject(
+        self, db_session, make_model, make_file, make_job, make_derivative
+    ):
+        from app.db.models import DerivativeKind, DerivativeState
+        from app.modules.derivatives.jobs import definitions
+
+        file = make_file(make_model(), filename="replacement.stl")
+        old = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=f"file/{file.id}",
+            state=JobState.FAILED,
+            attempts=1,
+        )
+        make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=f"file/{file.id}",
+            state=JobState.RUNNING,
+            attempts=1,
+        )
+        derivative = make_derivative(
+            file, DerivativeKind.THUMBNAIL, state=DerivativeState.RUNNING
+        )
+        definition = next(
+            d for d in definitions() if d.name is JobKind.DERIVATIVES_MESH
+        )
+
+        JobStore().settle_attempt(
+            old.id,
+            1,
+            JobOutcome.FAILED,
+            error="replayed_old_failure",
+            on_failure=definition.on_failure,
+            execution_epoch=old.execution_epoch,
+        )
+
+        db_session.refresh(derivative)
+        assert (derivative.state, derivative.failure_reason) == (
+            DerivativeState.RUNNING,
+            None,
+        )
+
+
+class TestReconcileSettledAttempt:
+    @pytest.mark.parametrize(
+        "old_epoch", [False, True], ids=["older-attempt", "older-epoch"]
+    )
+    def test_old_cleanup_preserves_staging_owned_by_a_later_attempt(
+        self,
+        db_session,
+        make_user,
+        make_ingest_request,
+        make_file,
+        make_model,
+        tmp_path,
+        old_epoch,
+    ):
+        import hashlib
+
+        from app.db.models import IngestRequestKind
+        from app.modules.ingestion import jobs as ingestion_jobs
+        from app.modules.ingestion import staging_leases
+
+        owner = make_user()
+        request = make_ingest_request(
+            owner, kind=IngestRequestKind.UPLOAD, state=JobState.COMPLETED
+        )
+        job = db_session.get(Job, request.job_id)
+        job.attempts = 1 if old_epoch else 2
+        db_session.add(job)
+        db_session.commit()
+        make_file(make_model(), filename="committed.stl", ingestion_key=job.id)
+        staged = tmp_path / "retry.stl"
+        staged.write_bytes(b"new attempt bytes")
+        lease = staging_leases.create_job_lease(
+            db_session,
+            job_id=job.id,
+            owner_user_id=owner.id,
+            path=staged,
+            size_bytes=staged.stat().st_size,
+            sha256=hashlib.sha256(staged.read_bytes()).hexdigest(),
+        )
+        db_session.commit()
+        definition = next(
+            d
+            for d in ingestion_jobs.definitions()
+            if d.name is JobKind.INGESTION_UPLOAD
+        )
+
+        JobStore().reconcile_settled_attempt(
+            job.id,
+            1,
+            definition.on_settled,
+            execution_epoch="previous-epoch" if old_epoch else job.execution_epoch,
+        )
+
+        db_session.expire_all()
+        assert staged.read_bytes() == b"new attempt bytes"
+        assert db_session.get(StagingLease, lease.id) is not None
+
+
+class TestExecutionEpochInvariant:
+    @pytest.mark.parametrize(
+        "field,value",
+        [("execution_epoch", ""), ("execution_epoch", None), ("submitted_epoch", "")],
+    )
+    def test_database_rejects_missing_execution_authority(
+        self, db_session, make_job, field, value
+    ):
+        from sqlalchemy import text
+
+        row = make_job()
+        with pytest.raises(IntegrityError):
+            db_session.execute(
+                text(f"UPDATE jobs SET {field} = :value WHERE id = :job_id"),
+                {"value": value, "job_id": row.id},
+            )
+            db_session.commit()
+
+
+@pytest.fixture
+def active_history_plan(db_session, make_model, make_file, make_job, request):
+    from app.db.models import FileType
+    from tests.factories.ops import build_job_history
+
+    available = make_file(make_model(), file_type=FileType.STL)
+    claimed = make_file(make_model(), file_type=FileType.STL)
+    build_job_history(
+        db_session,
+        count=request.param,
+        kind=JobKind.DERIVATIVES_MESH,
+        subject=f"file/{available.id}",
+    )
+    backfill = make_job(
+        kind=JobKind.DERIVATIVES_MESH,
+        state=JobState.RUNNING,
+        subject=f"file/{claimed.id}",
+        priority=WorkPriority.BACKFILL,
+    )
+    interactive = make_job(
+        kind=JobKind.DERIVATIVES_VIEWER_STL, priority=WorkPriority.INTERACTIVE
+    )
+    db_session.connection().exec_driver_sql("ANALYZE")
+    return available, claimed, backfill, interactive
+
+
+@pytest.fixture
+def emitted_job_queries(db_session):
+    from contextlib import contextmanager
+
+    from sqlalchemy import event
+
+    @contextmanager
+    def capture():
+        queries = []
+
+        def before_cursor(_connection, _cursor, statement, parameters, _context, _many):
+            normalized = statement.lstrip().lower()
+            if normalized.startswith("select") and "from jobs" in normalized:
+                queries.append((statement, parameters))
+
+        engine = db_session.get_bind()
+        event.listen(engine, "before_cursor_execute", before_cursor)
+        try:
+            yield queries
+        finally:
+            event.remove(engine, "before_cursor_execute", before_cursor)
+
+    return capture
+
+
+def _captured_plans(session, queries, prefix):
+    selected = [
+        query for query in queries if query[0].lstrip().lower().startswith(prefix)
+    ]
+    assert selected, "production did not emit the expected Job query"
+    connection = session.connection()
+    return [
+        [
+            row[3]
+            for row in connection.exec_driver_sql(
+                "EXPLAIN QUERY PLAN " + statement, parameters
+            ).all()
+        ]
+        for statement, parameters in selected
+    ]
+
+
+class TestActiveJobQueryPlans:
+    @pytest.mark.parametrize("active_history_plan", [1000, 10000], indirect=True)
+    def test_source_anti_join_uses_active_history_boundary(
+        self, db_session, active_history_plan, emitted_job_queries
+    ):
+        from app.modules.derivatives.kinds import group
+        from app.modules.derivatives.source import DerivativeSource, subject_key
+        from app.modules.work.contracts import DiscoveryBudget
+
+        available, claimed, _backfill, _interactive = active_history_plan
+        with emitted_job_queries() as queries:
+            pending = DerivativeSource(
+                group(JobKind.DERIVATIVES_MESH)
+            ).pending_prioritized(
+                db_session,
+                now=utcnow(),
+                budget=DiscoveryBudget(total=2, interactive=2, backfill=2),
+            )
+        assert [item.subject_key for item in pending] == [subject_key(available.id)]
+        assert subject_key(claimed.id) not in [item.subject_key for item in pending]
+        plans = _captured_plans(db_session, queries, "select files.id")
+        assert all(
+            any("uq_jobs_active_subject" in detail for detail in plan) for plan in plans
+        ), plans
+        assert all(
+            not any("SCAN jobs" in detail for detail in plan) for plan in plans
+        ), plans
+
+    @pytest.mark.parametrize("active_history_plan", [1000, 10000], indirect=True)
+    def test_discovery_quota_uses_active_history_boundary(
+        self, db_session, active_history_plan, emitted_job_queries, work_catalog
+    ):
+        from app.modules.work.contracts import DiscoveryBudget
+        from app.modules.work.reconciler import _discovery_budget
+
+        definition = work_catalog.definition(JobKind.DERIVATIVES_MESH)
+        lane = work_catalog.lanes[definition.lane]
+        interactive = max(0, lane.concurrency - 1)
+        with emitted_job_queries() as queries:
+            budget = _discovery_budget(db_session, definition)
+        assert budget == DiscoveryBudget(
+            total=min(settings.jobs_reconcile_batch, interactive),
+            interactive=interactive,
+            backfill=0,
+        )
+        plans = _captured_plans(db_session, queries, "select jobs.priority")
+        assert all(
+            any("uq_jobs_active_subject" in detail for detail in plan) for plan in plans
+        ), plans
+        assert all(
+            not any("SCAN jobs" in detail for detail in plan) for plan in plans
+        ), plans
+
+
+class TestOwnsExecution:
+    """A step asks whether its attempt still holds the Job, without locking it."""
+
+    def _running(self, make_job) -> Job:
+        return make_job(state=JobState.RUNNING, attempts=2, execution_epoch="epoch-a")
+
+    def test_the_current_attempt_owns_its_job(self, db_session, make_job) -> None:
+        job = self._running(make_job)
+
+        assert JobStore.owns_execution(
+            db_session, job.id, epoch="epoch-a", attempt=2, state=JobState.RUNNING
+        )
+
+    @pytest.mark.parametrize(
+        ("epoch", "attempt", "state"),
+        [
+            ("epoch-b", 2, JobState.RUNNING),
+            ("epoch-a", 1, JobState.RUNNING),
+            ("epoch-a", 2, JobState.QUEUED),
+        ],
+        ids=["replaced-epoch", "superseded-attempt", "other-state"],
+    )
+    def test_a_stale_claim_does_not_own_the_job(
+        self, db_session, make_job, epoch, attempt, state
+    ) -> None:
+        job = self._running(make_job)
+
+        assert not JobStore.owns_execution(
+            db_session, job.id, epoch=epoch, attempt=attempt, state=state
+        )
+
+    def test_a_missing_job_is_owned_by_nobody(self, db_session) -> None:
+        assert not JobStore.owns_execution(
+            db_session, "absent", epoch="e", attempt=1, state=JobState.RUNNING
+        )
+
+    def test_the_check_does_not_become_the_writer(self, db_session, make_job) -> None:
+        job = self._running(make_job)
+
+        JobStore.owns_execution(
+            db_session, job.id, epoch="epoch-a", attempt=2, state=JobState.RUNNING
+        )
+
+        assert not db_session.connection().connection.driver_connection.in_transaction

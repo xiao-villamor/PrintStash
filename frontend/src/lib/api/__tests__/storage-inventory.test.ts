@@ -15,7 +15,6 @@ import {
   getStorageInventory,
   sampleStorageInventory,
 } from "@/lib/api/storage-inventory";
-import { invalidateApiCache } from "@/lib/api/request";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -27,7 +26,7 @@ beforeEach(() => {
     ),
   );
   vi.stubGlobal("fetch", fetchMock);
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

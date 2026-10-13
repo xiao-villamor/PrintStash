@@ -8,7 +8,6 @@ import {
   finalizeGcPlan,
   getActiveGcPlan,
 } from "@/lib/api/gc";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
@@ -29,7 +28,7 @@ const plan = {
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

@@ -1,6 +1,17 @@
-import { getJson, sendAction, sendForm, sendJson, type GetJsonOptions } from "@/lib/api/request";
+import {
+  getJson,
+  sendAction,
+  sendForm,
+  sendJson,
+  requestApi,
+  jsonHeaders,
+  type GetJsonOptions,
+} from "@/lib/api/request";
 import {
   CollectionCreate,
+  CollectionLookupRead,
+  CollectionPage,
+  CollectionRole,
   CollectionPermissionRead,
   CollectionPermissionUpdate,
   CollectionRead,
@@ -8,8 +19,55 @@ import {
   TagRead,
 } from "@/types";
 
-export function listCollections(options?: GetJsonOptions): Promise<CollectionRead[]> {
-  return getJson<CollectionRead[]>("/api/v1/collections", options);
+/** One page of a collection's children, or of the caller's top level when `parentId` is null. */
+export function listCollectionChildren(
+  parentId: number | null,
+  cursor: string | null = null,
+  limit = 200,
+  options: GetJsonOptions = {},
+): Promise<CollectionPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (parentId !== null) params.set("parent_id", String(parentId));
+  if (cursor !== null) params.set("cursor", cursor);
+  return getJson<CollectionPage>(`/api/v1/collections/children?${params}`, {
+    ...options,
+  });
+}
+
+/** The collection at `path` with its visible ancestors, root first. */
+export function lookupCollection(
+  path: string,
+  options: GetJsonOptions = {},
+): Promise<CollectionLookupRead> {
+  const params = new URLSearchParams({ path });
+  return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?${params}`, {
+    ...options,
+  });
+}
+
+/** Resolve a previously saved collection id without walking the tree. */
+export function lookupCollectionById(
+  id: number,
+  options: GetJsonOptions = {},
+): Promise<CollectionLookupRead> {
+  return getJson<CollectionLookupRead>(`/api/v1/collections/lookup?id=${id}`, {
+    ...options,
+  });
+}
+
+/** Collections whose name contains `query`, held at `minRole` or above. */
+export function searchCollections(
+  query: string,
+  minRole: CollectionRole = "view",
+  cursor: string | null = null,
+  limit = 20,
+  options: GetJsonOptions = {},
+): Promise<CollectionPage> {
+  const params = new URLSearchParams({ q: query, min_role: minRole, limit: String(limit) });
+  if (cursor !== null) params.set("cursor", cursor);
+  return getJson<CollectionPage>(`/api/v1/collections/search?${params}`, {
+    ...options,
+  });
 }
 
 export function createCollection(payload: CollectionCreate): Promise<CollectionRead> {
@@ -33,8 +91,13 @@ export function replaceCollectionTags(id: number, tags: string[]): Promise<Colle
   return sendJson<CollectionRead>(`/api/v1/collections/${id}/tags`, "PUT", { tags });
 }
 
-export function getCollectionReadme(id: number): Promise<{ readme: string | null }> {
-  return getJson<{ readme: string | null }>(`/api/v1/collections/${id}/readme`, { fresh: true });
+export function getCollectionReadme(
+  id: number,
+  options: GetJsonOptions = {},
+): Promise<{ readme: string | null }> {
+  return getJson<{ readme: string | null }>(`/api/v1/collections/${id}/readme`, {
+    ...options,
+  });
 }
 
 export function setCollectionReadme(
@@ -50,9 +113,12 @@ export function uploadCollectionImage(id: number, file: File): Promise<{ url: st
   return sendForm<{ url: string }>(`/api/v1/collections/${id}/images`, form);
 }
 
-export function listCollectionPermissions(id: number): Promise<CollectionPermissionRead[]> {
+export function listCollectionPermissions(
+  id: number,
+  options: GetJsonOptions = {},
+): Promise<CollectionPermissionRead[]> {
   return getJson<CollectionPermissionRead[]>(`/api/v1/collections/${id}/permissions`, {
-    fresh: true,
+    ...options,
   });
 }
 
@@ -61,15 +127,20 @@ export function updateCollectionPermission(
   userId: number,
   payload: CollectionPermissionUpdate,
 ): Promise<CollectionPermissionRead> {
-  return sendJson<CollectionPermissionRead>(
+  return requestApi<CollectionPermissionRead>(
     `/api/v1/collections/${collectionId}/permissions/${userId}`,
-    "PUT",
-    payload,
+    {
+      method: "PUT",
+      headers: jsonHeaders(),
+      body: JSON.stringify(payload),
+    },
   );
 }
 
 export function deleteCollectionPermission(collectionId: number, userId: number): Promise<void> {
-  return sendAction(`/api/v1/collections/${collectionId}/permissions/${userId}`, "DELETE");
+  return requestApi<void>(`/api/v1/collections/${collectionId}/permissions/${userId}`, {
+    method: "DELETE",
+  });
 }
 
 export function listTags(options?: GetJsonOptions): Promise<TagRead[]> {

@@ -10,8 +10,8 @@ import warnings
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.native_settings import settings
 from app.modules.media import bgcode
 
 logger = get_logger(__name__)
@@ -25,20 +25,31 @@ class ThumbnailValidationError(ValueError):
     """A decodable candidate failed the canonical thumbnail contract."""
 
 
-def to_webp(data: bytes, *, normalize: bool = True, width: int | None = None) -> bytes:
-    """Re-encode image bytes (PNG from slicers/rasteriser) as lossless WebP.
+def to_webp(
+    data: bytes,
+    *,
+    normalize: bool = True,
+    width: int | None = None,
+    preserve_frame: bool = False,
+    renderer_encoded: bool = False,
+) -> bytes:
+    """Normalize preview bytes using the shared lossy WebP policy.
 
-    Single conversion seam for every thumbnail write. Lossless keeps the
-    output pixel-identical to the source — no colour shift, no edge bleed on
-    the transparent background — while still shrinking these flat-shaded
-    renders below the original PNG. ``exact=True`` preserves the RGB of fully
-    transparent pixels so the encoder can't recolour hidden areas.
+    Visible RGB may change within the compression recipe. Alpha stays lossless,
+    including antialiased edges; invisible RGB does not need to be preserved.
+
+    ``preserve_frame`` accepts only a complete renderer's canonical-sized,
+    nonempty alpha frame with a transparent border; it never repositions pixels.
+    An already encoded WebP is retained after the same decode validation.
+    For normal framing, only internal ``renderer_encoded`` provenance allows
+    bypassing recompression; embedded images and uploads always encode.
 
     Raises a stable error when validation or encoding fails. Callers treat the
     thumbnail as a retryable derivative; hostile input is never stored raw.
     """
     try:
         from PIL import Image
+        from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
 
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -57,9 +68,21 @@ def to_webp(data: bytes, *, normalize: bool = True, width: int | None = None) ->
                 if alpha_bounds is None:
                     raise ThumbnailValidationError("thumbnail_empty")
 
-                if normalize:
-                    from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
-
+                if preserve_frame:
+                    # Only the complete renderer owns this frame. Embedded
+                    # previews still take the normalization path below.
+                    if (
+                        not source_had_alpha
+                        or rgba.size != (width, height)
+                        or alpha_bounds[0] <= 0
+                        or alpha_bounds[1] <= 0
+                        or alpha_bounds[2] >= width
+                        or alpha_bounds[3] >= height
+                    ):
+                        raise ThumbnailValidationError("thumbnail_frame_invalid")
+                    if source_is_webp:
+                        return data
+                elif normalize:
                     canonical_with_safe_border = (
                         source_had_alpha
                         and rgba.size == (width, height)
@@ -100,17 +123,22 @@ def to_webp(data: bytes, *, normalize: bool = True, width: int | None = None) ->
                         )
                         canvas.alpha_composite(rgba, dest=offset)
                         rgba = canvas
-                    elif source_is_webp:
-                        # The full renderer already encoded the canonical,
-                        # lossless recipe. Validation above is still shared;
-                        # only the redundant second WebP encode is skipped.
+                    elif source_is_webp and renderer_encoded:
+                        # Preserve the current renderer's encoded color once;
+                        # validation still precedes this trusted fast path.
                         return data
                 else:
                     rgba.thumbnail((width, height), Image.Resampling.LANCZOS)
 
-                buf = io.BytesIO()
-                rgba.save(buf, format="WEBP", lossless=True, exact=True, method=6)
-                return buf.getvalue()
+                from printstash_core.mesh.rasterizer import (
+                    RenderedPixels,
+                    encode_rendered_pixels,
+                )
+
+                return encode_rendered_pixels(
+                    RenderedPixels(rgba.width, rgba.height, rgba.tobytes()),
+                    output_format="WEBP",
+                )
     except ThumbnailValidationError:
         raise
     except Exception as exc:

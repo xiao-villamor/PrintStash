@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
@@ -37,11 +38,13 @@ from app.db.models import (
     ModelStar,
     MultipartModelChoice,
     MultipartPart,
+    OwnedStorageObject,
     PrintBatch,
     Printer,
     PrinterFile,
     PrintJob,
     ShareLink,
+    StorageObjectState,
     Tag,
     User,
     VaultAuditFinding,
@@ -51,16 +54,23 @@ from app.db.projections import content_changed
 from app.db.scopes import live, trashed
 from app.db.session import get_session_factory
 from app.modules.library import part_options
-from app.modules.storage.storage_backend.contracts import StorageTier
+from app.modules.storage.storage_backend.contracts import (
+    CreationReceipt,
+    StorageBackend,
+    StorageTier,
+)
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_deletion import (
-    enqueue_owned_key,
+    PreparedOwnedDeletion,
+    enqueue_prepared_owned_deletion,
+    enqueue_prevalidated_receipt,
+    prepare_owned_key_deletion,
     process_storage_delete_intents,
     record_legacy_blocked_intent,
 )
 from app.modules.storage.storage_ownership import (
     UnsafeStorageDeleteError,
-    require_or_adopt_legacy_artifact,
+    provider_ref_for_backend,
     require_owned_key,
     sweep_orphaned_publications,
 )
@@ -177,6 +187,14 @@ def _claim_purge(session: Session, resource) -> str:
     return token
 
 
+def _verify_destructive_access(backend: StorageBackend, keys: list[str]) -> None:
+    """Keep provider probe failures inside the destructive-operation contract."""
+    try:
+        backend.verify_destructive_access(keys)
+    except Exception as exc:
+        raise UnsafeStorageDeleteError("storage_delete_access_unverified") from exc
+
+
 def _preflight_primary_keys(
     session: Session, keys: Iterable[str], *, allow_unverified: bool = False
 ) -> None:
@@ -185,10 +203,7 @@ def _preflight_primary_keys(
     if not exact_keys:
         return
     # Abort read-only/permission failures before deleting the first byte.
-    try:
-        backend.verify_destructive_access(exact_keys)
-    except Exception as exc:
-        raise UnsafeStorageDeleteError("storage_delete_access_unverified") from exc
+    _verify_destructive_access(backend, exact_keys)
     for key in exact_keys:
         if not allow_unverified:
             require_owned_key(session, backend, key)
@@ -202,20 +217,251 @@ def _preflight_primary_files(
     rows = [file_row for file_row in files if not file_row.is_external]
     if not rows:
         return
-    try:
-        backend.verify_destructive_access(list(dict.fromkeys(row.path for row in rows)))
-    except Exception as exc:
-        raise UnsafeStorageDeleteError("storage_delete_access_unverified") from exc
+    _verify_destructive_access(backend, list(dict.fromkeys(row.path for row in rows)))
     for file_row in rows:
         if allow_unverified:
             continue
-        require_or_adopt_legacy_artifact(
-            session,
-            backend,
+        _prepare_primary_artifact(session, file_row, allow_unverified=allow_unverified)
+
+
+@dataclass(frozen=True)
+class _VerifiedPurgeDeletion:
+    receipt: CreationReceipt
+    sha256: str
+    resource_id: int
+
+
+@dataclass(frozen=True)
+class _LegacyPurgeDeletion:
+    key: str
+    size_bytes: int
+    sha256: str
+    resource_id: int
+
+
+PurgeDeletion = PreparedOwnedDeletion | _VerifiedPurgeDeletion | _LegacyPurgeDeletion
+
+
+def _prepare_primary_artifact(
+    session: Session, file_row: File, *, allow_unverified: bool
+) -> PurgeDeletion:
+    backend = get_backend()
+    _verify_destructive_access(backend, [file_row.path])
+    prepared = prepare_owned_key_deletion(
+        session,
+        backend,
+        file_row.path,
+        resource_kind="file",
+        resource_id=file_row.id,
+        allow_unverified=allow_unverified,
+    )
+    if prepared is not None:
+        return prepared
+    if file_row.id is None:
+        raise UnsafeStorageDeleteError("storage_ownership_unverified")
+    if allow_unverified:
+        return _LegacyPurgeDeletion(
+            file_row.path, file_row.size_bytes, file_row.sha256, file_row.id
+        )
+    namespace = backend.namespace_for(file_row.path)
+    current_ref = provider_ref_for_backend(backend, namespace=namespace)
+    existing = session.exec(
+        select(OwnedStorageObject.id).where(
+            OwnedStorageObject.backend == backend.backend_name,
+            OwnedStorageObject.namespace == namespace,
+            OwnedStorageObject.key == file_row.path,
+            OwnedStorageObject.provider_ref == current_ref,
+            OwnedStorageObject.state == StorageObjectState.COMMITTED,
+        )
+    ).first()
+    if existing is not None:
+        raise UnsafeStorageDeleteError("storage_object_no_longer_matches_receipt")
+    try:
+        receipt = backend.adopt_existing(
             file_row.path,
             expected_size=file_row.size_bytes,
             expected_sha256=file_row.sha256,
         )
+    except Exception as exc:
+        raise UnsafeStorageDeleteError("storage_ownership_unverified") from exc
+    if receipt.backend == "local" and receipt.provider_ref is None:
+        # Local adoption has already verified the physical object. Bind that
+        # proof to this installation before handing it to durable deletion.
+        receipt = replace(receipt, provider_ref=current_ref)
+    if (
+        receipt.backend != backend.backend_name
+        or receipt.namespace != namespace
+        or receipt.key != file_row.path
+        or receipt.provider_ref != current_ref
+    ):
+        raise UnsafeStorageDeleteError("storage_ownership_unverified")
+    return _VerifiedPurgeDeletion(receipt, file_row.sha256, file_row.id)
+
+
+def prepare_purge_deletions(
+    session: Session,
+    resources: Iterable[Model | File | Document | Collection],
+    *,
+    confirm_storage_risk: bool = False,
+) -> list[PurgeDeletion]:
+    """Preflight a complete purge batch before domain claims or locator locks."""
+    backend = get_backend()
+    resources = list(resources)
+    files: dict[int, File] = {}
+    keys: list[tuple[str, bool, str, int]] = []
+    for resource in resources:
+        if resource.id is None:
+            continue
+        if isinstance(resource, Model):
+            for file_row in session.exec(
+                select(File).where(File.model_id == resource.id)
+            ).all():
+                if file_row.id is not None:
+                    files[file_row.id] = file_row
+            covers = session.exec(
+                select(ModelSourceCover)
+                .join(ModelProvenanceSource)
+                .where(ModelProvenanceSource.model_id == resource.id)
+            ).all()
+            keys.extend(
+                (cover.storage_key, True, "model_source_cover", cover.id)
+                for cover in covers
+                if cover.id is not None
+            )
+        elif isinstance(resource, File):
+            files[resource.id] = resource
+        elif isinstance(resource, Document):
+            if resource.filename:
+                keys.append(
+                    (
+                        backend.document_file_key(resource.id, resource.filename),
+                        True,
+                        "document",
+                        resource.id,
+                    )
+                )
+            keys.extend(
+                (
+                    backend.document_image_key(resource.id, name),
+                    False,
+                    "document_image",
+                    resource.id,
+                )
+                for identifier, name in _DOCUMENT_IMAGE_RE.findall(resource.body or "")
+                if int(identifier) == resource.id
+            )
+        elif isinstance(resource, Collection):
+            keys.extend(
+                (
+                    backend.collection_image_key(resource.id, name),
+                    False,
+                    "collection_image",
+                    resource.id,
+                )
+                for identifier, name in _COLLECTION_IMAGE_RE.findall(
+                    resource.readme or ""
+                )
+                if int(identifier) == resource.id
+            )
+        else:
+            raise ValueError("purge_resource_unsupported")
+    prepared: list[PurgeDeletion] = []
+    for identifier, file_row in files.items():
+        if not file_row.is_external:
+            prepared.append(
+                _prepare_primary_artifact(
+                    session, file_row, allow_unverified=confirm_storage_risk
+                )
+            )
+        current = file_row.thumbnail_path or backend.thumbnail_key(identifier)
+        keys.extend(
+            (key, False, kind, identifier)
+            for key, kind in (
+                (current, "file_thumbnail"),
+                (backend.thumbnail_key(identifier), "file_thumbnail_legacy_webp"),
+                (backend.legacy_thumbnail_key(identifier), "file_thumbnail_legacy"),
+            )
+        )
+        keys.extend(
+            (key, False, "artifact_derivative", identifier)
+            for key in session.exec(
+                select(ArtifactDerivative.storage_key).where(
+                    ArtifactDerivative.file_id == identifier,
+                    col(ArtifactDerivative.storage_key).is_not(None),
+                )
+            ).all()
+            if key
+        )
+        shared_owner = session.exec(
+            select(File.id).where(
+                col(File.id).not_in(list(files)), File.sha256 == file_row.sha256
+            )
+        ).first()
+        if shared_owner is None and file_row.sha256:
+            keys.append(
+                (backend.stl_cache_key(file_row.sha256), False, "stl_cache", identifier)
+            )
+    seen = {
+        value.receipt.key if not isinstance(value, _LegacyPurgeDeletion) else value.key
+        for value in prepared
+    }
+    for key, required, kind, resource_id in keys:
+        if key in seen:
+            continue
+        seen.add(key)
+        if required:
+            _verify_destructive_access(backend, [key])
+        value = prepare_owned_key_deletion(
+            session,
+            backend,
+            key,
+            required_proof=required,
+            resource_kind=kind,
+            resource_id=resource_id,
+            allow_unverified=confirm_storage_risk,
+        )
+        if value is not None:
+            prepared.append(value)
+    return prepared
+
+
+def enqueue_purge_deletions(session: Session, prepared: list[PurgeDeletion]) -> None:
+    """Flush all logical removal before attaching sorted SQL-only retirement."""
+    session.flush()
+    backend = get_backend()
+
+    def key(value: PurgeDeletion):
+        if isinstance(value, _LegacyPurgeDeletion):
+            return backend.backend_name, backend.namespace_for(value.key), value.key
+        return value.receipt.backend, value.receipt.namespace, value.receipt.key
+
+    for value in sorted(prepared, key=key):
+        if isinstance(value, _LegacyPurgeDeletion):
+            record_legacy_blocked_intent(
+                session,
+                backend,
+                key=value.key,
+                size_bytes=value.size_bytes,
+                sha256=value.sha256,
+                object_kind="legacy_artifact",
+                resource_id=value.resource_id,
+            )
+        elif isinstance(value, _VerifiedPurgeDeletion):
+            enqueue_prevalidated_receipt(
+                session,
+                value.receipt,
+                object_kind="legacy_artifact",
+                sha256=value.sha256,
+                resource_kind="file",
+                resource_id=value.resource_id,
+            )
+        else:
+            enqueue_prepared_owned_deletion(
+                session,
+                value,
+                required_proof=value.resource_kind
+                in {"file", "document", "model_source_cover"},
+            )
 
 
 def trash_expires_at(
@@ -364,6 +610,7 @@ def hard_delete_file(
     ownership_preflighted: bool = False,
     purge_claimed_by_parent: bool = False,
     confirm_storage_risk: bool = False,
+    prepared_deletions: list[PurgeDeletion] | None = None,
 ) -> None:
     """Permanently remove one Artifact and every vault-owned dependent.
 
@@ -378,101 +625,20 @@ def hard_delete_file(
             storage_backed=True,
             confirmed=confirm_storage_risk,
         )
+    own_deletions = prepared_deletions is None
+    deletions = (
+        prepare_purge_deletions(
+            session, [file_row], confirm_storage_risk=confirm_storage_risk
+        )
+        if own_deletions
+        else prepared_deletions
+    )
+    assert deletions is not None
     _require_destructive_maintenance_safe(session)
     if not purge_claimed_by_parent:
         _claim_purge(session, file_row)
 
-    backend = get_backend()
     file_id = int(file_row.id)
-    if not file_row.is_external:
-        if not ownership_preflighted:
-            _preflight_primary_files(
-                session, [file_row], allow_unverified=confirm_storage_risk
-            )
-        # Once a multi-key purge starts, a late storage failure must leak the
-        # uncertain remainder rather than roll back DB rows after earlier exact
-        # objects were already removed.
-        try:
-            enqueue_owned_key(
-                session,
-                backend,
-                file_row.path,
-                required_proof=True,
-                resource_kind="file",
-                resource_id=file_id,
-                allow_unverified=confirm_storage_risk,
-            )
-        except UnsafeStorageDeleteError:
-            if not confirm_storage_risk:
-                raise
-            record_legacy_blocked_intent(
-                session,
-                backend,
-                key=file_row.path,
-                size_bytes=file_row.size_bytes,
-                sha256=file_row.sha256,
-                object_kind="legacy_artifact",
-                resource_id=file_id,
-            )
-    current_thumbnail = file_row.thumbnail_path or backend.thumbnail_key(file_id)
-    enqueue_owned_key(
-        session,
-        backend,
-        current_thumbnail,
-        resource_kind="file_thumbnail",
-        resource_id=file_id,
-        allow_unverified=confirm_storage_risk,
-    )
-    if current_thumbnail != backend.thumbnail_key(file_id):
-        enqueue_owned_key(
-            session,
-            backend,
-            backend.thumbnail_key(file_id),
-            resource_kind="file_thumbnail_legacy_webp",
-            resource_id=file_id,
-            allow_unverified=confirm_storage_risk,
-        )
-    derivative_keys = session.exec(
-        select(ArtifactDerivative.storage_key).where(
-            ArtifactDerivative.file_id == file_id,
-            col(ArtifactDerivative.storage_key).is_not(None),
-        )
-    ).all()
-    for derivative_key in set(derivative_keys):
-        if not derivative_key or derivative_key == current_thumbnail:
-            continue
-        enqueue_owned_key(
-            session,
-            backend,
-            derivative_key,
-            resource_kind="artifact_derivative",
-            resource_id=file_id,
-            allow_unverified=confirm_storage_risk,
-        )
-    enqueue_owned_key(
-        session,
-        backend,
-        backend.legacy_thumbnail_key(file_id),
-        resource_kind="file_thumbnail_legacy",
-        resource_id=file_id,
-        allow_unverified=confirm_storage_risk,
-    )
-    shared_cache_owner = session.exec(
-        select(File.id).where(
-            File.id != file_id,
-            File.sha256 == file_row.sha256,
-        )
-    ).first()
-    if shared_cache_owner is None and file_row.sha256:
-        enqueue_owned_key(
-            session,
-            backend,
-            backend.stl_cache_key(file_row.sha256),
-            resource_kind="stl_cache",
-            resource_id=file_id,
-            allow_unverified=confirm_storage_risk,
-        )
-
     model = session.get(Model, file_row.model_id)
     if model is not None and model.thumbnail_file_id == file_id:
         model.thumbnail_file_id = None
@@ -508,19 +674,22 @@ def hard_delete_file(
     # `foreign_keys=ON` is a production pragma and these are all `RESTRICT`, so a
     # child left behind is a failed purge rather than a dangling id — and the two
     # rows the ownership ledger cares about are already gone by this point.
-    session.exec(delete(PrinterFile).where(PrinterFile.file_id == file_id))
+    session.exec(delete(PrinterFile).where(col(PrinterFile.file_id) == file_id))
     part_options.remove_file_from_groups(session, file_id)
-    session.exec(delete(FileTagLink).where(FileTagLink.file_id == file_id))
-    session.exec(delete(PrintJob).where(PrintJob.file_id == file_id))
-    session.exec(delete(Metadata).where(Metadata.file_id == file_id))
-    session.exec(delete(PrintBatch).where(PrintBatch.file_id == file_id))
+    session.exec(delete(FileTagLink).where(col(FileTagLink.file_id) == file_id))
+    session.exec(delete(PrintJob).where(col(PrintJob.file_id) == file_id))
+    session.exec(delete(Metadata).where(col(Metadata.file_id) == file_id))
+    session.exec(delete(PrintBatch).where(col(PrintBatch.file_id) == file_id))
     session.exec(
         delete(ArtifactMaterialRequirement).where(
-            ArtifactMaterialRequirement.file_id == file_id
+            col(ArtifactMaterialRequirement.file_id) == file_id
         )
     )
     session.delete(file_row)
     content_changed(session, "model", [file_row.model_id])
+
+    if own_deletions:
+        enqueue_purge_deletions(session, deletions)
 
 
 @guarded_destructive_operation
@@ -530,6 +699,7 @@ def hard_delete_document(
     *,
     ownership_preflighted: bool = False,
     confirm_storage_risk: bool = False,
+    prepared_deletions: list[PurgeDeletion] | None = None,
 ) -> None:
     """Permanently remove a Document row and every vault-owned blob."""
     if document.id is None:
@@ -542,38 +712,22 @@ def hard_delete_document(
         storage_backed=storage_backed,
         confirmed=confirm_storage_risk,
     )
+    own_deletions = prepared_deletions is None
+    deletions = (
+        prepare_purge_deletions(
+            session, [document], confirm_storage_risk=confirm_storage_risk
+        )
+        if own_deletions
+        else prepared_deletions
+    )
+    assert deletions is not None
     _require_destructive_maintenance_safe(session)
     _claim_purge(session, document)
-    backend = get_backend()
-    if document.filename:
-        document_key = backend.document_file_key(document.id, document.filename)
-        if not ownership_preflighted:
-            _preflight_primary_keys(
-                session,
-                [document_key],
-                allow_unverified=confirm_storage_risk,
-            )
-        enqueue_owned_key(
-            session,
-            backend,
-            document_key,
-            required_proof=True,
-            resource_kind="document",
-            resource_id=document.id,
-            allow_unverified=confirm_storage_risk,
-        )
-    for document_id, name in _DOCUMENT_IMAGE_RE.findall(document.body or ""):
-        if int(document_id) == document.id:
-            enqueue_owned_key(
-                session,
-                backend,
-                backend.document_image_key(document.id, name),
-                resource_kind="document_image",
-                resource_id=document.id,
-                allow_unverified=confirm_storage_risk,
-            )
     session.delete(document)
     content_changed(session, "document", [document.id])
+
+    if own_deletions:
+        enqueue_purge_deletions(session, deletions)
 
 
 def restore_document(session: Session, document: Document) -> None:
@@ -582,7 +736,11 @@ def restore_document(session: Session, document: Document) -> None:
 
 @guarded_destructive_operation
 def hard_delete_collection(
-    session: Session, collection: Collection, *, confirm_storage_risk: bool = False
+    session: Session,
+    collection: Collection,
+    *,
+    confirm_storage_risk: bool = False,
+    prepared_deletions: list[PurgeDeletion] | None = None,
 ) -> None:
     """Permanently remove a Collection and its explicitly referenced images."""
     if collection.id is None:
@@ -592,26 +750,27 @@ def hard_delete_collection(
         storage_backed=bool(_COLLECTION_IMAGE_RE.search(collection.readme or "")),
         confirmed=confirm_storage_risk,
     )
+    own_deletions = prepared_deletions is None
+    deletions = (
+        prepare_purge_deletions(
+            session, [collection], confirm_storage_risk=confirm_storage_risk
+        )
+        if own_deletions
+        else prepared_deletions
+    )
+    assert deletions is not None
     _require_destructive_maintenance_safe(session)
     _claim_purge(session, collection)
-    backend = get_backend()
-    for collection_id, name in _COLLECTION_IMAGE_RE.findall(collection.readme or ""):
-        if int(collection_id) == collection.id:
-            enqueue_owned_key(
-                session,
-                backend,
-                backend.collection_image_key(collection.id, name),
-                resource_kind="collection_image",
-                resource_id=collection.id,
-                allow_unverified=confirm_storage_risk,
-            )
     session.exec(
         delete(CollectionTagLink).where(
-            CollectionTagLink.collection_id == collection.id
+            col(CollectionTagLink.collection_id) == collection.id
         )
     )
     session.delete(collection)
     content_changed(session, "collection", [collection.id])
+
+    if own_deletions:
+        enqueue_purge_deletions(session, deletions)
 
 
 @guarded_destructive_operation
@@ -621,12 +780,11 @@ def hard_delete_model(
     *,
     ownership_preflighted: bool = False,
     confirm_storage_risk: bool = False,
+    prepared_deletions: list[PurgeDeletion] | None = None,
 ) -> None:
     """Permanently remove a model, related DB rows, and stored blobs."""
     if model.id is None:
         return
-    _require_destructive_maintenance_safe(session)
-
     file_rows = session.exec(select(File).where(File.model_id == model.id)).all()
     has_cover = session.exec(
         select(ModelSourceCover.id)
@@ -640,36 +798,22 @@ def hard_delete_model(
         confirmed=confirm_storage_risk,
     )
 
-    _claim_purge(session, model)
-    # Verify every required primary before deleting the first byte. This avoids
-    # a mixed legacy/missing model producing a partially applied hard delete.
-    if not ownership_preflighted:
-        _preflight_primary_files(
-            session, file_rows, allow_unverified=confirm_storage_risk
+    own_deletions = prepared_deletions is None
+    deletions = (
+        prepare_purge_deletions(
+            session, [model], confirm_storage_risk=confirm_storage_risk
         )
+        if own_deletions
+        else prepared_deletions
+    )
+    assert deletions is not None
+    _require_destructive_maintenance_safe(session)
+
+    _claim_purge(session, model)
     model.thumbnail_file_id = None
     model.thumbnail_path = None
     session.add(model)
     session.flush()
-    # Covers belong to provenance rows, which cascade with their Model. Move
-    # each exact receipt into the delete outbox before that cascade removes the
-    # row; soft-delete/restore deliberately never touch these private bytes.
-    covers = session.exec(
-        select(ModelSourceCover)
-        .join(ModelProvenanceSource)
-        .where(ModelProvenanceSource.model_id == model.id)
-    ).all()
-    backend = get_backend()
-    for cover in covers:
-        enqueue_owned_key(
-            session,
-            backend,
-            cover.storage_key,
-            required_proof=True,
-            resource_kind="model_source_cover",
-            resource_id=cover.id,
-            allow_unverified=confirm_storage_risk,
-        )
     for file_row in file_rows:
         hard_delete_file(
             session,
@@ -678,28 +822,31 @@ def hard_delete_model(
             ownership_preflighted=True,
             purge_claimed_by_parent=True,
             confirm_storage_risk=confirm_storage_risk,
+            prepared_deletions=deletions,
         )
     session.flush()
 
-    session.exec(delete(ShareLink).where(ShareLink.model_id == model.id))
+    session.exec(delete(ShareLink).where(col(ShareLink.model_id) == model.id))
     inbox_rows = session.exec(
         select(InboxItem).where(InboxItem.resulting_model_id == model.id)
     ).all()
     for inbox in inbox_rows:
         inbox.resulting_model_id = None
         session.add(inbox)
-    session.exec(delete(ModelStar).where(ModelStar.model_id == model.id))
+    session.exec(delete(ModelStar).where(col(ModelStar.model_id) == model.id))
     # Multipart compositions reference Models without owning them. Detach this
     # member before the restrictive Model FK is enforced; an empty part no
     # longer represents a useful choice and is removed, while its aggregate
     # remains available to be edited.
     member_part_ids = session.exec(
         select(MultipartModelChoice.multipart_part_id).where(
-            MultipartModelChoice.model_id == model.id
+            col(MultipartModelChoice.model_id) == model.id
         )
     ).all()
     session.exec(
-        delete(MultipartModelChoice).where(MultipartModelChoice.model_id == model.id)
+        delete(MultipartModelChoice).where(
+            col(MultipartModelChoice.model_id) == model.id
+        )
     )
     session.flush()
     for part_id in member_part_ids:
@@ -711,7 +858,7 @@ def hard_delete_model(
             ).first()
             is None
         ):
-            session.exec(delete(MultipartPart).where(MultipartPart.id == part_id))
+            session.exec(delete(MultipartPart).where(col(MultipartPart.id) == part_id))
     part_options.remove_model_from_groups(session, model.id)
     # Don't bulk-delete the tag links here: ``Model.tags`` is a link_model
     # (many-to-many) relationship, so deleting the model already removes its
@@ -720,6 +867,9 @@ def hard_delete_model(
     # *tagged* model, including the expired-trash cron, would 500).
     session.delete(model)
     content_changed(session, "model", [model.id])
+
+    if own_deletions:
+        enqueue_purge_deletions(session, deletions)
 
 
 def hard_delete_expired_models(
@@ -738,16 +888,9 @@ def hard_delete_expired_models(
             Model.deleted_at <= cutoff,  # type: ignore[operator]
         )
     ).all()
-    model_ids = [int(model.id) for model in models if model.id is not None]
-    if model_ids:
-        file_rows = session.exec(
-            select(File).where(File.model_id.in_(model_ids))  # type: ignore[attr-defined]
-        ).all()
-        # Preflight the entire batch before deleting the first object. One
-        # legacy or remounted item must preserve every model in this purge.
-        _preflight_primary_files(
-            session, file_rows, allow_unverified=confirm_storage_risk
-        )
+    prepared = prepare_purge_deletions(
+        session, models, confirm_storage_risk=confirm_storage_risk
+    )
     purged_ids = [model.id for model in models if model.id is not None]
     for model in models:
         hard_delete_model(
@@ -755,7 +898,9 @@ def hard_delete_expired_models(
             model,
             ownership_preflighted=True,
             confirm_storage_risk=confirm_storage_risk,
+            prepared_deletions=prepared,
         )
+    enqueue_purge_deletions(session, prepared)
     return [int(model_id) for model_id in purged_ids]
 
 

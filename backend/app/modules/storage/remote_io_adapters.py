@@ -72,7 +72,15 @@ class _RemoteAdapter:
             return self._operator
         import opendal
 
-        return layer(opendal.layers.TimeoutLayer(timeout=timeout, io_timeout=timeout))
+        operator = layer(
+            opendal.layers.TimeoutLayer(timeout=timeout, io_timeout=timeout)
+        )
+        to_async = getattr(operator, "to_async_operator", None)
+        if to_async is None:
+            return operator
+        from app.modules.storage.opendal_async_reads import AsyncReadOperator
+
+        return AsyncReadOperator(to_async())
 
     @property
     def storage_target(self) -> StorageTargetIdentity | None:
@@ -181,7 +189,7 @@ class _RemoteAdapter:
         return self._namespace
 
     def exists(self, key: str) -> bool:
-        return bool(self._operator.exists(self._relative(key)))
+        return bool(self._io_operator.exists(self._relative(key)))
 
     def publish_replica(self, source: BinaryIO, key: str) -> CreationReceipt:
         if self._read_only:
@@ -281,7 +289,7 @@ class _RemoteAdapter:
 
     def stat_size(self, key: str) -> int:
         try:
-            return int(self._operator.stat(self._relative(key)).content_length)
+            return int(self._io_operator.stat(self._relative(key)).content_length)
         except Exception as exc:
             if _is_not_found(exc):
                 raise FileNotFoundError(key) from exc
@@ -294,7 +302,10 @@ class _RemoteAdapter:
             if not operator.exists(relative):
                 return None
             metadata = operator.stat(relative)
+        except StorageConfigurationError:
+            raise
         except Exception as exc:
+            operation_timeout()
             if _is_not_found(exc):
                 return None
             raise StorageConfigurationError("remote_storage_metadata_failed") from exc
@@ -306,7 +317,7 @@ class _RemoteAdapter:
         )
 
     def read_bytes(self, key: str) -> bytes:
-        return bytes(self._operator.read(self._relative(key)))
+        return bytes(self._io_operator.read(self._relative(key)))
 
     @property
     def operator_capabilities(self):
@@ -314,7 +325,7 @@ class _RemoteAdapter:
         return self._operator.capability()
 
     def check(self) -> None:
-        self._operator.check()
+        self._io_operator.check()
 
     def _delete_versioned(self, key: str, version_id: str) -> None:
         if (
@@ -393,6 +404,7 @@ class _RemoteAdapter:
             except StorageConfigurationError:
                 raise
             except Exception as exc:
+                operation_timeout()
                 if _is_not_found(exc):
                     raise FileNotFoundError(key) from exc
                 raise StorageConfigurationError("remote_storage_read_failed") from exc
@@ -446,11 +458,17 @@ class _RemoteAdapter:
                     if not path or path == directory:
                         continue
                     metadata = entry.metadata
+                    modified_at = getattr(metadata, "last_modified", None)
+                    if self._spec.kind is TransportKind.S3 and modified_at is not None:
+                        # S3 list XML can include fractions, but HEAD's HTTP date
+                        # has whole-second precision. Keep both observations in
+                        # that common precision; ETag/version still fence reads.
+                        modified_at = modified_at.replace(microsecond=0)
                     yield RemoteEntry(
                         key=path,
                         size=int(getattr(metadata, "content_length", 0) or 0),
                         is_dir=bool(getattr(metadata, "is_dir", False)),
-                        modified_at=getattr(metadata, "last_modified", None),
+                        modified_at=modified_at,
                         etag=getattr(metadata, "etag", None) or None,
                         version_id=getattr(metadata, "version", None) or None,
                     )
@@ -501,7 +519,10 @@ class _RemoteReader(RawIOBase):
         try:
             read = getattr(self.reader, "read1", self.reader.read)
             chunk = read(len(buffer))
+        except StorageConfigurationError:
+            raise
         except Exception as exc:
+            operation_timeout()
             raise StorageConfigurationError("remote_storage_read_failed") from exc
         buffer[: len(chunk)] = chunk
         return len(chunk)
@@ -696,7 +717,10 @@ class _ChunkReader(RawIOBase):
                 self._pending = memoryview(next(self._chunks))
             except StopIteration:
                 return 0
+            except StorageConfigurationError:
+                raise
             except Exception as exc:
+                operation_timeout()
                 raise StorageConfigurationError("remote_storage_read_failed") from exc
         count = min(len(buffer), len(self._pending))
         buffer[:count] = self._pending[:count]
@@ -708,7 +732,10 @@ class _ChunkReader(RawIOBase):
             close = getattr(self._chunks, "close", None)
             if close is not None:
                 close()
+        except StorageConfigurationError:
+            raise
         except Exception as exc:
+            operation_timeout()
             raise StorageConfigurationError("remote_storage_read_failed") from exc
         finally:
             self._pending = memoryview(b"")

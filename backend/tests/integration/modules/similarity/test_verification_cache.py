@@ -31,7 +31,9 @@ def verified_pair(
 
 
 class TestVerificationCache:
-    @pytest.mark.parametrize("previous_version", [None, "surface-verification-v2"])
+    @pytest.mark.parametrize(
+        "previous_version", [None, "surface-verification-v2", "surface-verification-v3"]
+    )
     def test_retains_refreshed_recipe_for_reuse(
         self,
         db_session,
@@ -77,6 +79,18 @@ class TestVerificationCache:
         db_session.refresh(candidate)
         assert original.evidence_json == snapshot
         assert candidate.review_state == "rejected"
+
+    def test_rechecks_previous_point_distance_recipe(self, db_session, verified_pair):
+        observation = db_session.exec(select(SimilarityCandidateObservation)).one()
+        evidence = json.loads(observation.evidence_json)
+        evidence["version"] = "surface-verification-v3"
+        observation.evidence_json = json.dumps(evidence)
+        db_session.add(observation)
+        db_session.commit()
+
+        assert not verification_cache.reusable_pair(
+            db_session, *verified_pair, sample_points=256
+        )
 
     @pytest.mark.parametrize("side", [0, 1])
     def test_rechecks_deleted_artifact(self, db_session, verified_pair, side):

@@ -254,6 +254,13 @@ class TestCsvCell:
                             "is_recommended": True,
                             "uploaded_at": "2024-01-01",
                             "metadata": {
+                                "volume_measurement": {
+                                    "state": "not_calculated",
+                                    "unit": "mm3",
+                                    "method": None,
+                                    "value_mm3": None,
+                                    "cause": "not_applicable",
+                                },
                                 "infill_percent": 0,
                                 "bed_temperature_c": 0,
                                 "top_shell_layers": 0,

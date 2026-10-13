@@ -21,12 +21,16 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { queryKeys } from "@/lib/query-client";
+import { clearLogin } from "@/lib/auth-store";
+import { vaultConfigOptions } from "@/lib/queries/settings-config";
 import { StorageConfigCard } from "@/components/storage-config-card";
-import { aVaultConfig } from "@/test-support/factories";
+import { VaultMigrationPanel } from "@/components/vault-migration-panel";
+import { aMigrationBackup, aVaultMigration, aVaultConfig } from "@/test-support/factories";
 import { adminSession, json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { StorageHealthRead, StorageProvider, VaultConfigRead } from "@/types";
 
@@ -190,7 +194,7 @@ function renderCard(
         "GET /api/v1/config": json(config),
         "GET /api/v1/storage/providers": json(PROVIDERS),
         "GET /api/v1/storage-connections": json([]),
-        "PUT /api/v1/config": json(config),
+        "PUT /api/v1/config": json({ ...config, edit_version: config.edit_version + 1 }),
         ...routes,
       },
       ...rest,
@@ -246,8 +250,8 @@ describe("StorageConfigCard", () => {
         },
       });
 
-      expect(await screen.findByRole("status")).toHaveTextContent(
-        "Imports are copied, not hard-linked",
+      await waitFor(() =>
+        expect(screen.getByRole("status")).toHaveTextContent("Imports are copied, not hard-linked"),
       );
     });
 
@@ -281,6 +285,12 @@ describe("StorageConfigCard", () => {
           requestsWithMethod("POST").some((call) => call.url.includes("storage-roots/enroll")),
         ).toBe(true),
       );
+      expect(
+        JSON.parse(
+          requestsWithMethod("POST").find((call) => call.url.includes("storage-roots/enroll"))!
+            .body,
+        ),
+      ).toEqual({ role: "data", confirm: true, expected_path: "/data/files" });
       expect(await screen.findByText(/Storage root enrolled/i)).toBeVisible();
     });
 
@@ -529,7 +539,7 @@ describe("StorageConfigCard", () => {
     it("offers no way to save", async () => {
       renderCard({ auth: adminSession({ user: null }) });
 
-      await screen.findByDisplayValue("/data/files");
+      await screen.findByText("Sign in to modify configuration.");
       expect(screen.queryByRole("button", { name: /Save configuration/ })).toBeNull();
     });
 
@@ -584,6 +594,32 @@ describe("Configured Vault migration entry", () => {
     expect(within(details).getByText("/data/thumbs")).toBeVisible();
     expect(within(details).queryByText("Root")).toBeNull();
   });
+  it.each([
+    {
+      backend: "local" as const,
+      label: "Local disk",
+      location: "/data/files",
+      config: aVaultConfig(),
+    },
+    {
+      backend: "s3" as const,
+      label: "Amazon S3",
+      location: "vault-prod",
+      config: anS3Config({ s3_bucket: "vault-prod" }),
+    },
+  ])("shows legacy $backend storage paths", async ({ backend, label, location, config }) => {
+    renderCard({
+      migrationManaged: true,
+      config: {
+        ...config,
+        storage_backend: backend,
+        storage_provider: "",
+        storage_provider_config: {},
+      },
+    });
+    expect(await screen.findByText(label)).toBeVisible();
+    expect(screen.getByText(location)).toBeVisible();
+  });
   it("keeps guarded deletion consequences visible when location changes require migration", async () => {
     renderCard({ migrationManaged: true, config: anS3Config() });
     expect(await screen.findByText("Guarded storage consequences")).toBeVisible();
@@ -599,7 +635,7 @@ describe("Configured Vault migration entry", () => {
   });
   it("hides the migration entry without an administrator session", async () => {
     renderCard({ migrationManaged: true, auth: adminSession({ user: null }) });
-    await screen.findByText("Local disk");
+    await screen.findByText("Sign in to modify configuration.");
     expect(screen.queryByRole("button", { name: "Move storage" })).not.toBeInTheDocument();
   });
   it("keeps current credentials editable without exposing location fields", async () => {
@@ -608,5 +644,415 @@ describe("Configured Vault migration entry", () => {
     expect(screen.queryByLabelText("Bucket")).not.toBeInTheDocument();
     expect(screen.getByText("Bucket", { selector: "dt" })).toBeVisible();
     expect(screen.queryByText("/data/files")).not.toBeInTheDocument();
+  });
+});
+
+describe("Storage configuration ownership", () => {
+  it("cancels an abandoned storage configuration read", async () => {
+    const held = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = renderCard({
+      routes: {
+        "GET /api/v1/config": (_url, init) => {
+          signal = init?.signal;
+          return held.promise;
+        },
+      },
+    });
+    await waitFor(() => expect(signal).toBeDefined());
+    app.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => held.resolve(json(aVaultConfig())));
+  });
+  it("exposes failed configuration reads with explicit recovery", async () => {
+    const app = renderCard({
+      routes: { "GET /api/v1/config": () => json({ detail: "unavailable" }, 503) },
+    });
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save configuration" })).toBeNull();
+    app.route({ "GET /api/v1/config": () => json(aVaultConfig()) });
+    await userEvent.click(screen.getByRole("button", { name: "Retry storage configuration" }));
+    expect(await screen.findByDisplayValue("/data/files")).toBeVisible();
+  });
+  it("publishes the normalized storage receipt to configuration observers", async () => {
+    const receipt = aVaultConfig({
+      edit_version: 2,
+      storage_provider_config: {
+        provider: "local",
+        data_dir: "/normalized/files",
+        thumb_dir: "/data/thumbs",
+      },
+    });
+    const app = renderCard({ routes: { "PUT /api/v1/config": () => json(receipt) } });
+    await screen.findByDisplayValue("/data/files");
+    await userEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+    await screen.findByText("Saved");
+    expect(app.client.getQueryData(queryKeys.vaultConfig)).toEqual(receipt);
+    expect(
+      app
+        .requests()
+        .filter((request) => request.method === "GET" && request.url === "/api/v1/config"),
+    ).toHaveLength(1);
+  });
+  it("keeps private configuration unreadable without an administrator", async () => {
+    const app = renderCard({ auth: adminSession({ user: null }) });
+    await screen.findByText("Sign in to modify configuration.");
+    expect(app.requests().some((request) => request.url === "/api/v1/config")).toBe(false);
+    expect(screen.queryByDisplayValue("/data/files")).toBeNull();
+  });
+  it("hides private storage configuration after denial", async () => {
+    const app = renderCard({ migrationManaged: true });
+    await screen.findByText("/data/files");
+    app.route({ "GET /api/v1/config": () => json({ detail: "forbidden" }, 403) });
+    await act(async () => {
+      await app.client.fetchQuery({ ...vaultConfigOptions(), staleTime: 0 }).catch(() => undefined);
+    });
+    await waitFor(() => expect(screen.queryByText("/data/files")).toBeNull());
+  });
+  it.each([412, 503])("%s: reviews a storage conflict before revised save", async (status) => {
+    let reads = 0;
+    const writes: Headers[] = [];
+    const latest = aVaultConfig({
+      edit_version: 2,
+      storage_provider_config: {
+        provider: "local",
+        data_dir: "/remote/files",
+        thumb_dir: "/remote/thumbs",
+      },
+    });
+    const app = renderCard({
+      routes: {
+        "GET /api/v1/config": () => json(++reads === 1 ? aVaultConfig() : latest),
+        "PUT /api/v1/config": (_url, init) => {
+          writes.push(new Headers(init?.headers));
+          return writes.length === 1
+            ? json({ detail: "edit_conflict" }, status)
+            : json(aVaultConfig({ edit_version: 3 }));
+        },
+      },
+    });
+    const field = await screen.findByLabelText("Data directory");
+    await userEvent.clear(field);
+    await userEvent.type(field, "/draft/files");
+    await userEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+    const reviewed = await screen.findByRole("region", { name: "Latest saved version" });
+    expect(within(reviewed).getByText("/remote/files")).toBeVisible();
+    expect(field).toHaveValue("/draft/files");
+    expect(screen.getByLabelText("Thumbnail directory")).toHaveValue("/data/thumbs");
+    expect(writes).toHaveLength(1);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save my draft against this version" }),
+    );
+    await screen.findByText("Saved");
+    expect(writes[0].get("If-Match")).toBe(`"vault-config-e${latest.edit_epoch}-v1"`);
+    expect(writes[1].get("If-Match")).toBe(`"vault-config-e${latest.edit_epoch}-v2"`);
+    expect(JSON.parse(app.requestsWithMethod("PUT")[1].body).storage_provider_config).toMatchObject(
+      { data_dir: "/draft/files", thumb_dir: "/remote/thumbs" },
+    );
+    expect(app.client.getMutationCache().getAll()).toHaveLength(0);
+  });
+  it("adopts the reviewed storage configuration without writing", async () => {
+    let reads = 0;
+    const app = renderCard({
+      routes: {
+        "GET /api/v1/config": () =>
+          json(
+            ++reads === 1
+              ? aVaultConfig()
+              : aVaultConfig({
+                  edit_version: 2,
+                  storage_provider_config: {
+                    provider: "local",
+                    data_dir: "/remote/files",
+                    thumb_dir: "/data/thumbs",
+                  },
+                }),
+          ),
+        "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.type(await screen.findByLabelText("Data directory"), "-draft");
+    await userEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Use latest version" }));
+    expect(screen.getByLabelText("Data directory")).toHaveValue("/remote/files");
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+  it.each([403, 503])(
+    "%s: blocks storage retry when latest configuration cannot be read",
+    async (status) => {
+      let reads = 0;
+      const app = renderCard({
+        config: anS3Config(),
+        migrationManaged: true,
+        routes: {
+          "GET /api/v1/config": () =>
+            ++reads === 1 ? json(anS3Config()) : json({ detail: "unavailable" }, status),
+          "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+        },
+      });
+      await userEvent.type(await screen.findByLabelText(/Access key/), "FakePrivateDraft");
+      await userEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("button", { name: "Retry storage configuration" });
+      expect(
+        screen.queryByRole("button", { name: "Save my draft against this version" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByDisplayValue("FakePrivateDraft") !== null).toBe(status === 503);
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    },
+  );
+  it("retires a pending storage review on logout", async () => {
+    let reads = 0;
+    const pending = Promise.withResolvers<Response>();
+    const app = renderCard({
+      config: anS3Config(),
+      migrationManaged: true,
+      routes: {
+        "GET /api/v1/config": () => (++reads === 1 ? json(anS3Config()) : pending.promise),
+        "PUT /api/v1/config": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.type(await screen.findByLabelText(/Access key/), "FakePrivateDraft");
+    await userEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Review latest version" }));
+    await act(async () => {
+      clearLogin();
+      pending.resolve(json(anS3Config({ edit_version: 2 })));
+    });
+    expect(screen.queryByDisplayValue("FakePrivateDraft")).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Latest saved version" })).not.toBeInTheDocument();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+  });
+  it("retains a storage draft during background configuration refresh", async () => {
+    const sent: Headers[] = [];
+    const app = renderCard({
+      routes: {
+        "PUT /api/v1/config": (_url, init) => {
+          sent.push(new Headers(init?.headers));
+          return json({ detail: "edit_conflict" }, 412);
+        },
+      },
+    });
+    const input = await screen.findByLabelText("Data directory");
+    await userEvent.clear(input);
+    await userEvent.type(input, "/draft/files");
+    act(() =>
+      app.client.setQueryData(
+        queryKeys.vaultConfig,
+        aVaultConfig({
+          edit_version: 2,
+          storage_provider_config: {
+            provider: "local",
+            data_dir: "/other/files",
+            thumb_dir: "/other/thumbs",
+          },
+        }),
+      ),
+    );
+    expect(screen.getByLabelText("Data directory")).toHaveValue("/draft/files");
+    await userEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    expect(sent[0].get("If-Match")).toBe(`"vault-config-e${aVaultConfig().edit_epoch}-v1"`);
+    expect(
+      JSON.parse(app.requestsWithMethod("PUT")[0].body).storage_provider_config.thumb_dir,
+    ).toBe("/data/thumbs");
+  });
+  it("preserves a newer credential draft after an older save finishes", async () => {
+    const held = Promise.withResolvers<Response>();
+    const app = renderCard({
+      migrationManaged: true,
+      config: anS3Config(),
+      routes: { "PUT /api/v1/config": () => held.promise },
+    });
+    const input = await screen.findByLabelText(/Access key/);
+    await userEvent.type(input, "test-old-secret");
+    await userEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+    await waitFor(() => expect(app.requestsWithMethod("PUT")).toHaveLength(1));
+    await userEvent.clear(input);
+    await userEvent.type(input, "test-new-secret");
+    await act(async () => held.resolve(json(anS3Config({ edit_version: 2 }))));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save configuration" })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText(/Access key/)).toHaveValue("test-new-secret");
+    const retryHeaders: Headers[] = [];
+    app.route({
+      "PUT /api/v1/config": (_url, init) => {
+        retryHeaders.push(new Headers(init?.headers));
+        return json(anS3Config({ edit_version: 3 }));
+      },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+    await screen.findByText("Saved");
+    expect(retryHeaders[0].get("If-Match")).toBe(`"vault-config-e${anS3Config().edit_epoch}-v2"`);
+  });
+  it("retires root enrollment review with its session", async () => {
+    const app = renderCard({
+      storageHealth: {
+        ok: false,
+        provider: "local",
+        tier: "guarded",
+        diagnostics: { root_bindings: { data: "binding_missing" } },
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Review and enroll" }));
+    act(() => clearLogin());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+  it("dismisses enrollment after a server-side root change", async () => {
+    const app = renderCard({
+      storageHealth: {
+        ok: false,
+        provider: "local",
+        tier: "guarded",
+        diagnostics: { root_bindings: { data: "binding_missing" } },
+      },
+      routes: {
+        "POST /api/v1/config/storage-roots/enroll": json({ detail: "storage_review_changed" }, 409),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Review and enroll" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Enroll root" }),
+    );
+    expect(await screen.findByText(/changed during review/)).toBeVisible();
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
+  });
+  it("refuses enrollment after the reviewed root changes", async () => {
+    const app = renderCard({
+      storageHealth: {
+        ok: false,
+        provider: "local",
+        tier: "guarded",
+        diagnostics: { root_bindings: { data: "binding_missing" } },
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Review and enroll" }));
+    act(() =>
+      app.client.setQueryData(queryKeys.vaultConfig, aVaultConfig({ data_dir: "/different/root" })),
+    );
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Enroll root" }),
+    );
+    expect(await screen.findByText(/changed during review/)).toBeVisible();
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+  it("updates current storage after a confirmed migration cutover", async () => {
+    let config = aVaultConfig();
+    const run = aVaultMigration({
+      state: "ready",
+      destination: { provider: "local", data_dir: "/active/files", thumb_dir: "/active/thumbs" },
+    });
+    renderApp(
+      <>
+        <StorageConfigCard migrationManaged />
+        <VaultMigrationPanel />
+      </>,
+      {
+        routes: {
+          "GET /api/v1/config": () => json(config),
+          "GET /api/v1/storage/providers": () => json(PROVIDERS),
+          "GET /api/v1/backups/sources": () => json([aMigrationBackup()]),
+          "GET /api/v1/storage/migrations": () => json([run]),
+          "GET /api/v1/storage/migrations/migration-1/report": () =>
+            json({ ...run, resource_kind_totals: [], recent_failures: [] }),
+          "POST /api/v1/storage/migrations/migration-1/cutover": () => {
+            config = aVaultConfig({
+              data_dir: "/active/files",
+              thumb_dir: "/active/thumbs",
+              storage_provider_config: run.destination,
+            });
+            return json({ ...run, state: "active" });
+          },
+        },
+      },
+    );
+    await screen.findByText("/data/files");
+    await userEvent.click(await screen.findByRole("button", { name: "Switch Vault storage" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Switch Vault storage" }),
+    );
+    expect(await screen.findByText("/active/files", { exact: true })).toBeVisible();
+    expect(screen.queryByText("/data/files", { exact: true })).toBeNull();
+  });
+  it("discards a conflicting storage draft before renewed review", async () => {
+    const app = renderCard({
+      routes: { "PUT /api/v1/config": json(aVaultConfig({ edit_version: 3 })) },
+    });
+    await userEvent.type(await screen.findByLabelText("Data directory"), "-draft");
+    act(() =>
+      app.client.setQueryData(
+        queryKeys.vaultConfig,
+        aVaultConfig({
+          edit_version: 2,
+          storage_provider_config: {
+            provider: "local",
+            data_dir: "/other/files",
+            thumb_dir: "/data/thumbs",
+          },
+        }),
+      ),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Discard storage draft" }));
+    expect(screen.getByLabelText("Data directory")).toHaveValue("/other/files");
+    await userEvent.click(screen.getByRole("button", { name: "Save configuration" }));
+    await screen.findByText("Saved");
+    expect(JSON.parse(app.requestsWithMethod("PUT")[0].body).storage_provider_config.data_dir).toBe(
+      "/other/files",
+    );
+  });
+  it("permits retry after refused root enrollment", async () => {
+    let attempts = 0;
+    const app = renderCard({
+      storageHealth: {
+        ok: false,
+        provider: "local",
+        tier: "guarded",
+        diagnostics: { root_bindings: { data: "binding_missing" } },
+      },
+      routes: {
+        "POST /api/v1/config/storage-roots/enroll": () =>
+          ++attempts === 1
+            ? json({ detail: "storage_root_enrollment_failed" }, 409)
+            : json({ enrolled: true, role: "data", restart_required: true }),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Review and enroll" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Enroll root" }),
+    );
+    await screen.findByText(/Something went wrong/);
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Enroll root" }),
+    );
+    expect(await screen.findByText(/Storage root enrolled/i)).toBeVisible();
+    expect(app.requestsWithMethod("POST")).toHaveLength(2);
+  });
+
+  it("hides storage after enrollment access is revoked", async () => {
+    const app = renderCard({
+      migrationManaged: true,
+      storageHealth: {
+        ok: false,
+        provider: "local",
+        tier: "guarded",
+        diagnostics: { root_bindings: { data: "binding_missing" } },
+      },
+      routes: {
+        "POST /api/v1/config/storage-roots/enroll": () => json({ detail: "forbidden" }, 403),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Review and enroll" }));
+    app.route({ "GET /api/v1/config": () => json({ detail: "forbidden" }, 403) });
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Enroll root" }),
+    );
+    await waitFor(() => expect(screen.queryByText("/data/files", { exact: true })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 });

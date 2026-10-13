@@ -13,19 +13,20 @@
  * a part that looks like it fits when it does not — which is a wrong answer
  * presented with the same confidence as a right one.
  *
- * Favouriting writes immediately and optimistically, so the star has to survive
- * the request failing: leaving it lit after a 403 tells the user something is
- * saved that is not.
+ * Favouriting publishes the confirmed server state. A failed write must leave
+ * the earlier star visible rather than claim something was saved.
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelDetail } from "@/components/model-detail";
 import { queryKeys } from "@/lib/query-client";
 import { aCollection } from "@/test-support/factories";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
 import { json, memberSession, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { FileRead, ModelRead } from "@/types";
 
@@ -52,12 +53,15 @@ function aFile(over: Partial<FileRead> = {}): FileRead {
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    edit_version: 1,
     id: 1,
     name: "Benchy",
     slug: "benchy",
     hash: "h".repeat(16),
     collection: "parts",
     collection_id: 1,
+    collection_label: "Parts",
     description: null,
     source_url: null,
     effective_role: "admin",
@@ -67,32 +71,41 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
     updated_at: FROZEN_NOW,
     files: [aFile()],
     starred: false,
+    derivatives_revision: "0",
     ...over,
   };
 }
 
+function DetailLocation() {
+  const location = useLocation();
+  return (
+    <output aria-label="Current detail location">{location.pathname + location.search}</output>
+  );
+}
+
 function renderDetail(options: RenderAppOptions & { model?: ModelRead } = {}) {
   const { model = aModel(), seed = [], routes = {}, ...rest } = options;
-  return renderApp(<ModelDetail model={model} />, {
-    seed: [
-      [queryKeys.collections, [aCollection()]],
-      [queryKeys.tags, []],
-      [queryKeys.printers, []],
-      ...seed,
-    ],
-    routes: {
-      "GET /api/v1/models/1": json(model),
-      "GET /api/v1/models/1/print-jobs": json([]),
-      "GET /api/v1/models/1/printer-files": json([]),
-      "GET /api/v1/models/1/provenance": json({ sources: [] }),
-      "GET /api/v1/models/1/shares": json([]),
-      "GET /api/v1/printers": json([]),
-      "GET /api/v1/collections": json([aCollection()]),
-      "GET /api/v1/tags": json([]),
-      ...routes,
+  return renderApp(
+    <>
+      <ModelDetail model={model} />
+      <DetailLocation />
+    </>,
+    {
+      seed: [[queryKeys.tags, []], [queryKeys.printers, []], ...seed],
+      routes: {
+        "GET /api/v1/models/1": json(model),
+        "GET /api/v1/models/1/print-jobs": json([]),
+        "GET /api/v1/models/1/printer-files": json([]),
+        "GET /api/v1/models/1/provenance": json({ edit_version: 1, sources: [] }),
+        "GET /api/v1/models/1/shares": json([]),
+        "GET /api/v1/printers": json([]),
+        ...collectionTreeRoutes([aCollection()]),
+        "GET /api/v1/tags": json([]),
+        ...routes,
+      },
+      ...rest,
     },
-    ...rest,
-  });
+  );
 }
 
 /** Open the header's actions menu, which is where every write action lives. */
@@ -117,7 +130,112 @@ afterEach(() => {
 });
 
 describe("ModelDetail", () => {
+  describe("remote Model ownership", () => {
+    it("shows a refreshed authorized Model", async () => {
+      const { client } = renderDetail();
+      await screen.findByText("Benchy");
+
+      act(() =>
+        client.setQueryData(queryKeys.model(1), aModel({ name: "Updated Model", edit_version: 4 })),
+      );
+
+      expect(await screen.findByText("Updated Model")).toBeVisible();
+      expect(screen.queryByText("Benchy")).toBeNull();
+    });
+
+    it("preserves the editing base across a background refresh", async () => {
+      const user = userEvent.setup();
+      const headers: string[] = [];
+      const { client } = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": (_url, init) => {
+            headers.push(new Headers(init?.headers).get("If-Match") ?? "missing");
+            return json({ detail: "edit_conflict" }, 412);
+          },
+        },
+      });
+      await openEdit(user);
+      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.type(screen.getByPlaceholderText("Model name"), "My draft");
+
+      act(() =>
+        client.setQueryData(
+          queryKeys.model(1),
+          aModel({
+            name: "Remote edit",
+            edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            edit_version: 4,
+          }),
+        ),
+      );
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(headers).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("My draft");
+    });
+
+    it("keeps a confirmed edit after an older read finishes", async () => {
+      const user = userEvent.setup();
+      let release!: (response: Response) => void;
+      const oldRead = new Promise<Response>((resolve) => {
+        release = resolve;
+      });
+      const { client, requests } = renderDetail({
+        routes: {
+          "GET /api/v1/models/1": () => oldRead,
+          "PATCH /api/v1/models/1": json(aModel({ name: "Confirmed edit", edit_version: 4 })),
+        },
+      });
+      await openEdit(user);
+      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.type(screen.getByPlaceholderText("Model name"), "Confirmed edit");
+      void client.invalidateQueries({ queryKey: queryKeys.model(1), exact: true });
+      await waitFor(() =>
+        expect(requests().some((r) => r.url === "/api/v1/models/1" && r.method === "GET")).toBe(
+          true,
+        ),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      expect(await screen.findByText("Confirmed edit")).toBeVisible();
+      await act(async () => {
+        release(json(aModel()));
+        await oldRead;
+      });
+
+      expect(screen.getByText("Confirmed edit")).toBeVisible();
+      expect(client.getQueryData<ModelRead>(queryKeys.model(1))?.name).toBe("Confirmed edit");
+    });
+  });
+
   describe("collection navigation", () => {
+    it("shows the detail label without loading the whole collection tree", async () => {
+      const { requests } = renderDetail({
+        model: aModel({ collection: "parts/brackets", collection_label: "Parts/Brackets" }),
+      });
+
+      expect(await screen.findByText("Parts/Brackets")).toBeVisible();
+      expect(
+        requests().filter(
+          (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",
+        ),
+      ).toEqual([]);
+    });
+
+    it("offers editable destinations through collection search", async () => {
+      const user = userEvent.setup();
+      const { requests } = renderDetail();
+      await openEdit(user);
+
+      await user.click(screen.getByRole("button", { name: "Parts" }));
+      expect(await screen.findByRole("option", { name: /Parts/ })).toBeVisible();
+      expect(
+        requests().some(
+          (call) => new URL(call.url, "http://test").searchParams.get("min_role") === "edit",
+        ),
+      ).toBe(true);
+    });
+
     it.each([
       { label: "containing collection", collection: "parts", expected: "/?c=parts" },
       {
@@ -276,6 +394,154 @@ describe("ModelDetail", () => {
   });
 
   describe("editing", () => {
+    it("preserves a Model draft on edit conflict", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ name: "Other editor", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.type(screen.getByPlaceholderText("Model name"), "My draft");
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(
+        await screen.findByText(
+          "This item changed elsewhere. Your draft has been kept. Review the latest version before saving again.",
+        ),
+      ).toBeVisible();
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("My draft");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      await user.click(screen.getByRole("button", { name: "Review latest version" }));
+      expect(await screen.findByRole("dialog", { name: "Latest saved version" })).toHaveTextContent(
+        "Other editor",
+      );
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("saves a retained Model draft only after explicit version review", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(
+            aModel({
+              name: "Other editor",
+              edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              edit_version: 7,
+            }),
+          ),
+        },
+      });
+      await openEdit(user);
+      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.type(screen.getByPlaceholderText("Model name"), "My draft");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+      let version: string | null = null;
+      app.route({
+        "PATCH /api/v1/models/1": (_url, init) => {
+          version = new Headers(init?.headers).get("If-Match");
+          return json(
+            aModel({
+              name: "My draft",
+              edit_epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              edit_version: 8,
+            }),
+          );
+        },
+      });
+
+      await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
+
+      expect(await screen.findByText("My draft")).toBeVisible();
+      expect(version).toBe('"model-1-ebbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-v7"');
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(2);
+    });
+
+    it("replaces a Model draft with the reviewed version", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ name: "Other editor", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+
+      await user.click(screen.getByRole("button", { name: "Use latest version" }));
+
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Other editor");
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("keeps a conflicted Model draft when review is dismissed", async () => {
+      const user = userEvent.setup();
+      renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ name: "Other editor", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+
+      await user.click(screen.getByRole("button", { name: "Keep my draft" }));
+
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("requires another review when a reviewed version becomes stale", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ name: "Other editor", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+
+      await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(2);
+    });
+
+    it("prevents retry after review reveals lost edit access", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "edit_conflict" }, 412),
+          "GET /api/v1/models/1": json(aModel({ effective_role: "view", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+
+      expect(
+        screen.getByRole("button", { name: "Save my draft against this version" }),
+      ).toBeDisabled();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
     it("offers direct tag editing in the header", async () => {
       renderDetail();
 
@@ -311,7 +577,7 @@ describe("ModelDetail", () => {
     it("saves the name the user typed", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderDetail({
-        routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2" })) },
+        routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2", edit_version: 2 })) },
       });
       await openEdit(user);
       const name = screen.getByPlaceholderText("Model name");
@@ -345,7 +611,7 @@ describe("ModelDetail", () => {
       // server leaves the user looking at the old values.
       const user = userEvent.setup();
       renderDetail({
-        routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2" })) },
+        routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2", edit_version: 2 })) },
       });
       await openEdit(user);
       const name = screen.getByPlaceholderText("Model name");
@@ -355,6 +621,115 @@ describe("ModelDetail", () => {
       await user.click(screen.getByRole("button", { name: "Save" }));
 
       expect(await screen.findByText("Benchy v2")).toBeInTheDocument();
+    });
+
+    it("clears a description the user emptied", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        model: aModel({ description: "Previous description" }),
+        routes: {
+          "PATCH /api/v1/models/1": json(aModel({ description: null, edit_version: 2 })),
+        },
+      });
+      await openEdit(user);
+
+      await user.clear(screen.getByPlaceholderText("Optional description"));
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toHaveProperty(
+        "description",
+        null,
+      );
+    });
+
+    it("clears all Model tags", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        model: aModel({ tags: ["old-tag"] }),
+        routes: {
+          "PATCH /api/v1/models/1": json(aModel({ tags: [], edit_version: 2 })),
+        },
+      });
+      await openEdit(user);
+
+      await user.click(screen.getByPlaceholderText("Search or create — press Enter"));
+      await user.keyboard("{Backspace}");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toHaveProperty("tags", []);
+    });
+
+    it.each(["transport", "server"] as const)(
+      "blocks another Model write after an unconfirmed response (%s)",
+      async (failure) => {
+        const user = userEvent.setup();
+        const failures = {
+          transport: () => {
+            throw new TypeError("Failed to fetch");
+          },
+          server: () => json({ detail: "unavailable" }, 503),
+        };
+        const app = renderDetail({ routes: { "PATCH /api/v1/models/1": failures[failure] } });
+        await openEdit(user);
+
+        await user.click(screen.getByRole("button", { name: "Save" }));
+
+        expect(
+          await screen.findByText(
+            "The save was not confirmed. Review the latest version before retrying.",
+          ),
+        ).toBeVisible();
+        expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+        expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+        expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      },
+    );
+
+    it("keeps an unconfirmed draft blocked when review fails", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "unavailable" }, 503),
+          "GET /api/v1/models/1": json({ detail: "unavailable" }, 503),
+        },
+      });
+      await openEdit(user);
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Review latest version" })).not.toBeDisabled(),
+      );
+
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    });
+
+    it("adopts the reviewed result of an unconfirmed save without rewriting", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: {
+          "PATCH /api/v1/models/1": json({ detail: "unavailable" }, 503),
+          "GET /api/v1/models/1": json(aModel({ name: "Saved draft", edit_version: 7 })),
+        },
+      });
+      await openEdit(user);
+      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.type(screen.getByPlaceholderText("Model name"), "Saved draft");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(await screen.findByRole("button", { name: "Review latest version" }));
+      await screen.findByRole("dialog", { name: "Latest saved version" });
+
+      await user.click(screen.getByRole("button", { name: "Use latest version" }));
+
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+      expect(app.client.getQueryData<ModelRead>(queryKeys.model(1))).toMatchObject({
+        name: "Saved draft",
+        edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        edit_version: 7,
+      });
+      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Saved draft");
     });
 
     it("clears a source URL the user emptied", async () => {
@@ -490,11 +865,38 @@ describe("ModelDetail", () => {
       );
     });
 
+    it.each([
+      { label: "collection", collection: "parts/tools", expected: "/?c=parts%2Ftools" },
+      { label: "root", collection: null, expected: "/" },
+    ])("returns to the deleted Model $label destination", async ({ collection, expected }) => {
+      const user = userEvent.setup();
+      renderDetail({
+        at: "/models/1",
+        model: aModel({
+          collection,
+          collection_id: collection === null ? null : 1,
+          collection_label: collection === null ? null : "Tools",
+        }),
+        routes: { "DELETE /api/v1/models/1": json(null, 204) },
+      });
+      await openActions(user);
+      await user.click(screen.getByRole("menuitem", { name: /Delete model/ }));
+
+      await user.click(
+        within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }),
+      );
+
+      await waitFor(() =>
+        expect(screen.getByLabelText("Current detail location").textContent).toBe(expected),
+      );
+    });
+
     it("stays on the page when the delete is refused", async () => {
       // Navigating away from a model that still exists loses the user's place
       // for nothing.
       const user = userEvent.setup();
       renderDetail({
+        at: "/models/1",
         routes: { "DELETE /api/v1/models/1": json({ detail: "model_in_use" }, 409) },
       });
       await openActions(user);
@@ -504,7 +906,12 @@ describe("ModelDetail", () => {
         within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete" }),
       );
 
-      expect(await screen.findByText("Benchy")).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          "Something went wrong reaching the server. Check that PrintStash is running and try again.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText("Current detail location").textContent).toBe("/models/1");
     });
   });
 

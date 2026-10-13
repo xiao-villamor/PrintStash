@@ -83,6 +83,9 @@ test.describe("Vault migration", () => {
     await expect(confirmation).toContainText("writes are paused");
     await confirmation.getByRole("button", { name: "Switch Vault storage" }).click();
     await expect(panel.getByText("Destination is active", { exact: true })).toBeVisible();
+    const currentStorage = page.getByRole("region", { name: "Storage connection details" });
+    await expect(currentStorage.getByText(data, { exact: true })).toBeVisible();
+    await expect(currentStorage.getByText(thumbs, { exact: true })).toBeVisible();
     await expect(panel.getByText(/will not be deleted automatically/)).toBeVisible();
     await expect(panel.getByRole("button", { name: "Clean up retained source" })).toBeDisabled();
 

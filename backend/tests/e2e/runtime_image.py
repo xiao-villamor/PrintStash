@@ -1,6 +1,6 @@
 """Storage contracts against an already built, unmodified runtime image.
 
-Run through ``scripts/test.sh image --image TAG --variant full|lite``. This is
+Run through ``scripts/test.sh image --image TAG --variant full|lite|gpu|gpu-render``. This is
 the image-build lane: unlike ASGI tests, every application dependency comes
 from the final image. The host only supplies HTTP and container test clients.
 """
@@ -9,9 +9,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
+import tempfile
 import time
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
 
@@ -85,6 +90,218 @@ def _probe() -> dict:
         check=True,
     )
     return json.loads(result.stdout)
+
+
+@contextmanager
+def _entrypoint_layout() -> Iterator[Path]:
+    """Throwaway host data shared by bind mounts, restored for host cleanup."""
+    with tempfile.TemporaryDirectory(prefix="printstash-entrypoint-") as scratch:
+        root = Path(scratch)
+        root.chmod(0o755)
+        library = root / "library"
+        library.mkdir()
+        (library / "part.stl").write_bytes(b"solid sample")
+        try:
+            yield root
+        finally:
+            # The entrypoint may have repaired this test's managed directories
+            # to the image UID. Restore them before TemporaryDirectory removes
+            # them; every byte here was created by this test.
+            subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "--rm",
+                    "--network",
+                    "none",
+                    "--mount",
+                    f"type=bind,src={root},dst=/data",
+                    "--entrypoint",
+                    "chown",
+                    IMAGE,
+                    "-R",
+                    f"{os.getuid()}:{os.getgid()}",
+                    "/data",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+            )
+
+
+def _source_metadata(
+    root: Path,
+) -> tuple[tuple[int, int, int], tuple[int, int, int], bytes]:
+    library = root / "library"
+    artifact = library / "part.stl"
+    directory_stat = library.stat()
+    artifact_stat = artifact.stat()
+    return (
+        (directory_stat.st_uid, directory_stat.st_gid, directory_stat.st_ctime_ns),
+        (artifact_stat.st_uid, artifact_stat.st_gid, artifact_stat.st_ctime_ns),
+        artifact.read_bytes(),
+    )
+
+
+class TestRuntimeImageEntrypoint(unittest.TestCase):
+    """External sources are untouched; managed storage still gets repaired."""
+
+    def _run(
+        self, mounts: list[str], *, role: str = "worker"
+    ) -> subprocess.CompletedProcess[str]:
+        # The API case exercises real migrations. Ownership-only cases use the
+        # shipped worker role to avoid creating a schema for each permission test.
+        return subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--env",
+                f"VAULT_PROCESS_ROLE={role}",
+                "--entrypoint",
+                "/app/docker-entrypoint.sh",
+                *mounts,
+                IMAGE,
+                "/app/.venv/bin/python",
+                "-c",
+                "import json, os, sqlite3; from pathlib import Path; "
+                "database = Path('/data/db/printstash.sqlite'); "
+                "revision = sqlite3.connect(f'file:{database}?mode=ro', uri=True)"
+                ".execute('SELECT version_num FROM alembic_version').fetchone()[0] "
+                "if database.exists() else None; "
+                "paths = ['/data', '/data/library', '/data/db', '/data/db/legacy.sqlite', "
+                "'/data/artifact-cache', '/data/ai-models']; "
+                "print(json.dumps({'uid': os.getuid(), 'gid': os.getgid(), 'revision': revision, "
+                "'paths': {p: [Path(p).stat().st_uid, Path(p).stat().st_gid, "
+                "Path(p).stat().st_dev] for p in paths if Path(p).exists()}}))",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            check=False,
+        )
+
+    def test_starts_with_an_external_read_only_mount(self) -> None:
+        with _entrypoint_layout() as root:
+            result = self._run(
+                [
+                    "--tmpfs",
+                    "/data",
+                    "--mount",
+                    f"type=bind,src={root / 'library'},dst=/data/library,readonly",
+                ],
+                role="api",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = json.loads(result.stdout.splitlines()[-1])
+            self.assertIsInstance(state["revision"], str)
+            self.assertTrue(state["revision"])
+            self.assertEqual((state["uid"], state["gid"]), (10001, 10001))
+            self.assertNotEqual(
+                state["paths"]["/data"][2], state["paths"]["/data/library"][2]
+            )
+
+    def test_preserves_a_same_device_read_only_bind_mount(self) -> None:
+        with _entrypoint_layout() as root:
+            before = _source_metadata(root)
+
+            result = self._run(
+                [
+                    "--mount",
+                    f"type=bind,src={root},dst=/data",
+                    "--mount",
+                    f"type=bind,src={root / 'library'},dst=/data/library,readonly",
+                ]
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = json.loads(result.stdout)
+            self.assertEqual(
+                state["paths"]["/data"][2], state["paths"]["/data/library"][2]
+            )
+            self.assertEqual(_source_metadata(root), before)
+
+    def test_preserves_a_writable_external_bind_mount(self) -> None:
+        with _entrypoint_layout() as root:
+            before = _source_metadata(root)
+
+            result = self._run(
+                [
+                    "--mount",
+                    f"type=bind,src={root},dst=/data",
+                    "--mount",
+                    f"type=bind,src={root / 'library'},dst=/data/library",
+                ]
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(_source_metadata(root), before)
+
+    def test_repairs_a_separately_mounted_database_tree(self) -> None:
+        with _entrypoint_layout() as root:
+            database = root / "db"
+            database.mkdir()
+            (database / "legacy.sqlite").write_bytes(b"ownership fixture")
+
+            result = self._run(
+                [
+                    "--mount",
+                    f"type=bind,src={database},dst=/data/db",
+                ]
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = json.loads(result.stdout)
+            self.assertEqual(
+                state["paths"]["/data/db/legacy.sqlite"][:2], [10001, 10001]
+            )
+            self.assertNotEqual(
+                state["paths"]["/data"][2], state["paths"]["/data/db"][2]
+            )
+
+    def test_repairs_the_cache_roots(self) -> None:
+        with _entrypoint_layout() as root:
+            result = self._run(["--mount", f"type=bind,src={root},dst=/data"])
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            state = json.loads(result.stdout)
+            self.assertEqual(state["paths"]["/data/artifact-cache"][:2], [10001, 10001])
+            self.assertEqual(state["paths"]["/data/ai-models"][:2], [10001, 10001])
+
+    def test_preserves_metadata_for_correctly_owned_managed_entries(self) -> None:
+        with _entrypoint_layout() as root:
+            files = root / "files"
+            files.mkdir()
+            artifact = files / "part.stl"
+            artifact.write_bytes(b"owned artifact")
+            mounts = ["--mount", f"type=bind,src={root},dst=/data"]
+            first = self._run(mounts)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            before = artifact.stat()
+
+            second = self._run(mounts)
+
+            self.assertEqual(second.returncode, 0, second.stderr)
+            self.assertEqual(artifact.stat(), before)
+
+    def test_a_read_only_managed_root_stops_before_migration(self) -> None:
+        with _entrypoint_layout() as root:
+            result = self._run(
+                [
+                    "--mount",
+                    f"type=bind,src={root / 'library'},dst=/data/files,readonly",
+                ],
+                role="api",
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Read-only file system", result.stderr)
+            self.assertNotIn("migrate:", result.stderr)
+            self.assertEqual(result.stdout, "")
 
 
 class TestFullImageTransports(unittest.TestCase):
@@ -309,13 +526,16 @@ def main() -> int:
     global IMAGE, VARIANT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", required=True)
-    parser.add_argument("--variant", required=True, choices=("full", "lite"))
+    parser.add_argument("--variant", required=True, choices=("full", "lite", "gpu", "gpu-render"))
     arguments = parser.parse_args()
     IMAGE, VARIANT = arguments.image, arguments.variant
     classes = (
-        (TestFullImageTransports, TestRuntimeImageBackup)
-        if VARIANT == "full"
-        else (TestLiteImageTransports,)
+        TestRuntimeImageEntrypoint,
+        *(
+            (TestFullImageTransports, TestRuntimeImageBackup)
+            if VARIANT in {"full", "gpu", "gpu-render"}
+            else (TestLiteImageTransports,)
+        ),
     )
     suite = unittest.TestSuite(
         unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in classes

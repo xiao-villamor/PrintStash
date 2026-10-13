@@ -575,3 +575,89 @@ class TestPrivateCacheRecovery:
                 assert cache.clear()["bytes"] == representation.size
                 assert opened.read() == b"verified bytes"
         assert cache.status()["bytes"] == 0
+
+
+class TestMaterializationCancellation:
+    def test_withdrawn_hit_leaves_no_lease(self, cache, representation):
+        from app.core.cancellation import OperationCancelled, cancellation_scope
+
+        with cache.materialize(representation, lambda: iter([b"verified bytes"])):
+            pass
+        with cancellation_scope(lambda: True), pytest.raises(OperationCancelled):
+            with cache.materialize(representation, lambda: iter(())):
+                pytest.fail("withdrawn job received a cache lease")
+        assert cache.status()["entries"] == 1
+        assert cache.status()["leases"] == 0
+
+    def test_stops_before_next_transfer_block(self, cache, representation, monkeypatch):
+        from itertools import count
+
+        from app.core import cancellation
+
+        clock = count()
+        monkeypatch.setattr(cancellation.time, "monotonic", lambda: float(next(clock)))
+        withdrawn = False
+        consumed = []
+
+        def chunks():
+            nonlocal withdrawn
+            consumed.append(b"verified")
+            withdrawn = True
+            yield b"verified"
+            consumed.append(b" bytes")
+            yield b" bytes"
+
+        with cancellation.cancellation_scope(lambda: withdrawn):
+            with pytest.raises(cancellation.OperationCancelled):
+                with cache.materialize(representation, chunks):
+                    pytest.fail("cancelled fill reached a consumer")
+        assert consumed == [b"verified"]
+        assert cache.status()["reserved_bytes"] == 0
+        assert cache.status()["entries"] == 0
+        assert list(cache.root.glob("*.tmp")) == []
+
+    def test_waiter_cancellation_preserves_live_fill(
+        self, cache, representation, monkeypatch
+    ):
+        from itertools import count
+
+        from app.core import cancellation
+
+        clock = count()
+        monkeypatch.setattr(cancellation.time, "monotonic", lambda: float(next(clock)))
+        fill = cache.begin_fill(representation)
+        assert fill is not None
+        probes = 0
+
+        def withdrawn():
+            nonlocal probes
+            probes += 1
+            return probes >= 2
+
+        try:
+            with cancellation.cancellation_scope(withdrawn):
+                with pytest.raises(cancellation.OperationCancelled):
+                    with cache.materialize(representation, lambda: iter(())):
+                        pytest.fail("waiting job should have been cancelled")
+            assert cache.status()["fills"] == 1
+            assert cache.status()["reserved_bytes"] == representation.size
+            assert fill.path.exists()
+        finally:
+            fill.close()
+
+    def test_withdrawal_at_eof_prevents_publication(self, cache, representation):
+        from app.core.cancellation import OperationCancelled, cancellation_scope
+
+        withdrawn = False
+
+        def chunks():
+            nonlocal withdrawn
+            yield b"verified bytes"
+            withdrawn = True
+
+        with cancellation_scope(lambda: withdrawn), pytest.raises(OperationCancelled):
+            with cache.materialize(representation, chunks):
+                pytest.fail("withdrawn fill published its bytes")
+        assert cache.status()["entries"] == 0
+        assert cache.status()["reserved_bytes"] == 0
+        assert list(cache.root.glob("*.tmp")) == []

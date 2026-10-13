@@ -1,0 +1,213 @@
+/** Similarity commands cannot dispatch or publish after their initiating session retires. */
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useQuery } from "@tanstack/react-query";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useMultipartModels } from "@/lib/queries";
+import { librarySourcesOptions, librarySourceKeys } from "@/lib/queries/settings-library-sources";
+import { similaritySourcesOptions } from "@/lib/queries/similarity";
+import { anExternalLibrary } from "@/test-support/factories";
+import { aMultipartModel } from "@/test-support/factories";
+import { aSimilarityCandidate } from "@/test-support/similarity";
+import { clearLogin } from "@/lib/auth-store";
+import { getSessionVersion } from "@/lib/session-transport";
+import {
+  similarityKeys,
+  similarityStatusOptions,
+  useSimilarityCommands,
+} from "@/lib/queries/similarity";
+import { similaritySettings, similarityStatus } from "@/test-support/similarity";
+import { json, renderApp } from "@/test-support/render";
+
+function SettingsCommand() {
+  const status = useQuery(similarityStatusOptions());
+  const { saveSettings } = useSimilarityCommands();
+  return (
+    <>
+      <p>{status.data ? "Loaded" : "Loading"}</p>
+      <p>{status.data?.settings?.minimum_confidence}</p>
+      <button
+        onClick={() =>
+          saveSettings.mutate({ payload: { enabled: false }, session: getSessionVersion() })
+        }
+      >
+        Save similarity
+      </button>
+    </>
+  );
+}
+function renderCommand() {
+  return renderApp(<SettingsCommand />, {
+    routes: {
+      "GET /api/v1/similarity/status": json(similarityStatus()),
+      "PATCH /api/v1/similarity/settings": json(similaritySettings({ enabled: false })),
+    },
+  });
+}
+afterEach(() => vi.restoreAllMocks());
+describe("similarity command lifetime", () => {
+  it("leaves a new same-user read active when a retired acknowledgement resumes", async () => {
+    const app = renderCommand();
+    await screen.findByText("Loaded");
+    const cache = app.client.getMutationCache();
+    const previousSuccess = cache.config.onSuccess;
+    const previousSettled = cache.config.onSettled;
+    const entered = Promise.withResolvers<void>();
+    const resume = Promise.withResolvers<void>();
+    const settled = Promise.withResolvers<void>();
+    cache.config.onSuccess = async () => {
+      entered.resolve();
+      await resume.promise;
+    };
+    cache.config.onSettled = () => {
+      settled.resolve();
+    };
+    const currentRead = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Save similarity" }));
+      await entered.promise;
+      app.unmount();
+      clearLogin();
+      renderApp(<SettingsCommand />, {
+        routes: {
+          "GET /api/v1/similarity/status": (_url, init) => {
+            signal = init?.signal;
+            return currentRead.promise;
+          },
+        },
+      });
+      await waitFor(() => expect(signal).toBeDefined());
+      await act(async () => {
+        resume.resolve();
+        await settled.promise;
+      });
+      expect(signal?.aborted).toBe(false);
+      await act(async () => {
+        currentRead.resolve(
+          json(similarityStatus({ settings: similaritySettings({ minimum_confidence: 0.77 }) })),
+        );
+      });
+      expect(await screen.findByText("0.77")).toBeVisible();
+    } finally {
+      cache.config.onSuccess = previousSuccess;
+      cache.config.onSettled = previousSettled;
+      resume.resolve();
+      currentRead.resolve(json(similarityStatus()));
+    }
+  });
+  it("never dispatches a retired gesture", async () => {
+    const app = renderCommand();
+    await screen.findByText("Loaded");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save similarity" }));
+      app.unmount();
+      clearLogin();
+    });
+    expect(app.requestsWithMethod("PATCH")).toEqual([]);
+    expect(app.client.getQueriesData({ queryKey: similarityKeys.all })).toEqual([]);
+  });
+  it("discards a retired acknowledgement after delayed publication", async () => {
+    const app = renderCommand();
+    await screen.findByText("Loaded");
+    let resume!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const cancel = app.client.cancelQueries.bind(app.client);
+    const spy = vi
+      .spyOn(app.client, "cancelQueries")
+      .mockImplementationOnce(cancel)
+      .mockImplementationOnce(() => paused);
+    await userEvent.click(screen.getByRole("button", { name: "Save similarity" }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      app.unmount();
+      clearLogin();
+      resume();
+      await paused;
+    });
+    expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
+    expect(app.client.getQueriesData({ queryKey: similarityKeys.all })).toEqual([]);
+  });
+});
+
+describe("similarity resolution publication", () => {
+  it("refreshes the canonical Multipart catalog once after resolution", async () => {
+    function Resolve() {
+      const catalog = useMultipartModels();
+      const { decide } = useSimilarityCommands();
+      return (
+        <>
+          <p>{catalog.data?.[0]?.name}</p>
+          <button
+            onClick={() =>
+              decide.mutate({
+                id: 1,
+                payload: {
+                  action: "create_multipart",
+                  request_id: "resolution-request",
+                  version: 1,
+                  name: "Confirmed assembly",
+                },
+                session: getSessionVersion(),
+              })
+            }
+          >
+            Resolve assembly
+          </button>
+        </>
+      );
+    }
+    let resolved = false;
+    const app = renderApp(<Resolve />, {
+      routes: {
+        "GET /api/v1/multipart-models": () =>
+          json([aMultipartModel({ name: resolved ? "Confirmed assembly" : "Existing assembly" })]),
+        "POST /api/v1/similarity/candidates/1/decision": () => {
+          resolved = true;
+          return json({
+            decision_id: 1,
+            target_id: 1,
+            resolution_kind: "multipart",
+            candidate: aSimilarityCandidate({
+              resolution_kind: "multipart",
+              review_state: "confirmed",
+              version: 2,
+            }),
+          });
+        },
+      },
+    });
+    await screen.findByText("Existing assembly");
+    await userEvent.click(screen.getByRole("button", { name: "Resolve assembly" }));
+    expect(await screen.findByText("Confirmed assembly")).toBeVisible();
+    expect(
+      app.requestsWithMethod("GET").filter((request) => request.url === "/api/v1/multipart-models"),
+    ).toHaveLength(2);
+    expect(app.requestsWithMethod("POST")).toHaveLength(1);
+  });
+});
+
+describe("similarity source projection", () => {
+  it("shares the management source owner", async () => {
+    function Sources() {
+      const direct = useQuery(librarySourcesOptions());
+      const similarity = useQuery(similaritySourcesOptions());
+      return (
+        <p>
+          {direct.data?.kind === "enabled" && similarity.data?.kind === "enabled"
+            ? similarity.data.items[0]?.name
+            : "Loading"}
+        </p>
+      );
+    }
+    const app = renderApp(<Sources />, {
+      routes: { "GET /api/v1/libraries": json([anExternalLibrary({ name: "Shared source" })]) },
+    });
+    expect(await screen.findByText("Shared source")).toBeVisible();
+    expect(app.requestsWithMethod("GET")).toHaveLength(1);
+    expect(app.client.getQueryCache().findAll({ queryKey: librarySourceKeys.all })).toHaveLength(1);
+    expect(app.client.getQueryData(["similarity", "sources"])).toBeUndefined();
+  });
+});

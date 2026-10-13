@@ -1,18 +1,22 @@
 """Notification channels and their recorded delivery outcomes."""
 
 from datetime import datetime
-from typing import Optional
+from typing import ClassVar, Optional
+from uuid import uuid4
 
 from sqlalchemy import (
+    BigInteger,
     Column,
     Text,
 )
-from sqlmodel import Field
+from sqlalchemy.orm import Mapped, column_property
+from sqlmodel import Field, select
 
 from app.core.time import utcnow
 from app.db.encrypted import EncryptedText
 
 from .base import SQLModel
+from .library import LibraryRevision
 from .types import NotificationDeliveryStatus, NotificationEventType, NotificationTarget
 
 
@@ -29,6 +33,11 @@ class NotificationChannel(SQLModel, table=True):
     __tablename__ = "notification_channels"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+    edit_identity: str = Field(default_factory=lambda: uuid4().hex, max_length=32)
+    database_epoch: ClassVar[Mapped[str]]
     name: str = Field(max_length=128)
     target: NotificationTarget = Field(index=True)
     enabled: bool = Field(default=True, index=True)
@@ -56,6 +65,11 @@ class NotificationChannel(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+NotificationChannel.database_epoch = column_property(
+    select(LibraryRevision.epoch).where(LibraryRevision.id == 1).scalar_subquery()
+)
 
 
 class NotificationDelivery(SQLModel, table=True):

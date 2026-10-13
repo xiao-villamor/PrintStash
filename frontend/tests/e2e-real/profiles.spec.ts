@@ -6,7 +6,7 @@
  * edit, and delete rather than stopping at the first green tick.
  */
 import { type Locator } from "@playwright/test";
-import { test, expect } from "./helpers";
+import { test, expect, authBundleFor, ADMIN } from "./helpers";
 
 // Playwright has no getByDisplayValue, so find a preset row by scanning the
 // live input values for the unique name we created.
@@ -81,6 +81,56 @@ test.describe("profiles", () => {
       .toBe(false);
   });
 
+  test("keeps an invalid local draft while another preset refreshes the catalog", async ({
+    page,
+  }) => {
+    const name = `e2e-draft-${Date.now()}`;
+    const second = `${name}-second`;
+    await page.goto("/profiles");
+    const section = page.locator("section", { hasText: "Filament presets" });
+    const add = async (value: string) => {
+      await page.getByRole("button", { name: /New filament/ }).click();
+      const form = section.getByRole("form", { name: "Create filament preset" });
+      await form.getByLabel("Name").fill(value);
+      await form.getByLabel("Cost per kg").fill("25");
+      await form.getByRole("button", { name: "Add preset" }).click();
+      return inputByValue(section, /^Filament preset name/, value);
+    };
+    const first = await add(name);
+    const cost = rowOf(first).getByLabel(/Filament cost per kg/);
+    await cost.fill("-1");
+
+    await add(second);
+
+    await expect(cost).toHaveValue("-1");
+    await expect(cost).toHaveAttribute("aria-invalid", "true");
+    await expect(section.getByText("Cost must be 0 or more.")).toBeVisible();
+    await cost.fill("42");
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          /\/api\/v1\/filament-profiles\/\d+/.test(response.url()) &&
+          response.request().method() === "PATCH",
+      ),
+      section.getByRole("heading", { name: "Filament presets" }).click(),
+    ]);
+    await expect(cost).toBeEnabled();
+    await page.reload();
+    const persisted = await inputByValue(section, /^Filament preset name/, name);
+    await expect(rowOf(persisted).getByLabel(/Filament cost per kg/)).toHaveValue("42");
+    for (const value of [name, second]) {
+      const row = await inputByValue(section, /^Filament preset name/, value);
+      await rowOf(row)
+        .getByRole("button", { name: `Delete filament preset ${value}` })
+        .click();
+      await page
+        .getByRole("dialog", { name: "Delete filament preset?" })
+        .getByRole("button", { name: "Delete preset" })
+        .click();
+      await expect(page.getByRole("dialog", { name: "Delete filament preset?" })).toBeHidden();
+    }
+  });
+
   test("create and delete a printer preset", async ({ page }) => {
     const name = `e2e-printer-${Date.now()}`;
     await page.goto("/profiles");
@@ -115,4 +165,84 @@ test.describe("profiles", () => {
       })
       .toBe(false);
   });
+  for (const kind of ["filament", "printer"] as const) {
+    test(`two ${kind} preset editors recover a competing save`, async ({ page }) => {
+      const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
+      const bundle = await authBundleFor(ADMIN.username, ADMIN.password);
+      const headers = { Authorization: `Bearer ${bundle.token}` };
+      const label = kind === "filament" ? "Filament" : "Printer";
+      const name = `e2e-${kind}-conflict-${Date.now()}`;
+      const response = await page.request.post(`${api}/api/v1/${kind}-profiles`, {
+        headers,
+        data: {
+          name,
+          ...(kind === "filament" ? { cost_per_kg: 25 } : { nozzle_diameter_mm: 0.4 }),
+        },
+      });
+      expect(response.status()).toBe(201);
+      const profile: { id: number } = await response.json();
+      const second = await page.context().newPage();
+      const numericLabel =
+        kind === "filament"
+          ? `Filament cost per kg ${profile.id}`
+          : `Printer nozzle diameter ${profile.id}`;
+      const nextValue = kind === "filament" ? "42" : "0.6";
+      try {
+        await page.goto("/profiles");
+        await second.goto("/profiles");
+        if (kind === "printer") {
+          await page.getByRole("tab", { name: /Printers/ }).click();
+          await second.getByRole("tab", { name: /Printers/ }).click();
+        }
+        // An invalid number captures the second editor's base without allowing
+        // blur between browser tabs to save it before the competing edit.
+        await second.getByRole("textbox", { name: numericLabel, exact: true }).fill("-1");
+        await page
+          .getByRole("textbox", { name: `${label} notes ${profile.id}`, exact: true })
+          .fill("Keep the first editor notes");
+        const firstSave = page.waitForResponse(
+          (r) =>
+            r.url().endsWith(`/api/v1/${kind}-profiles/${profile.id}`) &&
+            r.request().method() === "PATCH",
+        );
+        await page.getByRole("heading", { name: `${label} presets`, exact: true }).click();
+        expect((await firstSave).status()).toBe(200);
+        await second.getByRole("textbox", { name: numericLabel, exact: true }).fill(nextValue);
+        const staleSave = second.waitForResponse(
+          (r) =>
+            r.url().endsWith(`/api/v1/${kind}-profiles/${profile.id}`) &&
+            r.request().method() === "PATCH",
+        );
+        await second.getByRole("heading", { name: `${label} presets`, exact: true }).click();
+        expect((await staleSave).status()).toBe(412);
+        await expect(second.getByRole("textbox", { name: numericLabel, exact: true })).toHaveValue(
+          nextValue,
+        );
+        await second.getByRole("button", { name: "Review current values" }).click();
+        await expect(
+          second
+            .getByRole("status", { name: "Current preset values" })
+            .getByText("Keep the first editor notes"),
+        ).toBeVisible();
+        const revisedSave = second.waitForResponse(
+          (r) =>
+            r.url().endsWith(`/api/v1/${kind}-profiles/${profile.id}`) &&
+            r.request().method() === "PATCH",
+        );
+        await second.getByRole("button", { name: "Save revised changes" }).click();
+        expect((await revisedSave).status()).toBe(200);
+        await second.reload();
+        if (kind === "printer") await second.getByRole("tab", { name: /Printers/ }).click();
+        await expect(second.getByRole("textbox", { name: numericLabel, exact: true })).toHaveValue(
+          nextValue,
+        );
+        await expect(
+          second.getByRole("textbox", { name: `${label} notes ${profile.id}`, exact: true }),
+        ).toHaveValue("Keep the first editor notes");
+      } finally {
+        await second.close();
+        await page.request.delete(`${api}/api/v1/${kind}-profiles/${profile.id}`, { headers });
+      }
+    });
+  }
 });

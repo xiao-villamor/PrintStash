@@ -11,7 +11,7 @@ services:
       PROXY_AUTH_ADD: "false"
 
   web:
-    image: ghcr.io/xiao-villamor/printstash:0.13.0
+    image: ghcr.io/xiao-villamor/printstash:0.14.0
     # Not on-failure: a restart requested from Settings is a graceful SIGTERM,
     # which can exit with status 0 and would not be relaunched.
     restart: unless-stopped

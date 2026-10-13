@@ -20,6 +20,14 @@ test.describe("storage presets", () => {
     try {
       await page.goto("/settings?section=remote-storage");
       const remote = page.getByRole("region", { name: "Remote storage" });
+      const connectionReads: string[] = [];
+      page.on("request", (request) => {
+        if (
+          request.method() === "GET" &&
+          new URL(request.url()).pathname === "/api/v1/storage-connections"
+        )
+          connectionReads.push(request.url());
+      });
       await remote
         .getByRole("group", { name: "Storage category" })
         .getByRole("button", { name: "Nextcloud and WebDAV" })
@@ -37,6 +45,7 @@ test.describe("storage presets", () => {
       await page.getByLabel("Base folder", { exact: true }).fill(root);
       await page.getByLabel("Username", { exact: true }).fill("webdav-user");
       await page.getByLabel("Password", { exact: true }).fill(password);
+      const settledReads = connectionReads.length;
       const saved = page.waitForResponse(
         (response) =>
           response.url().endsWith("/api/v1/storage-connections") &&
@@ -53,6 +62,9 @@ test.describe("storage presets", () => {
         configuration: { provider: "koofr" },
       });
       expect(JSON.stringify(connection)).not.toContain(password);
+      await expect(remote.getByRole("listitem").filter({ hasText: name })).toBeVisible();
+      await expect(page.getByLabel("Password", { exact: true })).toHaveValue("");
+      expect(connectionReads).toHaveLength(settledReads);
 
       await page.reload();
       const row = page.getByRole("listitem").filter({ hasText: name });
@@ -62,12 +74,14 @@ test.describe("storage presets", () => {
         (await persisted.json()).find((item: { id: number }) => item.id === connectionId),
       ).toMatchObject({ kind: "webdav", configuration: { provider: "koofr" } });
       expect(await persisted.text()).not.toContain(password);
+      const readsBeforeProbe = connectionReads.length;
       const checked = page.waitForResponse((result) =>
         result.url().endsWith(`/storage-connections/${connectionId}/probe`),
       );
       await row.getByRole("button", { name: "Test", exact: true }).click();
       expect((await checked).ok()).toBe(true);
       await expect(page.getByText(`${name} is reachable.`, { exact: true })).toBeVisible();
+      expect(connectionReads).toHaveLength(readsBeforeProbe);
 
       expect(
         (

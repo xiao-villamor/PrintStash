@@ -49,8 +49,12 @@ export function TabBar<K extends string>({
       if (el) setIndicator({ left: el.offsetLeft, width: el.offsetWidth });
       else setIndicator(null);
     };
-    measure();
-    if (!canObserveResize) return;
+    if (!canObserveResize) {
+      measure();
+      return;
+    }
+    // Initial observation arrives after layout and before paint. Measuring in
+    // this layout effect forced the whole library to lay out during commit.
     const ro = new ResizeObserver(measure);
     ro.observe(list);
     return () => ro.disconnect();

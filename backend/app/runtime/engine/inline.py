@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Any
 
 from app.core.config import settings
-from app.db.models import LaneName
+from app.db.models import LaneName, WorkPriority
 from app.modules.work.catalog import WorkCatalog
 from app.modules.work.contracts import (
     ActiveExecution,
@@ -31,6 +31,7 @@ from app.modules.work.contracts import (
     JobEngine,
     JobSubmission,
     LaneDepth,
+    LaneOrder,
     PassSubmission,
     RetryPolicy,
     Submission,
@@ -54,7 +55,12 @@ def _execute(submission: Submission, runner: _Runner) -> None:
     else:
         from app.modules.work.runner import execute_job
 
-        execute_job(submission.job_id, submission.attempt, runner)
+        execute_job(
+            submission.job_id,
+            submission.attempt,
+            runner,
+            execution_epoch=submission.execution_epoch,
+        )
 
 
 def _dedupe_key(submission: Submission) -> str | None:
@@ -265,7 +271,12 @@ class InlineJobEngine(JobEngine):
         return sorted(
             ready,
             key=lambda item: (
-                PRIORITY_RANK[item.submission.priority],
+                (
+                    PRIORITY_RANK[WorkPriority.INTERACTIVE]
+                    if self.catalog.lanes[item.submission.lane].queue_order
+                    is LaneOrder.FIFO
+                    else PRIORITY_RANK[item.submission.priority]
+                ),
                 item.sequence,
             ),
         )

@@ -31,6 +31,47 @@ class TestGetModel:
         assert response.status_code == 200, response.text
         assert response.json()["id"] == model.id
 
+    def test_labels_a_model_with_its_collections_names(
+        self, client: TestClient, auth_headers, make_collection, make_model
+    ) -> None:
+        parts = make_collection("Parts")
+        model = make_model(
+            "Bracket", collection=make_collection("Wall Brackets", parent=parts)
+        )
+
+        response = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["collection_label"] == "Parts/Wall Brackets"
+
+    def test_leaves_a_root_model_without_a_collection_label(
+        self, client: TestClient, auth_headers, make_model
+    ) -> None:
+        model = make_model("Loose")
+
+        response = client.get(f"/api/v1/models/{model.id}", headers=auth_headers)
+
+        assert response.json()["collection_label"] is None
+
+    def test_hides_ancestor_names_above_a_viewers_grant(
+        self,
+        client: TestClient,
+        make_collection,
+        make_model,
+        make_user,
+        grant_role,
+        headers_for,
+    ) -> None:
+        brackets = make_collection("Brackets", parent=make_collection("Parts"))
+        model = make_model("Shared", collection=brackets)
+        viewer = make_user("detail-label-reader")
+        grant_role(viewer, brackets, CollectionRole.VIEW)
+
+        response = client.get(f"/api/v1/models/{model.id}", headers=headers_for(viewer))
+
+        assert response.status_code == 200, response.text
+        assert response.json()["collection_label"] == "Brackets"
+
     def test_reports_a_model_that_does_not_exist(
         self, client: TestClient, auth_headers
     ) -> None:
@@ -216,6 +257,7 @@ class TestUpdateModel:
 
         assert response.status_code == 200, response.text
         assert response.json()["collection_id"] == collection.id
+        assert response.json()["collection_label"] == "Brackets"
 
     def test_creates_a_collection_that_does_not_exist_yet_for_a_superuser(
         self, client: TestClient, auth_headers, make_model

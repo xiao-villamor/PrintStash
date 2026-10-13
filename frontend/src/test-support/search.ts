@@ -86,7 +86,14 @@ export function searchSettings(overrides: Partial<SearchSettings> = {}): SearchS
 export function searchConfiguration(
   overrides: Partial<SearchSettingsRead> = {},
 ): SearchSettingsRead {
-  return { settings: searchSettings(), endpoints: [], environment_endpoints: [], ...overrides };
+  return {
+    edit_epoch: "a".repeat(32),
+    edit_version: 1,
+    settings: searchSettings(),
+    endpoints: [],
+    environment_endpoints: [],
+    ...overrides,
+  };
 }
 export function anInferenceEndpoint(overrides: Partial<InferenceEndpoint> = {}): InferenceEndpoint {
   return {

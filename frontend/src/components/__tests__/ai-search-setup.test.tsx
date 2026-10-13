@@ -1,5 +1,5 @@
 /** Guided AI setup keeps consent explicit and advances only after successful server operations. */
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { AiSearchSettings } from "@/components/ai-search-settings";
@@ -41,7 +41,11 @@ describe("AiSearchSetup", () => {
   });
   it("enables local processing only on request", async () => {
     const app = setup({
-      routes: { "PUT /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })) },
+      routes: {
+        "PUT /api/v1/config/ai-search": json(
+          searchConfiguration({ edit_version: 2, settings: enabled }),
+        ),
+      },
     });
     await userEvent.click(await screen.findByRole("button", { name: "Use this machine" }));
     expect(app.requestsWithMethod("PUT")).toHaveLength(0);
@@ -51,15 +55,65 @@ describe("AiSearchSetup", () => {
     expect(JSON.parse(app.requestsWithMethod("PUT")[0].body)).toEqual(enabled);
     expect(app.requestsWithMethod("POST")).toHaveLength(0);
   });
+  it("requires review after an unconfirmed enable", async () => {
+    const app = setup({
+      routes: { "PUT /api/v1/config/ai-search": json({ detail: "unavailable" }, 503) },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Use this machine" }));
+    await userEvent.click(screen.getByRole("button", { name: "Enable local AI Search" }));
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Enable local AI Search" })).toBeDisabled();
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+
+  it.each([412, 503])("stops setup after a consent save returns %s", async (status) => {
+    const app = setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/inference/models": json([anInferenceModel({ installed: false })]),
+        "PUT /api/v1/config/ai-search": json({ detail: "edit_conflict" }, status),
+      },
+    });
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Allow download and continue" }),
+    );
+    expect(await screen.findByRole("button", { name: "Review latest version" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Allow download and continue" })).toBeDisabled();
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+    app.route({
+      "GET /api/v1/config/ai-search": json(
+        searchConfiguration({
+          edit_version: 5,
+          settings: { ...enabled, timezone: "Europe/Madrid" },
+        }),
+      ),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Review latest version" }));
+    expect(await screen.findByText("Europe/Madrid")).toBeVisible();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+    await userEvent.click(screen.getByRole("button", { name: "Use latest version" }));
+    expect(screen.getByRole("button", { name: "Allow download and continue" })).toBeEnabled();
+    expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+
   it("requires explicit download consent", async () => {
+    let submittedBase: string | null = null;
     const model = anInferenceModel({ installed: false });
     const app = setup({
       routes: {
         "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
         "GET /api/v1/inference/models": json([model]),
-        "PUT /api/v1/config/ai-search": json(
-          searchConfiguration({ settings: { ...enabled, download_enabled: true } }),
-        ),
+        "PUT /api/v1/config/ai-search": (_url, init) => {
+          submittedBase = new Headers(init?.headers).get("If-Match");
+          return json(
+            searchConfiguration({
+              edit_version: 2,
+              settings: { ...enabled, download_enabled: true },
+            }),
+          );
+        },
         "POST /api/v1/inference/models/": json({ job_id: "download-1" }),
       },
     });
@@ -72,6 +126,7 @@ describe("AiSearchSetup", () => {
     });
     await userEvent.click(button);
     expect(await screen.findByText("Downloading an AI model")).toBeVisible();
+    expect(submittedBase).toBe(`"search-settings-e${"a".repeat(32)}-v1"`);
     expect(JSON.parse(app.requestsWithMethod("PUT")[0].body)).toEqual({
       ...enabled,
       download_enabled: true,
@@ -114,6 +169,74 @@ describe("AiSearchSetup", () => {
       auto_activate: true,
     });
   });
+  it("stops preparation after the setup route leaves during an estimate", async () => {
+    let finish!: (response: Response) => void;
+    let signal: AbortSignal | null | undefined;
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const app = setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "POST /api/v1/config/ai-search/generations/estimate": (_url, init) => {
+          signal = init?.signal;
+          return pending;
+        },
+        "POST /api/v1/config/ai-search/generations": json(aSearchGeneration({ state: "building" })),
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Prepare my library" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    app.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      finish(
+        json({
+          passages: 10,
+          estimated_bytes: 1000,
+          existing_bytes: 0,
+          budget_bytes: 2000,
+          fits_budget: true,
+          estimated_seconds: 10,
+        }),
+      );
+      await pending;
+    });
+    expect(app.requestsWithMethod("POST").map((request) => request.url)).toEqual([
+      "/api/v1/config/ai-search/generations/estimate",
+    ]);
+  });
+  it("stops a download after the setup route leaves during consent", async () => {
+    let finish!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      finish = resolve;
+    });
+    const app = setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/inference/models": json([anInferenceModel({ installed: false })]),
+        "PUT /api/v1/config/ai-search": () => pending,
+        "POST /api/v1/inference/models/": json({ job_id: "download-1" }),
+      },
+    });
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Allow download and continue" }),
+    );
+    await waitFor(() => expect(app.requestsWithMethod("PUT")).toHaveLength(1));
+    app.unmount();
+    await act(async () => {
+      finish(
+        json(
+          searchConfiguration({
+            edit_version: 2,
+            settings: { ...enabled, download_enabled: true },
+          }),
+        ),
+      );
+      await pending;
+    });
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
   it("blocks preparation over budget", async () => {
     const app = setup({
       routes: {
@@ -145,13 +268,6 @@ describe("AiSearchSetup", () => {
     expect(screen.getByRole("button", { name: "Use another server" })).toBeVisible();
   });
   it.each([
-    {
-      label: "enable",
-      initial: searchSettings(),
-      installed: true,
-      action: "Enable local AI Search",
-      route: "PUT /api/v1/config/ai-search",
-    },
     {
       label: "download",
       initial: { ...enabled, download_enabled: true },
@@ -192,7 +308,9 @@ describe("AiSearchSetup", () => {
     if (!initial.enabled)
       await userEvent.click(await screen.findByRole("button", { name: "Use this machine" }));
     await userEvent.click(await screen.findByRole("button", { name: action }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("This step could not be completed");
+    expect(
+      await screen.findByText("This step could not be completed. Your library is safe. Try again."),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: action })).toBeEnabled();
     expect(screen.queryByText("AI Search is ready")).not.toBeInTheDocument();
   });
@@ -314,6 +432,7 @@ describe("AiSearchSetup", () => {
         "GET /api/v1/config/ai-search": json(config),
         "PUT /api/v1/config/ai-search": json({
           ...config,
+          edit_version: 2,
           settings: searchSettings({ enabled: true }),
         }),
       },

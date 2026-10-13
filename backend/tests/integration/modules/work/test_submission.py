@@ -9,7 +9,7 @@ never raises into the caller, because the tick recovers a lost nudge.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlmodel import Session, select
@@ -52,6 +52,67 @@ def _cursor(session: Session, source: JobKind) -> ReconcileCursor:
 
 
 class TestSubmit:
+    @pytest.mark.parametrize(
+        "outcome,fields", [("completed", {}), ("failed", {"error": "expected"})]
+    )
+    def test_terminal_execution_before_submit_returns_keeps_its_engine_result(
+        self, work_engine, make_job, db_session, monkeypatch, outcome, fields
+    ):
+        from app.db.models import LaneName
+        from app.modules.work.catalog import default_lanes
+        from app.modules.work.contracts import (
+            EngineStatus,
+            JobDefinition,
+            JobOutcome,
+            JobSubmission,
+            Step,
+        )
+        from app.runtime.engine.inline import InlineJobEngine
+
+        def finish(ctx):
+            ctx.finish(JobOutcome(outcome), **fields)
+
+        catalog = WorkCatalog(
+            [
+                JobDefinition(
+                    name=JobKind.SOURCES_SCAN,
+                    lane=LaneName.MAINTENANCE,
+                    steps=(Step("finish-before-ack", finish),),
+                    label="Probe",
+                )
+            ],
+            lanes=default_lanes(),
+        )
+        engine = InlineJobEngine(catalog)
+        engine.launch(listen_lanes=None)
+        catalog_module.bind(engine, catalog)
+        job = make_job(kind=JobKind.SOURCES_SCAN)
+        accepted = engine.submit
+        cancellations = []
+        cancel = engine.cancel
+
+        def finish_before_ack(submission):
+            result = accepted(submission)
+            if isinstance(submission, JobSubmission):
+                engine.drain()
+            return result
+
+        def record_cancel(execution):
+            cancellations.append(execution)
+            cancel(execution)
+
+        monkeypatch.setattr(engine, "submit", finish_before_ack)
+        monkeypatch.setattr(engine, "cancel", record_cancel)
+        assert submit(job.id) is SubmitOutcome.ACCEPTED
+
+        db_session.refresh(job)
+        assert job.state.value == outcome
+        assert job.attempts == 1
+        assert job.submitted_epoch == job.execution_epoch
+        execution = execution_id(job.id, 1, job.execution_epoch)
+        assert engine.evidence([execution])[execution].status is EngineStatus.SUCCEEDED
+        assert cancellations == []
+
     def test_an_accepted_submission_counts_as_the_next_attempt(
         self, work_engine, make_job, db_session: Session
     ) -> None:
@@ -62,7 +123,7 @@ class TestSubmit:
         assert outcome is SubmitOutcome.ACCEPTED
         db_session.refresh(job)
         assert job.attempts == 1
-        execution = work_engine.executions[execution_id(job.id, 1)]
+        execution = work_engine.executions[execution_id(job.id, 1, job.execution_epoch)]
         assert execution.submission.routing == Deduplicated(
             f"sources.scan|{job.subject_key}"
         )
@@ -116,8 +177,79 @@ class TestSubmit:
 
         submit(job.id)
 
-        submission = work_engine.executions[execution_id(job.id, 1)].submission
+        submission = work_engine.executions[
+            execution_id(job.id, 1, job.execution_epoch)
+        ].submission
         assert submission.routing == Partitioned("7")
+
+    def test_retokened_backfill_cannot_submit_a_reserved_epoch(
+        self, work_engine, make_job, make_user, make_model, make_file, db_session
+    ):
+        from app.db.models import Job
+        from app.modules.derivatives.source import subject_key
+        from app.modules.work import service
+
+        actor = make_user()
+        first_file = make_file(make_model(), filename="first.stl")
+        reserved_epoch = "first-reserved-backfill"
+        first = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=subject_key(first_file.id),
+            owner=actor,
+            priority=WorkPriority.BACKFILL,
+            execution_epoch=reserved_epoch,
+            backfill_admission_epoch=reserved_epoch,
+        )
+        first_id = first.id
+        service.cancel(first_id, actor=actor)
+        service.retry(first_id, actor=actor)
+        db_session.expire_all()
+        retokened = db_session.get(Job, first_id)
+        assert retokened is not None
+        assert retokened.execution_epoch != reserved_epoch
+        second_file = make_file(make_model(), filename="second.stl")
+        other_epoch = "second-reserved-backfill"
+        second = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=subject_key(second_file.id),
+            owner=actor,
+            priority=WorkPriority.BACKFILL,
+            execution_epoch=other_epoch,
+            backfill_admission_epoch=other_epoch,
+        )
+        second_id = second.id
+        assert (
+            submit(second_id, reserved_backfill_epoch=other_epoch)
+            is SubmitOutcome.ACCEPTED
+        )
+
+        outcome = submit(first_id, reserved_backfill_epoch=reserved_epoch)
+
+        assert outcome is None
+        db_session.expire_all()
+        assert db_session.get(Job, first_id).attempts == 0
+        assert db_session.get(Job, second_id).attempts == 1
+        assert execution_id(second_id, 1, other_epoch) in work_engine.executions
+        assert (
+            execution_id(first_id, 1, retokened.execution_epoch)
+            not in work_engine.executions
+        )
+
+    def test_unreserved_current_backfill_epoch_cannot_submit(
+        self, work_engine, make_job, db_session
+    ):
+        job = make_job(kind=JobKind.SOURCES_SCAN, priority=WorkPriority.BACKFILL)
+        job_id, current_epoch = job.id, job.execution_epoch
+
+        outcome = submit(job_id, reserved_backfill_epoch=current_epoch)
+
+        assert outcome is None
+        db_session.refresh(job)
+        assert job.execution_epoch == current_epoch
+        assert job.backfill_admission_epoch is None
+        assert job.attempts == 0
+        assert job.submitted_epoch is None
+        assert work_engine.executions == {}
 
 
 class TestNudge:
@@ -131,6 +263,73 @@ class TestNudge:
         assert cursor.pass_queued_at is not None
         (queued,) = _passes(work_engine, JobKind.SOURCES_SCAN)
         assert queued.submission.priority is WorkPriority.INTERACTIVE
+
+    @pytest.mark.parametrize("priority", list(WorkPriority))
+    def test_a_nudge_marks_a_running_pass_dirty_without_queuing_another(
+        self, work_engine, db_session: Session, priority
+    ) -> None:
+        started = datetime(2026, 1, 1, tzinfo=UTC)
+        nudge(JobKind.SOURCES_SCAN, now=started)
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        cursor.holder = "active-executor"
+        cursor.holder_expires_at = started + timedelta(minutes=1)
+        cursor.pass_queued_at = None
+        cursor.pass_priority = None
+        db_session.commit()
+
+        arrived = started + timedelta(seconds=1)
+        nudge(JobKind.SOURCES_SCAN, now=arrived, priority=priority)
+
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        assert cursor.nudged_at == arrived.replace(tzinfo=None)
+        assert cursor.holder == "active-executor"
+        assert cursor.pass_queued_at is None
+        assert len(_passes(work_engine, JobKind.SOURCES_SCAN)) == 1
+
+    @pytest.mark.parametrize(
+        ("holder", "remaining_seconds"),
+        [(None, None), ("expired-executor", -1), ("expired-executor", 0)],
+    )
+    def test_a_nudge_after_owner_release_queues_a_pass(
+        self, work_engine, db_session: Session, holder, remaining_seconds
+    ) -> None:
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        nudge(JobKind.SOURCES_SCAN, now=now - timedelta(seconds=1))
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        cursor.holder = holder
+        cursor.holder_expires_at = (
+            None
+            if remaining_seconds is None
+            else now + timedelta(seconds=remaining_seconds)
+        )
+        cursor.pass_queued_at = None
+        cursor.pass_priority = None
+        db_session.commit()
+
+        nudge(JobKind.SOURCES_SCAN, now=now)
+
+        assert len(_passes(work_engine, JobKind.SOURCES_SCAN)) == 2
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        assert cursor.pass_queued_at == now.replace(tzinfo=None)
+
+    def test_a_delayed_nudge_keeps_its_wakeup_while_a_pass_is_running(
+        self, work_engine, db_session: Session
+    ) -> None:
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        nudge(JobKind.SOURCES_SCAN, now=now)
+        cursor = _cursor(db_session, JobKind.SOURCES_SCAN)
+        cursor.holder = "active-executor"
+        cursor.holder_expires_at = now + timedelta(minutes=1)
+        db_session.commit()
+
+        nudge(JobKind.SOURCES_SCAN, now=now + timedelta(seconds=1), delay=45)
+
+        passes = _passes(work_engine, JobKind.SOURCES_SCAN)
+        assert len(passes) == 2
+        assert passes[-1].submission.delay_seconds == 45
+        assert _cursor(db_session, JobKind.SOURCES_SCAN).nudged_at == now.replace(
+            tzinfo=None
+        )
 
     def test_a_second_nudge_rides_on_the_queued_pass(self, work_engine) -> None:
         nudge(JobKind.SOURCES_SCAN)

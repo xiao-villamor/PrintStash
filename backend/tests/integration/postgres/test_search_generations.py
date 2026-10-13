@@ -27,12 +27,16 @@ from app.modules.search import configuration, generations
 from app.modules.search.text_inputs import TextRecipe
 from app.schemas.inference import SearchSettings
 from app.schemas.search_generations import GenerationProposal
-from tests.containers import postgres_url
+from tests.containers import fresh_postgres_database, postgres_url
 from tests.factories import (
     build_embedding_space,
     build_index_generation,
     build_inference_endpoint,
     build_user,
+)
+from tests.factories.migration_rows import (
+    RELEASED_V0121_REVISION,
+    create_released_v0121_postgres_schema,
 )
 
 
@@ -114,22 +118,32 @@ def database_wait():
 
 
 class TestPrepare:
-    def test_keeps_the_migrated_postgres_schema_in_sync(self, generation_database):
-        env = generation_database
-        engine = env.session.get_bind()
-        config = _alembic_config(engine.url.render_as_string(hide_password=False))
-        env.session.rollback()
-        command.stamp(config, "head")
-        command.downgrade(config, "bf6dfc561eca")
+    def test_keeps_the_migrated_postgres_schema_in_sync(self):
+        url = normalize_database_url(
+            fresh_postgres_database("search_generations_upgrade")
+        )
+        engine = create_engine(url)
+        config = _alembic_config(url)
+        try:
+            with engine.begin() as connection:
+                create_released_v0121_postgres_schema(connection)
+            command.stamp(config, RELEASED_V0121_REVISION)
+            command.upgrade(config, "bf6dfc561eca")
 
-        command.upgrade(config, "head")
-        with engine.connect() as connection:
-            context = MigrationContext.configure(
-                connection, opts={"compare_server_default": True}
-            )
-            assert compare_metadata(context, SQLModel.metadata) == []
-
-        assert env.session.exec(select(IndexGeneration)).all() == []
+            command.upgrade(config, "head")
+            with engine.connect() as connection:
+                context = MigrationContext.configure(
+                    connection, opts={"compare_server_default": True}
+                )
+                assert compare_metadata(context, SQLModel.metadata) == []
+                assert (
+                    connection.execute(
+                        text("SELECT count(*) FROM index_generations")
+                    ).scalar_one()
+                    == 0
+                )
+        finally:
+            engine.dispose()
 
     def test_fences_concurrent_proposals(self, generation_database):
         env = generation_database

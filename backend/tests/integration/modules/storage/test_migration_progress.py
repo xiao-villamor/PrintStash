@@ -1,6 +1,7 @@
 """Migration progress is durable, credential-free and notification delivery is edge-triggered."""
 
 import json
+from datetime import UTC, datetime
 
 import pytest
 from sqlmodel import select
@@ -65,6 +66,27 @@ class TestTransition:
 
 
 class TestProject:
+    @pytest.mark.parametrize(
+        "field", ["expires_at", "last_activity_at", "cleanup_after"], ids=str
+    )
+    def test_projects_persisted_timestamps_as_utc(
+        self, db_session, make_vault_migration, field
+    ):
+        instant = datetime(2026, 9, 29, 14, 30, tzinfo=UTC)
+        run = make_vault_migration(**{field: instant})
+
+        result = project(db_session, run)
+
+        assert result[field] == instant
+        assert result[field].utcoffset().total_seconds() == 0
+
+    def test_preserves_an_absent_cleanup_deadline(self, db_session, make_vault_migration):
+        run = make_vault_migration(cleanup_after=None)
+
+        result = project(db_session, run)
+
+        assert result["cleanup_after"] is None
+
     def test_unavailable_capacity_probe_is_reported_as_unknown(
         self, db_session, tmp_path, make_vault_migration, monkeypatch
     ):

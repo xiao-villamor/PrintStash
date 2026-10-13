@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "vitest";
+import { describe, expect, it, test } from "vitest";
 
 import {
   BROWSER_EXTENSION_SETUP_STORAGE_KEY,
@@ -10,6 +10,7 @@ import {
   normalizeVault,
   parseBrowserExtensionSetup,
   verifyVaultConnection,
+  verifyVaultReachability,
 } from "../core.ts";
 import { buildBrowserCaptureMessage } from "../capture-adapter.ts";
 
@@ -45,7 +46,7 @@ test("claims a pairing code and retains only the returned browser credential", a
       }
       return Response.json({
         credential: "device-secret",
-        device: { id: 3, name: "Browser extension" },
+        device: { id: 3, name: "Browser extension", edit_epoch: "a".repeat(32), edit_version: 1 },
       });
     },
     vault: "https://prints.example.com",
@@ -55,7 +56,7 @@ test("claims a pairing code and retains only the returned browser credential", a
   assert.deepEqual(claimed, {
     base: "https://prints.example.com",
     deviceCredential: "device-secret",
-    device: { id: 3, name: "Browser extension" },
+    device: { id: 3, name: "Browser extension", edit_epoch: "a".repeat(32), edit_version: 1 },
   });
   const claimCall = itemAt(calls, 1);
   assert.equal(claimCall.url, "https://prints.example.com/api/v1/browser-pairings/claim");
@@ -535,4 +536,93 @@ test("rejects unsupported pages before sending credentials", async () => {
     /supported model page or direct model file/,
   );
   assert.equal(called, false);
+});
+
+test.each([
+  { label: "JSON null", body: "null" },
+  { label: "malformed JSON", body: "{" },
+])("rejects an invalid login body: $label", async ({ body }) => {
+  await assert.rejects(
+    verifyVaultConnection({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "synthetic-key",
+      fetchImpl: async (input) =>
+        requestUrl(input).endsWith("/health")
+          ? Response.json({ status: "ok", name: "PrintStash" })
+          : new Response(body, { headers: { "Content-Type": "application/json" } }),
+    }),
+    /PrintStash did not return an access token/,
+  );
+});
+
+describe("capture authentication boundary", () => {
+  it.each(["invalid_browser_credential", "not_authenticated", "malformed"])(
+    "rejects direct capture authentication failures: %s",
+    async (detail) => {
+      await expect(
+        captureModelPage({
+          vault: "https://prints.example.com",
+          deviceCredential: "test-device",
+          pageUrl: "https://models.example.com/part.stl",
+          fetchImpl: async () =>
+            detail === "malformed"
+              ? new Response("invalid JSON", { status: 401 })
+              : Response.json({ detail, secret: "test-secret" }, { status: 401 }),
+        }),
+      ).rejects.toMatchObject({
+        name: "CaptureAuthenticationError",
+        message: "The PrintStash connection expired. Reconnect and try again.",
+      });
+    },
+  );
+
+  it("keeps direct capture permission failures scoped", async () => {
+    await expect(
+      captureModelPage({
+        vault: "https://prints.example.com",
+        deviceCredential: "test-device",
+        pageUrl: "https://models.example.com/part.stl",
+        fetchImpl: async () => Response.json({ detail: "insufficient_scope" }, { status: 403 }),
+      }),
+    ).rejects.toMatchObject({
+      name: "Error",
+      message: "This PrintStash user does not have import permission.",
+    });
+  });
+});
+
+test("checks vault reachability without authenticating a device", async () => {
+  const requests: Array<{ url: string; options: RequestInit }> = [];
+  const result = await verifyVaultReachability({
+    vault: "https://prints.example.com/",
+    fetchImpl: async (input, options = {}) => {
+      requests.push({ url: requestUrl(input), options });
+      return Response.json({ status: "ok", name: "PrintStash" });
+    },
+  });
+
+  assert.deepEqual(result, { base: "https://prints.example.com" });
+  assert.equal(requests.length, 1);
+  const request = itemAt(requests, 0);
+  assert.equal(request.url, "https://prints.example.com/api/v1/health");
+  assert.equal(request.options.method ?? "GET", "GET");
+  assert.equal(headerValue(request.options, "Authorization"), undefined);
+  assert.equal(request.options.credentials, "omit");
+  assert.equal(request.options.cache, "no-store");
+});
+
+it.each([
+  { label: "HTTP failure", body: { status: "ok", name: "PrintStash" }, status: 503 },
+  { label: "wrong server", body: { status: "ok", name: "Other" }, status: 200 },
+  { label: "unhealthy server", body: { status: "unavailable", name: "PrintStash" }, status: 200 },
+  { label: "unreadable body", body: undefined, status: 200 },
+])("rejects an unusable vault reachability response: $label", async ({ body, status }) => {
+  await expect(
+    verifyVaultReachability({
+      vault: "https://prints.example.com",
+      fetchImpl: async () =>
+        body === undefined ? new Response("unreadable") : Response.json(body, { status }),
+    }),
+  ).rejects.toThrow("That URL is not a PrintStash server.");
 });

@@ -20,7 +20,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from sqlalchemy.engine.url import make_url
 
 # ---------------------------------------------------------------------------
 # Shared overlay dict — written by runtime_config, read by ConfigResolver.
@@ -145,6 +144,9 @@ class Settings(BaseSettings):
     db_url: str = Field(default=None, validate_default=True)
     sqlite_synchronous: str = "NORMAL"
     sqlite_busy_timeout_ms: int = Field(default=30_000, ge=1)
+    # Kept SQLite connections. Each costs a page cache and a parsed schema
+    # (a few MiB); one discarded and reopened costs a schema parse per use.
+    sqlite_pool_size: int = Field(default=24, ge=1, le=256)
 
     jwt_secret: str = DEFAULT_JWT_SECRET
     # How a fresh installation gets its first owner (resolved and validated
@@ -196,6 +198,8 @@ class Settings(BaseSettings):
     # Optional operator-supplied base URL for notification navigation links.
     public_url: str = ""
 
+    # Keep slow file commands and engine hints off the general request limiter.
+    api_command_concurrency: int = Field(default=8, ge=1, le=128)
     max_upload_mb: int = Field(default=512, gt=0)
     portable_manifest_max_mb: int = Field(default=128, gt=0)
     staging_max_pending: int = Field(default=32, gt=0)
@@ -215,6 +219,12 @@ class Settings(BaseSettings):
     api_runs_jobs: bool = True
     executor_id: str | None = Field(default=None, min_length=1, max_length=128)
     shared_storage: bool = False
+    # DBOS polls each lane. This is dispatch latency, separate from the
+    # recovery tick; chained ingest/reconcile/derive queues used to each wait 1s.
+    jobs_queue_poll_interval_seconds: float = Field(default=0.25, ge=0.05, le=5)
+    # Lanes nobody waits on (search, upkeep, notifications). Every look at a
+    # queue costs database statements whether or not work is there.
+    jobs_relaxed_queue_poll_interval_seconds: float = Field(default=2.0, ge=0.05, le=60)
     jobs_reconcile_interval_seconds: int = Field(default=300, ge=10, le=86400)
     jobs_reconcile_batch: int = Field(default=500, ge=1, le=10000)
     jobs_lane_headroom_factor: int = Field(default=2, ge=1, le=100)
@@ -231,6 +241,10 @@ class Settings(BaseSettings):
     jobs_system_retention_hours: int = Field(default=24, ge=1, le=8760)
     jobs_retention_per_user: int = Field(default=500, ge=10, le=100000)
     engine_history_retention_days: int = Field(default=7, ge=1, le=365)
+    derivatives_mesh_enabled: bool = True
+    derivatives_gcode_enabled: bool = True
+    derivatives_toolpath_enabled: bool = True
+
     derivative_max_attempts: int = Field(default=5, ge=1, le=100)
     derivative_backoff_seconds: int = Field(default=30, ge=1, le=86400)
     fence_heartbeat_seconds: int = Field(default=15, ge=1, le=3600)
@@ -271,6 +285,7 @@ class Settings(BaseSettings):
     capture_provider_concurrency: int = Field(default=4, ge=1, le=4)
     capture_provider_retry_after_max_seconds: float = Field(default=10, ge=0, le=10)
     log_level: str = "INFO"
+    slow_request_ms: int = Field(default=1000, ge=1)
     # A restart request exits the API process gracefully. Enable this only when
     # Docker, systemd, Kubernetes, or another supervisor is configured to
     # relaunch it; source/dev launches stay safely disabled by default.
@@ -284,30 +299,36 @@ class Settings(BaseSettings):
     # the mesh is not loaded; the file is still indexed, and 3MF still gets its
     # embedded slicer preview. This is the hard ceiling; the RAM-aware cap below
     # tightens it further on small hosts.
+    # Portable device selection is independent of durable recipe/model identity.
+    compute_mode: Literal["auto", "cpu"] = "auto"
+    compute_adapter: str | None = None
+    compute_backend: Literal["auto", "vulkan", "opengl"] = "auto"
+    compute_render_policy: Literal["qualified", "preview"] = "qualified"
+    compute_memory_mb: int = Field(default=1024, ge=256, le=65536)
+    compute_batch_wait_ms: int = Field(default=10, ge=0, le=10)
+
     mesh_max_render_triangles: int = Field(default=2_000_000, gt=0)
 
-    # Fraction of detected available RAM that a single mesh load+render may peak
-    # to. The effective triangle cap is derived from this (per format, using the
-    # measured per-triangle peak cost), divided by ``max_render_jobs`` so the
-    # budget is shared across concurrent renders, and combined with the static
-    # ceiling above via a min(), so a small 4 GB container automatically skips
-    # meshes a 32 GB host would happily render — no per-host tuning needed to keep
-    # a scan from being OOM-killed (#29). Container-aware: honours the cgroup
-    # memory limit, not just host RAM. Set to 0 to disable RAM-aware capping. 0.5
-    # leaves headroom for the rest of the app and the OS while still rendering
-    # typical detailed models; 0.30–0.35 is safer for production / self-hosted
-    # setups that run other workloads alongside the scan.
+    # Fraction of host/cgroup RAM shared by native mesh work. Admission reserves
+    # a startup floor or the estimated whole-pipeline peak for each job;
+    # unknown complexity reserves the full pool. The job's admitted bytes set
+    # its hard worker ceiling and loader cap. Zero disables geometry estimation,
+    # while retaining containment at half of detected RAM.
     mesh_memory_budget_fraction: float = Field(default=0.5, ge=0, le=1)
 
-    # Maximum number of mesh load+render jobs allowed to run at once in one
-    # process. A bulk/folder upload (#26) can otherwise fire dozens of concurrent
-    # renders that each peak hundreds of MB and collectively OOM the box. This is
-    # the default concurrency of the derive.native lane, the process's local
-    # inference admission, and the divisor of the RAM-aware triangle cap, so each
-    # concurrent job stays within its share. 1 (serialised) is the safe default;
-    # raise it on hosts with RAM headroom. Zero is the supported sentinel for
-    # serial execution.
+    # Maximum simultaneous native mesh jobs across processes sharing this local
+    # data root. This also defaults the derive.native lane. Memory reservations
+    # can reduce actual concurrency when large models need more of the pool.
+    # One is the safe default; zero retains serial execution compatibility.
     max_render_jobs: int = Field(default=1, ge=0)
+
+    # Bounded prepared inputs, independent of native RAM. Zero jobs follows
+    # max_render_jobs + one waiting batch (at least two). Bytes account for two
+    # copies of each source, including verification pairs; I/O slots are held
+    # only during materialization, never while awaiting CPU/RAM.
+    mesh_prepared_max_jobs: int = Field(default=0, ge=0)
+    mesh_prepared_max_mb: int = Field(default=4096, gt=0)
+    mesh_source_io_jobs: int = Field(default=2, gt=0)
 
     # Number of faces processed per chunk in the software rasteriser. The renderer
     # builds its per-face geometry/shading arrays (each O(faces)) one chunk at a
@@ -340,6 +361,11 @@ class Settings(BaseSettings):
     embedding_local_model_dir: str = ""
     embedding_model_key: str = ""
     embedding_onnx_threads: int = Field(default=1, ge=1, le=4)
+    # Process-shared residency is separate from temporary geometric allocations.
+    # Restart all processes together when changing either memory partition.
+    embedding_memory_budget_fraction: float = Field(default=0.25, gt=0, lt=1)
+    embedding_resident_workers: int = Field(default=1, ge=1, le=2)
+    embedding_worker_memory_mb: int = Field(default=1024, ge=512)
     embedding_batch_size: int = Field(default=8, ge=1, le=8)
     embedding_cache_dir: Path = Field(default=None, validate_default=True)
     embedding_cache_max_bytes: int = Field(
@@ -408,6 +434,11 @@ class Settings(BaseSettings):
 
     mesh_step_timeout_seconds: int = Field(default=90, gt=0)
 
+    # Every mesh derivative (geometry, thumbnail, fingerprint) runs in a
+    # disposable child so a file that outgrows its memory budget costs one
+    # process rather than the API. This is that child's wall-clock deadline.
+    mesh_worker_timeout_seconds: int = Field(default=300, ge=10, le=3600)
+
     # Oversized STL previews run in a disposable, streaming worker. The worker
     # deadline is intentionally capped by the service so an operator override
     # cannot leave an ingestion thread waiting indefinitely.
@@ -419,6 +450,9 @@ class Settings(BaseSettings):
 
     # URL + ZIP import (see modules/ingestion/importer.py).
     url_import_max_redirects: int = Field(default=5, ge=0)
+    # Disposable expanded outputs per batch; source archives retain separate caps.
+    ingestion_batch_max_files: int = Field(default=4, gt=0)
+    ingestion_batch_max_mb: int = Field(default=512, gt=0)
     max_archive_entries: int = Field(default=500, gt=0)
     max_archive_entry_mb: int = Field(default=512, gt=0)
     max_archive_uncompressed_mb: int = Field(default=2048, gt=0)
@@ -445,7 +479,7 @@ class Settings(BaseSettings):
     backup_s3_secret_key: str = ""
 
     app_name: str = "PrintStash"
-    app_version: str = "0.13.0"
+    app_version: str = "0.14.0"
 
     @field_validator(*DATA_ROOT_LAYOUT, "db_url", mode="before")
     @classmethod
@@ -544,6 +578,8 @@ def _sqlite_db_path(db_url: str) -> Path | None:
     """Return the on-disk path for a sqlite URL, or ``None`` for in-memory/other."""
     if not db_url.startswith("sqlite"):
         return None
+    from sqlalchemy.engine.url import make_url
+
     database = make_url(db_url).database
     if not database or database == ":memory:":
         return None

@@ -27,7 +27,7 @@ import {
   revokeApiKey,
   updateAdminUser,
 } from "@/lib/api/auth";
-import { invalidateApiCache } from "@/lib/api/request";
+import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
@@ -36,7 +36,7 @@ const USER = { id: 1, username: "alice", is_active: true, is_superuser: false };
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -201,5 +201,75 @@ describe("deactivateAdminUser", () => {
     await deactivateAdminUser(3);
 
     expectRequest("/api/v1/admin/users/3", "DELETE");
+  });
+});
+
+/** Auth reads must retire with the cookie session that started them. */
+describe("auth read isolation", () => {
+  it.each([
+    { label: "identity", read: getMe },
+    { label: "API keys", read: listApiKeys },
+  ])("ignores a retired $label response", async ({ read }) => {
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const pending = read();
+    const outcome = pending.catch((error: Error) => error);
+    clearLogin();
+    storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
+    headers.resolve(new Response('{"detail":"expired"}', { status: 401 }));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(getUser()?.id).toBe(9);
+  });
+});
+
+describe("entry endpoint cancellation", () => {
+  it.each([
+    { label: "providers", send: (signal: AbortSignal) => getAuthProviders({ signal }) },
+    {
+      label: "login",
+      send: (signal: AbortSignal) =>
+        login({ username: "maker", password: "password", remember_me: false }, { signal }),
+    },
+    { label: "identity", send: (signal: AbortSignal) => getMe({ signal }) },
+    { label: "logout", send: (signal: AbortSignal) => logout({ signal }) },
+  ])("aborts the $label authentication endpoint", async ({ send }) => {
+    let finish: (response: Response) => void = () => {};
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const caller = new AbortController();
+
+    const pending = send(caller.signal);
+    caller.abort();
+
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    finish(new Response(JSON.stringify({ acknowledged: true })));
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+});
+
+/** Account feature reads forward their caller cancellation through the existing private transport. */
+describe("account caller cancellation", () => {
+  it.each([
+    { label: "API keys", read: listApiKeys },
+    { label: "admin Users", read: listAdminUsers },
+  ])("cancels an active $label read", async ({ read }) => {
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = read({ signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
   });
 });

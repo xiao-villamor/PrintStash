@@ -46,6 +46,27 @@ def vectors(item, style):
 
 class TestVisualRanking:
     @pytest.mark.parametrize(
+        "profile,single_floor", [("thumbnail", 0.27), ("multiview", 0.2)]
+    )
+    def test_pinned_encoder_retains_its_score_floor_policy(self, profile, single_floor):
+        from app.modules.inference.manifest import LocalModelManifest
+        from app.modules.search.query_context import SemanticLeg
+
+        manifest = LocalModelManifest.model_validate_json(
+            (FIXTURES_DIR / "embeddings/clip-vit-base-patch32-fp32.json").read_bytes()
+        )
+        space = VisualRecipe.space(
+            manifest.encoder_space(), image_size=224, profile=profile
+        )
+        settings = SearchSettings()
+        floor = semantic.score_floor(space, settings)
+        leg = SemanticLeg(profile, 1, space, floor, 1.0, 5.0)
+
+        assert floor == 0.2
+        assert semantic.for_query(leg, settings, "bracket").floor == single_floor
+        assert semantic.for_query(leg, settings, "wall bracket").floor == 0.2
+
+    @pytest.mark.parametrize(
         "style,aggregation,expected",
         [
             ("existing_media", "mean", 27 / 32),

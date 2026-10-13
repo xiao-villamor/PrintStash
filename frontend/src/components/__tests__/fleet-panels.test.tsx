@@ -16,11 +16,12 @@
  * printer permanently out of rotation with the UI showing it as available.
  */
 
+import { anEditingBase } from "@/test-support/factories";
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   FleetMaintenancePanel,
@@ -29,14 +30,21 @@ import {
   type FleetQueueDeps,
 } from "@/components/fleet-panels";
 import { defaultQueryApi, QueryApiProvider, type QueryApi } from "@/lib/queries";
+import { setEventSocketFactory, type EventSocket } from "@/lib/events";
+import { clearLogin, retirePrivateSessionScope } from "@/lib/auth-store";
+import { aMaintenanceLog, aMaintenanceWindow, aPrinter } from "@/test-support/factories";
+import { json, renderApp } from "@/test-support/render";
 import { queryKeys } from "@/lib/query-client";
-import type {
-  FleetSummary,
-  MaintenanceLog,
-  MaintenanceWindow,
-  PrinterRead,
-  PrintJobRead,
-} from "@/types";
+import type { FleetSummary, PrinterRead, PrintJobRead } from "@/types";
+
+class MaintenanceSocket implements EventSocket {
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  send() {}
+  close() {}
+}
+let maintenanceSocket: MaintenanceSocket;
 
 // Both panels take their fleet mutations through an optional `deps` prop, so
 // those are stubbed by passing them in. The queue panel's reads are the real
@@ -78,10 +86,18 @@ const maintenanceDeps: FleetMaintenanceDeps = {
 
 function makePrinter(overrides: Partial<PrinterRead> = {}): PrinterRead {
   return {
+    ...anEditingBase(),
+    provider_material_sync_enabled: true,
+    operator_release_required: false,
     id: 1,
     name: "Voron 2.4",
     provider: "moonraker",
     moonraker_url: "http://10.0.0.1:7125",
+    has_bambu_access_code: false,
+    has_prusalink_password: false,
+    has_prusalink_api_key: false,
+    has_elegoo_centauri_access_code: false,
+    has_octoprint_api_key: false,
     has_api_key: false,
     access: { role: "admin", can_view: true, can_print: true, can_control: true, can_admin: true },
     capabilities: {
@@ -167,34 +183,6 @@ function makeSummary(overrides: Partial<FleetSummary> = {}): FleetSummary {
   };
 }
 
-function makeWindow(overrides: Partial<MaintenanceWindow> = {}): MaintenanceWindow {
-  return {
-    id: 1,
-    printer_id: 1,
-    starts_at: "2026-08-01T09:00:00Z",
-    ends_at: "2026-08-01T11:00:00Z",
-    reason: "Nozzle swap",
-    created_at: "2026-07-15T00:00:00Z",
-    updated_at: "2026-07-15T00:00:00Z",
-    ...overrides,
-  };
-}
-
-function makeLog(overrides: Partial<MaintenanceLog> = {}): MaintenanceLog {
-  return {
-    id: 1,
-    printer_id: 1,
-    performed_at: "2026-07-15T00:00:00Z",
-    category: "belt",
-    note: "Tensioned X belt",
-    counter_value: null,
-    counter_unit: null,
-    created_at: "2026-07-15T00:00:00Z",
-    updated_at: "2026-07-15T00:00:00Z",
-    ...overrides,
-  };
-}
-
 /** FleetQueuePanel's history window is part of the fleet-queue query key. */
 const FLEET_QUEUE_HISTORY_LIMIT = 20;
 
@@ -232,6 +220,8 @@ function renderQueuePanel(
 }
 
 beforeEach(() => {
+  maintenanceSocket = new MaintenanceSocket();
+  setEventSocketFactory(async () => maintenanceSocket);
   vi.clearAllMocks();
   listWindows.mockResolvedValue([]);
   listLog.mockResolvedValue([]);
@@ -414,7 +404,7 @@ describe("FleetQueuePanel", () => {
 
 describe("FleetMaintenancePanel", () => {
   it("shows the empty state with no printers", () => {
-    render(
+    renderApp(
       <FleetMaintenancePanel
         printers={[]}
         onPrintersChanged={vi.fn<() => void>()}
@@ -427,7 +417,7 @@ describe("FleetMaintenancePanel", () => {
   it("toggling soft drain calls updatePrinterRouting with drain_mode true", async () => {
     updateRouting.mockResolvedValue({});
     const onPrintersChanged = vi.fn<() => void>();
-    render(
+    renderApp(
       <FleetMaintenancePanel
         printers={[makePrinter({ drain_mode: false })]}
         onPrintersChanged={onPrintersChanged}
@@ -448,7 +438,7 @@ describe("FleetMaintenancePanel", () => {
 
   it("resuming a drained printer calls updatePrinterRouting with drain_mode false", async () => {
     updateRouting.mockResolvedValue({});
-    render(
+    renderApp(
       <FleetMaintenancePanel
         printers={[makePrinter({ drain_mode: true, drain_reason: "Nozzle swap" })]}
         onPrintersChanged={vi.fn<() => void>()}
@@ -467,8 +457,8 @@ describe("FleetMaintenancePanel", () => {
   });
 
   it("scheduling a maintenance window calls createMaintenanceWindow with the entered fields", async () => {
-    createWindow.mockResolvedValue(makeWindow());
-    render(
+    createWindow.mockResolvedValue(aMaintenanceWindow());
+    renderApp(
       <FleetMaintenancePanel
         printers={[makePrinter()]}
         onPrintersChanged={vi.fn<() => void>()}
@@ -489,11 +479,14 @@ describe("FleetMaintenancePanel", () => {
         expect.objectContaining({ reason: "Nozzle swap" }),
       ),
     );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(listWindows).toHaveBeenCalledTimes(2);
+    expect(listLog).toHaveBeenCalledOnce();
   });
 
   it("logging maintenance calls createMaintenanceLog with the category and note", async () => {
-    createLog.mockResolvedValue(makeLog());
-    render(
+    createLog.mockResolvedValue(aMaintenanceLog());
+    renderApp(
       <FleetMaintenancePanel
         printers={[makePrinter()]}
         onPrintersChanged={vi.fn<() => void>()}
@@ -514,5 +507,240 @@ describe("FleetMaintenancePanel", () => {
         note: "Tensioned X belt",
       }),
     );
+  });
+});
+
+/** Deferred HTTP responses verify publication ownership rather than effect invocation. */
+describe("FleetMaintenancePanel remote ownership", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("reuses maintenance reads for unchanged printer IDs", async () => {
+    const app = renderApp(
+      <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />,
+      {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": json([aMaintenanceWindow()]),
+          "GET /api/v1/fleet/printers/1/maintenance-log": json([aMaintenanceLog()]),
+        },
+      },
+    );
+    await screen.findByText(/Tensioned X belt/);
+    expect(app.requests()).toHaveLength(2);
+    app.rerender(
+      <FleetMaintenancePanel
+        printers={[aPrinter({ name: "Renamed" })]}
+        onPrintersChanged={() => {}}
+      />,
+    );
+    await screen.findByText("Renamed");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(app.requests()).toHaveLength(2);
+  });
+
+  it("fetches maintenance only for an added printer", async () => {
+    const app = renderApp(
+      <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />,
+      {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": json([aMaintenanceWindow()]),
+          "GET /api/v1/fleet/printers/1/maintenance-log": json([aMaintenanceLog()]),
+          "GET /api/v1/fleet/printers/2/maintenance-windows": json([]),
+          "GET /api/v1/fleet/printers/2/maintenance-log": json([]),
+        },
+      },
+    );
+    await screen.findByText(/Tensioned X belt/);
+    app.rerender(
+      <FleetMaintenancePanel
+        printers={[aPrinter(), aPrinter({ id: 2, name: "Added" })]}
+        onPrintersChanged={() => {}}
+      />,
+    );
+    await waitFor(() =>
+      expect(app.requests().filter((request) => request.url.includes("/printers/2/"))).toHaveLength(
+        2,
+      ),
+    );
+    expect(app.requests().filter((request) => request.url.includes("/printers/1/"))).toHaveLength(
+      2,
+    );
+  });
+
+  it("aborts removed printer maintenance reads", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const app = renderApp(
+      <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />,
+      {
+        routes: {
+          "GET /api/v1/fleet/printers/1": (_url, init) => {
+            signals.push(init?.signal);
+            return pending.promise;
+          },
+        },
+      },
+    );
+    await waitFor(() => expect(signals).toHaveLength(2));
+    app.rerender(<FleetMaintenancePanel printers={[]} onPrintersChanged={() => {}} />);
+    expect(signals.every((signal) => signal?.aborted)).toBe(true);
+    await act(async () => pending.resolve(json([aMaintenanceLog({ note: "Obsolete" })])));
+    expect(screen.queryByText("Obsolete")).toBeNull();
+  });
+
+  it("shares maintenance reads between mounted panels", async () => {
+    const app = renderApp(
+      <>
+        <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />
+        <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />
+      </>,
+      {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": json([]),
+          "GET /api/v1/fleet/printers/1/maintenance-log": json([aMaintenanceLog()]),
+        },
+      },
+    );
+    await waitFor(() => expect(screen.getAllByText(/Tensioned X belt/)).toHaveLength(2));
+    expect(app.requests()).toHaveLength(2);
+  });
+
+  it("retains successful maintenance beside a failed resource", async () => {
+    renderApp(<FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />, {
+      routes: {
+        "GET /api/v1/fleet/printers/1/maintenance-windows": json([aMaintenanceWindow()]),
+        "GET /api/v1/fleet/printers/1/maintenance-log": json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByText(/Nozzle swap/)).toBeVisible();
+    expect(await screen.findByRole("alert")).toBeVisible();
+  });
+
+  it("preserves maintenance drafts during revalidation", async () => {
+    const app = renderApp(
+      <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />,
+      {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": json([]),
+          "GET /api/v1/fleet/printers/1/maintenance-log": json([]),
+        },
+      },
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Log" }));
+    await userEvent.type(screen.getByLabelText("Note"), "Unsaved service details");
+    await act(async () => app.client.invalidateQueries({ queryKey: ["printers"] }));
+    expect(screen.getByLabelText("Note")).toHaveValue("Unsaved service details");
+  });
+
+  it("refreshes only confirmed maintenance windows", async () => {
+    let windowReads = 0;
+    const app = renderApp(
+      <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />,
+      {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": () =>
+            json(++windowReads === 1 ? [aMaintenanceWindow()] : []),
+          "GET /api/v1/fleet/printers/1/maintenance-log": json([aMaintenanceLog()]),
+          "DELETE /api/v1/fleet/printers/1/maintenance-windows/1": json(null, 204),
+        },
+      },
+    );
+    await screen.findByText(/Nozzle swap/);
+    await userEvent.click(screen.getByRole("button", { name: "Delete maintenance window" }));
+    await waitFor(() => expect(screen.queryByText(/Nozzle swap/)).toBeNull());
+    expect(
+      app.requests().filter((request) => request.url.endsWith("/maintenance-log")),
+    ).toHaveLength(1);
+    expect(windowReads).toBe(2);
+  });
+
+  it("refreshes only confirmed maintenance logs", async () => {
+    let logReads = 0;
+    const app = renderApp(
+      <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />,
+      {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": json([aMaintenanceWindow()]),
+          "GET /api/v1/fleet/printers/1/maintenance-log": () =>
+            json(++logReads === 1 ? [aMaintenanceLog()] : []),
+          "DELETE /api/v1/fleet/printers/1/maintenance-log/1": json(null, 204),
+        },
+      },
+    );
+    await screen.findByText(/Tensioned X belt/);
+    await userEvent.click(screen.getByRole("button", { name: "Delete maintenance log" }));
+    await waitFor(() => expect(screen.queryByText(/Tensioned X belt/)).toBeNull());
+    expect(
+      app.requests().filter((request) => request.url.endsWith("/maintenance-windows")),
+    ).toHaveLength(1);
+    expect(logReads).toBe(2);
+  });
+
+  it("retains maintenance data after a denied mutation", async () => {
+    const app = renderApp(
+      <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />,
+      {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": json([]),
+          "GET /api/v1/fleet/printers/1/maintenance-log": json([aMaintenanceLog()]),
+          "DELETE /api/v1/fleet/printers/1/maintenance-log/1": json({ detail: "forbidden" }, 403),
+        },
+      },
+    );
+    await screen.findByText(/Tensioned X belt/);
+    await userEvent.click(screen.getByRole("button", { name: "Delete maintenance log" }));
+    await waitFor(() => expect(app.requests()).toHaveLength(3));
+    expect(screen.getByText(/Tensioned X belt/)).toBeVisible();
+  });
+
+  it("rejects maintenance mutation effects after scope retirement", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const app = renderApp(
+      <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />,
+      {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": json([]),
+          "GET /api/v1/fleet/printers/1/maintenance-log": json([]),
+          "POST /api/v1/fleet/printers/1/maintenance-log": () => pending.promise,
+        },
+      },
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Log" }));
+    await userEvent.type(screen.getByLabelText("Note"), "Retained draft");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    act(() => retirePrivateSessionScope());
+    await act(async () => {});
+    const readsAfterRetirement = app
+      .requests()
+      .filter(
+        (request) => request.url.endsWith("/maintenance-log") && request.method === "GET",
+      ).length;
+    await act(async () => pending.resolve(json(aMaintenanceLog())));
+    expect(screen.getByLabelText("Note")).toHaveValue("Retained draft");
+    expect(
+      app
+        .requests()
+        .filter((request) => request.url.endsWith("/maintenance-log") && request.method === "GET"),
+    ).toHaveLength(readsAfterRetirement);
+    act(() => clearLogin());
+  });
+  it("refreshes active maintenance after event resync", async () => {
+    const app = renderApp(
+      <FleetMaintenancePanel printers={[aPrinter()]} onPrintersChanged={() => {}} />,
+      {
+        routes: {
+          "GET /api/v1/fleet/printers/1/maintenance-windows": json([]),
+          "GET /api/v1/fleet/printers/1/maintenance-log": json([aMaintenanceLog()]),
+        },
+      },
+    );
+    await screen.findByText(/Tensioned X belt/);
+    maintenanceSocket.onopen?.();
+    act(() => maintenanceSocket.onmessage?.({ data: '{"type":"resync"}' }));
+    await waitFor(() => expect(app.requests()).toHaveLength(4));
+  });
+
+  it("skips maintenance reads for an empty fleet", async () => {
+    const app = renderApp(<FleetMaintenancePanel printers={[]} onPrintersChanged={() => {}} />);
+    expect(screen.getByText("No printers to maintain")).toBeVisible();
+    expect(app.requests()).toHaveLength(0);
   });
 });

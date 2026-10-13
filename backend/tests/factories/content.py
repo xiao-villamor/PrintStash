@@ -91,18 +91,21 @@ def binary_stl(
     )
 
 
-def ascii_stl() -> bytes:
-    """A one-facet ASCII STL, correctly terminated."""
+def ascii_stl(*, triangles: int = 1) -> bytes:
+    """A correctly terminated ASCII STL; repeated facets exercise scan limits."""
     return (
         b"solid printstash\n"
-        b"facet normal 0 0 1\n"
-        b" outer loop\n"
-        b"  vertex 0 0 0\n"
-        b"  vertex 1 0 0\n"
-        b"  vertex 0 1 0\n"
-        b" endloop\n"
-        b"endfacet\n"
-        b"endsolid printstash\n"
+        + (
+            b"facet normal 0 0 1\n"
+            b" outer loop\n"
+            b"  vertex 0 0 0\n"
+            b"  vertex 1 0 0\n"
+            b"  vertex 0 1 0\n"
+            b" endloop\n"
+            b"endfacet\n"
+        )
+        * triangles
+        + b"endsolid printstash\n"
     )
 
 
@@ -118,6 +121,27 @@ def png(*, width: int = 8, height: int = 8) -> bytes:
 
     buffer = io.BytesIO()
     Image.new("RGBA", (width, height), (90, 140, 210, 255)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def rendered_thumbnail(
+    *,
+    width: int = 640,
+    height: int = 480,
+    color: tuple[int, int, int, int] = (90, 140, 210, 255),
+    output_format: str = "WEBP",
+) -> bytes:
+    """Generated frame with intentional 50% extent and a transparent border."""
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    ImageDraw.Draw(image).rectangle(
+        (width // 4, height // 4, 3 * width // 4 - 1, 3 * height // 4 - 1), fill=color
+    )
+    buffer = io.BytesIO()
+    image.save(
+        buffer, format=output_format, lossless=True, exact=True, method=2, quality=80
+    )
     return buffer.getvalue()
 
 
@@ -184,3 +208,25 @@ def three_mf(*, model: bytes | None = None, preview: bool = True) -> bytes:
     if preview:
         entries["Metadata/thumbnail.png"] = png()
     return zip_bytes(entries)
+
+
+def binary_stl_facets(triangles: list[tuple[tuple[float, float, float], ...]]) -> bytes:
+    body = b"\0" * 80 + struct.pack("<I", len(triangles))
+    for facet in triangles:
+        body += struct.pack("<3f", 0.0, 0.0, 1.0)
+        for vertex in facet:
+            body += struct.pack("<3f", *vertex)
+        body += struct.pack("<H", 0)
+    return body
+
+
+def ascii_stl_facets(triangles: list[tuple[tuple[float, float, float], ...]]) -> bytes:
+    lines = ["solid test"]
+    for facet in triangles:
+        lines.append("facet normal 0 0 1")
+        lines.append("outer loop")
+        lines.extend(f"vertex {v[0]} {v[1]} {v[2]}" for v in facet)
+        lines.append("endloop")
+        lines.append("endfacet")
+    lines.append("endsolid test")
+    return ("\n".join(lines) + "\n").encode("ascii")

@@ -1,5 +1,23 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
+import { refreshLibraryMetadata } from "@/features/library/metadata";
+import { useTaxonomyCommands } from "@/features/library/taxonomy";
+
+import { captureEditingBase } from "@/lib/api/editing";
+
+import { LibraryBackLink } from "@/features/library/navigation";
+import { useQuery } from "@tanstack/react-query";
+import {
+  useModelDetail,
+  modelPrinterFilesOptions,
+  useModelPrintJobs,
+  type PublishModel,
+} from "@/features/library/model-detail";
+import { useLibraryStar } from "@/features/library/mutations";
+import { ApiError } from "@/lib/errors";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+import { Modal } from "@/components/ui/modal";
 import { SubjectCaption } from "@/components/subject-caption";
 import { ModelSearchAction } from "@/components/model-search-action";
 
@@ -9,7 +27,6 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
-import { Link } from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import {
   ArrowLeft,
@@ -31,25 +48,15 @@ import {
 
 import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
 import type { ViewerMode } from "@/components/model-detail/viewer-toolbar";
-import {
-  createTag,
-  deleteModel,
-  deleteTag,
-  getAssetUrl,
-  getModelPrinterFiles,
-  getModelPrintJobs,
-  starModel,
-  unstarModel,
-  updateModel,
-} from "@/lib/api";
-import { useCollections, useTags } from "@/lib/queries";
+import { deleteModel, getAssetUrl, getModel, updateModel } from "@/lib/api";
+import { useTags } from "@/lib/queries";
 import { timeAgo } from "@/lib/format";
 import { readMetadataPreferences } from "@/lib/metadata-preferences";
 import { toast } from "@/lib/toast";
 import { useAuth } from "@/lib/auth-context";
 import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import { ModelPrinterFileRead, ModelPrintJobRead, ModelRead, TagRead } from "@/types";
+import { ModelPrinterFileRead, ModelRead, TagRead } from "@/types";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Button } from "@/components/ui/button";
@@ -78,6 +85,7 @@ import { useRevisionUpdater } from "./use-revision-updater";
 import { ViewerToolbar } from "./viewer-toolbar";
 import { Localized } from "@/components/ui/localized";
 import { ModelTagsDialog } from "@/components/model-tags-dialog";
+import { MeshPreviewGate } from "@/components/mesh-preview-gate";
 
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
@@ -143,35 +151,62 @@ function getBedSize(printerModel: string | null | undefined): BedSize {
 }
 
 export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
+  const resource = useModelDetail(initialModel.id, initialModel);
+  const denied =
+    resource.error instanceof ApiError && [401, 403, 404].includes(resource.error.status);
+  if (!resource.data || denied) return null;
+  return (
+    <ModelDetailPresentation
+      key={resource.data.id}
+      model={resource.data}
+      setModel={resource.publish}
+      readError={resource.isError}
+      retryRead={() => void resource.refetch()}
+    />
+  );
+}
+
+function ModelDetailPresentation({
+  model,
+  setModel,
+  readError,
+  retryRead,
+}: {
+  model: ModelRead;
+  setModel: PublishModel;
+  readError: boolean;
+  retryRead: () => void;
+}) {
   useUiLocale();
   const router = useRouter();
   const auth = useRequireAuth();
   const { user } = useAuth();
-  const [model, setModel] = useState(initialModel);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [editBase, setEditBase] = useState(() => captureEditingBase(model));
+  const [editProblem, setEditProblem] = useState<"conflict" | "unconfirmed" | null>(null);
+  const reviewPublication = useRef<typeof setModel | null>(null);
+  const [reviewedModel, setReviewedModel] = useState<ModelRead | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagDialogSession, setTagDialogSession] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [starBusy, setStarBusy] = useState(false);
+  const star = useLibraryStar();
+  const starBusy = star.isPending;
   const [editName, setEditName] = useState(model.name);
   const [editDescription, setEditDescription] = useState(model.description || "");
   const [editSourceUrl, setEditSourceUrl] = useState(model.source_url || "");
   const [editCollection, setEditCollection] = useState(model.collection || "");
+  const [editCollectionLabel, setEditCollectionLabel] = useState(model.collection_label);
   const [editTags, setEditTags] = useState<string[]>([...model.tags]);
   const [catOpen, setCatOpen] = useState(false);
   const [tagInput, setTagInput] = useState("");
-  // Shared taxonomy lists come from the TanStack Query cache (deduped across
-  // the app, refetched on focus + after any mutation).
-  const { data: collections = [] } = useCollections();
   const { data: tags = [] } = useTags();
   // Read once at mount; the panel that edits these lives on another route, so
   // there is nothing to re-sync while this view is open.
   const [metadataPreferences] = useState(readMetadataPreferences);
   const [addRevisionOpen, setAddRevisionOpen] = useState(false);
-  const [fetchedPrinterFiles, setFetchedPrinterFiles] = useState<ModelPrinterFileRead[]>([]);
-  const [fetchedPrintJobs, setFetchedPrintJobs] = useState<ModelPrintJobRead[]>([]);
   const [requestedTab, setRequestedTab] = useState<TabKey>("overview");
   const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
   const [detailSidebarWidth, setDetailSidebarWidth] = useState(() => {
@@ -190,6 +225,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const [sendFileId, setSendFileId] = useState<number | undefined>(undefined);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const { createTag, deleteTag } = useTaxonomyCommands();
+  const metadataClient = useQueryClient();
   const [deleteTagTarget, setDeleteTagTarget] = useState<TagRead | null>(null);
   const [deleteTagBusy, setDeleteTagBusy] = useState(false);
   const [viewerMode, setViewerMode] = useState<ViewerMode>("model");
@@ -197,17 +234,16 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   const viewerControls = useRef<STLViewerControls | null>(null);
   const canEditModel = model.effective_role === "edit" || model.effective_role === "admin";
   const canViewPrinters = !!user?.is_superuser;
-  // Printer files, print jobs and the history tab are superuser-only. Gating
-  // them here — rather than clearing state from an effect when the permission
-  // disappears — keeps the fetch effect a pure fetch.
+  const printerFileQuery = useQuery({
+    ...modelPrinterFilesOptions(model.id),
+    enabled: canViewPrinters,
+  });
+  const printJobQuery = useModelPrintJobs(model.id, canViewPrinters);
   const printerFiles = useMemo(
-    () => (canViewPrinters ? fetchedPrinterFiles : []),
-    [canViewPrinters, fetchedPrinterFiles],
+    () => (canViewPrinters ? (printerFileQuery.data ?? []) : []),
+    [canViewPrinters, printerFileQuery.data],
   );
-  const printJobs = useMemo(
-    () => (canViewPrinters ? fetchedPrintJobs : []),
-    [canViewPrinters, fetchedPrintJobs],
-  );
+  const printJobs = canViewPrinters ? (printJobQuery.data ?? []) : [];
   const activeTab =
     (!canViewPrinters && requestedTab === "history") ||
     (!canEditModel && requestedTab === "similar")
@@ -225,35 +261,20 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   // Quick actions on the Overview card (mark failed / recommend).
   const revisionUpdater = useRevisionUpdater(model.id, setModel);
   // Thumbnails and metadata arrive after upload, derived in the background.
-  useDerivativeRefresh(model.id, setModel);
+  useDerivativeRefresh(model.id);
 
   async function toggleFavorite() {
     if (!auth.isAuthenticated || starBusy) {
       auth.showAuthRequiredToast();
       return;
     }
-    const starred = !model.starred;
-    setModel((current) => ({ ...current, starred }));
-    setStarBusy(true);
+    const session = getSessionVersion();
     try {
-      await (starred ? starModel(model.id) : unstarModel(model.id));
+      await star.mutateAsync({ kind: "model", id: model.id, starred: !model.starred });
     } catch (error) {
-      setModel((current) => ({ ...current, starred: !starred }));
-      toast.error(error);
-    } finally {
-      setStarBusy(false);
+      if (session === getSessionVersion()) toast.error(error);
     }
   }
-
-  useEffect(() => {
-    if (!canViewPrinters) return;
-    getModelPrinterFiles(model.id)
-      .then(setFetchedPrinterFiles)
-      .catch(() => {});
-    getModelPrintJobs(model.id)
-      .then(setFetchedPrintJobs)
-      .catch(() => {});
-  }, [model.id, canViewPrinters]);
 
   useEffect(() => {
     try {
@@ -298,12 +319,13 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   async function doDelete() {
     setDeleting(true);
     try {
+      const deletionSession = getSessionVersion();
       await deleteModel(model.id);
+      refreshLibraryMetadata(metadataClient, deletionSession);
       toast.success(uiText("Model deleted"));
       // Return to the folder the model lived in, not the root — deleting one
       // model shouldn't kick the user out of the collection they were browsing.
       router.push(model.collection ? `/?c=${encodeURIComponent(model.collection)}` : "/");
-      router.refresh();
     } catch (e) {
       toast.error(e);
       setDeleting(false);
@@ -311,10 +333,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   }
 
   function enterEdit() {
+    setEditBase(captureEditingBase(model));
+    setEditProblem(null);
+    setReviewedModel(null);
     setEditName(model.name);
     setEditDescription(model.description || "");
     setEditSourceUrl(model.source_url || "");
     setEditCollection(model.collection || "");
+    setEditCollectionLabel(model.collection_label);
     setEditTags([...model.tags]);
     setTagInput("");
     setCatOpen(false);
@@ -323,28 +349,84 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   }
 
   function cancelEdit() {
+    setEditProblem(null);
+    setReviewedModel(null);
     setEditing(false);
   }
 
-  async function saveEdit() {
-    if (!editName.trim()) return;
+  async function saveEdit(version = editBase) {
+    if (!editName.trim() || saving || !canEditModel || reviewedModel?.effective_role === "view")
+      return;
+    const session = getSessionVersion();
     setSaving(true);
     try {
-      const updated = await updateModel(model.id, {
-        name: editName.trim() || undefined,
-        description: editDescription.trim() || undefined,
-        source_url: editSourceUrl.trim() || null,
-        collection: editCollection,
-        tags: editTags.length ? editTags : undefined,
-      });
-      setModel(updated);
+      const updated = await updateModel(
+        model.id,
+        {
+          name: editName.trim() || undefined,
+          description: editDescription.trim() || null,
+          source_url: editSourceUrl.trim() || null,
+          collection: editCollection,
+          tags: editTags,
+        },
+        version,
+      );
+      requireSessionVersion(session);
+      if (!(await setModel(updated))) return;
+      setEditProblem(null);
+      setReviewedModel(null);
       setEditing(false);
       toast.success(uiText("Model updated"));
     } catch (e) {
-      toast.error(e);
+      if (session !== getSessionVersion()) return;
+      if (e instanceof ApiError && e.status === 412) {
+        setEditProblem("conflict");
+        setReviewedModel(null);
+      } else if (
+        !(e instanceof ApiError) ||
+        e.status === 0 ||
+        e.status === 408 ||
+        e.status >= 500
+      ) {
+        setEditProblem("unconfirmed");
+        setReviewedModel(null);
+      } else toast.error(e);
     } finally {
-      setSaving(false);
+      if (session === getSessionVersion()) setSaving(false);
     }
+  }
+
+  async function reviewLatest() {
+    const session = getSessionVersion();
+    setReviewing(true);
+    try {
+      reviewPublication.current = setModel;
+      const latest = await getModel(model.id);
+      requireSessionVersion(session);
+      setReviewedModel(latest);
+    } catch (error) {
+      if (session === getSessionVersion()) toast.error(error);
+    } finally {
+      if (session === getSessionVersion()) setReviewing(false);
+    }
+  }
+
+  async function useReviewedVersion() {
+    if (
+      !reviewedModel ||
+      !reviewPublication.current ||
+      !(await reviewPublication.current(reviewedModel))
+    )
+      return;
+    setEditBase(captureEditingBase(reviewedModel));
+    setEditName(reviewedModel.name);
+    setEditDescription(reviewedModel.description ?? "");
+    setEditSourceUrl(reviewedModel.source_url ?? "");
+    setEditCollection(reviewedModel.collection ?? "");
+    setEditCollectionLabel(reviewedModel.collection_label);
+    setEditTags([...reviewedModel.tags]);
+    setEditProblem(null);
+    setReviewedModel(null);
   }
 
   function editToggleTag(name: string) {
@@ -473,6 +555,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
   return (
     <Localized>
       <div className="flex flex-col h-full">
+        {readError && (
+          <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
+            <p>{uiText("Couldn’t load this model")}</p>
+            <Button variant="outline" size="sm" onClick={retryRead}>
+              {uiText("Retry")}
+            </Button>
+          </div>
+        )}
         <ConfirmModal
           open={confirmDeleteOpen}
           onClose={() => setConfirmDeleteOpen(false)}
@@ -504,8 +594,8 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           <AddGcodeRevisionModal
             modelId={model.id}
             onClose={() => setAddRevisionOpen(false)}
-            onUploaded={(updated) => {
-              setModel(updated);
+            onUploaded={async (updated) => {
+              if (!(await setModel(updated))) return;
               setAddRevisionOpen(false);
               toast.success(uiText("G-code revision added"));
             }}
@@ -523,18 +613,77 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
           suggestions={tags}
           open={tagDialogOpen}
           onClose={() => setTagDialogOpen(false)}
-          onSaved={(nextTags) => setModel((current) => ({ ...current, tags: nextTags }))}
+          onSaved={(nextTags, editVersion) => {
+            void setModel((current) => ({ ...current, tags: nextTags, ...editVersion }));
+          }}
         />
+        {editing && editProblem && (
+          <div role="alert" className="border-b border-border bg-muted px-4 py-3 text-sm">
+            <p>
+              {uiText(
+                editProblem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
+              )}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void reviewLatest()}
+              loading={reviewing}
+            >
+              {uiText("library.reviewLatest")}
+            </Button>
+          </div>
+        )}
+        <Modal
+          open={reviewedModel !== null}
+          onClose={() => setReviewedModel(null)}
+          title={uiText("library.latestVersion")}
+        >
+          {reviewedModel && (
+            <div className="space-y-4">
+              <dl className="space-y-2">
+                <dt className="font-semibold">{uiText("Name")}</dt>
+                <dd>{reviewedModel.name}</dd>
+                <dt className="font-semibold">{uiText("Description")}</dt>
+                <dd className="whitespace-pre-wrap">{reviewedModel.description ?? "—"}</dd>
+                <dt className="font-semibold">{uiText("Collection")}</dt>
+                <dd>{reviewedModel.collection_label ?? "—"}</dd>
+                <dt className="font-semibold">{uiText("Tags")}</dt>
+                <dd>{reviewedModel.tags.join(", ") || "—"}</dd>
+                <dt className="font-semibold">{uiText("Source URL")}</dt>
+                <dd>{reviewedModel.source_url ?? "—"}</dd>
+              </dl>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={() => setReviewedModel(null)}>
+                  {uiText("library.keepDraft")}
+                </Button>
+                <Button variant="outline" onClick={useReviewedVersion}>
+                  {uiText("library.useLatest")}
+                </Button>
+                <Button
+                  loading={saving}
+                  disabled={
+                    reviewedModel.effective_role !== "edit" &&
+                    reviewedModel.effective_role !== "admin"
+                  }
+                  onClick={() => void saveEdit(reviewedModel)}
+                >
+                  {uiText("library.retryDraft")}
+                </Button>
+              </div>
+            </div>
+          )}
+        </Modal>
         {/* Detail Header */}
         <header className="flex flex-wrap items-center justify-between px-4 md:px-6 py-3 gap-2 border-b border-outline-variant bg-surface-container-lowest shrink-0">
           <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
-            <Link
+            <LibraryBackLink
               href={model.collection ? `/?c=${encodeURIComponent(model.collection)}` : "/"}
               aria-label={uiText("Back")}
               className="w-10 h-10 shrink-0 flex items-center justify-center rounded hover:bg-surface-container-high text-on-surface-variant transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <ArrowLeft className="h-5 w-5" />
-            </Link>
+            </LibraryBackLink>
             <div className="min-w-0 flex-1">
               {editing ? (
                 <input
@@ -602,7 +751,12 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 <Button variant="outline" size="sm" onClick={cancelEdit}>
                   {uiText("Cancel")}
                 </Button>
-                <Button size="sm" onClick={saveEdit} loading={saving} disabled={!editName.trim()}>
+                <Button
+                  size="sm"
+                  onClick={() => void saveEdit()}
+                  loading={saving}
+                  disabled={!editName.trim() || editProblem !== null || !canEditModel}
+                >
                   {!saving && <Check className="h-4 w-4" />}{" "}
                   {saving ? uiText("Saving…") : uiText("Save")}
                 </Button>
@@ -723,18 +877,26 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 />
               </Suspense>
             ) : meshFile ? (
-              <Suspense fallback={ViewerFallback}>
-                <STLViewer
-                  url={getAssetUrl(`/api/v1/files/${meshFile.id}/stl`)}
-                  onControlsReady={(api) => {
-                    viewerControls.current = api;
-                  }}
-                  onReadyChange={setViewerReady}
-                  displayMode={displayMode}
-                  showGrid={showGrid}
-                  screenshotName={model.slug || model.name}
-                />
-              </Suspense>
+              <MeshPreviewGate
+                key={meshFile.id}
+                sizeBytes={meshFile.size_bytes}
+                posterUrl={thumbUrl}
+                posterAlt={model.name}
+              >
+                <Suspense fallback={ViewerFallback}>
+                  <STLViewer
+                    url={getAssetUrl(`/api/v1/files/${meshFile.id}/stl`)}
+                    modelId={model.id}
+                    onControlsReady={(api) => {
+                      viewerControls.current = api;
+                    }}
+                    onReadyChange={setViewerReady}
+                    displayMode={displayMode}
+                    showGrid={showGrid}
+                    screenshotName={model.slug || model.name}
+                  />
+                </Suspense>
+              </MeshPreviewGate>
             ) : thumbUrl ? (
               <img
                 src={thumbUrl}
@@ -921,10 +1083,14 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                     editing={editing}
                     editor={{
                       collection: editCollection,
-                      setCollection: setEditCollection,
+                      collectionLabel: editCollectionLabel,
+                      setCollection: (path, label) => {
+                        setEditCollection(path);
+                        setEditCollectionLabel(label);
+                      },
                       catOpen,
                       setCatOpen,
-                      collections,
+                      allowRoot: !!user?.is_superuser,
                       description: editDescription,
                       setDescription: setEditDescription,
                       sourceUrl: editSourceUrl,
@@ -965,6 +1131,11 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
               {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
               {activeTab === "source" && <SourceTab modelId={model.id} canEdit={canEditModel} />}
 
+              {activeTab === "revisions" && canViewPrinters && printerFileQuery.isError && (
+                <Button variant="outline" onClick={() => void printerFileQuery.refetch()}>
+                  {uiText("Retry")}
+                </Button>
+              )}
               {activeTab === "revisions" && (
                 <RevisionsTab
                   modelId={model.id}
@@ -987,14 +1158,25 @@ export function ModelDetail({ model: initialModel }: { model: ModelRead }) {
                 />
               )}
 
-              {activeTab === "history" && canViewPrinters && (
-                <PrintHistorySection
-                  jobs={printJobs}
-                  modelId={model.id}
-                  gcodeFiles={gcodeFiles}
-                  onJobCreated={(job) => setFetchedPrintJobs((jobs) => [job, ...jobs])}
-                />
+              {activeTab === "history" && canViewPrinters && printJobQuery.isError && (
+                <Button variant="outline" onClick={() => void printJobQuery.refetch()}>
+                  {uiText("Retry")}
+                </Button>
               )}
+              {activeTab === "history" && canViewPrinters && printJobQuery.isPending && (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              )}
+              {activeTab === "history" &&
+                canViewPrinters &&
+                printJobQuery.data &&
+                !printJobQuery.isError && (
+                  <PrintHistorySection
+                    jobs={printJobs}
+                    modelId={model.id}
+                    gcodeFiles={gcodeFiles}
+                    onJobCreated={(job) => void printJobQuery.publish(job)}
+                  />
+                )}
             </div>
 
             {/* Klipper Sync Panel */}

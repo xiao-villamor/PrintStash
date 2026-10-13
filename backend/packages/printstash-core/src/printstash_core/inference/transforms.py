@@ -87,7 +87,7 @@ class IndexTransform:
             ) != (native_dimension, index_dimension, quantization):
                 raise ValueError()
             return recipe
-        except (ValueError, TypeError, RecursionError):
+        except ValueError, TypeError, RecursionError:
             raise EmbeddingError("embedding_transform_invalid") from None
 
     @property

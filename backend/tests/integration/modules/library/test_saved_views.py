@@ -150,3 +150,52 @@ class TestSearchHistoryView:
             "residual_query" not in row.filters_json
             and "ranking" not in row.filters_json
         )
+
+
+class TestLibraryView:
+    @pytest.mark.parametrize(
+        "view", ["all", "multipart"], ids=["everything", "multipart-sets"]
+    )
+    def test_roundtrips_library_view(self, db_session, make_user, view):
+        user = make_user()
+        payload = SavedViewCreate(
+            name="Mode", filters={"library_view": view, "sort": "name-asc"}
+        )
+
+        saved = saved_views.create(db_session, user.id, payload)
+
+        assert saved.filters.library_view.value == view
+        assert (
+            saved_views.get_for_user(
+                db_session, user.id, saved.id
+            ).filters.library_view.value
+            == view
+        )
+
+    @pytest.mark.parametrize(
+        "legacy",
+        [{}, {"library_view": "organized"}, {"library_view": "components"}],
+        ids=["absent", "organized", "parts-only"],
+    )
+    def test_normalizes_legacy_stored_mode(self, db_session, make_user, legacy):
+        import json
+
+        user = make_user()
+        saved = saved_views.create(db_session, user.id, _payload("Legacy", q="bracket"))
+        row = db_session.get(SavedView, saved.id)
+        filters = {"q": "bracket", "sort": "name-asc", **legacy}
+        row.filters_json = json.dumps(filters)
+        db_session.add(row)
+        db_session.commit()
+
+        loaded = saved_views.get_for_user(db_session, user.id, saved.id)
+
+        assert loaded.filters.library_view.value == "all"
+        assert loaded.filters.q == "bracket"
+        assert loaded.filters.sort.value == "name-asc"
+
+    def test_rejects_new_retired_mode(self):
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="library_view"):
+            SavedViewCreate(name="Invalid", filters={"library_view": "organized"})

@@ -183,6 +183,13 @@ def _prepare_storage_for_startup(
             logger.warning(
                 "reconciled %d interrupted pending import(s)", interrupted_imports
             )
+    if recover_publications:
+        from app.modules.ingestion.staging_cleanup import prune_expired, reconcile_jobs
+
+        with get_session_factory().scoped_session() as session:
+            reconcile_jobs(session)
+            prune_expired(session, backend=backend)
+            session.commit()
     return backend
 
 
@@ -251,6 +258,9 @@ def prepare_process(*, owner: bool) -> PreparedProcess:
         logger.critical(
             "interrupted restore detected; application remains in restore maintenance"
         )
+    from app.bootstrap.native_resources import configure as configure_native_resources
+
+    configure_native_resources(Path(settings.data_root))
     # Storage must be configured and bound before either publication recovery
     # or Inbox recovery can inspect durable capture-slot receipts.
     backend = _prepare_storage_for_startup(

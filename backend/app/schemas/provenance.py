@@ -16,6 +16,8 @@ from printstash_core.imports import (
 from printstash_core.imports.contracts import MAX_FIELD_VALUE_LENGTHS
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.schemas.editing import EditingBase
+
 PROVENANCE_FIELD_NAMES = frozenset(MAX_FIELD_VALUE_LENGTHS)
 
 
@@ -40,6 +42,16 @@ class ProvenanceCaptureSummaryRead(BaseModel):
     checked_at: datetime
 
 
+class ModelSourceCoverRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    provenance_source_id: int
+    content_type: Literal["image/webp"]
+    size_bytes: int
+    updated_at: datetime
+
+
 class ProvenanceSourceRead(BaseModel):
     id: int
     provider: str
@@ -51,19 +63,10 @@ class ProvenanceSourceRead(BaseModel):
     last_checked_at: datetime
     fields: list[ProvenanceFieldRead] = Field(default_factory=list)
     captures: list[ProvenanceCaptureSummaryRead] = Field(default_factory=list)
+    cover: ModelSourceCoverRead | None
 
 
-class ModelSourceCoverRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    provenance_source_id: int
-    content_type: Literal["image/webp"]
-    size_bytes: int
-    updated_at: datetime
-
-
-class ModelProvenanceRead(BaseModel):
+class ModelProvenanceRead(EditingBase):
     schema_version: Literal[2] = 2
     sources: list[ProvenanceSourceRead] = Field(default_factory=list)
 

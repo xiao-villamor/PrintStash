@@ -27,11 +27,13 @@ from app.core.time import utcnow
 from app.db.models import (
     ExternalLibraryScanStatus,
     File,
+    JobKind,
 )
 from app.db.scopes import live
 from app.modules.sources import external_library
 from tests._env import use_local_storage
 from tests.factories import build_external_library
+from tests.factories.ops import build_job, build_job_context
 from tests.integration.modules.sources.external_library._helpers import (
     drop_gcode,
     enable_feature,
@@ -125,7 +127,15 @@ class TestScanLibrary:
         db_session.add(lib)
         db_session.commit()
 
-        result = external_library.scan_library(lib.id, job_id="duplicate-job")
+        build_job(
+            db_session,
+            kind=JobKind.SOURCES_SCAN,
+            id="duplicate-job",
+            subject=f"library/{lib.id}",
+        )
+        result = external_library.scan_library(
+            lib.id, job_context=build_job_context("duplicate-job")
+        )
 
         assert result == {"coalesced": True, "job_id": "existing-job"}
         assert external_files(db_session, live_only=False) == []

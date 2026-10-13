@@ -3,16 +3,18 @@
 ``request`` records a queued Job in the caller's transaction and nudges after
 the caller commits; ``cancel`` withdraws intent from the subject before
 stopping the engine, so the reconciler cannot resurrect it; ``retry`` returns a
-failed or cancelled Job's subject to pending and queues the same Job again.
+failed, cancelled or retryable partially completed Job's subject to pending
+and queues the same Job again.
 """
 
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime
 from typing import cast
 
-from sqlalchemy import delete, func
+from sqlalchemy import and_, delete, false, func, or_
 from sqlmodel import Session, col, select
 
 from app.core.errors import ErrorKind, OperationError
@@ -21,9 +23,10 @@ from app.core.time import utcnow
 from app.db.models import (
     ACTIVE_JOB_STATES,
     ArtifactDerivative,
+    DerivativeGroupRegeneration,
     DerivativeKind,
-    DerivativeRegeneration,
     DerivativeState,
+    File,
     Job,
     JobKind,
     JobState,
@@ -32,7 +35,9 @@ from app.db.models import (
     WorkLaneOverride,
     WorkPriority,
 )
+from app.db.scopes import live
 from app.db.session import get_session_factory
+from app.db.transactions import begin_write
 from app.schemas.jobs import (
     DefinitionRead,
     ExecutorRead,
@@ -95,13 +100,19 @@ def cancel(job_id: str, *, actor: User) -> JobStatus:
         row = session.get(Job, job_id)
         if row is None:
             raise OperationError("job_not_found", kind=ErrorKind.NOT_FOUND)
-        definition.cancel(session, row.subject_key)
-        session.commit()
-        attempts = row.attempts
-    jobs.finish(job_id, JobOutcome.CANCELLED, error="cancelled_by_user")
+        attempts, epoch, state = row.attempts, row.execution_epoch, row.state
+    settled = jobs.cancel_attempt(
+        job_id,
+        attempts,
+        execution_epoch=epoch,
+        expected_state=state,
+        withdraw=definition.cancel,
+    )
+    if settled is None:
+        raise OperationError("job_not_active", kind=ErrorKind.CONFLICT)
     if attempts:
         try:
-            catalog_module.get_engine().cancel(execution_id(job_id, attempts))
+            catalog_module.get_engine().cancel(execution_id(job_id, attempts, epoch))
         except Exception:  # noqa: BLE001 - the Job is settled; the engine catches up
             logger.warning("engine cancel failed", extra={"job_id": job_id})
     result = jobs.get(job_id)
@@ -171,17 +182,31 @@ def cancel_queued(definition: JobKind, *, actor: User) -> int:
     return len(ids)
 
 
+def _retry_eligible(status: JobStatus) -> bool:
+    return status.state in {JobState.FAILED, JobState.CANCELLED} or (
+        status.state is JobState.COMPLETED and status.retryable and status.failed > 0
+    )
+
+
 def retry(job_id: str, *, actor: User) -> JobStatus:
     status = jobs.get(job_id)
     if status is None or not visible_to(status, actor):
         raise OperationError("job_not_found", kind=ErrorKind.NOT_FOUND)
-    if status.state not in {JobState.FAILED, JobState.CANCELLED}:
+    if not _retry_eligible(status):
         raise OperationError("job_not_retryable", kind=ErrorKind.CONFLICT)
     definition = catalog_module.get_catalog().definition(status.kind)
     with get_session_factory().scoped_session() as session:
-        row = session.get(Job, job_id)
+        begin_write(session, immediate=True)
+        refused = definition.admission(session)
+        if refused is not None:
+            raise OperationError(refused, kind=ErrorKind.CONFLICT)
+        row = session.exec(
+            select(Job).where(Job.id == job_id).with_for_update()
+        ).first()
         if row is None:
             raise OperationError("job_not_found", kind=ErrorKind.NOT_FOUND)
+        if not _retry_eligible(status_of(row)):
+            raise OperationError("job_not_retryable", kind=ErrorKind.CONFLICT)
         other = session.exec(
             select(Job.id).where(
                 Job.kind == row.kind,
@@ -202,6 +227,7 @@ def retry(job_id: str, *, actor: User) -> JobStatus:
             if key in {"result", "current_item", "total"}
         }
         row.state = JobState.QUEUED
+        row.execution_epoch = uuid.uuid4().hex
         row.resubmits = 0
         row.finished_at = None
         row.status_json = json.dumps(payload, separators=(",", ":"))
@@ -243,23 +269,33 @@ def regenerate_derivatives(
     kind: DerivativeKind, *, mode: RegenerateMode, actor: User
 ) -> None:
     """``missing`` just nudges; ``all`` marks every output of ``kind`` stale."""
+    from app.modules.derivatives import policy
     from app.modules.derivatives.kinds import definitions_for_kind
+    from app.modules.work.contracts import SkipReason
 
-    if mode is RegenerateMode.ALL:
-        with get_session_factory().scoped_session() as session:
-            row = session.get(DerivativeRegeneration, kind) or DerivativeRegeneration(
-                kind=kind
+    with get_session_factory().scoped_session() as session:
+        policy.lock(session)
+        controls = policy.resolve(session)
+        enabled = [d for d in definitions_for_kind(kind) if controls[d].enabled]
+        if not enabled:
+            raise OperationError(
+                SkipReason.DERIVATIVE_GROUP_DISABLED, kind=ErrorKind.CONFLICT
             )
-            row.requested_at = utcnow()
-            row.requested_by = actor.id
-            session.add(row)
-            session.commit()
-    for definition in definitions_for_kind(kind):
+        if mode is RegenerateMode.ALL:
+            for definition in enabled:
+                row = session.get(DerivativeGroupRegeneration, (definition, kind))
+                if row is None:
+                    row = DerivativeGroupRegeneration(definition=definition, kind=kind)
+                row.requested_at = utcnow()
+                row.requested_by = actor.id
+                session.add(row)
+        session.commit()
+    for definition in enabled:
         nudge(definition)
 
 
 def overview(*, now: datetime | None = None) -> WorkOverview:
-    from app.modules.derivatives import kinds
+    from app.modules.derivatives import kinds, policy
 
     now = now or utcnow()
     catalog = catalog_module.get_catalog()
@@ -283,6 +319,8 @@ def overview(*, now: datetime | None = None) -> WorkOverview:
     counts = jobs.counts_by_definition()
     definitions: list[DefinitionRead] = []
     with get_session_factory().scoped_session() as session:
+        controls = policy.resolve(session)
+        disabled = [d for d, control in controls.items() if not control.enabled]
         for name, definition in sorted(catalog.definitions.items()):
             per_state = counts.get(name, {})
             last = session.exec(
@@ -299,12 +337,17 @@ def overview(*, now: datetime | None = None) -> WorkOverview:
             definitions.append(
                 DefinitionRead(
                     name=name,
+                    enabled=controls[name].enabled if name in controls else True,
+                    default_enabled=controls[name].default_enabled
+                    if name in controls
+                    else True,
+                    overridden=controls[name].overridden if name in controls else False,
                     label=definition.label,
                     lane=definition.lane,
                     queued=per_state.get(JobState.QUEUED, 0),
                     running=per_state.get(JobState.RUNNING, 0),
                     interrupted=per_state.get(JobState.INTERRUPTED, 0),
-                    failed=per_state.get(JobState.FAILED, 0),
+                    failed=0 if name in disabled else per_state.get(JobState.FAILED, 0),
                     completed=per_state.get(JobState.COMPLETED, 0),
                     derivative_kinds=list(kinds.group(name).kinds)
                     if kinds.is_derivative(name)
@@ -315,8 +358,19 @@ def overview(*, now: datetime | None = None) -> WorkOverview:
             )
         failed_derivatives = int(
             session.exec(
-                select(func.count(col(ArtifactDerivative.id))).where(
-                    ArtifactDerivative.state == DerivativeState.FAILED
+                select(func.count(col(ArtifactDerivative.id)))
+                .join(File)
+                .where(
+                    or_(
+                        false(),
+                        *(
+                            and_(g.applies(), col(ArtifactDerivative.kind).in_(g.kinds))
+                            for g in kinds.GROUPS
+                            if controls[g.definition].enabled
+                        ),
+                    ),
+                    live(File),
+                    ArtifactDerivative.state == DerivativeState.FAILED,
                 )
             ).one()
         )
@@ -337,7 +391,7 @@ def overview(*, now: datetime | None = None) -> WorkOverview:
         lanes=lanes,
         definitions=definitions,
         executors=executors_read,
-        failed_jobs=jobs.failed(limit=50),
+        failed_jobs=jobs.failed(limit=50, excluded_kinds=disabled),
         failed_derivatives=failed_derivatives,
     )
 

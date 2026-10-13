@@ -192,7 +192,7 @@ class TestAdvance:
 
         result = _advance(db_session, work_engine, make_job, run)
 
-        writer = execution_id(result["job"].id, 1)
+        writer = execution_id(result["job"].id, 1, result["job"].execution_epoch)
         assert done == [(run.id, writer)] * 3
         assert result["units"] == 3
 

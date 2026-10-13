@@ -35,6 +35,7 @@ still never recursively scanned.
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -1021,3 +1022,164 @@ class TestMatchingCaptureStagingPath:
         # Fail closed: a filesystem that supports xattrs and has no marker means
         # this is a replacement, not an owned partial.
         assert staging_leases._matching_capture_staging_path(lease) is None
+
+
+class TestCaptureSpoolContext:
+    def test_closes_descriptor_after_session_expiration(
+        self, db_session, make_user, tmp_path, monkeypatch
+    ):
+        from app.core.config import _overlay
+        from app.modules.ingestion import inbox
+        from tests.integration.api.v1.inbox.conftest import slot_payload
+
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
+        monkeypatch.setattr(inbox.importer, "validate_public_url", lambda _url: None)
+        owner = make_user("descriptor-only-capture")
+        payload = slot_payload(b"owned bytes")
+        _item, slots = inbox.create_capture_upload_slots(db_session, owner, payload)
+        slot_id = slots[0].id
+        path = staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot_id)
+        with Session(db_session.get_bind()) as session:
+            context = staging_leases.open_capture_slot_staging(session, slot_id=slot_id)
+            with context as target:
+                session.expire_all()
+                session.close()
+                assert target.write(b"owned bytes") == len(b"owned bytes")
+        assert target.closed
+        assert path.read_bytes() == b"owned bytes"
+
+    def test_refuses_replaced_inode_without_truncating_foreign_bytes(
+        self, db_session, make_user, tmp_path, monkeypatch
+    ):
+        from app.core.config import _overlay
+        from app.modules.ingestion import inbox
+        from tests.integration.api.v1.inbox.conftest import slot_payload
+
+        monkeypatch.setitem(_overlay, "staging_dir", tmp_path)
+        monkeypatch.setattr(inbox.importer, "validate_public_url", lambda _url: None)
+        owner = make_user("capture-foreign-inode")
+        _item, slots = inbox.create_capture_upload_slots(
+            db_session, owner, slot_payload(b"owned bytes")
+        )
+        slot_id = slots[0].id
+        path = staging_leases.prepare_capture_slot_staging(db_session, slot_id=slot_id)
+        context = staging_leases.open_capture_slot_staging(db_session, slot_id=slot_id)
+        original = tmp_path / "original-owned-spool"
+        path.rename(original)
+        replacement = b"foreign bytes must remain intact"
+        path.write_bytes(replacement)
+        assert path.stat().st_ino != original.stat().st_ino
+
+        with pytest.raises(
+            staging_leases.StagingLeaseError, match="capture_upload_staging_collision"
+        ):
+            with context:
+                raise AssertionError("a replaced inode must never be yielded")
+
+        assert path.read_bytes() == replacement
+        assert original.read_bytes() == b""
+
+
+class TestOpenJobInput:
+    def test_waiting_owner_cancels_promptly(
+        self,
+        db_session,
+        make_user,
+        make_ingest_request,
+        tmp_path,
+    ):
+        import time
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        from app.core.cancellation import OperationCancelled
+        from app.db.models import IngestRequestKind
+        from app.db.session import get_session_factory, override_session_factory
+
+        actor = make_user()
+        request = make_ingest_request(actor, kind=IngestRequestKind.UPLOAD)
+        path = tmp_path / "wait-owned.stl"
+        path.write_bytes(b"waiting input")
+        lease = staging_leases.create_job_lease(
+            db_session,
+            job_id=request.job_id,
+            owner_user_id=actor.id,
+            path=path,
+            size_bytes=path.stat().st_size,
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        db_session.commit()
+        factory = get_session_factory()
+        waiting, cancelled = Event(), Event()
+        first = staging_leases.open_job_input(db_session, request.job_id)
+
+        def checkpoint_waiter():
+            waiting.set()
+            if cancelled.is_set():
+                raise OperationCancelled()
+
+        def waiter():
+            override_session_factory(factory)
+            with factory.scoped_session() as session:
+                custody = staging_leases.open_job_input(
+                    session,
+                    request.job_id,
+                    checkpoint=checkpoint_waiter,
+                    acquire_timeout_seconds=5,
+                )
+            with custody:
+                pytest.fail("waiter entered while the first actor owns the inode")
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with first:
+                running = executor.submit(waiter)
+                assert waiting.wait(timeout=2)
+                started = time.monotonic()
+                cancelled.set()
+                with pytest.raises(OperationCancelled):
+                    running.result(timeout=2)
+                assert time.monotonic() - started < 2
+                assert path.read_bytes() == b"waiting input"
+            with staging_leases.open_job_input(db_session, request.job_id):
+                assert path.read_bytes() == b"waiting input"
+        assert db_session.get(StagingLease, lease.id) is not None
+
+    def test_waiting_owner_has_a_finite_acquisition_deadline(
+        self,
+        db_session,
+        make_user,
+        make_ingest_request,
+        tmp_path,
+    ):
+        from app.db.models import IngestRequestKind
+
+        actor = make_user()
+        request = make_ingest_request(actor, kind=IngestRequestKind.UPLOAD)
+        path = tmp_path / "timeout-owned.stl"
+        path.write_bytes(b"bounded input")
+        staging_leases.create_job_lease(
+            db_session,
+            job_id=request.job_id,
+            owner_user_id=actor.id,
+            path=path,
+            size_bytes=path.stat().st_size,
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        )
+        db_session.commit()
+        first = staging_leases.open_job_input(db_session, request.job_id)
+        second = staging_leases.open_job_input(
+            db_session, request.job_id, acquire_timeout_seconds=0.1
+        )
+
+        with first:
+            with pytest.raises(staging_leases.StagingLeaseError, match="timed out"):
+                with second:
+                    pytest.fail("second actor acquired the live input")
+        assert path.read_bytes() == b"bounded input"
+
+    @pytest.mark.parametrize("timeout", [0, -1, float("inf"), float("nan")])
+    def test_rejects_invalid_acquisition_timeout(self, db_session, timeout):
+        with pytest.raises(ValueError, match="acquisition_timeout"):
+            staging_leases.open_job_input(
+                db_session, "unregistered-job", acquire_timeout_seconds=timeout
+            )

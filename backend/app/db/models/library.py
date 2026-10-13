@@ -1,9 +1,17 @@
 """Models, Artifacts, taxonomies, multipart compositions and saved library views."""
 
 from datetime import datetime
-from typing import List, Optional
+from sys import float_info
+from typing import ClassVar, List, Optional
 
+from printstash_core.mesh.measurements import (
+    VolumeMethod,
+    VolumeNotCalculatedCause,
+    VolumeState,
+    VolumeUnavailableCause,
+)
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Column,
     ForeignKey,
@@ -16,9 +24,11 @@ from sqlalchemy import (
 from sqlalchemy import (
     Enum as SAEnum,
 )
-from sqlmodel import Field, Relationship
+from sqlalchemy.orm import Mapped, column_property
+from sqlmodel import Field, Relationship, select
 
 from app.core.time import utcnow
+from app.db.enum_columns import EnumText, enum_check
 
 from .base import SQLModel
 from .types import DocumentKind, FileRevisionStatus, FileType
@@ -28,6 +38,48 @@ class Metadata(SQLModel, table=True):
     """Slicer-derived facts. 1:1 with File."""
 
     __tablename__ = "metadata"
+    __table_args__ = (
+        CheckConstraint(
+            f"bbox_x_mm IS NULL OR (bbox_x_mm >= 0 AND bbox_x_mm <= {float_info.max!r})",
+            name="bbox_x_mm_physical",
+        ),
+        CheckConstraint(
+            f"bbox_y_mm IS NULL OR (bbox_y_mm >= 0 AND bbox_y_mm <= {float_info.max!r})",
+            name="bbox_y_mm_physical",
+        ),
+        CheckConstraint(
+            f"bbox_z_mm IS NULL OR (bbox_z_mm >= 0 AND bbox_z_mm <= {float_info.max!r})",
+            name="bbox_z_mm_physical",
+        ),
+        enum_check("volume_state", VolumeState),
+        enum_check("volume_method", VolumeMethod),
+        enum_check("volume_unavailable_cause", VolumeUnavailableCause),
+        enum_check("volume_not_calculated_cause", VolumeNotCalculatedCause),
+        CheckConstraint(
+            f"(volume_state = '{VolumeState.MEASURED.value}' "
+            f"AND volume_mm3 IS NOT NULL AND volume_mm3 > 0 "
+            f"AND volume_mm3 <= {float_info.max!r} "
+            f"AND volume_method IS NOT NULL AND volume_method = '{VolumeMethod.MESH_SURFACE_INTEGRAL.value}' "
+            "AND volume_unavailable_cause IS NULL "
+            "AND volume_not_calculated_cause IS NULL) OR "
+            f"(volume_state = '{VolumeState.UNAVAILABLE.value}' "
+            "AND volume_mm3 IS NULL "
+            f"AND volume_method IS NOT NULL AND volume_method = '{VolumeMethod.MESH_SURFACE_INTEGRAL.value}' "
+            "AND volume_unavailable_cause IS NOT NULL "
+            "AND volume_not_calculated_cause IS NULL) OR "
+            f"(volume_state = '{VolumeState.NOT_CALCULATED.value}' "
+            "AND volume_mm3 IS NULL AND volume_method IS NULL "
+            "AND volume_unavailable_cause IS NULL "
+            "AND volume_not_calculated_cause IS NOT NULL) OR "
+            f"(volume_state = '{VolumeState.LEGACY_UNASSESSED.value}' "
+            f"AND (volume_mm3 IS NULL OR (volume_mm3 >= {-float_info.max!r} "
+            f"AND volume_mm3 <= {float_info.max!r})) "
+            "AND volume_method IS NULL "
+            "AND volume_unavailable_cause IS NULL "
+            "AND volume_not_calculated_cause IS NULL)",
+            name="volume_evidence",
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     file_id: int = Field(foreign_key="files.id", unique=True, index=True)
@@ -63,6 +115,32 @@ class Metadata(SQLModel, table=True):
     bbox_y_mm: Optional[float] = None
     bbox_z_mm: Optional[float] = None
     volume_mm3: Optional[float] = None
+    volume_state: VolumeState = Field(
+        default=VolumeState.NOT_CALCULATED,
+        sa_column=Column(
+            EnumText(VolumeState),
+            nullable=False,
+            server_default=VolumeState.NOT_CALCULATED.value,
+        ),
+    )
+    # Nullability belongs to the exclusive persisted variants; the public
+    # result requires every applicable field and rejects incompatible states.
+    volume_method: Optional[VolumeMethod] = Field(
+        default=None,
+        sa_column=Column(EnumText(VolumeMethod), nullable=True),
+    )
+    volume_unavailable_cause: Optional[VolumeUnavailableCause] = Field(
+        default=None,
+        sa_column=Column(EnumText(VolumeUnavailableCause), nullable=True),
+    )
+    volume_not_calculated_cause: Optional[VolumeNotCalculatedCause] = Field(
+        default=VolumeNotCalculatedCause.ENRICHMENT_PENDING,
+        sa_column=Column(
+            EnumText(VolumeNotCalculatedCause).evaluates_none(),
+            nullable=True,
+            server_default=VolumeNotCalculatedCause.ENRICHMENT_PENDING.value,
+        ),
+    )
     triangle_count: Optional[int] = None
 
     created_at: datetime = Field(default_factory=utcnow)
@@ -96,6 +174,8 @@ class File(SQLModel, table=True):
     __table_args__ = (
         Index("uq_files_model_version", "model_id", "version", unique=True),
         Index("ix_files_model_deleted_type", "model_id", "deleted_at", "file_type"),
+        Index("ix_files_uploaded_id", "uploaded_at", "id"),
+        Index("ix_files_viewer_requested_id", "viewer_requested_at", "id"),
         Index(
             "uq_files_live_recommended_gcode_text",
             "model_id",
@@ -158,6 +238,8 @@ class File(SQLModel, table=True):
         default=None, max_length=64, unique=True, index=True
     )
     thumbnail_path: Optional[str] = Field(default=None, max_length=2048)
+    # Durable demand: scans never convert unopened mesh previews.
+    viewer_requested_at: Optional[datetime] = Field(default=None, index=True)
 
     uploaded_at: datetime = Field(default_factory=utcnow, index=True)
     deleted_at: Optional[datetime] = Field(default=None, index=True)
@@ -410,6 +492,10 @@ class Model(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_epoch: ClassVar[Mapped[str]]
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
     name: str = Field(index=True, max_length=255)
     slug: str = Field(index=True, unique=True, max_length=255)
     hash: str = Field(index=True, unique=True, max_length=64)
@@ -469,6 +555,10 @@ class MultipartModel(SQLModel, table=True):
     __table_args__ = (UniqueConstraint("slug", name="uq_multipart_models_slug"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_epoch: ClassVar[Mapped[str]]
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
     name: str = Field(max_length=255, index=True)
     slug: str = Field(max_length=255, index=True)
     description: Optional[str] = Field(default=None, sa_column=Column(Text))
@@ -616,6 +706,10 @@ class Document(SQLModel, table=True):
     __tablename__ = "documents"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_epoch: ClassVar[Mapped[str]]
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
     name: str = Field(index=True, max_length=255)
     kind: DocumentKind = Field(index=True)
     collection_id: Optional[int] = Field(
@@ -643,3 +737,28 @@ class Document(SQLModel, table=True):
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow, index=True)
+
+
+class LibraryRevision(SQLModel, table=True):
+    """Transactionally maintained authority for revision-checked browse pages."""
+
+    __tablename__ = "library_revision"
+    __table_args__ = (CheckConstraint("id = 1", name="library_revision_singleton"),)
+
+    id: int = Field(default=1, primary_key=True)
+    epoch: str = Field(max_length=32)
+    authorization_revision: int = Field(
+        default=0, sa_column=Column(BigInteger, nullable=False, server_default="0")
+    )
+    revision: int = Field(
+        default=0, sa_column=Column(BigInteger, nullable=False, server_default="0")
+    )
+
+
+# Capture the database incarnation in the same SELECT as each editing version.
+# This is an uncorrelated read expression, not a table column or a per-row query.
+# Snapshot/export code continues to copy only the durable table columns.
+for _editable_aggregate in (Model, MultipartModel, Document):
+    _editable_aggregate.edit_epoch = column_property(
+        select(LibraryRevision.epoch).where(LibraryRevision.id == 1).scalar_subquery()
+    )

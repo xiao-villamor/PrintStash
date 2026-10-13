@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   cancelArtifactUpload,
+  isArtifactUploadActive,
   pauseArtifactUpload,
   rememberedArtifactUploads,
   resumeArtifactUpload,
@@ -14,7 +15,9 @@ import {
   uploadArtifact,
   type ArtifactUploadApi,
 } from "@/lib/artifact-upload";
+import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
 import type { ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
+import { ApiError } from "@/lib/errors";
 
 const NOW = "2026-09-09T00:00:00Z";
 
@@ -98,6 +101,14 @@ describe("uploadArtifact", () => {
       },
     );
 
+    expect(api.createArtifactUpload).toHaveBeenCalledWith({
+      purpose: "model",
+      target_role: "new_model",
+      filename: "part.stl",
+      media_type: "model/stl",
+      size_bytes: 8,
+      sha256: "a".repeat(64),
+    });
     expect(rememberedArtifactUploads()).toEqual(["session-1"]);
     expect(localStorage.getItem("printstash.artifact-upload-session-ids")).toBe("session-1");
     expect(sessions).toEqual(["session-1"]);
@@ -257,5 +268,297 @@ describe("sha256Blob", () => {
     withoutSubtleCrypto();
 
     await expect(sha256Blob(blob)).resolves.toBe(native);
+  });
+});
+
+/** Authentication bounds the entire upload workflow, including local hashing and signed bytes. */
+describe("upload session isolation", () => {
+  it("stops an upload retired during hashing", async () => {
+    const api = anApi();
+    const hash = Promise.withResolvers<string>();
+    const pending = uploadArtifact(
+      new File(["12345678"], "part.stl"),
+      { purpose: "model", target_role: "new_model" },
+      { api, digest: () => hash.promise },
+    );
+    const outcome = pending.catch((error: Error) => error);
+    clearLogin();
+    hash.resolve("a".repeat(64));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(api.createArtifactUpload).not.toHaveBeenCalled();
+    expect(rememberedArtifactUploads()).toEqual([]);
+  });
+
+  it("never records a signed-part receipt after session retirement", async () => {
+    const api = anApi();
+    vi.mocked(api.getArtifactUpload).mockResolvedValue(aSession({ mode: "native_parts" }));
+    vi.mocked(api.getArtifactUploadPlan).mockResolvedValue({
+      session_id: "session-1",
+      mode: "native_parts",
+      chunk_size: 8,
+      max_parallel: 1,
+      upload_path: "/opaque/parts/{part_number}",
+      uploaded_parts: [],
+      expires_at: NOW,
+    });
+    vi.mocked(api.signArtifactUploadPart).mockResolvedValue({
+      url: "https://objects.example.test/private-part?signature=temporary",
+      method: "PUT",
+      headers: { "x-checksum": "required" },
+      expires_at: NOW,
+    });
+    const headers = Promise.withResolvers<Response>();
+    const fetcher = vi.fn<typeof fetch>().mockReturnValueOnce(headers.promise);
+    vi.stubGlobal("fetch", fetcher);
+    const pending = resumeArtifactUpload("session-1", new File(["12345678"], "part.stl"), {
+      api,
+      digest,
+    });
+    const outcome = pending.catch((error: Error) => error);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    clearLogin();
+    expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    headers.resolve(new Response(null, { headers: { etag: '"part-1"' } }));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(api.recordArtifactUploadPart).not.toHaveBeenCalled();
+    expect(api.finalizeArtifactUpload).not.toHaveBeenCalled();
+  });
+});
+
+/** Expiring the cookie session must not erase the server's genuine upload rejection. */
+describe("upload unauthorized failure", () => {
+  it("preserves a genuine unauthorized upload error", async () => {
+    storeLogin("", { id: 7, username: "maker", email: null, is_superuser: false });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response('{"detail":"invalid_or_expired_token"}', { status: 401 })),
+    );
+    await expect(
+      uploadArtifact(
+        new File(["12345678"], "part.stl"),
+        { purpose: "model", target_role: "new_model" },
+        { digest },
+      ),
+    ).rejects.toMatchObject({ status: 401, code: "invalid_or_expired_token" });
+    expect(getUser()).toBeNull();
+  });
+});
+
+/** A retired upload failure remains cancellation, never a new account's expiry. */
+describe("retired upload unauthorized failure", () => {
+  it("ignores a retired upload's unauthorized response", async () => {
+    storeLogin("", { id: 7, username: "maker", email: null, is_superuser: false });
+    const headers = Promise.withResolvers<Response>();
+    const fetcher = vi.fn<typeof fetch>().mockReturnValueOnce(headers.promise);
+    vi.stubGlobal("fetch", fetcher);
+    const pending = uploadArtifact(
+      new File(["12345678"], "part.stl"),
+      { purpose: "model", target_role: "new_model" },
+      { digest },
+    );
+    const outcome = pending.catch((error: Error) => error);
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledOnce());
+    storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false });
+    headers.resolve(new Response('{"detail":"invalid_or_expired_token"}', { status: 401 }));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(getUser()?.id).toBe(9);
+  });
+});
+
+/** Callback delivery belongs inside the transfer's cleanup boundary. */
+describe("upload session callback lifetime", () => {
+  it.each(["upload", "resume"] as const)(
+    "releases the %s transfer when its session callback retires authentication",
+    async (mode) => {
+      const id = `retired-callback-${mode}`;
+      const api = anApi();
+      vi.mocked(api.createArtifactUpload).mockResolvedValue(aSession({ id }));
+      vi.mocked(api.getArtifactUpload).mockResolvedValue(aSession({ id }));
+      const file = new File(["12345678"], "part.stl");
+      const options = { api, digest, onSession: () => clearLogin() };
+      try {
+        const pending =
+          mode === "upload"
+            ? uploadArtifact(file, { purpose: "model", target_role: "new_model" }, options)
+            : resumeArtifactUpload(id, file, options);
+        await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+        expect(isArtifactUploadActive(id)).toBe(false);
+        expect(api.getArtifactUploadPlan).not.toHaveBeenCalled();
+      } finally {
+        pauseArtifactUpload(id);
+      }
+    },
+  );
+
+  it.each(["upload", "resume"] as const)(
+    "releases the %s transfer when its session callback fails",
+    async (mode) => {
+      const id = `failed-callback-${mode}`;
+      const api = anApi();
+      vi.mocked(api.createArtifactUpload).mockResolvedValue(aSession({ id }));
+      vi.mocked(api.getArtifactUpload).mockResolvedValue(aSession({ id }));
+      const failure = new Error("callback failed");
+      const file = new File(["12345678"], "part.stl");
+      const options = {
+        api,
+        digest,
+        onSession: () => {
+          throw failure;
+        },
+      };
+      try {
+        const pending =
+          mode === "upload"
+            ? uploadArtifact(file, { purpose: "model", target_role: "new_model" }, options)
+            : resumeArtifactUpload(id, file, options);
+        await expect(pending).rejects.toBe(failure);
+        expect(isArtifactUploadActive(id)).toBe(false);
+        expect(api.getArtifactUploadPlan).not.toHaveBeenCalled();
+      } finally {
+        pauseArtifactUpload(id);
+      }
+    },
+  );
+
+  it.each(["upload", "resume"] as const)(
+    "allows the %s session callback to pause its transfer",
+    async (mode) => {
+      const id = `paused-callback-${mode}`;
+      const api = anApi();
+      vi.mocked(api.createArtifactUpload).mockResolvedValue(aSession({ id }));
+      vi.mocked(api.getArtifactUpload).mockResolvedValue(aSession({ id }));
+      const file = new File(["12345678"], "part.stl");
+      const options = {
+        api,
+        digest,
+        onSession: (id: string) => {
+          expect(pauseArtifactUpload(id)).toBe(true);
+        },
+      };
+      const pending =
+        mode === "upload"
+          ? uploadArtifact(file, { purpose: "model", target_role: "new_model" }, options)
+          : resumeArtifactUpload(id, file, options);
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      expect(isArtifactUploadActive(id)).toBe(false);
+      expect(api.getArtifactUploadPlan).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("upload admission", () => {
+  const file = () => new File(["12345678"], "part.stl", { type: "model/stl" });
+  const request = { purpose: "model", target_role: "new_model" } as const;
+
+  function admittingApi(): ArtifactUploadApi {
+    const api = anApi();
+    vi.mocked(api.createArtifactUpload).mockResolvedValue(aSession());
+    vi.mocked(api.getArtifactUploadPlan).mockResolvedValue({
+      session_id: "session-1",
+      mode: "api_chunks",
+      chunk_size: 8,
+      max_parallel: 2,
+      upload_path: "/opaque/chunks/{index}",
+      uploaded_parts: [],
+      expires_at: NOW,
+    });
+    vi.mocked(api.putArtifactUploadChunk).mockResolvedValue(aSession());
+    vi.mocked(api.finalizeArtifactUpload).mockResolvedValue(
+      aSession({ state: "ingesting", job_id: "job-1" }),
+    );
+    return api;
+  }
+
+  it("waits out a rate-limited session request", async () => {
+    const api = admittingApi();
+    vi.mocked(api.createArtifactUpload)
+      .mockRejectedValueOnce(new ApiError(429, "rate_limited", "rate_limited"))
+      .mockResolvedValueOnce(aSession());
+    const pauses: number[] = [];
+
+    const result = await uploadArtifact(file(), request, {
+      api,
+      digest,
+      pause: async (milliseconds) => void pauses.push(milliseconds),
+    });
+
+    expect(result.job_id).toBe("job-1");
+    expect(pauses).toEqual([500]);
+  });
+
+  it("waits for staging room without opening a second session", async () => {
+    const api = admittingApi();
+    vi.mocked(api.finalizeArtifactUpload)
+      .mockReset()
+      .mockRejectedValueOnce(new ApiError(507, "staging_capacity_exceeded", "full"))
+      .mockRejectedValueOnce(new ApiError(507, "staging_capacity_exceeded", "full"))
+      .mockResolvedValueOnce(aSession({ state: "ingesting", job_id: "job-1" }));
+    const pauses: number[] = [];
+
+    const result = await uploadArtifact(file(), request, {
+      api,
+      digest,
+      pause: async (milliseconds) => void pauses.push(milliseconds),
+    });
+
+    expect(result.job_id).toBe("job-1");
+    expect(pauses).toEqual([500, 1_000]);
+    expect(api.createArtifactUpload).toHaveBeenCalledOnce();
+    expect(api.putArtifactUploadChunk).toHaveBeenCalledOnce();
+  });
+
+  it("reports any other refusal without waiting", async () => {
+    const api = admittingApi();
+    vi.mocked(api.createArtifactUpload)
+      .mockReset()
+      .mockRejectedValue(new ApiError(400, "unsupported_file_type", "no"));
+    const pauses: number[] = [];
+
+    await expect(
+      uploadArtifact(file(), request, {
+        api,
+        digest,
+        pause: async (milliseconds) => void pauses.push(milliseconds),
+      }),
+    ).rejects.toThrow("unsupported_file_type");
+    expect(pauses).toEqual([]);
+  });
+
+  it("stops waiting once the server has stayed full for ten minutes", async () => {
+    const api = admittingApi();
+    vi.mocked(api.createArtifactUpload)
+      .mockReset()
+      .mockRejectedValue(new ApiError(507, "staging_capacity_exceeded", "full"));
+    let waited = 0;
+
+    await expect(
+      uploadArtifact(file(), request, {
+        api,
+        digest,
+        pause: async (milliseconds) => void (waited += milliseconds),
+      }),
+    ).rejects.toThrow("staging_capacity_exceeded");
+    expect(waited).toBeGreaterThanOrEqual(10 * 60_000);
+    expect(waited).toBeLessThan(10 * 60_000 + 4_000);
+  });
+
+  it("stops waiting when the upload is paused", async () => {
+    const api = admittingApi();
+    vi.mocked(api.createArtifactUpload)
+      .mockReset()
+      .mockRejectedValue(new ApiError(429, "rate_limited", "rate_limited"));
+    const controller = new AbortController();
+
+    await expect(
+      uploadArtifact(file(), request, {
+        api,
+        digest,
+        signal: controller.signal,
+        pause: async () => controller.abort(new DOMException("Upload paused", "AbortError")),
+      }),
+    ).rejects.toThrow("Upload paused");
+    expect(api.createArtifactUpload).toHaveBeenCalledOnce();
   });
 });

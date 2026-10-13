@@ -156,7 +156,6 @@ class ObjectIdentity(StrEnum):
     ETAG = "etag"        # entity tag only — detects change, cannot address it
     NONE = "none"
 
-
 @dataclass(frozen=True)
 class StorageCapabilities:
     """What one bound adapter can actually promise. Computed once, at setup."""
@@ -361,12 +360,10 @@ class StorageProvider(StrEnum):
     AZURE_BLOB = "azure_blob"
     GCS = "gcs"
 
-
 class TransportKind(StrEnum):
     NATIVE_LOCAL = "native_local"
     NATIVE_S3 = "native_s3"
     OPENDAL = "opendal"
-
 
 @dataclass(frozen=True)
 class TransportSpec:
@@ -376,7 +373,6 @@ class TransportSpec:
     root: str = ""
     options: Mapping[str, str] = field(default_factory=dict)
     secret_options: Mapping[str, str] = field(default_factory=dict)
-
 
 class ProviderConfig(BaseModel, ABC):
     """One provider's typed, user-facing settings."""
@@ -570,7 +566,6 @@ class ProviderConfig(BaseModel, ABC):
     @abstractmethod
     def transport(self) -> TransportSpec: ...
 
-
 class NextcloudConfig(ProviderConfig):
     provider = StorageProvider.NEXTCLOUD
     label = "Nextcloud"
@@ -582,7 +577,6 @@ class NextcloudConfig(ProviderConfig):
     server_url: HttpUrl
     app_password: SecretStr
     ...
-
 
 AnyProviderConfig = Annotated[
     LocalConfig | S3Config | R2Config | NextcloudConfig | WebdavConfig | SftpConfig
@@ -1091,9 +1085,7 @@ unnecessary.
 
 ## Testing
 
-The implementation is covered by the executable
-[63-row coverage matrix](0003-storage-capability-tiers-coverage.md). It has no
-missing or skipped behaviours. The enduring test obligations are:
+The enduring test obligations are:
 
 - `unit/` — tier derivation: one case per axis combination, plus one per
   warning-table row. Provider registry: every `StorageProvider` has a spec, every

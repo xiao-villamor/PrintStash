@@ -8,6 +8,8 @@ class ErrorKind(Enum):
     FORBIDDEN = "forbidden"
     NOT_FOUND = "not_found"
     CONFLICT = "conflict"
+    PRECONDITION_FAILED = "precondition_failed"
+    PRECONDITION_REQUIRED = "precondition_required"
     GONE = "gone"
     CAPACITY = "capacity"
     TOO_LARGE = "too_large"

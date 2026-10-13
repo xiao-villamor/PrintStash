@@ -1,14 +1,16 @@
 "use client";
 
+import { useTaxonomyCommands } from "@/features/library/taxonomy";
+
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { FileText, Loader2, Pencil } from "lucide-react";
 
 import { useQueryClient } from "@tanstack/react-query";
 
-import { setCollectionReadme, uploadCollectionImage } from "@/lib/api";
+import { uploadCollectionImage } from "@/lib/api";
 import { invalidateCachedAsset } from "@/lib/asset-cache";
 import { useCollectionReadme } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-client";
@@ -27,6 +29,7 @@ export function CollectionReadme({
 }) {
   useUiLocale();
   const queryClient = useQueryClient();
+  const { setCollectionReadme } = useTaxonomyCommands();
   // Cached per folder, so revisiting one shows its readme with no request. A
   // readme that cannot be read is treated as absent: the folder is still usable.
   const readmeQuery = useCollectionReadme(collectionId, { enabled: hasReadme });
@@ -44,11 +47,18 @@ export function CollectionReadme({
   // Collapse tall descriptions so a long/technical one doesn't bury the model
   // list. CLAMP_PX must match the max-h-* class below.
   const CLAMP_PX = 192;
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = contentRef.current;
-    setOverflows(!!el && el.scrollHeight > CLAMP_PX + 8);
-    setExpanded(false);
-  }, [readme]);
+    if (!el) return;
+    const measure = () => setOverflows(el.scrollHeight > CLAMP_PX);
+    // Measure before paint, then track images that change the prose later.
+    measure();
+    if (!("ResizeObserver" in window)) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    if (el.firstElementChild) observer.observe(el.firstElementChild);
+    return () => observer.disconnect();
+  }, [collectionId, readme, editing]);
 
   // Switching collections drops an open edit in the render that first sees the
   // new id — React's "adjust state when a prop changes". The readme itself is
@@ -57,6 +67,12 @@ export function CollectionReadme({
   if (shownCollectionId !== collectionId) {
     setShownCollectionId(collectionId);
     setEditing(false);
+    setExpanded(false);
+  }
+  const [shownReadme, setShownReadme] = useState(readme);
+  if (shownReadme !== readme) {
+    setShownReadme(readme);
+    setExpanded(false);
   }
 
   function startEdit() {
@@ -170,10 +186,7 @@ export function CollectionReadme({
     <div className="px-4 sm:px-6 py-4 bg-background border-b border-border">
       {readme ? (
         <div className="relative group/readme">
-          <div
-            ref={contentRef}
-            className={!expanded && overflows ? "max-h-48 overflow-hidden" : ""}
-          >
+          <div ref={contentRef} className={!expanded ? "max-h-48 overflow-hidden" : ""}>
             <MarkdownView source={readme} />
           </div>
           {overflows && (

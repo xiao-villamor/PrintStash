@@ -14,11 +14,13 @@ from __future__ import annotations
 
 from sqlmodel import Session, col, select
 
+from app.core.errors import OperationError
 from app.db.models import DerivativeKind, DerivativeState, File, JobKind, Model
 from app.db.scopes import live
 from app.db.session import get_session_factory
+from app.modules.work.contracts import SkipReason
 
-from . import producers, records
+from . import policy, producers, records
 from .kinds import MESH_TYPES, groups_for, recipes_for
 
 _PRODUCERS = {
@@ -62,6 +64,10 @@ def request(session: Session, file: File, kinds: list[DerivativeKind]) -> bool:
     kinds = _applicable(file, kinds)
     if not kinds:
         return False
+    policy.lock(session)
+    for group in groups_for(file):
+        if set(kinds) & set(group.kinds):
+            policy.require_enabled(session, group.definition)
     records.invalidate(session, file, kinds)
     session.commit()
     groups = [group for group in groups_for(file) if set(kinds) & set(group.kinds)]
@@ -82,7 +88,15 @@ def now(
         file = session.exec(select(File).where(File.id == file_id, live(File))).first()
         if file is None:
             return {}
-        kinds = _applicable(file, kinds)
+        policy.lock(session)
+        controls = policy.resolve(session)
+        allowed = {
+            kind
+            for group in groups_for(file)
+            if controls[group.definition].enabled
+            for kind in group.kinds
+        }
+        kinds = [kind for kind in _applicable(file, kinds) if kind in allowed]
         records.invalidate(session, file, kinds)
         session.commit()
         groups = [
@@ -92,5 +106,9 @@ def now(
         ]
     outcome: dict[DerivativeKind, DerivativeState] = {}
     for definition in groups:
-        outcome.update(_PRODUCERS[definition](file_id).kinds)
+        try:
+            outcome.update(_PRODUCERS[definition](file_id).kinds)
+        except OperationError as exc:
+            if exc.code != SkipReason.DERIVATIVE_GROUP_DISABLED:
+                raise
     return outcome

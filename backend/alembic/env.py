@@ -8,7 +8,10 @@ from sqlmodel import SQLModel
 
 from alembic import context
 from app.core.config import settings
-from app.db import models  # noqa: F401
+from app.db import (
+    library_contracts_autogen,  # noqa: F401
+    models,  # noqa: F401
+)
 from app.db.derived_objects import managed_names
 from app.db.enum_columns import EnumText  # also registers the enum CHECK comparator
 from app.db.migration_guards import (
@@ -51,6 +54,28 @@ def _process_revision_directives(context_, revision, directives) -> None:
         directives[:] = []
         logger.info("migrate: models and database already agree — no migration written")
         return
+    # Schema comparators run before table comparators. Install the generated
+    # trigger contract after its tables/columns; its inverse must run first.
+    installs = [
+        operation
+        for operation in script.upgrade_ops.ops
+        if isinstance(operation, library_contracts_autogen.LibraryContractsOp)
+    ]
+    script.upgrade_ops.ops = [
+        operation
+        for operation in script.upgrade_ops.ops
+        if not isinstance(operation, library_contracts_autogen.LibraryContractsOp)
+    ] + installs
+    removals = [
+        operation
+        for operation in script.downgrade_ops.ops
+        if isinstance(operation, library_contracts_autogen.LibraryContractsOp)
+    ]
+    script.downgrade_ops.ops = removals + [
+        operation
+        for operation in script.downgrade_ops.ops
+        if not isinstance(operation, library_contracts_autogen.LibraryContractsOp)
+    ]
     acknowledged = {
         entry.strip()
         for entry in (
@@ -115,14 +140,23 @@ def _configure_context(
     # SQLAlchemy catalog reads autobegin a transaction. Finish only that read
     # transaction before Alembic decides who owns commit; otherwise migrations
     # can be treated as externally owned and rolled back when the engine closes.
-    already_in_transaction = connection.in_transaction() if connection is not None else False
+    already_in_transaction = (
+        connection.in_transaction() if connection is not None else False
+    )
     derived = managed_names(connection)
-    if connection is not None and not already_in_transaction and connection.in_transaction():
+    if (
+        connection is not None
+        and not already_in_transaction
+        and connection.in_transaction()
+    ):
         connection.commit()
     kwargs = {
-        "include_object": lambda obj, name, kind, reflected, compare_to: not (kind == "table" and name in derived),
+        "include_object": lambda obj, name, kind, reflected, compare_to: (
+            not (kind == "table" and name in derived)
+        ),
         "include_name": lambda name, kind, parents: (
-            not (kind == "table" and name in derived) and _include_name(name, kind, parents)
+            not (kind == "table" and name in derived)
+            and _include_name(name, kind, parents)
         ),
         "target_metadata": target_metadata,
         "compare_type": True,

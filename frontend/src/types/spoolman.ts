@@ -1,4 +1,6 @@
-export interface SpoolmanStatus {
+import type { EditingBase } from "./editing";
+
+export interface SpoolmanStatus extends EditingBase {
   enabled: boolean;
   base_url: string | null;
   has_api_key: boolean;

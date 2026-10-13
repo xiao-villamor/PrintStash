@@ -1,7 +1,8 @@
 import { lazy, Suspense, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Checkbox } from "@/components/ui/checkbox";
-import { getModelPrintJobs } from "@/lib/api/models";
+import { similarityPrintJobsOptions } from "@/lib/queries/similarity";
+import { Button } from "@/components/ui/button";
 import { getAssetUrl } from "@/lib/api/request";
 import { createComparisonCamera } from "@/lib/comparison-camera";
 import { formatBytes } from "@/lib/format";
@@ -9,6 +10,7 @@ import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import type { FileRead, ModelRead } from "@/types/models";
 import type { SimilarityCandidate, SimilaritySource } from "@/types/similarity";
+import { MeshPreviewGate } from "@/components/mesh-preview-gate";
 
 const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((module) => ({ default: module.STLViewer })),
@@ -61,14 +63,8 @@ export function SimilarityComparison({
     () => ({ referenceSizeMm, alignment, compensateScale: scale, compensateMirror: mirror }),
     [referenceSizeMm, alignment, scale, mirror],
   );
-  const jobsA = useQuery({
-    queryKey: ["model-print-jobs", candidate.model_a_id],
-    queryFn: () => getModelPrintJobs(candidate.model_a_id),
-  });
-  const jobsB = useQuery({
-    queryKey: ["model-print-jobs", candidate.model_b_id],
-    queryFn: () => getModelPrintJobs(candidate.model_b_id),
-  });
+  const jobsA = useQuery(similarityPrintJobsOptions(candidate.model_a_id));
+  const jobsB = useQuery(similarityPrintJobsOptions(candidate.model_b_id));
   const number = (value: number | null | undefined, unit = "") =>
     value == null
       ? t("similarity.missingMeasurement")
@@ -160,6 +156,17 @@ export function SimilarityComparison({
   ];
   return (
     <section aria-label={t("similarity.compareTitle")} className="space-y-4">
+      {[jobsA, jobsB].map(
+        (jobs, index) =>
+          jobs.isError && (
+            <div key={index} role="alert" className="text-sm text-destructive">
+              {t("similarity.loadError")}{" "}
+              <Button variant="outline" onClick={() => void jobs.refetch()}>
+                {t("similarity.retry")}
+              </Button>
+            </div>
+          ),
+      )}
       <div className="flex flex-wrap items-center gap-4 text-sm">
         <span className="font-medium">{t("similarity.physicalScale")}</span>
         <label className="flex items-center gap-2">
@@ -216,20 +223,33 @@ export function SimilarityComparison({
                     </p>
                   }
                 >
-                  <STLViewer
-                    url={getAssetUrl(`/api/v1/files/${file.id}/stl`)}
-                    comparison={index === 0 ? left : right}
-                    comparisonCamera={camera}
-                    showGrid={false}
-                    overlay={
+                  <MeshPreviewGate
+                    key={file.id}
+                    // The overlay draws the other Model's mesh in this pane too.
+                    sizeBytes={
                       index === 0 && overlay && files[1]
-                        ? {
-                            url: getAssetUrl(`/api/v1/files/${files[1].id}/stl`),
-                            comparison: right,
-                          }
-                        : undefined
+                        ? Math.max(file.size_bytes, files[1].size_bytes)
+                        : file.size_bytes
                     }
-                  />
+                    posterUrl={null}
+                    posterAlt={modelRefs[index].name}
+                  >
+                    <STLViewer
+                      url={getAssetUrl(`/api/v1/files/${file.id}/stl`)}
+                      modelId={modelRefs[index].id}
+                      comparison={index === 0 ? left : right}
+                      comparisonCamera={camera}
+                      showGrid={false}
+                      overlay={
+                        index === 0 && overlay && files[1]
+                          ? {
+                              url: getAssetUrl(`/api/v1/files/${files[1].id}/stl`),
+                              comparison: right,
+                            }
+                          : undefined
+                      }
+                    />
+                  </MeshPreviewGate>
                 </Suspense>
               ) : (
                 <p className="flex h-full items-center justify-center p-4 text-sm text-muted-foreground">

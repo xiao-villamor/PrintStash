@@ -321,3 +321,58 @@ class TestVerifyDestructiveAccess:
         # and says so rather than reporting success it has not established.
         with pytest.raises(NotImplementedError):
             backend.verify_destructive_access(["some/remote/key.bin"])
+
+
+class TestAdoptExisting:
+    def test_distinguishes_equal_bytes_on_distinct_inodes(self, backend):
+        import hashlib
+
+        key = backend.blob_key("adoption", 1, "same.bin")
+        created = backend.create_bytes(b"same", key)
+        digest = hashlib.sha256(b"same").hexdigest()
+        first = backend.adopt_existing(key, expected_size=4, expected_sha256=digest)
+        backend.replace_bytes(b"same", created)
+
+        second = backend.adopt_existing(key, expected_size=4, expected_sha256=digest)
+
+        assert first.inode != second.inode
+        assert first.token != second.token
+
+    def test_repeats_the_token_for_the_same_inode(self, backend):
+        import hashlib
+
+        key = backend.blob_key("adoption", 2, "same.bin")
+        backend.create_bytes(b"same", key)
+        digest = hashlib.sha256(b"same").hexdigest()
+        first = backend.adopt_existing(key, expected_size=4, expected_sha256=digest)
+
+        second = backend.adopt_existing(key, expected_size=4, expected_sha256=digest)
+
+        assert first == second
+
+    def test_changes_the_token_after_same_inode_content_replacement(self, backend):
+        import hashlib
+
+        key = backend.blob_key("adoption", 3, "same.bin")
+        backend.create_bytes(b"same", key)
+        digest = hashlib.sha256(b"same").hexdigest()
+        first = backend.adopt_existing(key, expected_size=4, expected_sha256=digest)
+        Path(key).write_bytes(b"same")
+
+        second = backend.adopt_existing(key, expected_size=4, expected_sha256=digest)
+
+        assert first.inode == second.inode
+        assert first.ctime_ns != second.ctime_ns
+        assert first.token != second.token
+
+    def test_accepts_historical_content_tokens_for_exact_cleanup(self, backend):
+        import hashlib
+        from dataclasses import replace
+
+        key = backend.blob_key("adoption", 4, "same.bin")
+        created = backend.create_bytes(b"same", key)
+        historical = replace(created, token=hashlib.sha256(b"same").hexdigest())
+
+        assert backend.creation_matches(historical)
+        assert backend.rollback_create(historical)
+        assert not backend.exists(key)

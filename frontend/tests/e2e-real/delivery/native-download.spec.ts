@@ -26,7 +26,19 @@ test.describe("native artifact delivery", () => {
         sameSite: "Strict",
       },
     ]);
+    const reloadMessages: string[] = [];
+    page.on("websocket", (socket) => {
+      socket.on("framereceived", (event) => {
+        const payload = event.payload.toString();
+        if (payload.includes('"full-reload"')) reloadMessages.push(payload);
+      });
+    });
+    let documentNavigations = 0;
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame()) documentNavigations += 1;
+    });
     await page.goto("/tests/e2e-real/delivery/harness.html");
+    await page.getByLabel("Artifact path").fill(manifest.path);
 
     const redirectResponse = page.waitForResponse(
       (response) => response.url() === `${baseURL}${manifest.path}` && response.status() === 307,
@@ -37,17 +49,20 @@ test.describe("native artifact delivery", () => {
         response.request().method() === "GET",
     );
     const downloaded = page.waitForEvent("download");
-    await page.evaluate(async (path) => {
-      const moduleUrl = "/src/lib/api/request.ts";
-      const { downloadAuthenticatedFile } = await import(moduleUrl);
-      await downloadAuthenticatedFile(path);
-    }, manifest.path);
+    await page.getByRole("button", { name: "Download artifact" }).click();
 
     const [redirect, provider, download] = await Promise.all([
       redirectResponse,
       providerResponse,
       downloaded,
-    ]);
+    ]).catch(async (error) => {
+      await test.info().attach("delivery-reload-evidence", {
+        body: JSON.stringify({ documentNavigations, reloadMessages }),
+        contentType: "application/json",
+      });
+      throw error;
+    });
+    expect(documentNavigations).toBe(1);
     expect(await redirect.headerValue("cache-control")).toBe("private, no-store");
     expect(await redirect.headerValue("referrer-policy")).toBe("no-referrer");
     expect(await redirect.headerValue("content-length")).toBe("0");

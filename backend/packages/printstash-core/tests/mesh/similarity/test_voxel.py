@@ -10,6 +10,10 @@ from printstash_core.mesh.similarity.voxel import voxelize
 
 
 class TestVoxelize:
+    def test_stops_after_verification_deadline(self, cube):
+        with pytest.raises(GeometryError, match="verification_time_limit"):
+            voxelize(*cube, half_width=2, deadline=0.0)
+
     def test_fills_closed_cube(self, cube):
         vertices, faces = cube
 

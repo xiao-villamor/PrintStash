@@ -93,7 +93,9 @@ _RESOURCE_MARKERS = frozenset({"postgres", "s3"})
 
 
 @pytest.fixture(autouse=True)
-def block_real_network(request: pytest.FixtureRequest) -> Iterator[None]:
+def block_real_network(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[None]:
     """Fail the test on any real connect or DNS lookup.
 
     Exempts tests carrying a resource marker — a `postgres` or `s3` test is an
@@ -103,8 +105,6 @@ def block_real_network(request: pytest.FixtureRequest) -> Iterator[None]:
         yield
         return
     node_id = request.node.nodeid
-    real_connect = socket.socket.connect
-    real_connect_ex = socket.socket.connect_ex
     real_getaddrinfo = socket.getaddrinfo
 
     def connect(self: socket.socket, address: object) -> None:
@@ -120,12 +120,10 @@ def block_real_network(request: pytest.FixtureRequest) -> Iterator[None]:
             return real_getaddrinfo(host, port, *args, **kwargs)
         raise _blocked(node_id, "resolve a hostname", host)
 
-    socket.socket.connect = connect  # type: ignore[method-assign]
-    socket.socket.connect_ex = connect_ex  # type: ignore[method-assign]
-    socket.getaddrinfo = getaddrinfo  # type: ignore[assignment]
-    try:
-        yield
-    finally:
-        socket.socket.connect = real_connect  # type: ignore[method-assign]
-        socket.socket.connect_ex = real_connect_ex  # type: ignore[method-assign]
-        socket.getaddrinfo = real_getaddrinfo  # type: ignore[assignment]
+    # Test overrides and this guard must unwind through the same patch stack.
+    # An independent restore can otherwise be overwritten by fixture teardown,
+    # reinstalling this finished test's guard in the following E2E test.
+    monkeypatch.setattr(socket.socket, "connect", connect)
+    monkeypatch.setattr(socket.socket, "connect_ex", connect_ex)
+    monkeypatch.setattr(socket, "getaddrinfo", getaddrinfo)
+    yield

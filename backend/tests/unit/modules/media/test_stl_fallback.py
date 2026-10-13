@@ -1,6 +1,6 @@
 """Drawing a recognisable thumbnail of a mesh far too big to load.
 
-When `mesh_processing` refuses a mesh — a 40-million-triangle lattice, a gyroid,
+When full mesh loading refuses a mesh — a 40-million-triangle lattice, a gyroid,
 a scan — the alternative to "no thumbnail" is this: stream the file, sample a
 bounded number of facets, and rasterise those. It never builds a mesh object, so
 its memory cost is a function of the sample size rather than the file size, and
@@ -20,10 +20,10 @@ project to less than a pixel, so naive sampling paints scattered dots. The
 microfaceted tests assert both that enough of the frame is covered *and* that the
 covered pixels form one component, because coverage alone is satisfied by noise.
 
-**Partial is reported as partial.** Every budget — sampled facets, scanned bytes,
-candidate pixels — is finite, and when one is spent the result carries
-`complete=False` so the UI can say the preview is incomplete rather than imply it
-is the whole model.
+**Partial is reported as partial.** Retained facets and candidate pixels are
+bounded; exhausting those budgets produces `complete=False`. Source validation
+also has finite byte, facet and line budgets, but exhausting those refuses the
+source instead of accepting a partially validated preview.
 
 The input is untrusted and often malformed: ASCII STLs from hand-written
 exporters, a facet with a 10 MB "comment" line, vertices at `1e308`, a truncated
@@ -43,6 +43,7 @@ import pytest
 from PIL import Image
 
 from app.modules.media import stl_fallback
+from app.modules.media.stl_reader import STLReadLimits
 
 from ._meshes import (
     _largest_component_fraction,
@@ -59,12 +60,12 @@ def _sampled_stl(
     coordinates: list[float] | None = None,
     bounds_min: tuple[float, float, float] = (0.0, 0.0, 0.0),
     bounds_max: tuple[float, float, float] = (1.0, 1.0, 1.0),
-) -> "stl_fallback._SampledSTL":
+) -> "stl_fallback.STLSample":
     """A complete one-facet sample, so a test can vary the one field it is about."""
     from array import array
 
-    return stl_fallback._SampledSTL(
-        coordinates=array("f", coordinates if coordinates is not None else [0.0] * 9),
+    return stl_fallback.STLSample(
+        coordinates=array("d", coordinates if coordinates is not None else [0.0] * 9),
         triangle_count=1,
         sampled_triangles=1,
         bounds_min=bounds_min,
@@ -72,14 +73,16 @@ def _sampled_stl(
         scanned_bytes=1,
         parsed_triangles=1,
         complete=True,
+        source_complete=True,
     )
 
 
 def _write_hostile_ascii(path: Path) -> Path:
     """An ASCII STL whose one good facet is preceded by everything that can go wrong.
 
-    An unparseable vertex, a NaN vertex, and a line past `_MAX_ASCII_LINE_BYTES` —
-    the iterator has to skip all three and still yield the facet that follows.
+    An unparseable vertex, a NaN vertex, and an oversized line precede valid
+    geometry. The canonical reader must refuse the source rather than skip the
+    malformed content and certify the later facet.
     """
     valid = b"vertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\n"
     path.write_bytes(
@@ -87,7 +90,7 @@ def _write_hostile_ascii(path: Path) -> Path:
         + b"vertex not-a-number 0 0\n"
         + b"vertex nan 0 0\n"
         + b"comment "
-        + b"x" * (stl_fallback._MAX_ASCII_LINE_BYTES + 10)
+        + b"x" * (STLReadLimits().max_line_bytes + 10)
         + b"\n"
         + valid
         + b"endsolid iterator\n"
@@ -124,8 +127,8 @@ class TestRenderStlThumbnail:
         assert result is not None
         assert result.triangle_count == 101
         assert result.sampled_triangles == 10
-        assert result.parsed_triangles == 10
-        assert result.scanned_bytes <= 84 + (10 * 50)
+        assert result.parsed_triangles == 101
+        assert result.scanned_bytes == path.stat().st_size
 
     def test_stl_fallback_dense_fixture_has_a_coherent_silhouette(
         self,
@@ -215,8 +218,8 @@ class TestRenderStlThumbnail:
         assert result is not None
         assert result.triangle_count == 768
         assert result.sampled_triangles == 32
-        assert result.parsed_triangles == 32
-        assert result.scanned_bytes <= 84 + (32 * 50)
+        assert result.parsed_triangles == 768
+        assert result.scanned_bytes == path.stat().st_size
         # Incomplete samples retain all source triangles and add one centroid-splat
         # triangle per source facet. Both paths stay bounded by the sample cap.
         assert calls and 32 <= sum(calls) <= 2 * 32
@@ -233,6 +236,23 @@ class TestRenderStlThumbnail:
         assert result is not None
         assert result.sampled_triangles == 100_000
         assert result.raster_candidates == stl_fallback._MAX_COVERAGE_CANDIDATES
+        assert result.source_complete is True
+        assert result.complete is False
+
+    def test_all_retained_facets_are_partial_when_raster_budget_is_exhausted(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        path = tmp_path / "complete-sample-limited-raster.stl"
+        _write_large_projected_binary_stl(path, 2)
+        monkeypatch.setattr(stl_fallback, "_MAX_COVERAGE_CANDIDATES", 32)
+
+        result = stl_fallback.render_stl_thumbnail(path, width=64, height=48)
+
+        assert result is not None
+        assert result.parsed_triangles == result.sampled_triangles == 2
+        assert result.source_complete is True
+        assert result.raster_candidates == 32
+        assert result.complete is False
 
     def test_keeps_the_hole_open_when_rasterising_an_annulus(
         self, tmp_path: Path
@@ -252,7 +272,7 @@ class TestRenderStlThumbnail:
         assert float((alpha > 200).mean()) > 0.15
         assert float(pixels[:, :, :3][alpha > 200].std()) > 5.0
 
-    def test_stl_fallback_skips_nonfinite_facets(self, tmp_path: Path) -> None:
+    def test_stl_fallback_refuses_nonfinite_facets(self, tmp_path: Path) -> None:
 
         path = tmp_path / "malformed-coordinates.stl"
         record = struct.Struct("<12fH")
@@ -296,21 +316,19 @@ class TestRenderStlThumbnail:
 
         result = stl_fallback.render_stl_thumbnail(path, width=64, height=48)
 
-        assert result is not None
-        assert result.triangle_count == 2
-        assert result.sampled_triangles == 1
+        assert result is None
 
-    def test_binary_helpers_read_no_more_records_than_asked_for(
+    def test_sampler_validates_more_records_than_it_retains(
         self, tmp_path: Path
     ) -> None:
         path = tmp_path / "helpers.stl"
         _write_renderable_binary_stl(path, 2)
 
-        assert stl_fallback._binary_stl_info(path) == (2, path.stat().st_size)
-        assert stl_fallback._is_binary_stl(path)
-        records = list(stl_fallback._iter_binary_triangles(path, max_triangles=1))
-        assert len(records) == 1
-        assert len(records[0]) == 9
+        sampled = stl_fallback.sample_stl_geometry(path, max_triangles=1)
+        assert sampled is not None
+        assert sampled.sampled_triangles == 1
+        assert sampled.parsed_triangles == 2
+        assert sampled.scanned_bytes == path.stat().st_size
 
     def test_binary_helpers_reject_a_file_shorter_than_the_header(
         self, tmp_path: Path
@@ -318,8 +336,7 @@ class TestRenderStlThumbnail:
         short_header = tmp_path / "short-header.stl"
         short_header.write_bytes(b"short")
 
-        assert stl_fallback._binary_stl_info(short_header) is None
-        assert list(stl_fallback._iter_binary_triangles(short_header)) == []
+        assert stl_fallback.sample_stl_geometry(short_header) is None
 
     def test_binary_helpers_reject_a_truncated_facet_record(
         self, tmp_path: Path
@@ -327,8 +344,7 @@ class TestRenderStlThumbnail:
         truncated = tmp_path / "truncated.stl"
         truncated.write_bytes(b"x" * 80 + struct.pack("<I", 1) + b"x")
 
-        assert list(stl_fallback._iter_binary_triangles(truncated)) == []
-        assert stl_fallback._read_binary_samples(truncated, 1) is None
+        assert stl_fallback.sample_stl_geometry(truncated) is None
 
     def test_stl_fallback_binary_helpers_fail_closed_on_io_errors(
         self, tmp_path: Path, monkeypatch
@@ -342,9 +358,7 @@ class TestRenderStlThumbnail:
             raise OSError("unreadable")
 
         monkeypatch.setattr(Path, "open", fail_open)
-        assert stl_fallback._binary_stl_info(path) is None
-        assert list(stl_fallback._iter_binary_triangles(path)) == []
-        assert stl_fallback._read_binary_samples(path, 1) is None
+        assert stl_fallback.sample_stl_geometry(path) is None
         monkeypatch.setattr(Path, "open", original_open)
 
         def fail_stat(_path: Path):
@@ -359,58 +373,20 @@ class TestRenderStlThumbnail:
         short = tmp_path / "sampler-truncated-record.stl"
         short.write_bytes(b"x" * 84 + b"x")
 
-        assert stl_fallback._read_binary_samples(short, 1, info=(1, 85)) is None
+        assert stl_fallback.sample_stl_geometry(short) is None
 
     def test_binary_sampler_is_nothing_when_the_file_cannot_be_opened(
         self, tmp_path: Path, monkeypatch
     ) -> None:
         path = tmp_path / "sampler-unreadable.stl"
         _write_renderable_binary_stl(path, 1)
-        info = (1, path.stat().st_size)
 
         def fail_open(_path: Path, *args, **kwargs):
             raise OSError("unreadable")
 
         monkeypatch.setattr(Path, "open", fail_open)
 
-        assert stl_fallback._read_binary_samples(path, 1, info=info) is None
-
-    def test_ascii_iterator_yields_the_facet_that_follows_unparseable_lines(
-        self, tmp_path: Path
-    ) -> None:
-        path = tmp_path / "ascii-iterator.stl"
-
-        records = list(stl_fallback._iter_ascii_triangles(_write_hostile_ascii(path)))
-
-        assert records == [(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0)]
-
-    def test_ascii_iterator_yields_nothing_for_a_zero_triangle_budget(
-        self, tmp_path: Path
-    ) -> None:
-        path = tmp_path / "ascii-iterator-no-triangles.stl"
-
-        assert (
-            list(
-                stl_fallback._iter_ascii_triangles(
-                    _write_hostile_ascii(path), max_triangles=0
-                )
-            )
-            == []
-        )
-
-    def test_ascii_iterator_yields_nothing_for_a_zero_line_budget(
-        self, tmp_path: Path
-    ) -> None:
-        path = tmp_path / "ascii-iterator-no-lines.stl"
-
-        assert (
-            list(
-                stl_fallback._iter_ascii_triangles(
-                    _write_hostile_ascii(path), max_lines=0
-                )
-            )
-            == []
-        )
+        assert stl_fallback.sample_stl_geometry(path) is None
 
     def test_stl_fallback_ascii_helpers_fail_closed_on_io_errors(
         self, tmp_path: Path, monkeypatch
@@ -423,10 +399,9 @@ class TestRenderStlThumbnail:
             raise OSError("unreadable")
 
         monkeypatch.setattr(Path, "open", fail_open)
-        assert list(stl_fallback._iter_ascii_triangles(path)) == []
-        assert stl_fallback._read_ascii_samples(path, 1) is None
+        assert stl_fallback.sample_stl_geometry(path) is None
 
-    def test_ascii_samples_from_a_partly_invalid_source_are_marked_incomplete(
+    def test_ascii_samples_from_a_partly_invalid_source_are_refused(
         self, tmp_path: Path
     ) -> None:
         path = tmp_path / "ascii-invalid-source.stl"
@@ -435,11 +410,7 @@ class TestRenderStlThumbnail:
             encoding="ascii",
         )
 
-        sampled = stl_fallback._read_ascii_samples(path, 4)
-
-        assert sampled is not None
-        assert sampled.parsed_triangles == 1
-        assert sampled.complete is False
+        assert stl_fallback.sample_stl_geometry(path, max_triangles=4) is None
 
     def test_ascii_samples_are_nothing_when_no_facet_parses(
         self, tmp_path: Path
@@ -447,29 +418,14 @@ class TestRenderStlThumbnail:
         path = tmp_path / "ascii-empty.stl"
         path.write_text("solid empty\nvertex nan 0 0\n", encoding="ascii")
 
-        assert stl_fallback._read_ascii_samples(path, 1) is None
+        assert stl_fallback.sample_stl_geometry(path) is None
 
-    def test_dispatches_to_the_iterator_for_the_files_format(
-        self, tmp_path: Path
-    ) -> None:
-        binary = tmp_path / "dispatch.stl"
-        _write_renderable_binary_stl(binary, 1)
-        ascii_path = tmp_path / "dispatch-ascii.stl"
-        ascii_path.write_text(
-            "solid dispatch\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendsolid dispatch\n",
-            encoding="ascii",
-        )
-
-        assert len(list(stl_fallback._iter_stl_triangles(binary))) == 1
-        assert len(list(stl_fallback._iter_stl_triangles(ascii_path))) == 1
-
-    def test_binary_sampler_returns_nothing_for_a_zero_sample_budget(
-        self, tmp_path: Path
-    ) -> None:
+    def test_sample_budget_must_be_positive(self, tmp_path: Path) -> None:
         path = tmp_path / "zero-budget.stl"
         _write_renderable_binary_stl(path, 1)
 
-        assert stl_fallback._read_binary_samples(path, 0) is None
+        with pytest.raises(ValueError):
+            stl_fallback.sample_stl_geometry(path, max_triangles=0)
 
     @pytest.mark.parametrize(
         "kwargs",
@@ -606,7 +562,7 @@ class TestRenderStlThumbnail:
         assert visible.mean() >= 0.08
         assert _largest_component_fraction(visible) >= 0.70
 
-    def test_renders_the_facets_that_follow_an_oversized_ascii_line(
+    def test_refuses_an_oversized_ascii_line(
         self,
         tmp_path: Path,
     ) -> None:
@@ -623,7 +579,7 @@ class TestRenderStlThumbnail:
         path.write_text(
             "solid hostile\n"
             + "comment "
-            + ("x" * (stl_fallback._MAX_ASCII_LINE_BYTES + 10_000))
+            + ("x" * (STLReadLimits().max_line_bytes + 10_000))
             + "\n"
             + valid
             + "endsolid hostile\n",
@@ -632,13 +588,9 @@ class TestRenderStlThumbnail:
 
         result = stl_fallback.render_stl_thumbnail(path, width=64, height=48)
 
-        assert result is not None
-        assert result.triangle_count == 1
-        assert result.parsed_triangles == 1
-        assert result.scanned_bytes <= stl_fallback._MAX_ASCII_BYTES
-        assert result.complete is False
+        assert result is None
 
-    def test_stops_sampling_ascii_facets_at_the_cap(
+    def test_caps_retained_ascii_facets_without_stopping_validation(
         self, tmp_path: Path, monkeypatch
     ) -> None:
 
@@ -662,16 +614,15 @@ class TestRenderStlThumbnail:
         )
 
         assert result is not None
-        assert result.triangle_count == 4
+        assert result.triangle_count == 10
         assert result.sampled_triangles == 4
-        assert result.parsed_triangles == 4
-        assert result.scanned_bytes <= stl_fallback._MAX_ASCII_BYTES
+        assert result.parsed_triangles == 10
+        assert result.scanned_bytes == path.stat().st_size
 
-    def test_ascii_fallback_marks_truncated_metadata_incomplete(
+    def test_ascii_fallback_refuses_source_above_byte_budget(
         self, tmp_path: Path, monkeypatch
     ) -> None:
 
-        monkeypatch.setattr(stl_fallback, "_MAX_ASCII_BYTES", 500)
         path = tmp_path / "ascii-truncated.stl"
         facet = (
             "facet normal 0 0 1\n"
@@ -684,17 +635,17 @@ class TestRenderStlThumbnail:
         )
         path.write_text("solid truncated\n" + (facet * 20) + "endsolid truncated\n")
 
-        result = stl_fallback.render_stl_thumbnail(path, width=64, height=48)
+        result = stl_fallback.sample_stl_geometry(
+            path, limits=STLReadLimits(max_source_bytes=500)
+        )
 
-        assert result is not None
-        assert result.complete is False
-        assert result.scanned_bytes <= 500
+        assert result is None
 
     @pytest.mark.parametrize(
         "pending_vertices",
         ["vertex 2 2 2\n", "vertex 2 2 2\nvertex 3 3 3\n"],
     )
-    def test_ascii_pending_vertices_at_eof_are_incomplete(
+    def test_ascii_pending_vertices_at_eof_are_refused(
         self, tmp_path: Path, pending_vertices: str
     ) -> None:
 
@@ -712,9 +663,7 @@ class TestRenderStlThumbnail:
 
         result = stl_fallback.render_stl_thumbnail(path, width=64, height=48)
 
-        assert result is not None
-        assert result.parsed_triangles == 1
-        assert result.complete is False
+        assert result is None
 
     def test_ascii_fallback_rejects_float32_overflow(self, tmp_path: Path) -> None:
 
@@ -736,12 +685,34 @@ class TestRenderStlThumbnail:
 
 
 class TestPartialSampling:
-    def test_hostile_ascii_keeps_only_verified_facets(self, tmp_path):
+    def test_hostile_ascii_is_refused(self, tmp_path):
         source = _write_hostile_ascii(tmp_path / "hostile.stl")
         result = stl_fallback.sample_stl_geometry(source, max_triangles=10)
-        assert result is not None
-        assert result.complete is False
-        assert result.parsed_triangles == 1
-        assert list(result.coordinates) == [0, 0, 0, 1, 0, 0, 0, 1, 0]
-        assert result.bounds_min == (0, 0, 0)
-        assert result.bounds_max == (1, 1, 0)
+        assert result is None
+
+
+class TestSampleWorkingSet:
+    def test_bounds_sampling_working_set(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "working-set.stl"
+        _write_renderable_binary_stl(path, 120)
+        original = np.concatenate
+        records = []
+
+        def observed(arrays, *args, **kwargs):
+            parts = tuple(arrays)
+            if parts and all(
+                array.ndim == 3 and array.shape[1:] == (3, 3) for array in parts
+            ):
+                records.append(sum(len(array) for array in parts))
+            return original(parts, *args, **kwargs)
+
+        monkeypatch.setattr(np, "concatenate", observed)
+        sampled = stl_fallback.read_stl_sample(
+            path, max_triangles=17, limits=STLReadLimits(chunk_triangles=31)
+        )
+
+        assert sampled.sampled_triangles == 17
+        assert sampled.parsed_triangles == 120
+        assert records and max(records) <= 17 + 31

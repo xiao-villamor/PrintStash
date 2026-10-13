@@ -1,9 +1,15 @@
 """Public analysis controls enforce scope and do not reveal hidden candidates."""
 
+import httpx
 import pytest
+from sqlalchemy import event
 from sqlmodel import select
 
-from app.db.models import SimilarityRun
+from app.db.models import (
+    GeometryFingerprint,
+    SimilarityCandidateObservation,
+    SimilarityRun,
+)
 
 
 @pytest.fixture
@@ -213,6 +219,47 @@ class TestPersistedResults:
         assert len(result["observations"]) == 1
         assert result["exact_equivalence"] is True
 
+    def test_obsolete_interpretation_is_excluded_from_current_results(
+        self, client, auth_headers, current_pair, db_session
+    ):
+        previous = "geometry-v4-sh5f4577c4"
+        current_pair.algorithm_version = previous
+        db_session.add(current_pair)
+        observation = db_session.exec(
+            select(SimilarityCandidateObservation).where(
+                SimilarityCandidateObservation.candidate_id == current_pair.id
+            )
+        ).one()
+        for fingerprint_id in (
+            observation.fingerprint_a_id,
+            observation.fingerprint_b_id,
+        ):
+            fingerprint = db_session.get(GeometryFingerprint, fingerprint_id)
+            fingerprint.algorithm_version = previous
+            db_session.add(fingerprint)
+        db_session.commit()
+
+        current = client.get(
+            "/api/v1/similarity/candidates?freshness=current", headers=auth_headers
+        )
+        assert current.status_code == 200, current.text
+        assert current.json()["items"] == []
+        stale = client.get(
+            "/api/v1/similarity/candidates?freshness=stale", headers=auth_headers
+        )
+        assert stale.status_code == 200, stale.text
+        assert [item["id"] for item in stale.json()["items"]] == [current_pair.id]
+        detail = stale.json()["items"][0]
+        assert detail["freshness"] == "stale"
+        assert "confirm_evidence" not in detail["allowed_actions"]
+        summary = client.get(
+            f"/api/v1/models/{current_pair.model_a_id}/similar", headers=auth_headers
+        )
+        assert summary.status_code == 200, summary.text
+        assert [item["id"] for item in summary.json()["items"]] == [current_pair.id]
+        assert summary.json()["items"][0]["freshness"] == "stale"
+        assert "confirm_evidence" not in summary.json()["items"][0]["allowed_actions"]
+
     def test_scopes_cached_candidates_to_model(
         self, client, auth_headers, current_pair, make_model, make_similarity_candidate
     ):
@@ -337,3 +384,53 @@ class TestReviewIdentifiers:
             headers=auth_headers,
         )
         assert response.status_code == 422
+
+
+class TestSimilarityExecution:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["start", "cancel", "query"])
+    async def test_keeps_loop_responsive_during_run_commands(
+        self, app, auth_headers, db_session, make_model, loop_handshake, action
+    ):
+        wait_for_loop, observations = loop_handshake
+        model = make_model()
+        engine = db_session.get_bind()
+
+        def delayed_query(connection, cursor, statement, parameters, context, many):
+            if "similarity_runs" in statement.lower() and not observations:
+                wait_for_loop()
+
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            configured = await client.patch(
+                "/api/v1/similarity/settings",
+                headers=auth_headers,
+                json={"enabled": True},
+            )
+            assert configured.status_code == 200, configured.text
+            if action == "cancel":
+                started = await client.post(
+                    "/api/v1/similarity/runs", headers=auth_headers, json={}
+                )
+                assert started.status_code == 202, started.text
+                endpoint = f"/api/v1/similarity/runs/{started.json()['id']}/cancel"
+            elif action == "query":
+                endpoint = f"/api/v1/models/{model.id}/similar/query"
+            else:
+                endpoint = "/api/v1/similarity/runs"
+            event.listen(engine, "before_cursor_execute", delayed_query)
+            try:
+                response = await client.post(endpoint, headers=auth_headers, json={})
+            finally:
+                event.remove(engine, "before_cursor_execute", delayed_query)
+
+        assert response.status_code == (202 if action == "start" else 200), (
+            response.text
+        )
+        if action == "cancel":
+            assert response.json()["state"] == "cancelling"
+        else:
+            run = response.json()["run"] if action == "query" else response.json()
+            assert run["state"] == "queued"
+        assert observations == [True]

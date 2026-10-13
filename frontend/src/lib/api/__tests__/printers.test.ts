@@ -47,16 +47,19 @@ import {
   updatePrinterManualMaterialState,
   updatePrinterPermission,
 } from "@/lib/api/printers";
-import { invalidateApiCache } from "@/lib/api/request";
+import { queryClient } from "@/lib/query-client";
+import { aPrinter, anEditingBase } from "@/test-support/factories";
+import { clearLogin } from "@/lib/auth-store";
+import { aPrinterPermission } from "@/test-support/permissions";
 
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
-const PRINTER = { id: 3, name: "Ender", provider: "moonraker" };
+const PRINTER = { ...anEditingBase(), id: 3, name: "Ender", provider: "moonraker" };
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -115,12 +118,25 @@ describe("createPrinter", () => {
 
 describe("updatePrinter", () => {
   it("PATCHes only what changed", async () => {
-    respondWith(PRINTER);
+    respondWith({ ...PRINTER, edit_version: PRINTER.edit_version + 1 });
 
-    await updatePrinter(3, { name: "Ender 3 V2" });
+    await updatePrinter(3, { name: "Ender 3 V2" }, { base: PRINTER });
 
     expectRequest("/api/v1/printers/3", "PATCH");
     expect(lastBody()).toEqual({ name: "Ender 3 V2" });
+  });
+  it.each([
+    { label: "old version", saved: { ...PRINTER } },
+    {
+      label: "different history",
+      saved: { ...PRINTER, edit_version: 2, edit_epoch: "b".repeat(32) },
+    },
+    { label: "different printer", saved: { ...PRINTER, id: 99, edit_version: 2 } },
+  ])("rejects an acknowledgement with $label", async ({ saved }) => {
+    respondWith(saved);
+    await expect(updatePrinter(3, { name: "Edit" }, { base: PRINTER })).rejects.toThrow(
+      saved.id === 3 ? "Invalid editing acknowledgement" : "printer_identity_mismatch",
+    );
   });
 });
 
@@ -142,7 +158,7 @@ describe("live reads", () => {
     ["material state", () => getPrinterMaterialState(3), "/api/v1/printers/3/material-state"],
     ["permissions", () => listPrinterPermissions(3), "/api/v1/printers/3/permissions"],
   ])("reads %s without touching the cache", async (_name, call, url) => {
-    respondWith({});
+    respondWith(_name === "permissions" ? [] : {});
 
     await call();
 
@@ -166,9 +182,10 @@ describe("updatePrinterManualMaterialState", () => {
 
 describe("permissions", () => {
   it("PUTs a role for one user on one printer", async () => {
-    respondWith({ id: 1, role: "control" });
+    const permission = aPrinterPermission({ printer_id: 3, user_id: 7, role: "control" });
+    respondWith({ ...permission });
 
-    await updatePrinterPermission(3, 7, "control");
+    expect(await updatePrinterPermission(3, 7, "control")).toEqual(permission);
 
     expectRequest("/api/v1/printers/3/permissions/7", "PUT");
     expect(lastBody()).toEqual({ role: "control" });
@@ -308,5 +325,106 @@ describe("openPrinterWS", () => {
     // goes in the query string — which is why it is short-lived and single-use.
     expectRequest("/api/v1/printers/3/ws-ticket", "POST");
     expect(sockets[0]).toContain("/api/v1/printers/3/ws?ticket=abc");
+  });
+});
+
+/** A ticket authorizes only the session and page lifetime that requested it. */
+describe("printer ticket lifetimes", () => {
+  it("does not open a retired printer ticket", async () => {
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const sockets: string[] = [];
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        constructor(url: string) {
+          sockets.push(url);
+        }
+      },
+    );
+    const pending = openPrinterWS(3);
+    const outcome = pending.catch((error: Error) => error);
+    clearLogin();
+    headers.resolve(new Response('{"ticket":"old","expires_in":30}'));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(sockets).toEqual([]);
+  });
+
+  it("cancels an abandoned printer ticket", async () => {
+    const headers = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(headers.promise);
+    const sockets: string[] = [];
+    vi.stubGlobal(
+      "WebSocket",
+      class {
+        constructor(url: string) {
+          sockets.push(url);
+        }
+      },
+    );
+    const controller = new AbortController();
+    const pending = openPrinterWS(3, controller.signal);
+    const outcome = pending.catch((error: Error) => error);
+    controller.abort();
+    expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    headers.resolve(new Response('{"ticket":"old","expires_in":30}'));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
+    expect(sockets).toEqual([]);
+  });
+});
+
+describe("printer HTTP read cancellation", () => {
+  it.each([
+    { label: "detail", read: (signal: AbortSignal) => getPrinter(4, { signal }) },
+    { label: "jobs", read: (signal: AbortSignal) => listPrinterJobs(4, 50, { signal }) },
+    { label: "files", read: (signal: AbortSignal) => listPrinterFiles(4, { signal }) },
+    { label: "diagnostics", read: (signal: AbortSignal) => getPrinterDiagnostics(4, { signal }) },
+    { label: "config", read: (signal: AbortSignal) => getMoonrakerConfig(4, { signal }) },
+  ])("passes cancellation to printer HTTP reads ($label)", async ({ read }) => {
+    const pending = Promise.withResolvers<Response>();
+    vi.mocked(fetch).mockReturnValueOnce(pending.promise);
+    const caller = new AbortController();
+    const outcome = read(caller.signal).catch((error: Error) => error);
+    const signal = vi.mocked(fetch).mock.calls.at(-1)?.[1]?.signal;
+    const reason = new DOMException("View left", "AbortError");
+    caller.abort(reason);
+    expect(signal?.aborted).toBe(true);
+    pending.resolve(new Response("{}", { headers: { "content-type": "application/json" } }));
+    expect(await outcome).toBe(reason);
+  });
+});
+
+describe("printer file transport isolation", () => {
+  it.each([
+    {
+      label: "start",
+      write: () => startPrinterFile(4, { remote_filename: "bracket.gcode", file_id: 20 }),
+    },
+    { label: "sync", write: () => syncPrinterFiles(4) },
+    { label: "delete", write: () => deletePrinterFile(4, 50) },
+  ])("leaves caches untouched after printer file transport writes ($label)", async ({ write }) => {
+    queryClient.setQueryData(["printers", 99], aPrinter({ id: 99 }));
+    respondWith([]);
+    await write();
+    expect(queryClient.getQueryState(["printers", 99])?.isInvalidated).toBe(false);
+  });
+});
+
+describe("permission caller cancellation", () => {
+  it("cancels an active permission read", async () => {
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = listPrinterPermissions(3, { signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
   });
 });

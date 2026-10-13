@@ -2,7 +2,7 @@ manifestVersion: 1
 id: printstash
 category: files
 name: PrintStash
-version: "0.13.0"
+version: "0.14.0"
 tagline: A self-hosted library for 3D models and the G-code that prints them
 description: >-
   PrintStash keeps your 3D models, sliced G-code revisions and print history in
@@ -23,7 +23,11 @@ description: >-
 
   Sign in with the username and password Umbrel shows for this app, then choose
   where PrintStash stores your files.
-releaseNotes: ""
+releaseNotes: >-
+  Version 0.14.0 adds durable background jobs, guided first-run setup, AI Search
+  and Similar Models, verified Vault migration, and faster single-volume imports.
+  Back up and follow UPGRADE.md before upgrading: Compose volume layout and
+  several Jobs and Artifact download API endpoints change.
 developer: PrintStash contributors
 website: https://www.printstash.org
 dependencies: []

@@ -12,11 +12,13 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 
-from sqlmodel import Session
+from sqlalchemy import update
+from sqlmodel import Session, col
 
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.time import ensure_utc, utcnow
+from app.db.affected import affected
 from app.db.models import (
     ACTIVE_JOB_STATES,
     Job,
@@ -30,11 +32,13 @@ from app.db.session import get_session_factory
 from . import catalog as catalog_module
 from .contracts import (
     Deduplicated,
+    ExecutionKind,
     JobSubmission,
     Partitioned,
     PassSubmission,
     SubmitOutcome,
 )
+from .jobs import TERMINAL_STATES, jobs
 
 logger = get_logger(__name__)
 
@@ -42,9 +46,9 @@ logger = get_logger(__name__)
 PRIORITY_RANK = {WorkPriority.INTERACTIVE: 1, WorkPriority.BACKFILL: 1000}
 
 
-def execution_id(job_id: str, attempt: int) -> str:
-    """The engine key of one attempt: exactly once per (Job, attempt)."""
-    return f"{job_id}:{attempt}"
+def execution_id(job_id: str, attempt: int, execution_epoch: str) -> str:
+    """The engine key of one attempt: exactly once per (Job, epoch, attempt)."""
+    return f"{job_id}:{execution_epoch}:{attempt}"
 
 
 def dedupe_key(definition: JobKind, subject_key: str) -> str:
@@ -52,12 +56,18 @@ def dedupe_key(definition: JobKind, subject_key: str) -> str:
     return f"{definition.value}|{subject_key}"
 
 
-def submit(job_id: str, *, now: datetime | None = None) -> SubmitOutcome | None:
+def submit(
+    job_id: str,
+    *,
+    now: datetime | None = None,
+    reserved_backfill_epoch: str | None = None,
+) -> SubmitOutcome | None:
     """Submit the next attempt of an active Job. ``None`` when nothing to do.
 
     The attempt number is committed only after the engine accepted it. A crash
     in between re-derives the same attempt, so the same execution id, and the
-    engine returns the execution it already has.
+    engine returns the execution it already has. A reserved backfill submission
+    must still name the exact current admitted epoch when arguments are built.
     """
     now = now or utcnow()
     engine = catalog_module.get_engine()
@@ -66,35 +76,98 @@ def submit(job_id: str, *, now: datetime | None = None) -> SubmitOutcome | None:
         row = session.get(Job, job_id)
         if row is None or row.state not in ACTIVE_JOB_STATES:
             return None
+        if reserved_backfill_epoch is not None and (
+            row.execution_epoch != reserved_backfill_epoch
+            or row.backfill_admission_epoch != reserved_backfill_epoch
+        ):
+            return None
         definition = catalog.definition(row.kind)
+        if definition.admission(session) is not None:
+            return None
         attempt = row.attempts + 1
         submission = JobSubmission(
-            execution_id=execution_id(row.id, attempt),
+            execution_id=execution_id(row.id, attempt, row.execution_epoch),
             job_id=row.id,
             definition=row.kind,
             subject_key=row.subject_key,
             lane=definition.lane,
             priority=row.priority,
             attempt=attempt,
+            execution_epoch=row.execution_epoch,
             routing=Deduplicated(dedupe_key(row.kind, row.subject_key))
             if definition.partition is None
             else Partitioned(definition.partition(row.subject_key)),
         )
+        pending_epoch = row.submitted_epoch != row.execution_epoch
     outcome = engine.submit(submission)
+    if pending_epoch and outcome is SubmitOutcome.DEDUPLICATED:
+        _cancel_superseded(submission)
+        outcome = engine.submit(submission)
     if outcome is SubmitOutcome.DEDUPLICATED:
         # An older attempt of this subject is still active in the engine. The
         # reconciler cancels or settles it; this attempt is not recorded.
         return outcome
     with get_session_factory().scoped_session() as session:
-        row = session.get(Job, job_id)
-        if row is not None and row.attempts < attempt:
+        row = jobs.lock_execution(session, job_id, epoch=submission.execution_epoch)
+        # The body can legitimately finish before engine.submit returns. Its
+        # terminal result is not evidence of retired authority; only cancellation
+        # or a missing/replaced epoch warrants cancelling this exact execution.
+        superseded = row is None or row.state is JobState.CANCELLED
+        if (
+            row is not None
+            and row.state in ACTIVE_JOB_STATES
+            and row.attempts < attempt
+        ):
             row.attempts = attempt
+            row.submitted_epoch = submission.execution_epoch
             if row.state is JobState.INTERRUPTED:
                 row.state = JobState.QUEUED
             row.updated_at = now
             session.add(row)
             session.commit()
+    if superseded:
+        engine.cancel(submission.execution_id)
+
     return outcome
+
+
+def _cancel_superseded(submission: JobSubmission) -> None:
+    """Free subject dedupe after a retry or a replaced terminal Job.
+
+    The engine contract only exposes an active catalogue, not subject lookup.
+    Read it only when an epoch's first submission is deduplicated; successful
+    submissions and ordinary resubmits use exact execution IDs. No database lock spans engine I/O.
+    """
+    engine = catalog_module.get_engine()
+    # Observe executions first: a later DB snapshot can prove these exact IDs
+    # obsolete, but cannot accidentally authorize cancellation of a future epoch.
+    active = engine.active()
+    with get_session_factory().scoped_session() as session:
+        from sqlmodel import select
+
+        related = session.exec(
+            select(Job).where(
+                Job.kind == submission.definition,
+                Job.subject_key == submission.subject_key,
+            )
+        ).all()
+        epochs = {
+            row.id: row.execution_epoch
+            for row in related
+            if row.id == submission.job_id or row.state in TERMINAL_STATES
+        }
+    for execution in active:
+        if execution.kind is not ExecutionKind.JOB:
+            continue
+        for job_id, epoch in epochs.items():
+            if not execution.execution_id.startswith(f"{job_id}:"):
+                continue
+            current = job_id == submission.job_id and execution.execution_id.startswith(
+                f"{job_id}:{epoch}:"
+            )
+            if not current:
+                engine.cancel(execution.execution_id)
+            break
 
 
 def _cursor(session: Session, source: JobKind) -> ReconcileCursor:
@@ -143,6 +216,21 @@ def nudge(
         catalog_module.get_catalog().definition(source)
         if delay is None:
             with get_session_factory().scoped_session() as session:
+                # Mark a live owner dirty atomically with its release. It will
+                # consume this nudge before releasing; no extra DBOS workflow
+                # is needed merely to lose the same single-flight claim.
+                if affected(
+                    session,
+                    update(ReconcileCursor)
+                    .where(
+                        col(ReconcileCursor.source) == source,
+                        col(ReconcileCursor.holder).is_not(None),
+                        col(ReconcileCursor.holder_expires_at) > now,
+                    )
+                    .values(nudged_at=now),
+                ):
+                    session.commit()
+                    return
                 cursor = _cursor(session, source)
                 cursor.nudged_at = now
                 covered = _covered(cursor, priority, now)

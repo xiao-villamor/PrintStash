@@ -1,9 +1,13 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { getSimilarityStatus, searchSimilarModels } from "@/lib/api/similarity";
+import {
+  semanticNeighborsOptions,
+  similarityStatusOptions,
+  type NeighborQuery,
+} from "@/lib/queries/similarity";
 import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 
@@ -11,11 +15,13 @@ import { Link } from "@/lib/link";
 export function SimilaritySearch({ modelId }: { modelId?: number }) {
   const { t } = useI18n();
   const [text, setText] = useState("");
-  const status = useQuery({ queryKey: ["similarity", "status"], queryFn: getSimilarityStatus });
-  const result = useMutation({
-    mutationFn: () =>
-      searchSimilarModels(modelId === undefined ? { text: text.trim() } : { model_id: modelId }),
-  });
+  const [submitted, setSubmitted] = useState<{
+    subject: number | undefined;
+    query: NeighborQuery;
+  } | null>(null);
+  const status = useQuery(similarityStatusOptions());
+  const query = submitted?.subject === modelId ? (submitted?.query ?? null) : null;
+  const result = useQuery(semanticNeighborsOptions(query));
   if (
     !status.data?.enabled ||
     status.data.embeddings_enabled === false ||
@@ -29,7 +35,10 @@ export function SimilaritySearch({ modelId }: { modelId?: number }) {
         className="flex flex-wrap items-end gap-3"
         onSubmit={(event) => {
           event.preventDefault();
-          result.mutate();
+          const next: NeighborQuery =
+            modelId === undefined ? { text: text.trim() } : { model_id: modelId };
+          if (query && JSON.stringify(query) === JSON.stringify(next)) void result.refetch();
+          else setSubmitted({ subject: modelId, query: next });
         }}
       >
         {modelId === undefined && (
@@ -46,7 +55,7 @@ export function SimilaritySearch({ modelId }: { modelId?: number }) {
         <Button
           type="submit"
           variant="outline"
-          loading={result.isPending}
+          loading={query !== null && result.isFetching}
           disabled={modelId === undefined && !text.trim()}
         >
           {t(modelId === undefined ? "similarity.semanticSearch" : "similarity.semanticNeighbors")}
@@ -56,6 +65,9 @@ export function SimilaritySearch({ modelId }: { modelId?: number }) {
       {result.isError && (
         <p role="alert" className="text-sm text-destructive">
           {t("similarity.semanticError")}
+          <Button variant="ghost" size="sm" onClick={() => void result.refetch()}>
+            {t("similarity.retry")}
+          </Button>
         </p>
       )}
       {result.data && (

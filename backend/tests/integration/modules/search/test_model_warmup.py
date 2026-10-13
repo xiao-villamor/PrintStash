@@ -6,7 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from printstash_core.inference import EmbeddingError, EmbeddingInput
+from printstash_core.inference import EmbeddingError, EmbeddingInput, InferenceContext
 from sqlalchemy import event
 from sqlmodel import SQLModel, create_engine, select
 
@@ -50,7 +50,9 @@ def delayed_model(warm_model, monkeypatch, tmp_path):
     )
     release, entered, processes = tmp_path / "release", threading.Event(), []
 
-    def spawn():
+    def spawn(
+        *, context: InferenceContext | None = None, deadline: float | None = None
+    ):
         process = subprocess.Popen(
             [
                 sys.executable,

@@ -52,7 +52,7 @@ def local_caption_upgrade(db_session, warm_model, make_user, make_model):
     configuration.update(
         db_session,
         SearchSettings(enabled=True, local_models_enabled=True),
-        actor_id=actor.id,
+        actor=actor,
     )
     captions.patch(
         db_session, actor, subject, CaptionPatch(action="edit", text="Mounting bracket")
@@ -96,7 +96,7 @@ class TestEnsureCaptionRecipe:
             configuration.update(
                 db_session,
                 SearchSettings(enabled=True, local_models_enabled=False),
-                actor_id=actor.id,
+                actor=actor,
             )
         elif missing == "model":
             (model.directory / "manifest.json").unlink()

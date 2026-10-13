@@ -1,10 +1,9 @@
 /**
  * Acting on many models at once, and everything to do with the trash.
  *
- * A batch call is one request on purpose: the server applies the whole change or
- * none of it, so tagging forty models cannot leave half of them tagged when the
- * connection drops. That is why the bodies here are pinned whole — a batch that
- * degrades into N requests looks identical from the outside until it fails.
+ * A batch reports success or failure per Model. Edit preconditions belong to
+ * the selection snapshot, so a newer writer is not overwritten by a stale batch.
+ * Successful versions in the response are the preconditions for a later undo.
  *
  * Revision labels carry the one distinction a partial body cannot express.
  * Clearing a label sends an explicit `null`; leaving it alone omits the key.
@@ -14,6 +13,7 @@
  * recoverable from not: `DELETE /models/{id}` trashes, `DELETE /models/{id}/purge`
  * destroys, and `/trash/expired` destroys everything past its retention window.
  */
+import { anEditingBase } from "@/test-support/factories";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -26,14 +26,13 @@ import {
   purgeModel,
   restoreModel,
 } from "@/lib/api/models";
-import { invalidateApiCache } from "@/lib/api/request";
 
-import { expectRequest, fetchMock, lastBody, respondWith } from "../_wire";
+import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "../_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -42,24 +41,45 @@ afterEach(() => {
 });
 
 describe("batchMoveModels", () => {
-  it("moves several models into one collection", async () => {
+  it("moves with every selected version", async () => {
     respondWith({ succeeded_ids: [] });
 
-    await batchMoveModels([1, 2], "functional");
+    await batchMoveModels([1, 2], "functional", {
+      1: anEditingBase({ edit_version: 3 }),
+      2: anEditingBase({ edit_version: 7 }),
+    });
 
     expectRequest("/api/v1/models/batch/move", "POST");
-    expect(lastBody()).toEqual({ model_ids: [1, 2], collection: "functional" });
+    expect(lastBody()).toEqual({
+      model_ids: [1, 2],
+      collection: "functional",
+      expected_versions: {
+        1: anEditingBase({ edit_version: 3 }),
+        2: anEditingBase({ edit_version: 7 }),
+      },
+    });
+    expect(new Headers(lastCall().init?.headers).get("X-PrintStash-Edit-Contract")).toBe(
+      "conditional-v1",
+    );
   });
 });
 
 describe("batchTagModels", () => {
-  it("adds and removes tags in one request", async () => {
+  it("tags with every selected version", async () => {
     respondWith({ succeeded_ids: [] });
 
-    await batchTagModels([1], ["new"], ["old"]);
+    await batchTagModels([1], ["new"], ["old"], { 1: anEditingBase({ edit_version: 7 }) });
 
-    // One request, so the whole change is atomic on the server.
-    expect(lastBody()).toEqual({ model_ids: [1], add: ["new"], remove: ["old"] });
+    // Each row is conditional; one row may conflict while another succeeds.
+    expect(lastBody()).toEqual({
+      model_ids: [1],
+      add: ["new"],
+      remove: ["old"],
+      expected_versions: { 1: anEditingBase({ edit_version: 7 }) },
+    });
+    expect(new Headers(lastCall().init?.headers).get("X-PrintStash-Edit-Contract")).toBe(
+      "conditional-v1",
+    );
   });
 });
 

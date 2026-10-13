@@ -76,9 +76,9 @@ class TestCheckConstraint:
             db_session.execute(
                 text(
                     "INSERT INTO jobs (id, kind, subject_key, priority, state,"
-                    " status_json, attempts, resubmits, created_at, updated_at)"
+                    " status_json, attempts, resubmits, execution_epoch, created_at, updated_at)"
                     " VALUES ('raw', 'no.such.kind', 'x/1', 'interactive', 'queued',"
-                    " '{}', 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    " '{}', 0, 0, 'enum-check-epoch', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                 )
             )
 

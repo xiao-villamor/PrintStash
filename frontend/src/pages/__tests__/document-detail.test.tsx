@@ -18,18 +18,23 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentType } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { Link } from "@/lib/link";
 import DocumentDetailPage from "@/pages/document-detail";
 import { json, memberSession, renderApp, type RenderAppOptions } from "@/test-support/render";
+import { clearLogin } from "@/lib/auth-store";
+import { documentKeys } from "@/lib/queries/documents";
 import type { DocumentRead } from "@/types";
 
 function aDocument(over: Partial<DocumentRead> = {}): DocumentRead {
   return {
     id: 3,
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    edit_version: 1,
     name: "Assembly notes",
     kind: "markdown",
     collection: "parts",
@@ -150,6 +155,175 @@ describe("DocumentDetailPage", () => {
       );
     });
 
+    it("retains the captured version after a newer background read", async () => {
+      const user = userEvent.setup();
+      let conditionalHeader: string | null = null;
+      const app = renderDocument({
+        routes: {
+          "PUT /api/v1/documents/3": (_, init) => {
+            conditionalHeader = new Headers(init?.headers).get("If-Match");
+            return json(aDocument({ edit_version: 3 }));
+          },
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      app.route({
+        "GET /api/v1/documents/3": json(aDocument({ edit_version: 2, body: "Remote" })),
+      });
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() =>
+        expect(conditionalHeader).toBe('"document-3-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"'),
+      );
+    });
+
+    it("requires explicit review before saving a conflicting draft", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument({
+        routes: { "PUT /api/v1/documents/3": json({ detail: "edit_conflict" }, 412) },
+      });
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      await user.clear(screen.getByPlaceholderText(/Write markdown/));
+      await user.type(screen.getByPlaceholderText(/Write markdown/), "My local draft");
+      app.route({
+        "GET /api/v1/documents/3": json(aDocument({ edit_version: 2, body: "Remote changes" })),
+      });
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(await screen.findByText("Remote changes")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/Write markdown/)).toHaveValue("My local draft");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+      await user.click(screen.getByRole("button", { name: "Use latest version as edit base" }));
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+
+    it("confirms a lost acknowledgement through a read without repeating the write", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument({
+        routes: {
+          "PUT /api/v1/documents/3": () => {
+            throw new TypeError("Failed to fetch");
+          },
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      await user.clear(screen.getByPlaceholderText(/Write markdown/));
+      await user.type(screen.getByPlaceholderText(/Write markdown/), "Saved despite disconnect");
+      app.route({
+        "GET /api/v1/documents/3": json(
+          aDocument({ edit_version: 2, body: "Saved despite disconnect" }),
+        ),
+      });
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(
+        await screen.findByText("Save confirmed from the current document."),
+      ).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText(/Write markdown/)).toBeNull();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+
+    it("confirms an uncertain save after the recovery read becomes available", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument({
+        routes: {
+          "PUT /api/v1/documents/3": () => {
+            throw new TypeError("Failed to fetch");
+          },
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      await user.type(screen.getByPlaceholderText(/Write markdown/), " recovered");
+      app.route({ "GET /api/v1/documents/3": json({ detail: "offline" }, 500) });
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await screen.findByText(
+        "The save was not acknowledged. Your draft is kept. Check the current document before trying again.",
+      );
+      app.route({
+        "GET /api/v1/documents/3": json(aDocument({ edit_version: 2, body: "# Notes recovered" })),
+      });
+
+      await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+      expect(
+        await screen.findByText("Save confirmed from the current document."),
+      ).toBeInTheDocument();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(1);
+    });
+
+    it("retains an inaccessible draft without offering another write", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument({
+        routes: { "PUT /api/v1/documents/3": json({ detail: "forbidden" }, 403) },
+      });
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      await user.type(screen.getByPlaceholderText(/Write markdown/), " private draft");
+      app.route({ "GET /api/v1/documents/3": json({ detail: "forbidden" }, 403) });
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(
+        await screen.findByText("Document access changed. Your draft is kept here for copying."),
+      ).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/Write markdown/)).toHaveValue("# Notes private draft");
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("never dispatches a retired document gesture", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument({
+        routes: { "PUT /api/v1/documents/3": json(aDocument({ edit_version: 2 })) },
+      });
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Save" }));
+        app.unmount();
+        clearLogin();
+      });
+
+      expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+      expect(app.client.getQueriesData({ queryKey: documentKeys.all })).toEqual([]);
+    });
+
+    it("does not publish a retired save after delayed query cancellation", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument({
+        routes: { "PUT /api/v1/documents/3": json(aDocument({ edit_version: 2 })) },
+      });
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      let resume!: () => void;
+      const paused = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const cancel = app.client.cancelQueries.bind(app.client);
+      const spy = vi
+        .spyOn(app.client, "cancelQueries")
+        .mockImplementationOnce(cancel)
+        .mockImplementationOnce(() => paused);
+
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+      await act(async () => {
+        clearLogin();
+        resume();
+        await paused;
+      });
+
+      await waitFor(() =>
+        expect(app.client.getQueriesData({ queryKey: documentKeys.all })).toEqual([]),
+      );
+      spy.mockRestore();
+    });
+
     it("keeps the editor open when the save is refused", async () => {
       // Dropping back to preview on failure loses the edit with nothing said.
       const user = userEvent.setup();
@@ -161,6 +335,200 @@ describe("DocumentDetailPage", () => {
       await user.click(screen.getByRole("button", { name: /Save/ }));
 
       expect(await screen.findByPlaceholderText(/Write markdown/)).toBeInTheDocument();
+    });
+  });
+
+  describe("read recovery", () => {
+    it("distinguishes document detail failure from not found", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument({
+        routes: { "GET /api/v1/documents/3": json({ detail: "offline" }, 500) },
+      });
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      app.route({ "GET /api/v1/documents/3": json(aDocument()) });
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      expect(await screen.findByRole("heading", { name: "Assembly notes" })).toBeInTheDocument();
+    });
+
+    it("preserves a document draft on background read", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument();
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      const editor = screen.getByPlaceholderText(/Write markdown/);
+      await user.clear(editor);
+      await user.type(editor, "# My draft");
+      app.route({
+        "GET /api/v1/documents/3": json(
+          aDocument({ name: "Server rename", body: "# Changed remotely" }),
+        ),
+      });
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+      expect(screen.getByPlaceholderText(/Write markdown/)).toHaveValue("# My draft");
+      expect(screen.getByDisplayValue("Assembly notes")).toHaveValue("Assembly notes");
+    });
+
+    it("hides cached server content after a denied background read", async () => {
+      const app = renderDocument();
+      await screen.findByRole("heading", { name: "Assembly notes" });
+      app.route({ "GET /api/v1/documents/3": json({ detail: "forbidden" }, 403) });
+
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { name: "Assembly notes" })).toBeNull();
+      expect(screen.queryByText("Notes")).toBeNull();
+      expect(screen.queryByRole("button", { name: /Edit/ })).toBeNull();
+    });
+
+    it("keeps a captured document base before the first keystroke", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument();
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      app.route({ "GET /api/v1/documents/3": json(aDocument({ body: "# Changed remotely" })) });
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+      expect(screen.getByPlaceholderText(/Write markdown/)).toHaveValue("# Notes");
+    });
+  });
+
+  describe("background freshness", () => {
+    it("keeps an editor draft available after a failed refetch", async () => {
+      const user = userEvent.setup();
+      const app = renderDocument();
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      await user.type(screen.getByPlaceholderText(/Write markdown/), " locally edited");
+      app.route({ "GET /api/v1/documents/3": json({ detail: "offline" }, 500) });
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText(/Write markdown/)).toHaveValue("# Notes locally edited");
+    });
+
+    it("keeps a confirmed document save across a late read", async () => {
+      let resolveRead!: (response: Response) => void;
+      let resolveWrite!: (response: Response) => void;
+      const lateRead = new Promise<Response>((resolve) => {
+        resolveRead = resolve;
+      });
+      const write = new Promise<Response>((resolve) => {
+        resolveWrite = resolve;
+      });
+      const user = userEvent.setup();
+      const app = renderDocument({ routes: { "PUT /api/v1/documents/3": () => write } });
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      const name = screen.getByDisplayValue("Assembly notes");
+      await user.clear(name);
+      await user.type(name, "Saved title");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(app.requestsWithMethod("PUT")).toHaveLength(1));
+      app.route({ "GET /api/v1/documents/3": () => lateRead });
+      const refetch = app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      await waitFor(() =>
+        expect(app.requests().filter((request) => request.method === "GET")).toHaveLength(2),
+      );
+      await act(async () => {
+        resolveWrite(json(aDocument({ name: "Saved title", edit_version: 2 })));
+      });
+      expect(await screen.findByRole("heading", { name: "Saved title" })).toBeInTheDocument();
+      await act(async () => {
+        resolveRead(json(aDocument()));
+        await refetch;
+      });
+      expect(screen.getByRole("heading", { name: "Saved title" })).toBeInTheDocument();
+    });
+
+    it("keeps the next document draft across an earlier route save", async () => {
+      let respond!: (response: Response) => void;
+      const pending = new Promise<Response>((resolve) => {
+        respond = resolve;
+      });
+      const user = userEvent.setup();
+      renderApp(
+        <>
+          <Link href="/documents/4">Next document</Link>
+          <DocumentDetailPage />
+        </>,
+        {
+          at: "/documents/3",
+          routePath: "/documents/:id",
+          routes: {
+            "GET /api/v1/documents/3": json(aDocument()),
+            "GET /api/v1/documents/4": json(aDocument({ id: 4, name: "Next notes" })),
+            "PUT /api/v1/documents/3": () => pending,
+          },
+        },
+      );
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("link", { name: "Next document" }));
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      await user.type(screen.getByPlaceholderText(/Write markdown/), " next draft");
+
+      await act(async () => {
+        respond(json(aDocument({ edit_version: 2 })));
+        await pending;
+      });
+
+      expect(screen.getByPlaceholderText(/Write markdown/)).toHaveValue("# Notes next draft");
+      expect(screen.getByRole("textbox", { name: "Document name" })).toHaveValue("Next notes");
+    });
+
+    it("releases protected preview bytes after a denied read", async () => {
+      vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:revoked-image");
+      const revoke = vi.spyOn(URL, "revokeObjectURL");
+      const app = renderDocument({
+        document: aDocument({ kind: "other", filename: "diagram.png", body: null }),
+        routes: {
+          "GET /api/v1/documents/3/file": new Response("png", {
+            headers: { "content-type": "image/png" },
+          }),
+        },
+      });
+      await screen.findByRole("img", { name: "Assembly notes" });
+      app.route({ "GET /api/v1/documents/3": json({ detail: "forbidden" }, 403) });
+
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+
+      await screen.findByRole("alert");
+      expect(screen.queryByRole("img")).toBeNull();
+      expect(revoke).toHaveBeenCalledWith("blob:revoked-image");
+    });
+
+    it("keeps binary preview bytes across a metadata refresh", async () => {
+      vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:guide-image");
+      const revoke = vi.spyOn(URL, "revokeObjectURL");
+      const binary = aDocument({ kind: "other", filename: "diagram.png", body: null });
+      const app = renderDocument({
+        document: binary,
+        routes: {
+          "GET /api/v1/documents/3/file": new Response("png", {
+            headers: { "content-type": "image/png" },
+          }),
+        },
+      });
+      expect(await screen.findByRole("img", { name: "Assembly notes" })).toHaveAttribute(
+        "src",
+        "blob:guide-image",
+      );
+      app.route({ "GET /api/v1/documents/3": json({ ...binary, name: "Renamed image" }) });
+      await act(async () => {
+        await app.client.invalidateQueries({ queryKey: documentKeys.detail(3) });
+      });
+      expect(await screen.findByRole("img", { name: "Renamed image" })).toHaveAttribute(
+        "src",
+        "blob:guide-image",
+      );
+      expect(app.requests().filter((request) => request.url.endsWith("/file"))).toHaveLength(1);
+      app.unmount();
+      expect(revoke).toHaveBeenCalledWith("blob:guide-image");
     });
   });
 
@@ -310,6 +678,46 @@ describe("DocumentDetailPage", () => {
           /documents\/3\/images\/1/,
         ),
       );
+    });
+
+    it("keeps the next document draft across an earlier image upload", async () => {
+      let respond!: (response: Response) => void;
+      const pending = new Promise<Response>((resolve) => {
+        respond = resolve;
+      });
+      const user = userEvent.setup();
+      const app = renderApp(
+        <>
+          <Link href="/documents/4">Next document</Link>
+          <DocumentDetailPage />
+        </>,
+        {
+          at: "/documents/3",
+          routePath: "/documents/:id",
+          routes: {
+            "GET /api/v1/documents/3": json(aDocument()),
+            "GET /api/v1/documents/4": json(aDocument({ id: 4, name: "Next notes" })),
+            "POST /api/v1/documents/3/images": () => pending,
+          },
+        },
+      );
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      fireEvent.paste(screen.getByPlaceholderText(/Write markdown/), {
+        clipboardData: { files: [anImage()] },
+      });
+      await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      await user.click(screen.getByRole("link", { name: "Next document" }));
+      await user.click(await screen.findByRole("button", { name: /Edit/ }));
+      await user.type(screen.getByPlaceholderText(/Write markdown/), " next draft");
+
+      await act(async () => {
+        respond(json({ url: "/api/v1/documents/3/images/1" }));
+        await pending;
+      });
+
+      expect(screen.getByPlaceholderText(/Write markdown/)).toHaveValue("# Notes next draft");
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     });
 
     it("uploads an image dropped on the editor", async () => {

@@ -1,5 +1,35 @@
 """Register every domain table and expose the shared SQLModel metadata."""
 
+# Versioned database contracts also install on the direct create_all path.
+from app.db import (
+    browser_edit_contracts_v1 as _browser_edit_contracts_v1,  # noqa: F401, E402
+)
+from app.db import (
+    config_edit_contracts_v1 as _config_edit_contracts_v1,  # noqa: F401, E402
+)
+from app.db import (
+    connection_edit_contracts_v1 as _connection_edit_contracts_v1,  # noqa: F401, E402
+)
+from app.db import library_contracts_v1 as _library_contracts_v1  # noqa: F401, E402
+from app.db import (
+    notification_edit_contracts_v1 as _notification_edit_contracts_v1,  # noqa: F401, E402
+)
+from app.db import (
+    printer_edit_contracts_v1 as _printer_edit_contracts_v1,  # noqa: F401, E402
+)
+from app.db import (
+    profile_edit_contracts_v1 as _profile_edit_contracts_v1,  # noqa: F401, E402
+)
+from app.db import (
+    search_edit_contracts_v1 as _search_edit_contracts_v1,  # noqa: F401, E402
+)
+from app.db import (
+    source_edit_contracts_v1 as _source_edit_contracts_v1,  # noqa: F401, E402
+)
+from app.db import (
+    spoolman_edit_contracts_v1 as _spoolman_edit_contracts_v1,  # noqa: F401, E402
+)
+
 from .administration import (
     AuditLog as AuditLog,
 )
@@ -84,12 +114,14 @@ from .ingestion import (
 from .ingestion import (
     InboxItemResult as InboxItemResult,
 )
+from .ingestion import IngestionEntry as IngestionEntry
 from .ingestion import (
     IngestRequest as IngestRequest,
 )
 from .ingestion import (
     StagingLease as StagingLease,
 )
+from .ingestion_scratch import IngestionScratchWindow as IngestionScratchWindow
 from .library import (
     ArtifactMaterialRequirement as ArtifactMaterialRequirement,
 )
@@ -108,6 +140,7 @@ from .library import (
 from .library import (
     FileTagLink as FileTagLink,
 )
+from .library import LibraryRevision as LibraryRevision
 from .library import (
     Metadata as Metadata,
 )
@@ -151,8 +184,12 @@ from .media import (
     ArtifactDerivative as ArtifactDerivative,
 )
 from .media import (
+    DerivativeGroupRegeneration as DerivativeGroupRegeneration,
+)
+from .media import (
     DerivativeRegeneration as DerivativeRegeneration,
 )
+from .media import MeshFingerprintContinuation as MeshFingerprintContinuation
 from .notifications import (
     NotificationChannel as NotificationChannel,
 )
@@ -267,6 +304,7 @@ from .storage import (
 from .storage import (
     StorageFailureDomainDeclaration as StorageFailureDomainDeclaration,
 )
+from .storage import StoragePublicationLocator as StoragePublicationLocator
 from .types import (
     SENTINEL_FILE_HASH as SENTINEL_FILE_HASH,
 )
@@ -328,6 +366,7 @@ from .types import (
 from .types import (
     InboxSourceKind as InboxSourceKind,
 )
+from .types import IngestionEntryState as IngestionEntryState
 from .types import (
     IngestRequestKind as IngestRequestKind,
 )

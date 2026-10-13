@@ -215,6 +215,7 @@ def _status(**fields) -> JobStatus:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     base = {
         "job_id": "j",
+        "staging": None,
         "kind": JobKind.SOURCES_SCAN,
         "state": JobState.RUNNING,
         "priority": WorkPriority.BACKFILL,

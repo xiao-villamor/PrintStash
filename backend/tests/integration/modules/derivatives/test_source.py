@@ -52,6 +52,192 @@ def mesh(make_model, make_file):
 
 
 class TestPending:
+    @pytest.mark.parametrize(
+        ("kind", "old_recipe", "other_kind"),
+        [
+            (DerivativeKind.METADATA, 10, DerivativeKind.THUMBNAIL),
+            (DerivativeKind.THUMBNAIL, 9, DerivativeKind.METADATA),
+            (DerivativeKind.METADATA, 11, DerivativeKind.THUMBNAIL),
+            (DerivativeKind.THUMBNAIL, 10, DerivativeKind.METADATA),
+        ],
+    )
+    @pytest.mark.parametrize("state", [DerivativeState.READY, DerivativeState.FAILED])
+    def test_rederives_stl_outputs_from_the_previous_reader_recipe(
+        self, db_session, mesh, make_derivative, kind, old_recipe, other_kind, state
+    ):
+        artifact = mesh()
+        make_derivative(
+            artifact,
+            kind,
+            recipe_version=old_recipe,
+            state=state,
+            exhausted=state is DerivativeState.FAILED,
+            failure_reason="invalid_source"
+            if state is DerivativeState.FAILED
+            else None,
+        )
+        make_derivative(artifact, other_kind)
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    @pytest.mark.parametrize(
+        "state",
+        [DerivativeState.READY, DerivativeState.FAILED],
+        ids=["ready", "failed"],
+    )
+    def test_rederives_thumbnails_from_the_previous_gpu_recipe(
+        self, db_session, mesh, make_derivative, state
+    ):
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL,
+            recipe_version=14,
+            state=state,
+            exhausted=state is DerivativeState.FAILED,
+            failure_reason="render_failed" if state is DerivativeState.FAILED else None,
+        )
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    @pytest.mark.parametrize("previous_recipe", [1, 2])
+    def test_rederives_gcode_thumbnails_from_previous_recipes(
+        self, db_session, make_model, make_file, make_derivative, previous_recipe
+    ):
+        artifact = make_file(
+            make_model(), filename="part.gcode", file_type=FileType.GCODE
+        )
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(
+            artifact, DerivativeKind.THUMBNAIL, recipe_version=previous_recipe
+        )
+        source = DerivativeSource(group(JobKind.DERIVATIVES_GCODE))
+
+        assert _subjects(db_session, source=source) == [subject_key(artifact.id)]
+
+    def test_keeps_previous_thumbnail_visible_during_recipe_backfill(
+        self, db_session, mesh, make_derivative
+    ):
+        artifact = mesh(thumbnail_path="thumbs/previous-recipe.webp")
+        metadata = make_derivative(artifact, DerivativeKind.METADATA)
+        thumbnail = make_derivative(
+            artifact, DerivativeKind.THUMBNAIL, recipe_version=14
+        )
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+        db_session.refresh(artifact)
+        db_session.refresh(metadata)
+        db_session.refresh(thumbnail)
+        assert artifact.thumbnail_path == "thumbs/previous-recipe.webp"
+        assert metadata.state is DerivativeState.READY
+        assert metadata.recipe_version == 12
+        assert thumbnail.state is DerivativeState.READY
+        assert thumbnail.recipe_version == 14
+
+    def test_rederives_previews_with_ambiguous_completeness(
+        self, db_session, mesh, make_derivative
+    ):
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL,
+            recipe_version=7,
+            output_json='{"strategy":"fallback","complete":true}',
+        )
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    @pytest.mark.parametrize(
+        ("kind", "previous_recipe", "other_kind"),
+        [
+            (DerivativeKind.METADATA, 8, DerivativeKind.THUMBNAIL),
+            (DerivativeKind.THUMBNAIL, 7, DerivativeKind.METADATA),
+        ],
+    )
+    def test_rederives_outputs_from_the_previous_stl_reader_recipe(
+        self, db_session, mesh, make_derivative, kind, previous_recipe, other_kind
+    ):
+        artifact = mesh()
+        make_derivative(artifact, kind, recipe_version=previous_recipe)
+        make_derivative(artifact, other_kind)
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    @pytest.mark.parametrize(
+        ("kind", "old_recipe", "other_kind"),
+        [
+            (DerivativeKind.METADATA, 7, DerivativeKind.THUMBNAIL),
+            (DerivativeKind.THUMBNAIL, 6, DerivativeKind.METADATA),
+        ],
+    )
+    def test_rederives_outputs_from_the_percentile_framing_recipe(
+        self, db_session, mesh, make_derivative, kind, old_recipe, other_kind
+    ):
+        artifact = mesh()
+        make_derivative(artifact, kind, recipe_version=old_recipe)
+        make_derivative(artifact, other_kind)
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    def test_rederives_previews_from_the_axis_degeneracy_recipe(
+        self, db_session, mesh, make_derivative
+    ):
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL, recipe_version=5)
+
+        subjects = _subjects(db_session)
+
+        assert subjects == [subject_key(artifact.id)]
+
+    def test_rederives_terminal_fingerprint_cap_refusals(
+        self, db_session, mesh, make_derivative
+    ):
+        artifact = mesh()
+        make_derivative(
+            artifact,
+            DerivativeKind.METADATA,
+            recipe_version=6,
+            state=DerivativeState.FAILED,
+            exhausted=True,
+            failure_reason="resource_limit",
+        )
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL,
+            recipe_version=4,
+            state=DerivativeState.FAILED,
+            exhausted=True,
+            failure_reason="resource_limit",
+        )
+
+        subjects = _subjects(db_session)
+
+        assert subjects == [subject_key(artifact.id)]
+
+    def test_rederives_thumbnails_from_the_unfiltered_vertex_recipe(
+        self, db_session, mesh, make_derivative
+    ):
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL, recipe_version=3)
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    def test_rederives_thumbnails_from_the_world_float32_recipe(
+        self, db_session, mesh, make_derivative
+    ):
+        artifact = mesh()
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL, recipe_version=2)
+
+        subjects = _subjects(db_session)
+
+        assert subjects == [subject_key(artifact.id)]
+
     def test_a_fresh_upload_is_interactive_work(
         self, db_session: Session, mesh
     ) -> None:
@@ -77,6 +263,36 @@ class TestPending:
         make_derivative(artifact, DerivativeKind.THUMBNAIL)
 
         assert _pending(db_session) == []
+
+    @pytest.mark.parametrize(
+        ("file_type", "filename", "job_kind", "old_recipe"),
+        [
+            pytest.param(
+                FileType.STL, "part.stl", JobKind.DERIVATIVES_MESH, 11, id="mesh"
+            ),
+            pytest.param(
+                FileType.GCODE, "part.gcode", JobKind.DERIVATIVES_GCODE, 1, id="gcode"
+            ),
+        ],
+    )
+    def test_backfills_previous_thumbnail_recipes(
+        self,
+        db_session,
+        make_model,
+        make_file,
+        make_derivative,
+        file_type,
+        filename,
+        job_kind,
+        old_recipe,
+    ):
+        artifact = make_file(make_model(), filename=filename, file_type=file_type)
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL, recipe_version=old_recipe)
+
+        pending = _subjects(db_session, source=DerivativeSource(group(job_kind)))
+
+        assert pending == [subject_key(artifact.id)]
 
     def test_one_missing_kind_is_enough(
         self, db_session: Session, mesh, make_derivative
@@ -301,3 +517,243 @@ class TestSubjects:
     def test_refuses_what_is_not_a_derivative_subject(self, subject: str) -> None:
         with pytest.raises(ValueError, match="not_a_derivative_subject"):
             file_id_of(subject)
+
+
+class TestMeshContinuationSource:
+    @staticmethod
+    def _ready(artifact, make_derivative):
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+
+    def test_discovers_pending_analysis_after_basics_ready(
+        self, db_session, mesh, make_derivative, make_mesh_continuation
+    ):
+        artifact = mesh()
+        self._ready(artifact, make_derivative)
+        make_mesh_continuation(artifact)
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    def test_waits_until_continuation_due(
+        self, db_session, mesh, make_derivative, make_mesh_continuation
+    ):
+        artifact = mesh()
+        self._ready(artifact, make_derivative)
+        due = utcnow() + timedelta(minutes=3)
+        make_mesh_continuation(artifact, available_at=due)
+        now = utcnow()
+        assert MESH.pending(db_session, now=now, limit=10) == []
+        assert MESH.next_due(db_session, now=now) == due
+        assert [
+            item.subject_key for item in MESH.pending(db_session, now=due, limit=10)
+        ] == [subject_key(artifact.id)]
+
+    def test_discovers_obsolete_input_for_retirement(
+        self, db_session, mesh, make_derivative, make_mesh_continuation
+    ):
+        artifact = mesh()
+        self._ready(artifact, make_derivative)
+        make_mesh_continuation(
+            artifact, source_sha256="b" * 64, algorithm_version="historical-recipe"
+        )
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    @pytest.mark.parametrize("hidden", ["trash", "wrong-type"])
+    def test_ignores_inapplicable_continuation(
+        self, db_session, mesh, make_derivative, make_mesh_continuation, hidden
+    ):
+        artifact = mesh()
+        self._ready(artifact, make_derivative)
+        make_mesh_continuation(artifact, available_at=utcnow() + timedelta(minutes=1))
+        if hidden == "trash":
+            artifact.deleted_at = utcnow()
+        else:
+            artifact.file_type = FileType.GCODE
+        db_session.add(artifact)
+        db_session.commit()
+        assert _subjects(db_session) == []
+        assert MESH.next_due(db_session, now=utcnow()) is None
+
+    def test_bounds_continuation_discovery(
+        self, db_session, mesh, make_derivative, make_mesh_continuation
+    ):
+        artifacts = [mesh() for _ in range(5)]
+        for artifact in artifacts:
+            self._ready(artifact, make_derivative)
+            make_mesh_continuation(artifact)
+        subjects = _subjects(db_session, limit=2)
+        assert subjects == [subject_key(artifact.id) for artifact in artifacts[:2]]
+
+    def test_job_retention_preserves_pending_analysis(
+        self, db_session, mesh, make_derivative, make_mesh_continuation, make_job
+    ):
+        from app.db.models import JobState, MeshFingerprintContinuation
+
+        artifact = mesh()
+        self._ready(artifact, make_derivative)
+        job = make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            state=JobState.COMPLETED,
+            attempts=1,
+            subject=subject_key(artifact.id),
+        )
+        pending = make_mesh_continuation(artifact, job=job)
+        historical_id = job.id
+        db_session.delete(job)
+        db_session.commit()
+        db_session.expire_all()
+        current = db_session.get(MeshFingerprintContinuation, artifact.id)
+        assert current is not None and current.token == pending.token
+        assert current.job_id == historical_id
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+
+class TestPriorityDiscovery:
+    @staticmethod
+    def pending(session, *, total=1, interactive=1, backfill=1):
+        from app.modules.work.contracts import DiscoveryBudget
+
+        # Reconstructing the source must preserve the durable scan and turn.
+        source = DerivativeSource(group(JobKind.DERIVATIVES_MESH))
+        return source.pending_prioritized(
+            session,
+            now=utcnow(),
+            budget=DiscoveryBudget(
+                total=total, interactive=interactive, backfill=backfill
+            ),
+        )
+
+    def test_recent_upload_bypasses_an_old_unscanned_prefix(
+        self, db_session, mesh, monkeypatch
+    ):
+        monkeypatch.setattr(source_module, "WINDOW", 2)
+        for _ in range(5):
+            mesh(uploaded_at=utcnow() - timedelta(days=30))
+        recent = mesh()
+        (item,) = self.pending(db_session, backfill=0)
+        assert item.subject_key == subject_key(recent.id)
+        assert item.priority is WorkPriority.INTERACTIVE
+
+    def test_recent_upload_below_the_scan_cursor_remains_interactive(
+        self, db_session, mesh
+    ):
+        from app.db.models import ReconcileCursor
+
+        recent = mesh()
+        db_session.add(
+            ReconcileCursor(
+                source=JobKind.DERIVATIVES_MESH,
+                scan_high_water=recent.id,
+                scan_position=recent.id,
+            )
+        )
+        db_session.commit()
+        (item,) = self.pending(db_session, backfill=0)
+        assert item.subject_key == subject_key(recent.id)
+        assert item.priority is WorkPriority.INTERACTIVE
+
+    @pytest.mark.parametrize("state", ["QUEUED", "RUNNING", "INTERRUPTED"])
+    def test_active_subjects_cannot_consume_the_result_limit(
+        self, db_session, mesh, make_job, monkeypatch, state
+    ):
+        from app.db.models import JobState
+
+        monkeypatch.setattr(source_module, "WINDOW", 2)
+        pending = mesh()
+        active = mesh()
+        make_job(
+            kind=JobKind.DERIVATIVES_MESH,
+            subject=subject_key(active.id),
+            state=JobState[state],
+        )
+        (item,) = self.pending(db_session, backfill=0)
+        assert item.subject_key == subject_key(pending.id)
+
+    def test_recent_pagination_passes_a_ready_candidate_prefix(
+        self, db_session, mesh, make_derivative, monkeypatch
+    ):
+        monkeypatch.setattr(source_module, "WINDOW", 2)
+        pending = mesh()
+        for _ in range(5):
+            ready = mesh()
+            make_derivative(ready, DerivativeKind.METADATA)
+            make_derivative(ready, DerivativeKind.THUMBNAIL)
+        found = []
+        for _ in range(4):
+            items = self.pending(db_session, backfill=0)
+            assert len(items) <= 1
+            found.extend(items)
+        assert subject_key(pending.id) in {item.subject_key for item in found}
+        assert all(item.priority is WorkPriority.INTERACTIVE for item in found)
+
+    def test_one_item_budget_gives_backfill_a_durable_turn(
+        self, db_session, mesh, make_derivative
+    ):
+        old = mesh(uploaded_at=utcnow() - timedelta(days=30))
+        priorities = []
+        subjects = []
+        for _ in range(2):
+            mesh()
+            (item,) = self.pending(db_session)
+            priorities.append(item.priority)
+            subjects.append(item.subject_key)
+            artifact_id = file_id_of(item.subject_key)
+            from app.db.models import File
+
+            artifact = db_session.get(File, artifact_id)
+            make_derivative(artifact, DerivativeKind.METADATA)
+            make_derivative(artifact, DerivativeKind.THUMBNAIL)
+        assert set(priorities) == {WorkPriority.INTERACTIVE, WorkPriority.BACKFILL}
+        assert subject_key(old.id) in subjects
+
+    def test_new_uploads_cannot_extend_an_old_rotation_forever(
+        self, db_session, mesh, make_derivative, monkeypatch
+    ):
+        monkeypatch.setattr(source_module, "WINDOW", 2)
+        old = [mesh(uploaded_at=utcnow() - timedelta(days=30)) for _ in range(5)]
+        discovered = set()
+        for _ in range(12):
+            for _ in range(3):
+                mesh()
+            items = self.pending(db_session, interactive=0)
+            assert len(items) <= 1
+            for item in items:
+                assert item.priority is WorkPriority.BACKFILL
+                discovered.add(item.subject_key)
+                artifact = next(
+                    row for row in old if subject_key(row.id) == item.subject_key
+                )
+                make_derivative(artifact, DerivativeKind.METADATA)
+                make_derivative(artifact, DerivativeKind.THUMBNAIL)
+        assert discovered == {subject_key(item.id) for item in old}
+
+    def test_full_backfill_quota_preserves_the_old_scan_round(
+        self, db_session, mesh, monkeypatch
+    ):
+        from app.db.models import ReconcileCursor
+
+        monkeypatch.setattr(source_module, "WINDOW", 2)
+        old = [mesh(uploaded_at=utcnow() - timedelta(days=30)) for _ in range(3)]
+        frozen_upper = old[-1].id
+        db_session.add(
+            ReconcileCursor(
+                source=JobKind.DERIVATIVES_MESH,
+                scan_high_water=frozen_upper,
+                scan_position=0,
+            )
+        )
+        db_session.commit()
+        for _ in range(3):
+            mesh()
+            items = self.pending(db_session, backfill=0)
+            assert len(items) == 1
+            assert items[0].priority is WorkPriority.INTERACTIVE
+            cursor = db_session.get(ReconcileCursor, JobKind.DERIVATIVES_MESH)
+            assert cursor is not None
+            assert cursor.scan_position == 0
+            assert cursor.scan_high_water == frozen_upper
+        (item,) = self.pending(db_session, interactive=0)
+        assert item.subject_key == subject_key(old[0].id)
+        assert item.priority is WorkPriority.BACKFILL
+        cursor = db_session.get(ReconcileCursor, JobKind.DERIVATIVES_MESH)
+        assert cursor is not None
+        assert cursor.scan_high_water == frozen_upper

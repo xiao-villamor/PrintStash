@@ -1,4 +1,9 @@
 import { QueryClient } from "@tanstack/react-query";
+import { onAuthChange } from "@/lib/auth-store";
+import { getSessionVersion } from "@/lib/session-transport";
+
+import type { OutlinerParams } from "@/types/outliner";
+import type { CollectionRole } from "@/types";
 
 /**
  * Single app-wide query cache.
@@ -12,8 +17,7 @@ import { QueryClient } from "@tanstack/react-query";
  *  - `gcTime` 5m — unobserved data is dropped after five minutes.
  *  - one retry — transient blips recover; hard failures surface quickly.
  *
- * Lives in its own module (no imports from the api layer) so `request.ts` can
- * import it to invalidate the cache on mutations without a circular import.
+ * Feature command owners declare invalidation; transport never imports this module.
  */
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,6 +30,9 @@ export const queryClient = new QueryClient({
   },
 });
 
+// Authentication retires private Query state independently of HTTP imports.
+onAuthChange(() => queryClient.clear());
+
 // ---------------------------------------------------------------------------
 // Query keys — one factory, mirroring the backend resource roots so keys stay
 // consistent and invalidation can target a whole resource by prefix.
@@ -35,6 +42,10 @@ export const queryClient = new QueryClient({
 // partial matching, so a single entry covers a resource's lists + details.
 // ---------------------------------------------------------------------------
 export const queryKeys = {
+  outliner: ["outliner"] as const,
+  outlinerRestore: ["outliner", "restore"] as const,
+  outlinerCollections: (params: OutlinerParams) => ["outliner", "collections", params] as const,
+  outlinerEntries: (params: OutlinerParams) => ["outliner", "entries", params] as const,
   models: ["models"] as const,
   model: (id: number) => ["models", id] as const,
   multipartModels: ["multipart-models"] as const,
@@ -44,7 +55,14 @@ export const queryKeys = {
   collections: ["collections"] as const,
   // Under the collections root, so a readme write's `collections` invalidation
   // refreshes it together with the list's `has_readme` flag.
-  collectionReadme: (id: number) => ["collections", id, "readme"] as const,
+  collectionReadme: (id: number | null) => ["collections", id, "readme"] as const,
+  // The lazily loaded tree, under the same root: any collection write that
+  // invalidates `collections` refreshes every loaded level, lookup and search.
+  collectionChildren: (parentId: number | null) => ["collections", "children", parentId] as const,
+  collectionLookup: (path: string | null) => ["collections", "lookup", path] as const,
+  collectionLookupById: (id: number | null) => ["collections", "lookup-id", id] as const,
+  collectionSearch: (query: string, minRole: CollectionRole) =>
+    ["collections", "search", query, minRole] as const,
   tags: ["tags"] as const,
   printers: ["printers"] as const,
   printerDashboard: ["printers", "dashboard"] as const,
@@ -70,6 +88,7 @@ export const queryKeys = {
  * race with this completion refresh.
  */
 export async function refreshVaultAfterIngest(): Promise<void> {
+  const session = getSessionVersion();
   const keys = [
     queryKeys.models,
     queryKeys.collections,
@@ -77,118 +96,10 @@ export async function refreshVaultAfterIngest(): Promise<void> {
     queryKeys.multipartModels,
   ];
   await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
-  await Promise.all(keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
-}
-
-/**
- * Invalidate the query keys a mutated API path can affect.
- *
- * Keyed (not blanket) invalidation: a collection/tag write also touches how
- * models are listed/labelled, so those fan out to ["models"]. An unrecognised
- * path is intentionally left alone; callers that do not know the affected
- * resource can omit the path and request a full invalidation instead.
- */
-type ApiMethod = "GET" | "HEAD" | "OPTIONS" | "POST" | "PUT" | "PATCH" | "DELETE";
-
-/**
- * Invalidate read models affected by a successful API mutation.
- *
- * `request.ts` calls this only for writes. Keeping the method argument here is
- * useful for callers that work with a generic transport and, importantly,
- * makes an accidental GET invalidation a no-op. Resource names are matched as
- * path segments, never as substrings: `/printer-profiles` must not be treated
- * as `/printers`, and `/multipart-models` is not the only write that can make
- * a multipart view stale.
- */
-export function invalidateQueriesForPath(path: string, method: ApiMethod = "POST"): void {
-  if (method === "GET" || method === "HEAD" || method === "OPTIONS") return;
-
-  const segments = path.split(/[/?#]/).filter(Boolean);
-  const has = (...names: string[]) => names.some((name) => segments.includes(name));
-  const invalidated = new Set<string>();
-  const bust = (queryKey: readonly unknown[]) => {
-    const identity = JSON.stringify(queryKey);
-    if (invalidated.has(identity)) return;
-    invalidated.add(identity);
-    void queryClient.invalidateQueries({ queryKey });
-  };
-
-  const multipartAffected = () => {
-    // The root key is a prefix, so this refreshes list, detail, and candidate
-    // queries together (including entries with query parameters).
-    bust(queryKeys.multipartModels);
-  };
-
-  if (has("ai-search", "inference") && !segments.includes("estimate")) {
-    bust(["ai-search"]);
-  }
-
-  if (has("collections")) {
-    bust(queryKeys.collections);
-    bust(queryKeys.models);
-    multipartAffected();
-  }
-  if (has("tags")) {
-    bust(queryKeys.tags);
-    bust(queryKeys.models);
-    multipartAffected();
-  }
-  if (
-    has(
-      "models",
-      "files",
-      "artifacts",
-      "ingest",
-      "gcode",
-      "gcode-revision",
-      "gcode-revisions",
-      "revisions",
-    )
-  ) {
-    bust(queryKeys.models);
-    // Vault totals (count, size, material breakdown) are derived from models,
-    // so any model/file write can change them.
-    bust(queryKeys.vaultStats);
-    // Collections carry a `model_count`; a move/delete/import shifts those
-    // counts, so refresh the collection list (and its sidebar badges) too.
-    bust(queryKeys.collections);
-    multipartAffected();
-  }
-  if (has("trash", "restore", "purge", "gc")) {
-    // Trash routes can operate on Models, Files, or collections. These reads
-    // are cheap and keeping them in sync also covers restore/purge actions
-    // whose route does not include the affected resource name.
-    bust(queryKeys.models);
-    bust(queryKeys.collections);
-    bust(queryKeys.vaultStats);
-    multipartAffected();
-  }
-  if (has("multipart-models")) {
-    multipartAffected();
-  }
-  if (has("printers")) {
-    bust(queryKeys.printers);
-  }
-  if (has("fleet")) {
-    bust(queryKeys.fleetQueue);
-    bust(queryKeys.fleetSummary);
-    bust(queryKeys.printers);
-  }
-  if (has("filament-profiles")) {
-    bust(queryKeys.filamentProfiles);
-  }
-  if (has("printer-profiles")) {
-    bust(queryKeys.printerProfiles);
-  }
-  if (segments.includes("admin") && segments.includes("users")) {
-    bust(queryKeys.adminUsers);
-  }
-  if (has("spoolman")) {
-    bust(queryKeys.spoolmanStatus);
-    bust(queryKeys.spools);
-    // A filament sync rewrites linked presets.
-    if (segments.includes("sync-filaments")) {
-      bust(queryKeys.filamentProfiles);
-    }
-  }
+  // Cancellation can yield across logout or an access-scope replacement.
+  if (session !== getSessionVersion()) return;
+  await Promise.all([
+    queryClient.resetQueries({ queryKey: queryKeys.outliner }),
+    ...keys.map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  ]);
 }

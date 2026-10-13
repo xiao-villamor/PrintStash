@@ -1,18 +1,25 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { FolderOpen, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/lib/i18n";
+import { vaultConfigOptions, useVaultConfigCommand } from "@/lib/queries/settings-config";
 import {
-  createExternalLibrary,
-  getVaultConfig,
-  scanExternalLibrary,
-  updateVaultConfig,
-} from "@/lib/api";
-import { userMessage } from "@/lib/errors";
-import { trackImportJob, waitForImportJob } from "@/lib/task-center";
-import { uiMessage } from "@/lib/locale";
-import type { ExternalLibrary } from "@/types";
+  librarySourcesOptions,
+  useLibrarySourceCommand,
+} from "@/lib/queries/settings-library-sources";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
+import { captureEditingBase } from "@/lib/api/editing";
+import { onAuthChange } from "@/lib/auth-store";
+import type { VaultConfigRead } from "@/types";
+import { parseApiError, userMessage } from "@/lib/errors";
+import { uiMessage, uiText } from "@/lib/locale";
+
+type ActivationReview =
+  | { phase: "idle" }
+  | { phase: "required" | "loading"; problem: "conflict" | "unconfirmed" }
+  | { phase: "ready"; problem: "conflict" | "unconfirmed"; snapshot: VaultConfigRead };
 
 /** A first mounted source uses the same source and ingestion contracts as Settings. */
 export function SetupFolder({
@@ -27,11 +34,43 @@ export function SetupFolder({
   const { t } = useI18n();
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
-  const [source, setSource] = useState<ExternalLibrary | null>(null);
+  const [source, setSource] = useState<{ id: number; name: string } | null>(null);
+  const [session] = useState(getSessionVersion);
+  const [retired, setRetired] = useState(false);
+  const [review, setReview] = useState<ActivationReview>({ phase: "idle" });
+  const live = useRef(true);
+  const pending = useRef(false);
+  const config = useQuery({ ...vaultConfigOptions(), enabled: false });
+  const sources = useQuery({ ...librarySourcesOptions(), enabled: false });
+  const configCommand = useVaultConfigCommand();
+  const sourceCommand = useLibrarySourceCommand();
+  useEffect(() => {
+    live.current = true;
+    const release = onAuthChange(() => {
+      setRetired(true);
+      setName("");
+      setPath("");
+      setSource(null);
+      setReview({ phase: "idle" });
+    });
+    return () => {
+      live.current = false;
+      release();
+    };
+  }, []);
+  function assertCurrent() {
+    requireSessionVersion(session);
+    if (!live.current) throw new DOMException("First-folder view was disposed", "AbortError");
+  }
+  function isCurrent() {
+    return live.current && session === getSessionVersion();
+  }
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [empty, setEmpty] = useState(false);
-  async function connect() {
+  async function connect(reviewed?: VaultConfigRead) {
+    if (!isCurrent() || pending.current || (review.phase !== "idle" && !reviewed)) return;
+    pending.current = true;
     setBusy(true);
     onBusyChange(true);
     setError("");
@@ -41,34 +80,86 @@ export function SetupFolder({
       // submit enables the feature and creates the user-confirmed source.
       let current = source;
       if (!current) {
-        const config = await getVaultConfig();
-        if (!config.external_libraries_enabled) {
-          await updateVaultConfig({ external_libraries_enabled: true });
+        const snapshot = reviewed ?? (await config.refetch({ throwOnError: true })).data;
+        assertCurrent();
+        if (!snapshot) throw new Error("Configuration receipt is missing");
+        if (!snapshot.external_libraries_enabled) {
+          try {
+            await configCommand.mutateAsync({
+              session,
+              payload: { external_libraries_enabled: true },
+              base: captureEditingBase(snapshot),
+            });
+          } catch (cause) {
+            const status = parseApiError(cause).status;
+            if (isCurrent() && (status === 412 || status === 428 || status === 0 || status >= 500))
+              setReview({
+                phase: "required",
+                problem: status === 412 || status === 428 ? "conflict" : "unconfirmed",
+              });
+            throw cause;
+          }
+          assertCurrent();
         }
-        current = await createExternalLibrary({
-          name: name.trim(),
-          root_path: path.trim(),
-          scan_schedule: "0 * * * *",
-          watch_mode: "auto",
-          collection_mode: "mirror",
+        setReview({ phase: "idle" });
+        await sources.refetch({ throwOnError: true });
+        assertCurrent();
+        const created = await sourceCommand.mutateAsync({
+          kind: "create",
+          session,
+          payload: {
+            name: name.trim(),
+            root_path: path.trim(),
+            scan_schedule: "0 * * * *",
+            watch_mode: "auto",
+            collection_mode: "mirror",
+          },
         });
+        assertCurrent();
+        current = { id: created.id, name: created.name };
         setSource(current);
       }
-      const job = await scanExternalLibrary(current.id);
-      trackImportJob(job.job_id, uiMessage("Scan {value1}", { value1: current.name }));
-      const result = await waitForImportJob(job.job_id);
-      if (result.state !== "completed") throw new Error(result.error || "scan_failed");
+      const result = await sourceCommand.mutateAsync({
+        kind: "scan",
+        session,
+        id: current.id,
+        title: uiMessage("Scan {value1}", { value1: current.name }),
+      });
+      assertCurrent();
       const complete = result.completion !== "partial";
       const count = await onIndexed(complete);
+      assertCurrent();
       if (!complete) setError(t("setup.scanPartial"));
       setEmpty(count === 0);
     } catch (cause) {
-      setError(userMessage(cause));
+      if (isCurrent()) setError(userMessage(cause));
     } finally {
-      setBusy(false);
-      onBusyChange(false);
+      pending.current = false;
+      if (isCurrent()) {
+        setBusy(false);
+        onBusyChange(false);
+      }
     }
   }
+  async function reviewActivation() {
+    if (!isCurrent() || pending.current || review.phase === "idle" || review.phase === "loading")
+      return;
+    const problem = review.problem;
+    setReview({ phase: "loading", problem });
+    setError("");
+    try {
+      const result = await config.refetch({ throwOnError: true });
+      assertCurrent();
+      if (!result.data) throw new Error("Configuration review has no data");
+      setReview({ phase: "ready", problem, snapshot: result.data });
+    } catch (cause) {
+      if (isCurrent()) {
+        setReview({ phase: "required", problem });
+        setError(userMessage(cause));
+      }
+    }
+  }
+  if (retired) return null;
   return (
     <form
       className="space-y-5"
@@ -151,6 +242,39 @@ export function SetupFolder({
           {t("setup.mountInstructions")}
         </p>
       </details>
+      {review.phase !== "idle" && (
+        <div role="alert" className="space-y-3 text-sm">
+          <p>
+            {uiText(
+              review.problem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
+            )}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy || review.phase === "loading"}
+            onClick={() => void reviewActivation()}
+          >
+            {uiText("library.reviewLatest")}
+          </Button>
+          {review.phase === "ready" && (
+            <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+              <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
+              <p>
+                {uiText("Library sources")}:{" "}
+                {uiText(review.snapshot.external_libraries_enabled ? "Enabled" : "Disabled")}
+              </p>
+              <Button
+                type="button"
+                disabled={busy || !name.trim() || !path.trim()}
+                onClick={() => void connect(review.snapshot)}
+              >
+                {uiText("library.retryDraft")}
+              </Button>
+            </section>
+          )}
+        </div>
+      )}
       {error && (
         <div role="alert" className="space-y-1 rounded-md border border-destructive/30 p-3 text-sm">
           <p className="font-medium">{t(source ? "setup.scanFailed" : "setup.folderFailed")}</p>
@@ -170,7 +294,7 @@ export function SetupFolder({
       )}
       <Button
         type="submit"
-        disabled={busy || (!source && (!name.trim() || !path.trim()))}
+        disabled={busy || review.phase !== "idle" || (!source && (!name.trim() || !path.trim()))}
         className="h-11 w-full"
       >
         {t(busy ? "setup.scanning" : source ? "setup.scanAgain" : "setup.connectScan")}

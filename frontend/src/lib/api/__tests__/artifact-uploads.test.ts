@@ -1,4 +1,5 @@
 /** Canonical upload creation carries a stable retry identity without provider state. */
+import { clearLogin } from "@/lib/auth-store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -118,7 +119,7 @@ describe("artifact upload API", () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       `/api/v1/artifact-uploads/${session.id}/chunks/2?offset=8&length=4&sha256=${"b".repeat(64)}`,
-      expect.objectContaining({ method: "PUT", body: bytes, signal }),
+      expect.objectContaining({ method: "PUT", body: bytes, signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -176,5 +177,20 @@ describe("artifact upload API", () => {
       `/api/v1/artifact-uploads/${session.id}`,
       expect.objectContaining({ method: "DELETE" }),
     );
+  });
+});
+
+/** Upload acknowledgements cannot publish from a retired session. */
+describe("upload acknowledgement isolation", () => {
+  it("discards a retired chunk acknowledgement", async () => {
+    const headers = Promise.withResolvers<Response>();
+    const fetcher = vi.fn<typeof fetch>().mockReturnValueOnce(headers.promise);
+    vi.stubGlobal("fetch", fetcher);
+    const pending = putArtifactUploadChunk(session.id, 0, 0, new Blob(["part"]), "a".repeat(64));
+    const outcome = pending.catch((error: Error) => error);
+    clearLogin();
+    expect(fetcher.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    headers.resolve(json({ session }));
+    expect(await outcome).toMatchObject({ name: "AbortError" });
   });
 });

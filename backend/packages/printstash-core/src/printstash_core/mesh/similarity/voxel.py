@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .fingerprint import GeometryError
+from .time_budget import check_deadline
 
 if TYPE_CHECKING:
     import numpy as np
@@ -23,30 +24,43 @@ def voxelize(
     half_width: float,
     resolution: int = 64,
     fill: bool = True,
+    deadline: float | None = None,
 ) -> NDArray[np.bool_]:
     import numpy as np
 
     if resolution not in (16, 32, 64) or not np.isfinite(half_width) or half_width <= 0:
         raise GeometryError("invalid_voxel_recipe")
+    check_deadline(deadline)
     triangles = (vertices[faces] / half_width + 1) * (resolution / 2)
     normal = np.cross(
         triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0]
     )
     axis = int(np.argmax(np.abs(normal).sum(axis=0)))
-    grid = _project(triangles, axis=axis, resolution=resolution, fill=fill)
+    grid = _project(
+        triangles, axis=axis, resolution=resolution, fill=fill, deadline=deadline
+    )
     if not fill:
         # One projection misses faces parallel to its rays. Open-surface
         # descriptors use all three, without pretending that a shell is a solid.
         for other in range(3):
             if other != axis:
                 grid |= _project(
-                    triangles, axis=other, resolution=resolution, fill=False
+                    triangles,
+                    axis=other,
+                    resolution=resolution,
+                    fill=False,
+                    deadline=deadline,
                 )
     return grid
 
 
 def _project(
-    triangles: NDArray[np.float64], *, axis: int, resolution: int, fill: bool
+    triangles: NDArray[np.float64],
+    *,
+    axis: int,
+    resolution: int,
+    fill: bool,
+    deadline: float | None,
 ) -> NDArray[np.bool_]:
     import numpy as np
 
@@ -56,6 +70,7 @@ def _project(
     depths: list[NDArray[np.float64]] = []
     total = 0
     for start in range(0, len(triangles), 64):
+        check_deadline(deadline)
         tri = triangles[start : start + 64]
         low = np.maximum(np.ceil(tri[:, :, :2].min(axis=1) - 0.5).astype(np.int64), 0)
         high = np.minimum(

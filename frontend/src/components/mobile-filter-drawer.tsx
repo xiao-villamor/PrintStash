@@ -1,17 +1,23 @@
 "use client";
 
+import { useEffect } from "react";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { useOutlinerRestoration } from "@/lib/use-outliner-restoration";
+import { useOutlinerCollections } from "@/lib/queries";
+import { useLibraryStartup } from "@/lib/library-startup-context";
+
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { X } from "lucide-react";
-import { CollectionRead, PrinterRead, TagRead } from "@/types";
+import { PrinterRead, TagRead } from "@/types";
 import { FilterSidebarContent, type LibraryViewMode } from "@/components/filter-sidebar";
 import { Drawer } from "@/components/ui/drawer";
 
 interface MobileFilterDrawerProps {
+  outlinerFilters: import("@/types/outliner").OutlinerFilters;
   open: boolean;
   onClose: () => void;
-  collections: CollectionRead[];
   tags: TagRead[];
   printers: PrinterRead[];
   selectedCollection: string | null;
@@ -32,6 +38,17 @@ interface MobileFilterDrawerProps {
 
 export function MobileFilterDrawer({ open, onClose, ...filterProps }: MobileFilterDrawerProps) {
   useUiLocale();
+  const mobile = useMediaQuery("(max-width: 767px)");
+  const params = { ...filterProps.outlinerFilters, view: filterProps.libraryView };
+  const { restoring } = useOutlinerRestoration(params, filterProps.selectedCollection, mobile);
+  const roots = useOutlinerCollections(params, mobile && !restoring);
+  const { settle } = useLibraryStartup();
+  useEffect(() => {
+    if (!mobile || open) return;
+    // Fetch alongside the cards, but only the visible tree can report ready.
+    // Closing the drawer must not indefinitely starve secondary controls.
+    settle("tree", restoring || roots.isPending ? "pending" : "idle");
+  }, [mobile, open, restoring, roots.isPending, settle]);
   return (
     <Drawer
       open={open}
@@ -51,7 +68,7 @@ export function MobileFilterDrawer({ open, onClose, ...filterProps }: MobileFilt
         </button>
       </div>
       <div className="overflow-y-auto" style={{ height: "calc(100dvh - 60px)" }}>
-        <FilterSidebarContent {...filterProps} />
+        <FilterSidebarContent {...filterProps} readinessEnabled={open} />
       </div>
     </Drawer>
   );

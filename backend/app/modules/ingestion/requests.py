@@ -11,6 +11,7 @@ process and survives a restart.
 from __future__ import annotations
 
 import json
+from enum import Enum
 from typing import Any
 
 from sqlmodel import Session
@@ -20,6 +21,14 @@ from app.core.secrets import decrypt_secret, encrypt_secret
 from app.db.models import IngestRequest, IngestRequestKind, JobKind, User, WorkPriority
 from app.db.session import get_session_factory
 from app.modules.work import service as work_service
+
+_ENTRY_IDENTITY_VERSION_KEY = "_entry_identity_version"
+
+
+class EntryIdentityScheme(Enum):
+    LEGACY_INDEXED = "legacy_indexed"
+    STABLE_ENTRIES = "stable_entries"
+
 
 # The Job Definition that carries out each kind of request; every kind has one.
 DEFINITIONS: dict[IngestRequestKind, JobKind] = {
@@ -49,6 +58,8 @@ def create(
     import uuid
 
     job_id = uuid.uuid4().hex
+    selected = dict(selection) if selection is not None else {}
+    selected[_ENTRY_IDENTITY_VERSION_KEY] = 1
     work_service.request(
         session,
         definition=DEFINITIONS[kind],
@@ -61,7 +72,7 @@ def create(
         job_id=job_id,
         kind=kind,
         owner_user_id=owner_user_id,
-        selection_json=json.dumps(selection or {}, separators=(",", ":")),
+        selection_json=json.dumps(selected, separators=(",", ":")),
         source_credential=encrypt_secret(credential) if credential else None,
         **columns,
     )
@@ -79,7 +90,26 @@ def load(session: Session, job_id: str) -> IngestRequest:
 
 def selection(request: IngestRequest) -> dict[str, Any]:
     value = json.loads(request.selection_json or "{}")
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    value.pop(_ENTRY_IDENTITY_VERSION_KEY, None)
+    return value
+
+
+def identity_scheme(request: IngestRequest) -> EntryIdentityScheme:
+    """Missing markers identify stored legacy requests; new requests own version 1."""
+    try:
+        selected = json.loads(request.selection_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError("entry_identity_version_invalid") from exc
+    if not isinstance(selected, dict):
+        raise ValueError("entry_identity_version_invalid")
+    if _ENTRY_IDENTITY_VERSION_KEY not in selected:
+        return EntryIdentityScheme.LEGACY_INDEXED
+    version = selected[_ENTRY_IDENTITY_VERSION_KEY]
+    if type(version) is not int or version != 1:
+        raise ValueError("entry_identity_version_invalid")
+    return EntryIdentityScheme.STABLE_ENTRIES
 
 
 def credential(request: IngestRequest) -> str | None:

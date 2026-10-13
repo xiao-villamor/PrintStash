@@ -17,12 +17,18 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { InboxItem } from "@/types";
+import { SidebarNav } from "@/components/sidebar-nav";
+import { BottomNavBar } from "@/components/bottom-nav-bar";
+import { json, renderApp } from "@/test-support/render";
+import { clearLogin } from "@/lib/auth-store";
+import { inboxKeys } from "@/lib/queries/inbox";
 import { I18nProvider } from "@/lib/i18n";
 import InboxPage, { type InboxPageDeps } from "@/pages/inbox";
 
@@ -73,17 +79,21 @@ describe("InboxPage", () => {
 
   it("localizes Inbox UI while preserving dynamic source data", async () => {
     render(
-      <I18nProvider>
-        <MemoryRouter>
-          <InboxPage deps={deps} />
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <I18nProvider>
+          <MemoryRouter>
+            <InboxPage deps={deps} />
+          </MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
 
     expect(
       await screen.findByRole("heading", { name: "Importaciones pendientes" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Necesita revisión")).toBeInTheDocument();
+    expect(await screen.findByText("Necesita revisión")).toBeInTheDocument();
     expect(screen.getByText("printables.com")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Revisar" })).toHaveAttribute("href", "/inbox/1");
   });
@@ -101,17 +111,21 @@ describe("InboxPage", () => {
     vi.mocked(retryPendingImport).mockResolvedValue(failedImport);
 
     render(
-      <I18nProvider>
-        <MemoryRouter>
-          <InboxPage deps={deps} />
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <I18nProvider>
+          <MemoryRouter>
+            <InboxPage deps={deps} />
+          </MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
 
     expect(await screen.findByText("Partial")).toBeInTheDocument();
     const retry = screen.getByRole("button", { name: "Retry" });
-    await retry.click();
-    expect(retryPendingImport).toHaveBeenCalledWith(2);
+    await userEvent.setup().click(retry);
+    await waitFor(() => expect(retryPendingImport).toHaveBeenCalledWith(2));
   });
 
   it("uses captured metadata in an accessible work queue", async () => {
@@ -143,11 +157,15 @@ describe("InboxPage", () => {
     vi.mocked(listPendingImports).mockResolvedValue([richImport]);
 
     render(
-      <I18nProvider>
-        <MemoryRouter>
-          <InboxPage deps={deps} />
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <I18nProvider>
+          <MemoryRouter>
+            <InboxPage deps={deps} />
+          </MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
 
     const queue = await screen.findByRole("list", { name: "Import queue" });
@@ -164,11 +182,15 @@ describe("InboxPage", () => {
     vi.mocked(listPendingImports).mockResolvedValue([{ ...pendingImport, state: "resolving" }]);
 
     render(
-      <I18nProvider>
-        <MemoryRouter>
-          <InboxPage deps={deps} />
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <I18nProvider>
+          <MemoryRouter>
+            <InboxPage deps={deps} />
+          </MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
 
     expect(await screen.findByText("Resolving")).toBeInTheDocument();
@@ -181,11 +203,15 @@ describe("InboxPage", () => {
     const user = userEvent.setup();
 
     render(
-      <I18nProvider>
-        <MemoryRouter>
-          <InboxPage deps={deps} />
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <I18nProvider>
+          <MemoryRouter>
+            <InboxPage deps={deps} />
+          </MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
 
     await user.click(await screen.findByRole("button", { name: "Delete import" }));
@@ -211,11 +237,15 @@ describe("InboxPage", () => {
     const user = userEvent.setup();
 
     render(
-      <I18nProvider>
-        <MemoryRouter>
-          <InboxPage deps={deps} />
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <I18nProvider>
+          <MemoryRouter>
+            <InboxPage deps={deps} />
+          </MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
 
     await user.click(await screen.findByRole("tab", { name: /Completed/ }));
@@ -235,34 +265,39 @@ describe("InboxPage", () => {
     vi.useFakeTimers();
     localStorage.setItem("printstash.locale", "en");
     const activeImport: InboxItem = { ...pendingImport, id: 4, state: "captured" };
-    vi.mocked(listPendingImports).mockResolvedValue([activeImport]);
+    vi.mocked(listPendingImports)
+      .mockResolvedValueOnce([activeImport])
+      .mockResolvedValue([{ ...activeImport, state: "review" }]);
     vi.mocked(dismissPendingImport).mockRejectedValue(new Error("offline"));
 
     render(
-      <I18nProvider>
-        <MemoryRouter>
-          <InboxPage deps={deps} />
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <I18nProvider>
+          <MemoryRouter>
+            <InboxPage deps={deps} />
+          </MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Delete import" }));
     const dialog = screen.getByRole("dialog", { name: "Delete pending import?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete import" }));
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
     });
 
     expect(dismissPendingImport).toHaveBeenCalledWith(4);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_500);
+      await vi.advanceTimersByTimeAsync(1_501);
     });
     expect(listPendingImports).toHaveBeenCalledTimes(2);
+    expect(screen.getByText("Needs review")).toBeInTheDocument();
   });
 
   it("restarts polling when clearing completed imports fails while work is active", async () => {
@@ -281,15 +316,18 @@ describe("InboxPage", () => {
     vi.mocked(batchPendingImports).mockRejectedValue(new Error("offline"));
 
     render(
-      <I18nProvider>
-        <MemoryRouter>
-          <InboxPage deps={deps} />
-        </MemoryRouter>
-      </I18nProvider>,
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <I18nProvider>
+          <MemoryRouter>
+            <InboxPage deps={deps} />
+          </MemoryRouter>
+        </I18nProvider>
+      </QueryClientProvider>,
     );
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
     });
 
     fireEvent.click(screen.getByRole("tab", { name: /Completed/ }));
@@ -297,8 +335,7 @@ describe("InboxPage", () => {
     const dialog = screen.getByRole("dialog", { name: "Clear completed imports?" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Clear completed" }));
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
     });
 
     expect(batchPendingImports).toHaveBeenCalledWith({
@@ -309,5 +346,127 @@ describe("InboxPage", () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });
     expect(listPendingImports).toHaveBeenCalledTimes(2);
+  });
+  it("shares confirmed Inbox dismissal across consumers", async () => {
+    const user = userEvent.setup();
+    const app = renderApp(
+      <>
+        <InboxPage />
+        <BottomNavBar />
+        <SidebarNav />
+      </>,
+      {
+        at: "/inbox",
+        routes: {
+          "GET /api/v1/inbox?include_completed=true": json([pendingImport]),
+          "GET /api/v1/inbox?include_completed=false": json([pendingImport]),
+          "DELETE /api/v1/inbox/1": json(null, 204),
+        },
+      },
+    );
+    const badges = await screen.findAllByRole("link", { name: /Pending/ });
+    await waitFor(() => {
+      for (const badge of badges) expect(badge).toHaveTextContent("1");
+    });
+    expect(
+      app
+        .requests()
+        .filter((request) => request.method === "GET")
+        .map((request) => request.url)
+        .sort(),
+    ).toEqual(["/api/v1/inbox?include_completed=false", "/api/v1/inbox?include_completed=true"]);
+    await user.click(await screen.findByRole("button", { name: "Delete import" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Delete import" }),
+    );
+    expect(await screen.findByText("No imports in the queue")).toBeInTheDocument();
+    for (const badge of badges) expect(badge).not.toHaveTextContent("1");
+    expect(app.requestsWithMethod("DELETE").map((request) => request.url)).toEqual([
+      "/api/v1/inbox/1",
+    ]);
+  });
+
+  it("never dispatches a retired Inbox gesture", async () => {
+    const app = renderApp(<InboxPage />, {
+      routes: {
+        "GET /api/v1/inbox": json([{ ...pendingImport, state: "failed", retryable: true }]),
+        "POST /api/v1/inbox/1/retry": json({ ...pendingImport, state: "review" }),
+      },
+    });
+    await screen.findByRole("button", { name: "Retry" });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+      app.unmount();
+      clearLogin();
+    });
+
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+    expect(app.client.getQueriesData({ queryKey: inboxKeys.all })).toEqual([]);
+  });
+
+  it("does not publish retired Inbox commands after delayed cancellation", async () => {
+    const user = userEvent.setup();
+    const app = renderApp(<InboxPage />, {
+      routes: {
+        "GET /api/v1/inbox": json([{ ...pendingImport, state: "failed", retryable: true }]),
+        "POST /api/v1/inbox/1/retry": json({ ...pendingImport, state: "review" }),
+      },
+    });
+    await screen.findByRole("button", { name: "Retry" });
+    let resume!: () => void;
+    const paused = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const cancel = app.client.cancelQueries.bind(app.client);
+    const spy = vi
+      .spyOn(app.client, "cancelQueries")
+      .mockImplementationOnce(cancel)
+      .mockImplementationOnce(() => paused);
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    await act(async () => {
+      clearLogin();
+      resume();
+      await paused;
+    });
+
+    await waitFor(() => expect(app.client.getQueriesData({ queryKey: inboxKeys.all })).toEqual([]));
+    spy.mockRestore();
+  });
+
+  it("distinguishes Inbox read failure from empty success", async () => {
+    const user = userEvent.setup();
+    const app = renderApp(<InboxPage />, {
+      routes: { "GET /api/v1/inbox": json({ detail: "offline" }, 500) },
+    });
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText("No imports in the queue")).toBeNull();
+    app.route({ "GET /api/v1/inbox": json([pendingImport]) });
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("link", { name: "Review" })).toHaveAttribute("href", "/inbox/1");
+  });
+  it("deduplicates navigation badge polling", async () => {
+    vi.useFakeTimers();
+    const app = renderApp(
+      <>
+        <BottomNavBar />
+        <SidebarNav />
+      </>,
+      { routes: { "GET /api/v1/inbox?include_completed=false": json([pendingImport]) } },
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(
+      screen
+        .getAllByRole("link", { name: /Pending/ })
+        .every((badge) => badge.textContent?.includes("1")),
+    ).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(app.requests().filter((request) => request.url.includes("/inbox"))).toHaveLength(2);
   });
 });

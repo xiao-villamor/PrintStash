@@ -1,49 +1,29 @@
 "use client";
 
+import type { LibraryEntry } from "@/features/library/navigation-state";
 import { formatNumber } from "@/lib/format";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { Link } from "@/lib/link";
-import { useRouter } from "@/lib/navigation";
+import { LibraryItemLink } from "@/features/library/navigation";
 import { memo, useEffect, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
 import { FileText, Star, Tags, ScanSearch } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import { getAssetUrl, starModel, unstarModel } from "@/lib/api";
+import { useLibraryStar } from "@/features/library/mutations";
 import { toast } from "@/lib/toast";
 import { timeAgoShort } from "@/lib/format";
-import { useAuthenticatedAssetUrl } from "@/lib/use-authenticated-asset-url";
+import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { Localized } from "@/components/ui/localized";
-import { MODEL_DND_MIME } from "@/lib/model-dnd";
+import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
 
-// STL blobs already warmed this session (the /stl endpoint serves
-// Cache-Control'd responses, so a hover fetch lands in the HTTP cache and the
-// viewer's loader reads from disk instead of the network).
-const warmedMeshFiles = new Set<number>();
-
-function warmStl(meshFileId: number | null) {
-  if (meshFileId == null || warmedMeshFiles.has(meshFileId)) return;
-  warmedMeshFiles.add(meshFileId);
-  fetch(getAssetUrl(`/api/v1/files/${meshFileId}/stl`)).catch(() => {
-    warmedMeshFiles.delete(meshFileId);
-  });
-}
 import {
   CARD_METRIC_STORAGE_KEY,
   CardMetricId,
   CardMetrics,
   readCardMetrics,
 } from "@/lib/card-metrics";
-
-/** An optimistic star toggle, remembered against the server value it overrode. */
-interface StarOverride {
-  /** The `model.starred` this override was made against. */
-  base: boolean;
-  /** What the card shows for as long as the override stands. */
-  value: boolean;
-}
 
 function formatTime(seconds: number): string {
   const hours = Math.floor(seconds / 3600);
@@ -183,6 +163,7 @@ function MetricCell({
 
 function ModelCardInner({
   model,
+  origin,
   collectionLabel,
   metrics,
   selectable = false,
@@ -190,8 +171,10 @@ function ModelCardInner({
   onToggleSelect,
   draggable = false,
   onEditTags,
+  onIntent,
 }: {
   model: ModelListItem;
+  origin?: LibraryEntry;
   collectionLabel?: string | null;
   metrics: CardMetrics;
   selectable?: boolean;
@@ -199,25 +182,16 @@ function ModelCardInner({
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
   onEditTags?: (model: ModelListItem) => void;
+  onIntent?: (id: number | null) => void;
 }) {
   useUiLocale();
-  const router = useRouter();
   const [dragging, setDragging] = useState(false);
-  // The card owns an optimistic star only until the server says otherwise: a
-  // fresh `model.starred` (list refetch, or the star toggled on the detail
-  // page) no longer matches `base` and supersedes the override, so nothing has
-  // to copy the prop into state.
-  const [starOverride, setStarOverride] = useState<StarOverride | null>(null);
+  const starMutation = useLibraryStar();
   const starred =
-    starOverride !== null && starOverride.base === model.starred
-      ? starOverride.value
+    starMutation.isPending && starMutation.variables
+      ? starMutation.variables.starred
       : model.starred;
-  const [starBusy, setStarBusy] = useState(false);
-  const thumb = useAuthenticatedAssetUrl(model.thumbnail_url);
-  // Lazy thumbnails used to snap in at full opacity the instant their bytes
-  // arrived. Fade each one in on load so scrolling/searching settles smoothly
-  // instead of popping card by card.
-  const [thumbLoaded, setThumbLoaded] = useState(false);
+  const starBusy = starMutation.isPending;
   const printerPresence = model.printer_presence ?? [];
   const hasPrinter = printerPresence.length > 0;
   const ps = model.print_summary;
@@ -225,25 +199,11 @@ function ModelCardInner({
 
   async function toggleStar() {
     if (starBusy) return;
-    const next = !starred;
-    setStarOverride({ base: model.starred, value: next });
-    setStarBusy(true);
     try {
-      await (next ? starModel(model.id) : unstarModel(model.id));
+      await starMutation.mutateAsync({ kind: "model", id: model.id, starred: !starred });
     } catch (error) {
-      // `!next` is exactly what the card showed before this toggle.
-      setStarOverride({ base: model.starred, value: !next });
       toast.error(error);
-    } finally {
-      setStarBusy(false);
     }
-  }
-
-  // Hover intent: prefetch the detail route (server-rendered payload) and warm
-  // the STL into the browser cache so the 3D viewer opens without a spinner.
-  function handleHover() {
-    router.prefetch(`/models/${model.id}`);
-    warmStl(model.mesh_file_id ?? null);
   }
 
   return (
@@ -253,22 +213,20 @@ function ModelCardInner({
         onDragStart={
           draggable
             ? (e) => {
-                e.dataTransfer.setData(MODEL_DND_MIME, String(model.id));
+                e.dataTransfer.setData(MODEL_DND_MIME, JSON.stringify(captureModelDrag(model)));
                 e.dataTransfer.effectAllowed = "move";
                 setDragging(true);
               }
             : undefined
         }
         onDragEnd={() => setDragging(false)}
-        className={`animate-card-in group relative flex h-full flex-col bg-card border rounded transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-fast active:scale-[0.99] overflow-hidden ${
+        className={`${origin ? "" : "animate-card-in"} group relative flex h-full flex-col bg-card border rounded transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-fast active:scale-[0.99] overflow-hidden ${
           draggable ? "cursor-grab active:cursor-grabbing" : ""
         } ${dragging ? "opacity-40" : ""} ${
           selected
             ? "border-primary ring-2 ring-primary-soft"
             : "border-border hover:border-primary"
         }`}
-        onMouseEnter={handleHover}
-        onTouchStart={handleHover}
       >
         {selectable && (
           <div className="absolute left-2 top-2 z-10">
@@ -317,10 +275,15 @@ function ModelCardInner({
             <Tags className="h-4 w-4" />
           </Button>
         )}
-        <Link
+        <LibraryItemLink
+          origin={origin}
           href={`/models/${model.id}`}
           draggable={false}
           className="flex flex-col h-full overflow-hidden"
+          onPointerEnter={() => !selectable && onIntent?.(model.id)}
+          onFocus={() => !selectable && onIntent?.(model.id)}
+          onPointerLeave={() => onIntent?.(null)}
+          onBlur={() => onIntent?.(null)}
           onClick={(e) => {
             if (selectable) {
               e.preventDefault();
@@ -329,29 +292,18 @@ function ModelCardInner({
           }}
         >
           {/* Thumbnail */}
-          <div className="bg-muted relative overflow-hidden h-48 border-b border-border shrink-0">
-            {thumb ? (
-              <img
-                alt={model.name}
-                draggable={false}
-                className={`w-full h-full object-cover transition-opacity duration-slow ease-out ${
-                  thumbLoaded ? "opacity-90 group-hover:opacity-100" : "opacity-0"
-                }`}
-                src={thumb}
-                loading="lazy"
-                decoding="async"
-                onLoad={() => setThumbLoaded(true)}
-                // Cached images can finish before React attaches onLoad; catch that
-                // case so they don't stay stuck at opacity-0.
-                ref={(node) => {
-                  if (node?.complete && node.naturalWidth > 0) setThumbLoaded(true);
-                }}
-              />
-            ) : (
+          <ProtectedThumbnail
+            path={model.thumbnail_url}
+            alt={model.name}
+            fade={!origin}
+            className="bg-muted relative overflow-hidden h-48 border-b border-border shrink-0"
+            imageClassName="w-full h-full object-cover"
+            placeholder={
               <div className="flex h-full w-full items-center justify-center">
                 <FileText className="h-10 w-10 text-muted-foreground/40" />
               </div>
-            )}
+            }
+          >
             {hasPrinter && (
               <div className="absolute bottom-2 right-2">
                 <span className="text-3xs font-bold text-green-700 bg-green-50 dark:bg-green-950/60 px-1.5 py-0.5 border border-green-200 dark:border-green-800 rounded-sm uppercase">
@@ -359,7 +311,7 @@ function ModelCardInner({
                 </span>
               </div>
             )}
-          </div>
+          </ProtectedThumbnail>
 
           {/* Title + revision */}
           <div className="px-3 pt-3 pb-1 flex items-start justify-between gap-2">
@@ -441,7 +393,7 @@ function ModelCardInner({
               {timeAgoShort(model.updated_at)}
             </p>
           </div>
-        </Link>
+        </LibraryItemLink>
       </article>
     </Localized>
   );
@@ -451,20 +403,25 @@ const ModelCardMemo = memo(ModelCardInner);
 
 export function ModelCard({
   model,
+  origin,
   collectionLabel,
   selectable,
   selected,
   onToggleSelect,
   draggable,
   onEditTags,
+  onIntent,
 }: {
   model: ModelListItem;
+  origin?: LibraryEntry;
   collectionLabel?: string | null;
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
   draggable?: boolean;
   onEditTags?: (model: ModelListItem) => void;
+  /** A sustained pointer or focus on the card, or `null` once it leaves. */
+  onIntent?: (id: number | null) => void;
 }) {
   useUiLocale();
   // `readCardMetrics` already falls back to the defaults when there is no stored
@@ -483,6 +440,7 @@ export function ModelCard({
   return (
     <Localized>
       <ModelCardMemo
+        origin={origin}
         model={model}
         collectionLabel={collectionLabel}
         metrics={metrics}
@@ -491,6 +449,7 @@ export function ModelCard({
         onToggleSelect={onToggleSelect}
         draggable={draggable}
         onEditTags={onEditTags}
+        onIntent={onIntent}
       />
     </Localized>
   );

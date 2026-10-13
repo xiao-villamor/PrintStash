@@ -4,7 +4,7 @@
 # the installation stays closed and the setup page names what to fix.
 services:
   printstash:
-    image: ghcr.io/xiao-villamor/printstash:0.13.0
+    image: ghcr.io/xiao-villamor/printstash:0.14.0
     restart: unless-stopped
     stop_grace_period: 60s
     environment:

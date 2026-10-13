@@ -17,7 +17,10 @@ import hashlib
 import io
 import json
 import os
+import tempfile
+import tracemalloc
 import uuid
+from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
 from typing import Callable, Iterator
@@ -32,8 +35,10 @@ from app.core.config import _overlay, settings
 from app.db.models import LibrarySourceKind, StorageConnection
 from app.modules.media.thumbnail_publication import point_at, publish_thumbnail
 from app.modules.sources.library_source import source_from_connection
+from app.modules.storage.storage_backend import s3 as s3_module
 from app.modules.storage.storage_backend.contracts import (
     NativeMultipartPart,
+    StagedRemoteObject,
     StorageCollisionError,
     StorageConfigurationError,
 )
@@ -387,6 +392,44 @@ class TestUploadFile:
         finally:
             _overlay.pop("s3_multipart_threshold_mb", None)
 
+    def test_uploads_a_staged_file_without_spooling_a_copy(
+        self,
+        s3_backend: S3StorageBackend,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # A spool above its memory limit rolls over into the temp dir; with
+        # that dir unwritable, only an upload straight from the file succeeds.
+        unwritable = tmp_path / "no-temp"
+        unwritable.mkdir(mode=0o500)
+        monkeypatch.setattr(tempfile, "tempdir", str(unwritable))
+        monkeypatch.setitem(_overlay, "s3_multipart_threshold_mb", 1)
+        payload = os.urandom(3 * 1024 * 1024)
+        src = tmp_path / "staged.bin"
+        src.write_bytes(payload)
+        key = "vault-data/models/unspooled.bin"
+
+        s3_backend.upload_file(src, key)
+
+        assert s3_backend.read_bytes(key) == payload
+
+    def test_uploads_a_many_part_staged_file_intact(
+        self,
+        s3_backend: S3StorageBackend,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Parts upload in parallel from their own offsets; order must survive.
+        monkeypatch.setitem(_overlay, "s3_multipart_threshold_mb", 1)
+        payload = os.urandom(3 * 8 * 1024 * 1024 + 123)
+        src = tmp_path / "many-parts.bin"
+        src.write_bytes(payload)
+        key = "vault-data/models/many-parts.bin"
+
+        s3_backend.upload_file(src, key)
+
+        assert s3_backend.read_bytes(key) == payload
+
 
 class TestEnsureSetup:
     def test_fails_actionably_for_a_missing_bucket(
@@ -530,6 +573,131 @@ class TestMoveIn:
         assert s3_backend.exists(key)
         assert s3_backend.read_bytes(key) == b"staged content"
         assert not staged.exists()
+
+
+@pytest.fixture
+def copying_backend(s3_backend: S3StorageBackend) -> S3StorageBackend:
+    """The backend after its startup probe, which gates server-side copy."""
+    s3_backend.ensure_setup()
+    return s3_backend
+
+
+def _staged_upload(backend: S3StorageBackend, payload: bytes) -> StagedRemoteObject:
+    """An object in the store's upload staging area, as a finished upload is."""
+    receipt = backend.create_bytes(
+        payload, f"{backend._prefix()}staging/artifact-uploads/{uuid.uuid4().hex}"
+    )
+    return StagedRemoteObject(
+        key=receipt.key,
+        size=receipt.size,
+        namespace=receipt.namespace,
+        provider_ref=backend.storage_target.target_ref,
+        etag=receipt.etag,
+        version_id=receipt.version_id,
+    )
+
+
+class TestServerSideCopy:
+    """A finished upload reaches its final key without passing through the app.
+
+    Each refusal here is what makes the copy as safe as an upload: a changed
+    source must never be published, and an existing object never replaced.
+    """
+
+    def test_advertises_server_side_copy_once_proven(
+        self, copying_backend: S3StorageBackend
+    ) -> None:
+        assert copying_backend.capabilities.server_side_copy is True
+
+    def test_publishes_the_exact_bytes_at_the_destination(
+        self, copying_backend: S3StorageBackend
+    ) -> None:
+        payload = os.urandom(64 * 1024)
+        source = _staged_upload(copying_backend, payload)
+        key = _managed_key(copying_backend, "copied.bin")
+
+        copying_backend.copy_in(source, key)
+
+        assert copying_backend.read_bytes(key) == payload
+
+    def test_returns_a_receipt_that_proves_the_created_object(
+        self, copying_backend: S3StorageBackend
+    ) -> None:
+        source = _staged_upload(copying_backend, b"proof")
+
+        receipt = copying_backend.copy_in(
+            source, _managed_key(copying_backend, "proof.bin")
+        )
+
+        assert receipt is not None
+        assert copying_backend.creation_matches(receipt)
+
+    def test_copies_a_large_object_in_several_parts(
+        self, copying_backend: S3StorageBackend, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The smallest part S3 allows, so an 11 MiB object needs three.
+        monkeypatch.setattr(s3_module, "_COPY_PART_SIZE", 5 * 1024 * 1024)
+        payload = os.urandom(11 * 1024 * 1024)
+        source = _staged_upload(copying_backend, payload)
+        key = _managed_key(copying_backend, "parts.bin")
+
+        copying_backend.copy_in(source, key)
+
+        assert copying_backend.read_bytes(key) == payload
+
+    def test_refuses_to_replace_an_existing_object(
+        self, copying_backend: S3StorageBackend
+    ) -> None:
+        source = _staged_upload(copying_backend, b"new")
+        key = _managed_key(copying_backend, "occupied.bin")
+        copying_backend.create_bytes(b"owned", key)
+
+        with pytest.raises(StorageCollisionError):
+            copying_backend.copy_in(source, key)
+
+        assert copying_backend.read_bytes(key) == b"owned"
+
+    def test_declines_a_source_that_changed_after_it_was_verified(
+        self, copying_backend: S3StorageBackend
+    ) -> None:
+        # Its ETag no longer matches, so the caller uploads the verified copy.
+        source = _staged_upload(copying_backend, b"hashed bytes")
+        copying_backend._client.put_object(
+            Bucket=copying_backend._bucket, Key=source.key, Body=b"swapped bytes"
+        )
+
+        receipt = copying_backend.copy_in(
+            source, _managed_key(copying_backend, "stale.bin")
+        )
+
+        assert receipt is None
+
+    def test_publishes_nothing_from_a_changed_source(
+        self, copying_backend: S3StorageBackend
+    ) -> None:
+        source = _staged_upload(copying_backend, b"hashed bytes")
+        copying_backend._client.put_object(
+            Bucket=copying_backend._bucket, Key=source.key, Body=b"swapped bytes"
+        )
+        key = _managed_key(copying_backend, "stale.bin")
+
+        copying_backend.copy_in(source, key)
+
+        assert not copying_backend.exists(key)
+
+    def test_declines_a_source_in_another_bucket(
+        self, copying_backend: S3StorageBackend
+    ) -> None:
+        source = _staged_upload(copying_backend, b"elsewhere")
+        foreign = replace(
+            source, namespace=f"another-bucket/{copying_backend._prefix()}"
+        )
+
+        receipt = copying_backend.copy_in(
+            foreign, _managed_key(copying_backend, "foreign.bin")
+        )
+
+        assert receipt is None
 
 
 class TestKeyDerivation:
@@ -866,6 +1034,25 @@ class TestAdoptExisting:
         # instead of leaking forever.
         assert adopted.key == original.key
         assert adopted.token == original.token
+
+    def test_hashes_a_large_object_in_bounded_memory(
+        self, s3_backend: S3StorageBackend
+    ) -> None:
+        # Adoption runs on restart, when the object can be any size.
+        data = os.urandom(24 * 1024 * 1024)
+        original = s3_backend.create_bytes(data, _managed_key(s3_backend, "big.bin"))
+        tracemalloc.start()
+        try:
+            s3_backend.adopt_existing(
+                original.key,
+                expected_size=len(data),
+                expected_sha256=hashlib.sha256(data).hexdigest(),
+            )
+            _current, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        assert peak < 8 * 1024 * 1024
 
     def test_reports_a_key_that_was_never_published(
         self, s3_backend: S3StorageBackend

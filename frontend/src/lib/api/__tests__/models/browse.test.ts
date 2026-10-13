@@ -25,7 +25,6 @@ import {
   listModels,
   listOutlinerModels,
 } from "@/lib/api/models";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastCall, respondWith } from "../_wire";
 
@@ -34,7 +33,7 @@ type ListParams = NonNullable<Parameters<typeof listModels>[0]>;
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -272,4 +271,26 @@ describe("Print-history filter transport", () => {
       expect(params.get("print_duration_max_s")).toBe("10800");
     },
   );
+});
+
+describe("reader cancellation", () => {
+  it("aborts an active Model choices read", async () => {
+    const controller = new AbortController();
+    let delivered: AbortSignal | null = null;
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) throw new Error("Cancellation signal is required");
+          delivered = signal;
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+    const outcome = listModels({ limit: 25 }, { signal: controller.signal }).catch(
+      (error: Error) => error,
+    );
+    controller.abort();
+    await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
+    expect(delivered).toMatchObject({ aborted: true });
+  });
 });

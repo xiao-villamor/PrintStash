@@ -9,22 +9,24 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { I18nProvider } from "@/lib/i18n";
 import { ModelCard } from "@/components/model-card";
 import { json, renderApp, type RouteTable } from "@/test-support/render";
 import type { ModelListItem, PrintSummaryRead } from "@/types";
 
 const model: ModelListItem = {
+  edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  edit_version: 1,
   id: 1,
   name: "Cam Holder v4",
   slug: "cam-holder-v4",
   collection: null,
   collection_id: null,
+  collection_label: null,
   source_url: null,
   effective_role: "admin",
   tags: [],
@@ -69,7 +71,81 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function CardLocation() {
+  const location = useLocation();
+  return <output aria-label="Current card location">{location.pathname}</output>;
+}
+
 describe("ModelCard", () => {
+  it("opens the Model detail from its card", async () => {
+    const user = userEvent.setup();
+    renderApp(
+      <>
+        <ModelCard model={model} />
+        <CardLocation />
+      </>,
+    );
+    const link = screen.getByRole("link", { name: /Cam Holder v4/ });
+    expect(link).toHaveAttribute("href", "/models/1");
+
+    await user.click(link);
+
+    expect(screen.getByLabelText("Current card location")).toHaveTextContent("/models/1");
+  });
+
+  it("does not convert on hover", async () => {
+    const user = userEvent.setup();
+    const { requests } = renderCard({ mesh_file_id: 7 });
+
+    await user.hover(screen.getByText("Cam Holder v4"));
+
+    expect(requests().filter((request) => request.url.includes("/stl"))).toEqual([]);
+  });
+  describe("open intent", () => {
+    it("reports the Model under the pointer", async () => {
+      const user = userEvent.setup();
+      const onIntent = vi.fn<(id: number | null) => void>();
+      renderApp(<ModelCard model={model} onIntent={onIntent} />);
+
+      await user.hover(screen.getByRole("link", { name: /Cam Holder v4/ }));
+
+      expect(onIntent).toHaveBeenLastCalledWith(1);
+    });
+
+    it("reports that the pointer left", async () => {
+      const user = userEvent.setup();
+      const onIntent = vi.fn<(id: number | null) => void>();
+      renderApp(<ModelCard model={model} onIntent={onIntent} />);
+      const link = screen.getByRole("link", { name: /Cam Holder v4/ });
+      await user.hover(link);
+
+      await user.unhover(link);
+
+      expect(onIntent).toHaveBeenLastCalledWith(null);
+    });
+
+    it("reports the Model that receives keyboard focus", async () => {
+      const user = userEvent.setup();
+      const onIntent = vi.fn<(id: number | null) => void>();
+      renderApp(<ModelCard model={model} onIntent={onIntent} />);
+
+      await user.tab();
+      while (document.activeElement?.getAttribute("href") !== "/models/1") await user.tab();
+
+      expect(onIntent).toHaveBeenCalledWith(1);
+    });
+
+    it("stays silent while cards are being selected", async () => {
+      const user = userEvent.setup();
+      const onIntent = vi.fn<(id: number | null) => void>();
+      renderApp(<ModelCard model={model} selectable onIntent={onIntent} />);
+
+      await user.hover(screen.getByRole("link", { name: /Cam Holder v4/ }));
+
+      expect(onIntent).not.toHaveBeenCalledWith(1);
+    });
+  });
+
   describe("collection badge", () => {
     it("shows the exact folder name instead of its slug", () => {
       renderApp(
@@ -127,14 +203,9 @@ describe("ModelCard", () => {
   });
 
   it("shows revision status alongside a custom revision label", () => {
-    // The card links to the model detail route and prefetches it on hover, so
-    // it needs a real router; `thumbnail_url: null` keeps the thumbnail hook
-    // from touching the network.
-    render(
-      <MemoryRouter>
-        <ModelCard model={model} />
-      </MemoryRouter>,
-    );
+    // The card links to the model detail route, so it needs a real router.
+    // `thumbnail_url: null` keeps the thumbnail hook from touching the network.
+    renderApp(<ModelCard model={model} />);
 
     expect(screen.getByLabelText("Revision status: Needs Test; label: a")).toHaveTextContent(
       "Needs Test·a",
@@ -203,16 +274,16 @@ describe("ModelCard", () => {
     });
 
     it("lights the star before the server answers", async () => {
-      // The grid is a fast, repetitive surface; waiting a round trip per click
-      // makes starring ten models feel broken.
       const user = userEvent.setup();
-      renderCard();
+      const pending = Promise.withResolvers<Response>();
+      renderCard({}, { "PUT /api/v1/models/1/star": () => pending.promise });
 
       await user.click(screen.getByRole("button", { name: "Add Cam Holder v4 to favorites" }));
 
       expect(
-        await screen.findByRole("button", { name: "Remove Cam Holder v4 from favorites" }),
-      ).toBeInTheDocument();
+        screen.getByRole("button", { name: "Remove Cam Holder v4 from favorites" }),
+      ).toBeDisabled();
+      await act(async () => pending.resolve(json({ model_id: 1, starred: true })));
     });
 
     it("puts the star back when the server refuses", async () => {
@@ -250,13 +321,9 @@ describe("localized model card", () => {
       "printstash.card.metrics",
       JSON.stringify(["layer_height", "material", "file_count"]),
     );
-    render(
-      <MemoryRouter>
-        <I18nProvider>
-          <ModelCard model={{ ...model, name: "Files", print_summary: printSummary() }} />
-        </I18nProvider>
-      </MemoryRouter>,
-    );
+    renderApp(<ModelCard model={{ ...model, name: "Files", print_summary: printSummary() }} />, {
+      locale: "es",
+    });
     expect(screen.getByText("Files", { exact: true })).toBeVisible();
     expect(screen.getByText("CAPA", { exact: true })).toBeVisible();
     expect(screen.getByText("ARCH", { exact: true })).toBeVisible();

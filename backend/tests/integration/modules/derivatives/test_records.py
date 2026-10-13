@@ -24,9 +24,14 @@ from app.db.models import (
     DerivativeKind,
     DerivativeRegeneration,
     DerivativeState,
+    File,
+    FileType,
+    JobKind,
 )
 from app.modules.derivatives import records
-from app.modules.derivatives.kinds import recipes_for
+from app.modules.derivatives.kinds import VIEWER_STL_RECIPE, group, recipes_for
+from app.modules.derivatives.source import DerivativeSource, subject_key
+from tests.factories import build_derivative
 
 
 @pytest.fixture
@@ -99,6 +104,55 @@ class TestSatisfied:
 
 
 class TestNeeded:
+    @pytest.mark.parametrize("state", [DerivativeState.READY, DerivativeState.FAILED])
+    def test_reopens_viewer_receipts_from_the_previous_scene_recipe(
+        self, db_session, make_model, make_file, make_derivative, state
+    ):
+        now = utcnow()
+        artifact = make_file(
+            make_model(),
+            filename="required-extension.3mf",
+            file_type=FileType.THREE_MF,
+            viewer_requested_at=now,
+        )
+        previous = make_derivative(
+            artifact,
+            DerivativeKind.VIEWER_STL,
+            recipe_version=1,
+            state=state,
+            attempts=settings.derivative_max_attempts,
+            storage_key="old-viewer.stl" if state is DerivativeState.READY else None,
+            failure_reason="invalid_source"
+            if state is DerivativeState.FAILED
+            else None,
+            next_attempt_at=None,
+        )
+        viewer = group(JobKind.DERIVATIVES_VIEWER_STL)
+        assert viewer.kinds == {DerivativeKind.VIEWER_STL: VIEWER_STL_RECIPE}
+
+        assert DerivativeKind.VIEWER_STL not in records.rows_for(db_session, artifact)
+        assert records.needed(db_session, artifact, viewer.kinds, now=now) == {
+            DerivativeKind.VIEWER_STL
+        }
+        offered = DerivativeSource(viewer).pending(db_session, now=now, limit=1)
+        assert [item.subject_key for item in offered] == [subject_key(artifact.id)]
+        fresh = records.begin(
+            db_session, artifact, DerivativeKind.VIEWER_STL, VIEWER_STL_RECIPE, now=now
+        )
+        db_session.commit()
+
+        assert fresh.recipe_version == VIEWER_STL_RECIPE
+        assert fresh.state is DerivativeState.RUNNING
+        assert fresh.attempts == 1
+        assert (
+            records.rows_for(db_session, artifact)[DerivativeKind.VIEWER_STL].id
+            == fresh.id
+        )
+        db_session.refresh(previous)
+        assert previous.recipe_version == 1
+        assert previous.state is state
+        assert previous.attempts == settings.derivative_max_attempts
+
     def test_lists_the_kinds_still_owed(
         self, db_session: Session, mesh, make_derivative
     ) -> None:
@@ -186,11 +240,17 @@ class TestBegin:
 
 class TestOutcomes:
     def test_ready_records_what_was_published(self, db_session: Session, mesh) -> None:
-        row = records.begin(db_session, mesh, DerivativeKind.THUMBNAIL, 1, now=utcnow())
+        row = records.begin(
+            db_session,
+            mesh,
+            DerivativeKind.THUMBNAIL,
+            recipes_for(mesh)[DerivativeKind.THUMBNAIL],
+            now=utcnow(),
+        )
 
         records.mark_ready(
             db_session,
-            row,
+            records.attempt(db_session, mesh, row),
             now=utcnow(),
             storage_key="thumbs/1.webp",
             output={"strategy": "full"},
@@ -202,13 +262,43 @@ class TestOutcomes:
         assert row.output_json == '{"strategy":"full"}'
         assert row.peak_rss_bytes == 3 * 1024**3
 
+    def test_cancelled_attempt_cannot_publish_late(self, db_session, mesh):
+        recipe = recipes_for(mesh)[DerivativeKind.THUMBNAIL]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+        )
+        db_session.commit()
+        token = records.attempt(db_session, mesh, row)
+        records.cancel(
+            db_session, mesh, {DerivativeKind.THUMBNAIL: recipe}, now=utcnow()
+        )
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.mark_ready(db_session, token, now=utcnow(), storage_key="late.webp")
+        db_session.rollback()
+
+        db_session.expire_all()
+        assert (
+            records.rows_for(db_session, mesh)[DerivativeKind.THUMBNAIL].state
+            is DerivativeState.CANCELLED
+        )
+
     def test_ready_without_a_key_keeps_the_published_one(
         self, db_session: Session, mesh
     ) -> None:
-        row = records.begin(db_session, mesh, DerivativeKind.METADATA, 1, now=utcnow())
+        row = records.begin(
+            db_session,
+            mesh,
+            DerivativeKind.METADATA,
+            recipes_for(mesh)[DerivativeKind.METADATA],
+            now=utcnow(),
+        )
         row.storage_key = "kept"
 
-        records.mark_ready(db_session, row, now=utcnow())
+        records.mark_ready(
+            db_session, records.attempt(db_session, mesh, row), now=utcnow()
+        )
 
         assert row.storage_key == "kept"
 
@@ -216,9 +306,17 @@ class TestOutcomes:
         self, db_session: Session, mesh
     ) -> None:
         # The whole reason is kept: a truncated one could read as another code.
-        row = records.begin(db_session, mesh, DerivativeKind.THUMBNAIL, 1, now=utcnow())
+        row = records.begin(
+            db_session,
+            mesh,
+            DerivativeKind.THUMBNAIL,
+            recipes_for(mesh)[DerivativeKind.THUMBNAIL],
+            now=utcnow(),
+        )
 
-        records.mark_skipped(db_session, row, "x" * 100, now=utcnow())
+        records.mark_skipped(
+            db_session, records.attempt(db_session, mesh, row), "x" * 100, now=utcnow()
+        )
 
         assert (row.state, row.failure_reason) == (
             DerivativeState.SKIPPED,
@@ -229,10 +327,22 @@ class TestOutcomes:
         self, db_session: Session, mesh
     ) -> None:
         now = utcnow()
-        row = records.begin(db_session, mesh, DerivativeKind.THUMBNAIL, 1, now=now)
+        row = records.begin(
+            db_session,
+            mesh,
+            DerivativeKind.THUMBNAIL,
+            recipes_for(mesh)[DerivativeKind.THUMBNAIL],
+            now=now,
+        )
         row.attempts = 3
 
-        records.mark_failed(db_session, row, "storage", now=now, deterministic=False)
+        records.mark_failed(
+            db_session,
+            records.attempt(db_session, mesh, row),
+            "storage",
+            now=now,
+            deterministic=False,
+        )
 
         assert row.next_attempt_at == now + timedelta(
             seconds=settings.derivative_backoff_seconds * 4
@@ -243,21 +353,73 @@ class TestOutcomes:
 
         _overlay["derivative_backoff_seconds"] = 86400
         now = utcnow()
-        row = records.begin(db_session, mesh, DerivativeKind.THUMBNAIL, 1, now=now)
+        row = records.begin(
+            db_session,
+            mesh,
+            DerivativeKind.THUMBNAIL,
+            recipes_for(mesh)[DerivativeKind.THUMBNAIL],
+            now=now,
+        )
         row.attempts = 2
 
-        records.mark_failed(db_session, row, "storage", now=now, deterministic=False)
+        records.mark_failed(
+            db_session,
+            records.attempt(db_session, mesh, row),
+            "storage",
+            now=now,
+            deterministic=False,
+        )
 
         assert row.next_attempt_at == now + timedelta(days=1)
+
+    def test_timeouts_stop_at_the_configured_attempt_limit(self, db_session, mesh):
+        now = utcnow()
+        row = None
+        for _ in range(settings.derivative_max_attempts):
+            row = records.begin(
+                db_session,
+                mesh,
+                DerivativeKind.THUMBNAIL,
+                recipes_for(mesh)[DerivativeKind.THUMBNAIL],
+                now=now,
+            )
+            records.mark_failed(
+                db_session,
+                records.attempt(db_session, mesh, row),
+                "timeout",
+                now=now,
+                deterministic=False,
+                duration_ms=300_000,
+                peak_rss_bytes=123_456,
+            )
+            db_session.commit()
+            if row.next_attempt_at is not None:
+                now = row.next_attempt_at
+        assert row is not None
+        assert row.attempts == settings.derivative_max_attempts
+        assert row.next_attempt_at is None
+        assert records.satisfied(row, now=now)
+        assert row.duration_ms == 300_000
+        assert row.peak_rss_bytes == 123_456
 
     def test_a_deterministic_failure_is_terminal_at_once(
         self, db_session: Session, mesh
     ) -> None:
         # Retrying bytes that cannot render only repeats the failure.
-        row = records.begin(db_session, mesh, DerivativeKind.THUMBNAIL, 1, now=utcnow())
+        row = records.begin(
+            db_session,
+            mesh,
+            DerivativeKind.THUMBNAIL,
+            recipes_for(mesh)[DerivativeKind.THUMBNAIL],
+            now=utcnow(),
+        )
 
         records.mark_failed(
-            db_session, row, "invalid_source", now=utcnow(), deterministic=True
+            db_session,
+            records.attempt(db_session, mesh, row),
+            "invalid_source",
+            now=utcnow(),
+            deterministic=True,
         )
 
         assert row.attempts == settings.derivative_max_attempts
@@ -359,12 +521,16 @@ class TestRowInvariants:
             (DerivativeState.SKIPPED, {}),
             (DerivativeState.READY, {"failure_reason": "stale"}),
             (DerivativeState.READY, {"next_attempt_at": datetime(2030, 1, 1)}),
+            (DerivativeState.RUNNING, {}),
+            (DerivativeState.READY, {"attempt_token": "retired"}),
         ],
         ids=[
             "failed-without-reason",
             "skipped-without-reason",
             "ready-with-reason",
             "ready-with-retry",
+            "running-without-attempt-token",
+            "ready-with-attempt-token",
         ],
     )
     def test_the_database_refuses_a_row_its_state_contradicts(
@@ -389,7 +555,12 @@ class TestRowInvariants:
     ) -> None:
         make_derivative(mesh, DerivativeKind.THUMBNAIL, state=DerivativeState.FAILED)
 
-        records.cancel(db_session, mesh, {DerivativeKind.THUMBNAIL: 1}, now=utcnow())
+        records.cancel(
+            db_session,
+            mesh,
+            {DerivativeKind.THUMBNAIL: recipes_for(mesh)[DerivativeKind.THUMBNAIL]},
+            now=utcnow(),
+        )
         db_session.commit()
 
         (row,) = db_session.exec(select(ArtifactDerivative)).all()
@@ -416,3 +587,506 @@ class TestRead:
             reads[DerivativeKind.THUMBNAIL].failure_reason,
             reads[DerivativeKind.THUMBNAIL].retryable,
         ) == ("failed", "render_failed", True)
+
+
+class TestClaim:
+    def test_rejects_a_replaced_attempt(self, db_session, mesh):
+        recipe = recipes_for(mesh)[DerivativeKind.THUMBNAIL]
+        first = records.begin(
+            db_session, mesh, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+        )
+        token = records.attempt(db_session, mesh, first)
+        db_session.commit()
+        replacement = records.begin(
+            db_session, mesh, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+        )
+        replacement_token = replacement.attempt_token
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.mark_ready(db_session, token, now=utcnow())
+        db_session.rollback()
+
+        current = records.rows_for(db_session, mesh)[DerivativeKind.THUMBNAIL]
+        assert (current.state, current.attempt_token) == (
+            DerivativeState.RUNNING,
+            replacement_token,
+        )
+
+    def test_rejects_a_cancelled_attempt_after_immediate_retry(self, db_session, mesh):
+        recipe = recipes_for(mesh)[DerivativeKind.THUMBNAIL]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+        )
+        token = records.attempt(db_session, mesh, row)
+        db_session.commit()
+        db_session.expunge(row)
+        records.cancel(
+            db_session, mesh, {DerivativeKind.THUMBNAIL: recipe}, now=utcnow()
+        )
+        db_session.commit()
+        records.reset(db_session, mesh)
+        db_session.commit()
+        replacement = records.begin(
+            db_session, mesh, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+        )
+        replacement_token = replacement.attempt_token
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.mark_ready(db_session, token, now=utcnow())
+        db_session.rollback()
+
+        current = records.rows_for(db_session, mesh)[DerivativeKind.THUMBNAIL]
+        assert (current.state, current.attempt_token) == (
+            DerivativeState.RUNNING,
+            replacement_token,
+        )
+
+    @pytest.mark.parametrize("target", ["artifact", "model"], ids=str)
+    def test_rejects_a_trashed_subject(self, db_session, mesh, target):
+        from app.db.models import Model
+
+        recipe = recipes_for(mesh)[DerivativeKind.THUMBNAIL]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+        )
+        token = records.attempt(db_session, mesh, row)
+        subject = mesh if target == "artifact" else db_session.get(Model, mesh.model_id)
+        subject.deleted_at = utcnow()
+        db_session.add(subject)
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.mark_ready(db_session, token, now=utcnow())
+        db_session.rollback()
+
+        assert (
+            records.rows_for(db_session, mesh)[DerivativeKind.THUMBNAIL].state
+            is DerivativeState.RUNNING
+        )
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            pytest.param("sha256", "b" * 64, id="changed-content"),
+            pytest.param("path", "replacement.stl", id="changed-locator"),
+            pytest.param("source_etag", "new-etag", id="changed-etag"),
+            pytest.param("source_version_id", "new-version", id="changed-version"),
+        ],
+    )
+    def test_rejects_a_changed_source(self, db_session, mesh, field, value):
+        recipe = recipes_for(mesh)[DerivativeKind.THUMBNAIL]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+        )
+        token = records.attempt(db_session, mesh, row)
+        setattr(mesh, field, value)
+        db_session.add(mesh)
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.mark_ready(db_session, token, now=utcnow())
+        db_session.rollback()
+
+        assert (
+            records.rows_for(db_session, mesh)[DerivativeKind.THUMBNAIL].state
+            is DerivativeState.RUNNING
+        )
+
+    def test_rejects_failure_from_an_old_attempt(self, db_session, mesh):
+        recipe = recipes_for(mesh)[DerivativeKind.THUMBNAIL]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+        )
+        token = records.attempt(db_session, mesh, row)
+        db_session.commit()
+        db_session.expunge(row)
+        records.cancel(
+            db_session, mesh, {DerivativeKind.THUMBNAIL: recipe}, now=utcnow()
+        )
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.mark_failed(
+                db_session, token, "late_error", now=utcnow(), deterministic=True
+            )
+        db_session.rollback()
+
+        current = records.rows_for(db_session, mesh)[DerivativeKind.THUMBNAIL]
+        assert (current.state, current.failure_reason) == (
+            DerivativeState.CANCELLED,
+            None,
+        )
+
+    def test_rejects_skipped_from_an_old_attempt(self, db_session, mesh):
+        recipe = recipes_for(mesh)[DerivativeKind.THUMBNAIL]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+        )
+        token = records.attempt(db_session, mesh, row)
+        db_session.commit()
+        db_session.expunge(row)
+        records.cancel(
+            db_session, mesh, {DerivativeKind.THUMBNAIL: recipe}, now=utcnow()
+        )
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.mark_skipped(db_session, token, "late_skip", now=utcnow())
+        db_session.rollback()
+
+        assert (
+            records.rows_for(db_session, mesh)[DerivativeKind.THUMBNAIL].state
+            is DerivativeState.CANCELLED
+        )
+
+    def test_regeneration_rejects_an_in_flight_publication(
+        self, db_session, mesh, make_derivative_group_regeneration, make_derivative
+    ):
+        from app.db.models import JobKind
+        from app.modules.derivatives.kinds import group
+        from app.modules.derivatives.source import pending_predicate
+
+        recipe = recipes_for(mesh)[DerivativeKind.THUMBNAIL]
+        make_derivative(mesh, DerivativeKind.METADATA)
+        started = utcnow()
+        row = records.begin(
+            db_session, mesh, DerivativeKind.THUMBNAIL, recipe, now=started
+        )
+        token = records.attempt(db_session, mesh, row)
+        db_session.commit()
+        make_derivative_group_regeneration(
+            JobKind.DERIVATIVES_MESH,
+            DerivativeKind.THUMBNAIL,
+            requested_at=started + timedelta(seconds=1),
+        )
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.mark_ready(db_session, token, now=started + timedelta(seconds=2))
+        db_session.rollback()
+
+        assert DerivativeKind.THUMBNAIL in records.needed(
+            db_session,
+            mesh,
+            {DerivativeKind.THUMBNAIL: recipe},
+            now=started + timedelta(seconds=2),
+        )
+        assert (
+            db_session.exec(
+                select(File).where(
+                    File.id == mesh.id,
+                    pending_predicate(
+                        group(JobKind.DERIVATIVES_MESH),
+                        db_session,
+                        now=started + timedelta(seconds=2),
+                    ),
+                )
+            )
+            .one()
+            .id
+            == mesh.id
+        )
+
+
+class TestPublicationTransactions:
+    def test_committed_cancellation_wins_over_a_waiting_publisher(
+        self, publication_engine
+    ):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        from tests.factories import build_file, build_model
+
+        with Session(publication_engine) as session:
+            file = build_file(session, build_model(session), filename="cancel.stl")
+            session.expunge(file)
+            recipe = recipes_for(file)[DerivativeKind.THUMBNAIL]
+            row = records.begin(
+                session, file, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+            )
+            token = records.attempt(session, file, row)
+            session.commit()
+            records.cancel(
+                session, file, {DerivativeKind.THUMBNAIL: recipe}, now=utcnow()
+            )
+            session.flush()
+            entered = Event()
+
+            def publish():
+                with Session(publication_engine) as other:
+                    entered.set()
+                    with pytest.raises(records.AttemptSuperseded):
+                        records.mark_ready(other, token, now=utcnow())
+                    other.rollback()
+                    return records.rows_for(other, file)[DerivativeKind.THUMBNAIL].state
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(publish)
+                assert entered.wait(10)
+                session.commit()
+                assert future.result(timeout=20) is DerivativeState.CANCELLED
+
+    def test_committed_publication_survives_a_waiting_cancellation(
+        self, publication_engine
+    ):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        from tests.factories import build_file, build_model
+
+        with Session(publication_engine) as session:
+            file = build_file(session, build_model(session), filename="ready.stl")
+            session.expunge(file)
+            recipe = recipes_for(file)[DerivativeKind.THUMBNAIL]
+            row = records.begin(
+                session, file, DerivativeKind.THUMBNAIL, recipe, now=utcnow()
+            )
+            token = records.attempt(session, file, row)
+            session.commit()
+            records.mark_ready(session, token, now=utcnow(), storage_key="ready.webp")
+            session.flush()
+            entered = Event()
+
+            def cancel():
+                with Session(publication_engine) as other:
+                    entered.set()
+                    records.cancel(
+                        other, file, {DerivativeKind.THUMBNAIL: recipe}, now=utcnow()
+                    )
+                    other.commit()
+                    row = records.rows_for(other, file)[DerivativeKind.THUMBNAIL]
+                    return row.state, row.storage_key
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(cancel)
+                assert entered.wait(10)
+                session.commit()
+                assert future.result(timeout=20) == (
+                    DerivativeState.READY,
+                    "ready.webp",
+                )
+
+    def test_regeneration_commit_wins_over_waiting_publication(
+        self, publication_engine
+    ):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+
+        from app.db.models import DerivativeGroupRegeneration, JobKind
+        from app.modules.derivatives import policy
+        from tests.factories import build_file, build_model
+
+        with Session(publication_engine) as session:
+            file = build_file(session, build_model(session), filename="regenerate.stl")
+            session.expunge(file)
+            row = records.begin(
+                session,
+                file,
+                DerivativeKind.THUMBNAIL,
+                recipes_for(file)[DerivativeKind.THUMBNAIL],
+                now=utcnow(),
+            )
+            token = records.attempt(session, file, row)
+            session.commit()
+            policy.lock(session)
+            session.add(
+                DerivativeGroupRegeneration(
+                    definition=JobKind.DERIVATIVES_MESH,
+                    kind=DerivativeKind.THUMBNAIL,
+                    requested_at=utcnow(),
+                )
+            )
+            session.flush()
+            entered = Event()
+
+            def publish():
+                with Session(publication_engine) as other:
+                    entered.set()
+                    with pytest.raises(records.AttemptSuperseded):
+                        records.mark_ready(other, token, now=utcnow())
+                    other.rollback()
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(publish)
+                assert entered.wait(10)
+                session.commit()
+                future.result(timeout=20)
+            assert (
+                records.rows_for(session, file)[DerivativeKind.THUMBNAIL].state
+                is DerivativeState.RUNNING
+            )
+
+    @pytest.mark.postgres
+    @pytest.mark.parametrize("publication_engine", ["postgresql"], indirect=True)
+    def test_independent_publications_share_generation_lock(self, publication_engine):
+        from sqlalchemy import text
+
+        from tests.factories import build_file, build_model
+
+        with Session(publication_engine) as session:
+            attempts = []
+            for name in ("first.stl", "second.stl"):
+                file = build_file(session, build_model(session), filename=name)
+                row = records.begin(
+                    session,
+                    file,
+                    DerivativeKind.THUMBNAIL,
+                    recipes_for(file)[DerivativeKind.THUMBNAIL],
+                    now=utcnow(),
+                )
+                attempts.append(records.attempt(session, file, row))
+                session.commit()
+        with (
+            Session(publication_engine) as first,
+            Session(publication_engine) as second,
+        ):
+            records.mark_ready(first, attempts[0], now=utcnow())
+            first.flush()
+            # An exclusive singleton lock would make this independent publisher fail.
+            second.execute(text("SET LOCAL lock_timeout = '1s'"))
+            records.mark_ready(second, attempts[1], now=utcnow())
+            second.commit()
+            first.commit()
+        with Session(publication_engine) as session:
+            rows = session.exec(select(ArtifactDerivative)).all()
+            assert [row.state for row in rows] == [
+                DerivativeState.READY,
+                DerivativeState.READY,
+            ]
+
+
+class TestCommittedContext:
+    def test_context_survives_basic_output_commit(self, db_session, mesh):
+        recipe = recipes_for(mesh)[DerivativeKind.METADATA]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.METADATA, recipe, now=utcnow()
+        )
+        context = records.attempt(db_session, mesh, row)
+        records.mark_ready(db_session, context, now=utcnow())
+        db_session.commit()
+
+        assert records.require_context(db_session, context).id == mesh.id
+        with pytest.raises(records.AttemptSuperseded):
+            records.claim_running(db_session, context)
+        db_session.rollback()
+        assert (
+            records.rows_for(db_session, mesh)[DerivativeKind.METADATA].state
+            is DerivativeState.READY
+        )
+
+    @pytest.mark.parametrize("changed", ["source", "generation"])
+    def test_committed_context_rejects_replaced_input(self, db_session, mesh, changed):
+        recipe = recipes_for(mesh)[DerivativeKind.METADATA]
+        row = records.begin(
+            db_session, mesh, DerivativeKind.METADATA, recipe, now=utcnow()
+        )
+        context = records.attempt(db_session, mesh, row)
+        records.mark_ready(db_session, context, now=utcnow())
+        if changed == "source":
+            mesh.source_etag = "new-source"
+            db_session.add(mesh)
+        else:
+            db_session.add(
+                DerivativeRegeneration(
+                    kind=DerivativeKind.METADATA, requested_at=utcnow()
+                )
+            )
+        db_session.commit()
+
+        with pytest.raises(records.AttemptSuperseded):
+            records.require_context(db_session, context)
+        db_session.rollback()
+        assert (
+            records.rows_for(db_session, mesh)[DerivativeKind.METADATA].state
+            is DerivativeState.READY
+        )
+
+
+class TestModelRevision:
+    """What a Model snapshot and a later subscription compare to rule out a missed change."""
+
+    def test_a_model_without_derivatives_has_a_revision(
+        self, db_session: Session, mesh: File
+    ) -> None:
+        assert records.model_revision(db_session, mesh.model_id) == "0"
+
+    def test_is_stable_while_nothing_changes(
+        self, db_session: Session, mesh: File
+    ) -> None:
+        build_derivative(db_session, mesh, DerivativeKind.THUMBNAIL)
+
+        assert records.model_revision(
+            db_session, mesh.model_id
+        ) == records.model_revision(db_session, mesh.model_id)
+
+    def test_changes_when_a_derivative_appears(
+        self, db_session: Session, mesh: File
+    ) -> None:
+        before = records.model_revision(db_session, mesh.model_id)
+
+        build_derivative(db_session, mesh, DerivativeKind.THUMBNAIL)
+
+        assert records.model_revision(db_session, mesh.model_id) != before
+
+    def test_changes_when_a_derivative_settles(
+        self, db_session: Session, mesh: File
+    ) -> None:
+        row = build_derivative(
+            db_session,
+            mesh,
+            DerivativeKind.THUMBNAIL,
+            state=DerivativeState.QUEUED,
+            updated_at=utcnow() - timedelta(minutes=5),
+        )
+        before = records.model_revision(db_session, mesh.model_id)
+
+        row.state = DerivativeState.READY
+        row.updated_at = utcnow()
+        db_session.add(row)
+        db_session.commit()
+
+        assert records.model_revision(db_session, mesh.model_id) != before
+
+    def test_changes_when_a_derivative_is_removed(
+        self, db_session: Session, mesh: File
+    ) -> None:
+        build_derivative(
+            db_session,
+            mesh,
+            DerivativeKind.METADATA,
+            updated_at=utcnow() - timedelta(minutes=5),
+        )
+        older = build_derivative(
+            db_session,
+            mesh,
+            DerivativeKind.THUMBNAIL,
+            updated_at=utcnow() - timedelta(minutes=9),
+        )
+        before = records.model_revision(db_session, mesh.model_id)
+
+        db_session.delete(older)
+        db_session.commit()
+
+        assert records.model_revision(db_session, mesh.model_id) != before
+
+    def test_ignores_another_model(
+        self, db_session: Session, mesh: File, make_model, make_file
+    ) -> None:
+        before = records.model_revision(db_session, mesh.model_id)
+
+        build_derivative(
+            db_session,
+            make_file(make_model(), filename="other.stl"),
+            DerivativeKind.THUMBNAIL,
+        )
+
+        assert records.model_revision(db_session, mesh.model_id) == before
+
+    def test_ignores_a_trashed_artifact(self, db_session: Session, mesh: File) -> None:
+        build_derivative(db_session, mesh, DerivativeKind.THUMBNAIL)
+        mesh.deleted_at = utcnow()
+        db_session.add(mesh)
+        db_session.commit()
+
+        assert records.model_revision(db_session, mesh.model_id) == "0"

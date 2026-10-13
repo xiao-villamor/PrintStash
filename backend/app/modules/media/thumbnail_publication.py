@@ -18,7 +18,15 @@ from app.modules.storage.storage_backend.contracts import (
     StorageBackend,
     StorageCollisionError,
 )
-from app.modules.storage.storage_ownership import publish_bytes
+from app.modules.storage.storage_ownership import (
+    adopt_publication,
+    prepare_bytes,
+    provider_ref_for_backend,
+)
+from app.modules.storage.storage_publication import (
+    PendingPublication,
+    VerifiedPublication,
+)
 
 MESH_TYPES = frozenset({FileType.STL, FileType.THREE_MF, FileType.OBJ, FileType.STEP})
 
@@ -35,24 +43,33 @@ class PublishedThumbnail:
     etag: str | None
 
 
-def publish_thumbnail(
+@dataclass(frozen=True)
+class PreparedThumbnail:
+    published: PublishedThumbnail
+    publication: PendingPublication | VerifiedPublication
+
+
+def prepare_thumbnail(
     session: Session,
     backend: StorageBackend,
     file_row: File,
     encoded: bytes,
     *,
     recipe_tag: str,
-) -> PublishedThumbnail:
-    """Write ``encoded`` under a key unique to (Artifact, recipe, bytes)."""
+) -> PreparedThumbnail:
+    """Prepare ``encoded`` under a key unique to (Artifact, recipe, bytes)."""
     assert file_row.id is not None
     digest = hashlib.sha256(encoded).hexdigest()
     variant = hashlib.sha256(f"{recipe_tag}:{digest}".encode()).hexdigest()
     key = backend.thumbnail_variant_key(file_row.id, file_row.sha256, variant)
     try:
-        receipt = publish_bytes(
+        candidate = prepare_bytes(
             session, backend, key, encoded, object_kind="thumbnail", sha256=digest
         )
-        return PublishedThumbnail(key, digest, receipt.size, receipt.etag)
+        receipt = candidate.receipt
+        return PreparedThumbnail(
+            PublishedThumbnail(key, digest, receipt.size, receipt.etag), candidate
+        )
     except StorageCollisionError as exc:
         existing = backend.object_info(key)
         if (
@@ -61,7 +78,43 @@ def publish_thumbnail(
             or hashlib.sha256(backend.read_bytes(key)).hexdigest() != digest
         ):
             raise ThumbnailPublicationError("thumbnail_key_collision") from exc
-        return PublishedThumbnail(key, digest, existing.size, existing.etag)
+        from dataclasses import replace
+
+        receipt = backend.adopt_existing(
+            key, expected_size=len(encoded), expected_sha256=digest
+        )
+        if receipt is None:
+            raise ThumbnailPublicationError("thumbnail_ownership_unverified") from exc
+        receipt = replace(
+            receipt,
+            provider_ref=provider_ref_for_backend(backend, namespace=receipt.namespace),
+        )
+        return PreparedThumbnail(
+            PublishedThumbnail(key, digest, receipt.size, receipt.etag),
+            VerifiedPublication(receipt, "thumbnail", digest),
+        )
+
+
+def adopt_thumbnail(
+    session: Session, prepared: PreparedThumbnail
+) -> PublishedThumbnail:
+    """Join preparation evidence after output/authority locks; SQL only."""
+    adopt_publication(session, prepared.publication)
+    return prepared.published
+
+
+def publish_thumbnail(
+    session: Session,
+    backend: StorageBackend,
+    file_row: File,
+    encoded: bytes,
+    *,
+    recipe_tag: str,
+) -> PublishedThumbnail:
+    prepared = prepare_thumbnail(
+        session, backend, file_row, encoded, recipe_tag=recipe_tag
+    )
+    return adopt_thumbnail(session, prepared)
 
 
 def should_represent_model(session: Session, model: Model, file_row: File) -> bool:

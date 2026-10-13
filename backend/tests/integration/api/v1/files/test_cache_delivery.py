@@ -115,6 +115,12 @@ class TestCacheDelivery:
         db_session.commit()
         with resolve(row).materialize() as path:
             assert path.suffix == ".blob"
+        from tests.integration.api.v1._ingest_assertions import drain_work
+
+        accepted = client.get(f"/api/v1/files/{row.id}/stl", headers=auth_headers)
+        assert accepted.status_code == 202
+        drain_work()
+
         response = client.get(f"/api/v1/files/{row.id}/stl", headers=auth_headers)
         assert response.status_code == 200
         assert struct.unpack_from("<I", response.content, 80) == (1,)

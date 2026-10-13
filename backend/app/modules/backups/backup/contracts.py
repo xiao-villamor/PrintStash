@@ -3,13 +3,33 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from app.core.logging import get_logger
 from app.modules.storage.storage_backend.contracts import CreationReceipt
 
 logger = get_logger(__name__)
+
+
+class BackupStage(StrEnum):
+    SNAPSHOTTING = "snapshotting"
+    ARCHIVING = "archiving"
+    VERIFYING = "verifying"
+    PUBLISHING = "publishing"
+    FINALIZING = "finalizing"
+
+
+class BackupProgress(Protocol):
+    def __call__(
+        self,
+        stage: BackupStage,
+        *,
+        processed: int | None = None,
+        total: int | None = None,
+        destination: str | None = None,
+    ) -> None: ...
 
 
 class DatabaseBackupNotSupportedError(RuntimeError):

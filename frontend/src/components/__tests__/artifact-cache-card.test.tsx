@@ -1,11 +1,12 @@
 /** Cache controls preserve active readers and separate policy changes from clearing. */
 import "@testing-library/jest-dom/vitest";
-import { act, screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ArtifactCacheCard } from "@/components/artifact-cache-card";
 import type { ArtifactCacheRead } from "@/lib/api/artifact-cache";
-import { renderApp } from "@/test-support/render";
+import { clearLogin } from "@/lib/auth-store";
+import { json, renderApp } from "@/test-support/render";
 import { anArtifactCache } from "@/test-support/factories";
 
 const INITIAL = anArtifactCache();
@@ -282,9 +283,9 @@ describe("ArtifactCacheCard observability", () => {
         />,
       );
       await act(async () => Promise.resolve());
-      await act(async () => vi.advanceTimersByTimeAsync(1000));
+      await act(async () => vi.advanceTimersByTimeAsync(1010));
       expect(screen.getByRole("alert")).toHaveTextContent("could not be loaded");
-      await act(async () => vi.advanceTimersByTimeAsync(1000));
+      await act(async () => vi.advanceTimersByTimeAsync(1010));
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -306,5 +307,234 @@ describe("ArtifactCacheCard observability", () => {
     expect(await screen.findByText(/Cache needs attention/)).toHaveTextContent(
       "Original Vault storage remains authoritative",
     );
+  });
+});
+
+describe("Artifact cache ownership", () => {
+  it("shares cancellable cache maintenance reads", async () => {
+    vi.useFakeTimers();
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    try {
+      const view = renderApp(
+        <>
+          <ArtifactCacheCard />
+          <ArtifactCacheCard />
+        </>,
+        {
+          routes: {
+            "GET /api/v1/config/artifact-cache": (_url, init) => {
+              signal = init?.signal;
+              return pending.promise;
+            },
+          },
+        },
+      );
+      await act(async () => vi.advanceTimersByTimeAsync(3000));
+      expect(view.requestsWithMethod("GET")).toHaveLength(1);
+      view.unmount();
+      expect(signal?.aborted).toBe(true);
+      await act(async () => pending.resolve(json(INITIAL)));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it("clears obsolete cache reads before acknowledging writes", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const saved = anArtifactCache({
+      edit_version: 2,
+      policy: { ...INITIAL.policy, max_bytes: 20 * 1024 ** 2 },
+    });
+    const view = renderApp(<ArtifactCacheCard />, {
+      routes: {
+        "GET /api/v1/config/artifact-cache": json(INITIAL),
+        "PUT /api/v1/config/artifact-cache": json(saved),
+      },
+    });
+    await userEvent.click(await screen.findByRole("tab", { name: "Cache limits" }));
+    const input = screen.getByRole("spinbutton", { name: "Maximum cache size (MB)" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "20");
+    view.route({
+      "GET /api/v1/config/artifact-cache": (_url, init) => {
+        signal = init?.signal;
+        return pending.promise;
+      },
+    });
+    await act(async () => {
+      void view.client.invalidateQueries();
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Save cache settings" }));
+    expect(await screen.findByText("Artifact cache settings updated.")).toBeVisible();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => pending.resolve(json(INITIAL)));
+    expect(input).toHaveValue(20);
+    expect(view.client.getQueryData(["artifact-cache"])).toEqual(saved);
+  });
+  it("retires cache reads on unmount", async () => {
+    const response = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const view = renderApp(<ArtifactCacheCard />, {
+      routes: {
+        "GET /api/v1/config/artifact-cache": (_url, init) => {
+          signal = init?.signal;
+          return response.promise;
+        },
+      },
+    });
+    await waitFor(() => expect(signal).toBeDefined());
+    view.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => response.resolve(json(INITIAL)));
+  });
+  it("preserves cache policy draft during usage refresh", async () => {
+    const view = renderApp(<ArtifactCacheCard />, {
+      routes: {
+        "GET /api/v1/config/artifact-cache": json(INITIAL),
+      },
+    });
+    await userEvent.click(await screen.findByRole("tab", { name: "Cache limits" }));
+    const input = screen.getByRole("spinbutton", { name: "Maximum cache size (MB)" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "20");
+    view.route({
+      "GET /api/v1/config/artifact-cache": json(
+        anArtifactCache({ usage: { bytes: 200, leases: 2 } }),
+      ),
+    });
+    await act(async () => {
+      await view.client.invalidateQueries();
+    });
+    expect(input).toHaveValue(20);
+    expect(await screen.findByText(/2 active reads/)).toBeVisible();
+  });
+  it("preserves cache policy draft when clearing bytes", async () => {
+    renderApp(<ArtifactCacheCard />, {
+      routes: {
+        "GET /api/v1/config/artifact-cache": json(INITIAL),
+        "POST /api/v1/config/artifact-cache/clear": json(anArtifactCache({ usage: { bytes: 0 } })),
+      },
+    });
+    await userEvent.click(await screen.findByRole("tab", { name: "Cache limits" }));
+    const input = screen.getByRole("spinbutton", { name: "Maximum cache size (MB)" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "20");
+    await userEvent.click(screen.getByRole("button", { name: "Clear cached files" }));
+    expect(await screen.findByText(/0 MB cached/)).toBeVisible();
+    expect(input).toHaveValue(20);
+  });
+  it.each([412, 503])(
+    "requires explicit review after an unaccepted cache save (%i)",
+    async (status) => {
+      const view = renderApp(<ArtifactCacheCard />, {
+        routes: {
+          "GET /api/v1/config/artifact-cache": json(INITIAL),
+          "PUT /api/v1/config/artifact-cache": json({ detail: "edit_conflict" }, status),
+        },
+      });
+      await userEvent.click(await screen.findByRole("tab", { name: "Cache limits" }));
+      const input = screen.getByRole("spinbutton", { name: "Maximum cache size (MB)" });
+      await userEvent.clear(input);
+      await userEvent.type(input, "20");
+      await userEvent.click(screen.getByRole("button", { name: "Save cache settings" }));
+      expect(await screen.findByRole("button", { name: "Review current values" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Save cache settings" })).toBeDisabled();
+      expect(input).toHaveValue(20);
+      view.route({
+        "GET /api/v1/config/artifact-cache": json(
+          anArtifactCache({ policy: { ...INITIAL.policy, max_bytes: 10 * 1024 ** 2 } }),
+        ),
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Review current values" }));
+      await userEvent.click(await screen.findByRole("button", { name: "Use current values" }));
+      expect(input).toHaveValue(10);
+      expect(view.requestsWithMethod("PUT")).toHaveLength(1);
+    },
+  );
+  it("saves only revised cache fields over reviewed policy", async () => {
+    const view = renderApp(<ArtifactCacheCard />, {
+      routes: {
+        "GET /api/v1/config/artifact-cache": json(INITIAL),
+        "PUT /api/v1/config/artifact-cache": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(await screen.findByRole("tab", { name: "Cache limits" }));
+    const size = screen.getByRole("spinbutton", { name: "Maximum cache size (MB)" });
+    await userEvent.clear(size);
+    await userEvent.type(size, "20");
+    await userEvent.click(screen.getByRole("button", { name: "Save cache settings" }));
+    const reviewed = anArtifactCache({
+      edit_version: 2,
+      policy: { ...INITIAL.policy, max_entries: 100 },
+    });
+    view.route({
+      "GET /api/v1/config/artifact-cache": json(reviewed),
+      "PUT /api/v1/config/artifact-cache": json(
+        anArtifactCache({
+          edit_version: 3,
+          policy: { ...reviewed.policy, max_bytes: 20 * 1024 ** 2 },
+        }),
+      ),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Save revised changes" }));
+    expect(await screen.findByText("Artifact cache settings updated.")).toBeVisible();
+    expect(JSON.parse(view.requestsWithMethod("PUT")[1]!.body)).toEqual({
+      ...reviewed.policy,
+      max_bytes: 20 * 1024 ** 2,
+    });
+    expect(screen.getByRole("spinbutton", { name: "Maximum cached files" })).toHaveValue(100);
+  });
+  it("forbids cache draft replay across restored epochs", async () => {
+    const view = renderApp(<ArtifactCacheCard />, {
+      routes: {
+        "GET /api/v1/config/artifact-cache": json(INITIAL),
+        "PUT /api/v1/config/artifact-cache": json({ detail: "edit_conflict" }, 412),
+      },
+    });
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: "Enable remote Artifact cache" }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save cache settings" }));
+    view.route({
+      "GET /api/v1/config/artifact-cache": json(
+        anArtifactCache({ edit_epoch: "11111111111111111111111111111111" }),
+      ),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
+    expect(await screen.findByRole("button", { name: "Save revised changes" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Use current values" })).toBeEnabled();
+  });
+  it("retires cache command feedback with its session", async () => {
+    const response = Promise.withResolvers<Response>();
+    const view = renderApp(<ArtifactCacheCard />, {
+      routes: {
+        "GET /api/v1/config/artifact-cache": json(INITIAL),
+        "POST /api/v1/config/artifact-cache/clear": () => response.promise,
+      },
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Clear cached files" }));
+    await act(async () => clearLogin());
+    await act(async () => response.resolve(json(anArtifactCache({ usage: { bytes: 0 } }))));
+    expect(screen.queryByText("Artifact cache settings updated.")).not.toBeInTheDocument();
+    expect(
+      view.client
+        .getQueryCache()
+        .getAll()
+        .some((entry) => entry.state.data !== undefined),
+    ).toBe(false);
+  });
+  it("hides denied cache controls", async () => {
+    const view = renderApp(<ArtifactCacheCard />, {
+      routes: { "GET /api/v1/config/artifact-cache": json(INITIAL) },
+    });
+    await screen.findByRole("button", { name: "Save cache settings" });
+    view.route({ "GET /api/v1/config/artifact-cache": json({ detail: "denied" }, 403) });
+    await act(async () => {
+      await view.client.invalidateQueries();
+    });
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Save cache settings" })).not.toBeInTheDocument();
   });
 });

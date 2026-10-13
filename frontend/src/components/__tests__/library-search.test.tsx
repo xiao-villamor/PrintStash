@@ -159,6 +159,28 @@ describe("LibrarySearch", () => {
     ).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Search with AI" })).toBeNull();
   });
+  it("disables cached capabilities after a failed refresh", async () => {
+    const app = searchBox({
+      routes: {
+        "GET /api/v1/search/status": json(
+          searchStatus({ enabled: true, semantic_ready: true, legs: ["thumbnail"] }),
+        ),
+      },
+    });
+    await userEvent.type(screen.getByRole("searchbox"), "bracket");
+    expect(await screen.findByRole("button", { name: "Search with AI" })).toBeEnabled();
+    app.route({ "GET /api/v1/search/status": json({}, 503) });
+    await act(async () => {
+      await app.client.refetchQueries({ queryKey: ["ai-search", "status"] });
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Search with AI" })).toBeNull(),
+    );
+    expect(screen.queryByRole("button", { name: "Search by image" })).toBeNull();
+    expect(screen.getByRole("searchbox")).toHaveValue("bracket");
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getByTestId("location")).toHaveTextContent("/?q=bracket");
+  });
   it("hides the AI control when AI search is disabled", async () => {
     searchBox();
     await userEvent.setup().type(screen.getByRole("searchbox"), "bracket");

@@ -22,6 +22,7 @@ const parsed: ParsedSearch = {
   residual_query: "bracket",
   sort: "printed-desc",
   filters: {
+    library_view: "all",
     direct: false,
     favorites: false,
     tag: [],

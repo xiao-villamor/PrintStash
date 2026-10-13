@@ -1,12 +1,13 @@
 [project]
 name = "printstash"
-version = "0.13.0"
+version = "0.14.0"
 description = "PrintStash — self-hosted 3D printing asset manager"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dependencies = [
-    "printstash-core[network,printers-all]",
+    "printstash-core[mesh,network,printers-all]",
     "cryptography>=50,<51",
     "alembic>=1.19,<2",
+    "anyio>=4.15.1,<5",
     "boto3>=1.43,<2",
     "botocore>=1.43,<2",
     "croniter>=6.2,<7",
@@ -19,11 +20,11 @@ dependencies = [
     # the async DB capability is present on every platform we support.
     "greenlet>=3.5,<4",
     "httpx>=0.28,<0.29",
-    "lxml>=6.1,<7",
+    "lxml>=6.1.3,<7",
     "networkx>=3.6,<4",
-    "numpy>=2,<3",
+    "numpy>=2.5.3,<3",
     "orjson>=3.11,<4",
-    "pillow>=12.3,<13",
+    "pillow>=12.3.0,<13",
     "prometheus-client>=0.26,<1",
     "pydantic>=2.13,<3",
     "pydantic-settings>=2.15,<3",
@@ -31,14 +32,15 @@ dependencies = [
     "PyJWT>=2.13,<3",
     "python-multipart>=0.0.32,<0.1",
     "psycopg[binary]>=3.3,<4",
+    "scipy>=1.18.1,<2",
     "SQLAlchemy>=2.0.52,<2.1",
     "sqlmodel>=0.0.39,<0.1",
     "starlette>=1.6,<2",
-    "trimesh>=5,<6",
+    "trimesh>=5.1.1,<6",
     "uvicorn[standard]>=0.52,<1",
     "watchfiles>=1.2,<2",
     "pycentauri==0.9.1",
-    "dbos>=2.31,<3",
+    "dbos>=3.0,<4",
     "jsonschema>=4.26,<5",
 ]
 
@@ -87,8 +89,8 @@ dev = [
     # memory test that silently skips on the maintainer's machine is a memory test
     # nobody runs.
     "psutil>=6",
-    "pyright>=1.1.403",
-    "ruff>=0.8",
+    "pyright>=1.1.414",
+    "ruff>=0.16.10",
     # Provides the real PostgreSQL and SeaweedFS the `postgres`- and `s3`-marked
     # tests run against. There is no second path: see `tests/containers.py`.
     # Without a Docker daemon those tests skip, naming the prerequisite.
@@ -97,12 +99,30 @@ dev = [
     "WsgiDAV>=4.3,<5",
     "cheroot>=11,<12",
     "ty>=0.0.1",
+    "fast-simplification>=0.2.0,<0.3",
 ]
 ai = [
     "sqlite-vec==0.1.6",
     "onnx>=1.22,<2",
     "onnxruntime>=1.30,<2",
     "tokenizers>=0.23,<0.24",
+]
+gpu-render = [
+    "wgpu>=0.32,<0.33",
+]
+gpu = [
+    "onnx>=1.22,<2",
+    "tokenizers>=0.23,<0.24",
+    "wgpu>=0.32,<0.33",
+    "onnxruntime>=1.30,<2",
+    "onnxruntime-ep-webgpu>=0.4,<0.5",
+]
+webgpu-pilot = [
+    "wgpu==0.32.0",
+]
+gpu-pilot = [
+    "glcontext>=3.0.0,<4",
+    "moderngl>=5.12.0,<6",
 ]
 
 [tool.pytest.ini_options]
@@ -116,16 +136,23 @@ markers = [
     "e2e: the whole app over ASGITransport against the fakes (lane: e2e)",
     "critical: release-blocking workflows whose observable outcome must survive the whole stack (lane: critical)",
     # Resources. These gate a subset *inside* a tier and skip when the resource is absent.
+    "native_host: real native contention measured with exclusive suite host access (serial resource phase)",
     "bgcode: builds and runs the official converter through Docker",
     "postgres: runs against a real PostgreSQL container (tests/containers.py)",
     "remote_storage: runs against real Nextcloud and OpenSSH containers (tests/containers.py)",
     "s3: runs against a real SeaweedFS container (tests/containers.py)",
     "slow: large real fixtures or long simulations; excluded from the fast lane",
+    # Seeds a library at the supported size and times reads against budgets.
+    # Deselected by every lane but its own, which Deep CI runs (#295).
+    "scale: wall-clock budgets at the supported library size (lane: scale)",
     # Reads the report a finished coverage run wrote, so it cannot run inside the run
     # it judges. Every lane deselects it; `./scripts/test.sh coverage` runs it alone,
     # after the measured pass. See scripts/test.sh.
     "coverage_gate: asserts the coverage floors against coverage.json (lane: coverage)",
 ]
+
+[tool.ruff]
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B"]
@@ -134,7 +161,8 @@ ignore = ["B008"]  # FastAPI Depends() in argument defaults is the standard patt
 [tool.deptry]
 extend_exclude = ["tests"]
 known_first_party = ["app"]
-optional_dependencies_dev_groups = ["dev"]
+# The GPU experiment is tooling, not an application backend.
+optional_dependencies_dev_groups = ["dev", "gpu-pilot", "webgpu-pilot"]
 
 [tool.deptry.per_rule_ignores]
 # Runtime plugins/drivers are imported by their owning frameworks rather than
@@ -174,6 +202,8 @@ source = ["app"]
 # exactly the code that is hardest to test.
 concurrency = ["thread", "multiprocessing"]
 parallel = true
+# Measure disposable native workers and their sentinel exits too.
+patch = ["subprocess", "fork", "_exit"]
 sigterm = true
 omit = ["app/__main__.py"]
 

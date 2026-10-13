@@ -71,8 +71,6 @@ Both actions refresh the saved inventory. Thumbnails, Library artifacts, trash,
 backups and other authoritative data are never automatically deleted by this policy;
 their existing owner-specific Settings actions remain the only route.
 
-The [behavior matrix](storage-capacity-test-matrix.md) records the feature verification.
-
 ## Percentage headroom and durable work
 
 `STORAGE_MIN_FREE_PERCENT` (0–100, default 0) reserves a percentage of each

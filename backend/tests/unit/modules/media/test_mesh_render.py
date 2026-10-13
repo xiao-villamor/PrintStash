@@ -26,6 +26,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from app.modules.media import mesh_render
 
@@ -326,3 +327,132 @@ def _set_chunk_size(monkeypatch, n: int) -> None:
 class TestFailedPreview:
     def test_empty_geometry_has_no_preview(self):
         assert mesh_render.render_mesh_thumbnail(None, "empty.stl") is None
+
+
+class TestDeferredPreparation:
+    @staticmethod
+    def mesh(count):
+        return SimpleNamespace(
+            vertices=np.asarray([[0.0, 0, 0], [10, 0, 0], [0, 10, 0]]),
+            faces=np.tile([[0, 1, 2]], (count, 1)).astype(np.int64),
+        )
+
+    @pytest.mark.parametrize(
+        "faces", [1, 19_999, 20_000], ids=["one", "small", "large"]
+    )
+    def test_selects_gpu_before_cpu_normals(self, monkeypatch, faces):
+        from printstash_core.mesh import render_geometry
+
+        from app.modules.media.gpu_normals import VisualRender
+        from app.runtime.compute import client
+
+        monkeypatch.setattr(client, "available", lambda **_: True)
+        monkeypatch.setattr(
+            render_geometry,
+            "_prepare_normals",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("CPU normals computed before GPU selection")
+            ),
+        )
+        prepared = mesh_render.prepare_preview_render(self.mesh(faces))
+        assert isinstance(prepared, VisualRender)
+        assert not hasattr(prepared, "smooth_normals")
+        assert not hasattr(prepared, "position_ids")
+        assert prepared._canonical is None
+
+    def test_preserves_small_analytic_preparation(self, monkeypatch):
+        from printstash_core.mesh.render_geometry import PreparedRender
+
+        from app.runtime.compute import client
+
+        monkeypatch.setattr(client, "available", lambda **_: True)
+
+        prepared = mesh_render.prepare_mesh_render(self.mesh(1))
+
+        assert isinstance(prepared, PreparedRender)
+
+    def test_keeps_cpu_recovery_canonical(self, monkeypatch):
+        from printstash_core.mesh.render_geometry import PreparedRender
+
+        from app.runtime.compute import client
+
+        monkeypatch.setattr(client, "available", lambda **_: False)
+        assert isinstance(
+            mesh_render.prepare_mesh_render(self.mesh(20_000)), PreparedRender
+        )
+
+    @pytest.mark.parametrize("mode", ["visual", "deferred"], ids=str)
+    def test_preserves_parser_fallback_custody(self, monkeypatch, mode):
+        from printstash_core.mesh.render_geometry import PreparedRender, prepare_mesh
+
+        from app.modules.media.gpu_normals import VisualRender, defer
+
+        geometry = prepare_mesh(self.mesh(2))
+        prepared = VisualRender(geometry) if mode == "visual" else defer(geometry)
+        seen = []
+
+        def render(canonical, *_args, **_kwargs):
+            assert isinstance(canonical, PreparedRender)
+            assert canonical.vertices is prepared.vertices
+            seen.append(canonical)
+            return None
+
+        monkeypatch.setattr(mesh_render._core, "render_prepared_pixels", render)
+        mesh_render.render_prepared_pixels(prepared, "model", compute=False)
+        mesh_render.render_prepared_pixels(prepared, "model", compute=False)
+        assert seen[0] is seen[1]
+        np.testing.assert_array_equal(seen[0].smooth_normals, [[0, 0, 1]] * 3)
+
+
+class TestAcceleratedEncoding:
+    def test_renders_cpu_fallback_after_compute_refusal(self, monkeypatch):
+        from PIL import Image
+        from printstash_core.mesh.render_geometry import prepare_mesh_render
+
+        from app.modules.media import compute_render
+
+        prepared = prepare_mesh_render(TestDeferredPreparation.mesh(1))
+
+        attempts = []
+
+        def refused(*args):
+            attempts.append(args[0])
+            return None
+
+        monkeypatch.setattr(compute_render, "render", refused)
+
+        encoded = mesh_render.render_prepared_thumbnail(
+            prepared, "fallback", 64, 48, output_format="WEBP"
+        )
+
+        assert len(attempts) == 1
+        assert attempts[0] is prepared
+        assert encoded is not None
+        with Image.open(io.BytesIO(encoded)) as image:
+            assert image.size == (64, 48)
+            assert image.getchannel("A").getbbox() is not None
+
+    def test_preserves_accelerated_encoding_policy(self, monkeypatch):
+        from PIL import Image
+        from printstash_core.mesh.render_geometry import prepare_mesh_render
+
+        from app.modules.media import compute_render
+
+        rgba = np.random.default_rng(31).integers(0, 256, (12, 16, 4), dtype=np.uint8)
+        rgba[0, :, 3] = 0
+        pixels = mesh_render.RenderedPixels(16, 12, rgba.tobytes())
+        monkeypatch.setattr(compute_render, "render", lambda *_: (pixels,))
+        prepared = prepare_mesh_render(TestDeferredPreparation.mesh(1))
+        for output_format in ("PNG", "WEBP"):
+            encoded = mesh_render.render_prepared_thumbnail(
+                prepared, "model", 16, 12, output_format=output_format
+            )
+            expected = mesh_render._core.encode_rendered_pixels(
+                pixels, output_format=output_format
+            )
+            assert encoded == expected
+            decoded = np.asarray(Image.open(io.BytesIO(encoded)).convert("RGBA"))
+            if output_format == "PNG":
+                np.testing.assert_array_equal(decoded, rgba)
+            else:
+                np.testing.assert_array_equal(decoded[:, :, 3], rgba[:, :, 3])

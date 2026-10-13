@@ -102,7 +102,11 @@ class RemoteLibrarySource:
 
     @contextmanager
     def materialize(
-        self, key: str, *, expected: SourceEntry | None = None
+        self,
+        key: str,
+        *,
+        expected: SourceEntry | None = None,
+        directory: Path | None = None,
     ) -> Iterator[SourceContent]:
         with remote_budget(deadline=time.monotonic() + 900):
             safe_key = _safe_key(key)
@@ -118,7 +122,7 @@ class RemoteLibrarySource:
                 before.version_id,
             )
             _require_observation(expected, observation)
-            fd, raw = tempfile.mkstemp(suffix=Path(safe_key).suffix)
+            fd, raw = tempfile.mkstemp(suffix=Path(safe_key).suffix, dir=directory)
             path = Path(raw)
             written = 0
             started = time.monotonic()

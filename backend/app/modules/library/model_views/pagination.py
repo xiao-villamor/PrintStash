@@ -8,6 +8,7 @@ import json
 from datetime import datetime
 
 from sqlalchemy import Float, case, cast, func
+from sqlalchemy.orm import lazyload
 from sqlmodel import Session, select
 
 from app.core.time import ensure_utc
@@ -238,7 +239,9 @@ def page_items(
         total = decoded_cursor[2]
     stmt, sort_value = _sort_value_and_statement(filtered, sort, rank)
     stmt = _apply_model_cursor(stmt, sort_value, sort, decoded_cursor)
-    raw_rows = session.execute(stmt.add_columns(sort_value).limit(limit + 1)).all()
+    raw_rows = session.execute(
+        stmt.options(lazyload(Model.tags)).add_columns(sort_value).limit(limit + 1)
+    ).all()
     has_more = len(raw_rows) > limit
     page_rows = raw_rows[:limit]
     models = [row[0] for row in page_rows]

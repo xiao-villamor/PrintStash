@@ -37,7 +37,8 @@ def _make_guarded(monkeypatch: pytest.MonkeyPatch) -> None:
         "_capabilities",
         StorageCapabilities(
             conditional_create=True,
-            object_identity=ObjectIdentity.ETAG,
+            # A guarded local backend still proves its actual inode receipt.
+            object_identity=ObjectIdentity.INODE,
             verified_delete=False,
             conditional_replace=False,
             namespace_ownership=True,

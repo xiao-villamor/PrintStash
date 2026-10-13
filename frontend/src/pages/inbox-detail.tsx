@@ -1,7 +1,8 @@
+import { useTaxonomyCommands } from "@/features/library/taxonomy";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
-import { getErrorMessage } from "@/lib/errors";
-import { useEffect, useMemo, useState } from "react";
+import { getErrorMessage, userMessage } from "@/lib/errors";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ExternalLink, FileBox, FolderPlus, Link2, Tags, Trash2 } from "lucide-react";
 import { useParams } from "react-router-dom";
 
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { CollectionPicker } from "@/components/collection-picker";
 import { Input } from "@/components/ui/input";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
@@ -19,17 +21,18 @@ import {
   getPendingImport,
   importPendingImport,
   retryPendingImport,
+  searchCollections,
   updatePendingImport,
 } from "@/lib/api";
-import { createCompletionChainedPoller } from "@/lib/completion-chained-polling";
+import { inboxApi, useInboxItem, useInboxCommands, inboxIsTerminal } from "@/lib/queries/inbox";
 import { formatBytes } from "@/lib/format";
 import { Link } from "@/lib/link";
 import { useI18n } from "@/lib/i18n";
 import { useRouter } from "@/lib/navigation";
-import { useCollections } from "@/lib/queries";
-import { collectionDisplayPath } from "@/lib/collection-display";
+import { useCollectionLookupById } from "@/lib/queries";
+import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
-import type { InboxManifestFile, InboxItem } from "@/types";
+import type { CollectionNodeRead, InboxManifestFile, InboxItem } from "@/types";
 import { safeHttpUrl } from "@/components/model-detail/source-url";
 
 export interface InboxDetailApi {
@@ -38,6 +41,7 @@ export interface InboxDetailApi {
   getPendingImport: typeof getPendingImport;
   importPendingImport: typeof importPendingImport;
   retryPendingImport: typeof retryPendingImport;
+  searchCollections: typeof searchCollections;
   updatePendingImport: typeof updatePendingImport;
 }
 
@@ -47,12 +51,13 @@ const defaultInboxDetailApi: InboxDetailApi = {
   getPendingImport,
   importPendingImport,
   retryPendingImport,
+  searchCollections,
   updatePendingImport,
 };
 
-const ACTIVE_STATES = new Set<InboxItem["state"]>(["captured", "resolving", "importing"]);
 const NEW_COLLECTION = "new";
 const NO_COLLECTION = "none";
+const PICK_COLLECTION = "pick";
 
 function files(item: InboxItem): InboxManifestFile[] {
   return item.manifest.kind === "archive"
@@ -60,10 +65,6 @@ function files(item: InboxItem): InboxManifestFile[] {
     : item.manifest.kind === "model_files"
       ? (item.manifest.files ?? [])
       : [];
-}
-
-function isTerminalState(state: InboxItem["state"]): boolean {
-  return state === "completed" || state === "failed" || state === "dismissed";
 }
 
 function statusLabel(item: InboxItem, t: ReturnType<typeof useI18n>["t"]): string {
@@ -137,56 +138,89 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
   const { locale, t } = useI18n();
   const { id } = useParams();
   const inboxId = Number(id);
+  const routeRef = useRef(inboxId);
+  useLayoutEffect(() => {
+    routeRef.current = inboxId;
+  }, [inboxId]);
   const router = useRouter();
-  const collections = useCollections().data ?? [];
-  const [item, setItem] = useState<InboxItem | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [tags, setTags] = useState("");
-  const [destination, setDestination] = useState<string>(NEW_COLLECTION);
-  const [collectionName, setCollectionName] = useState("");
-  const [busy, setBusy] = useState(false);
-  // The import/retry endpoint returns the pre-worker row, which can still be
-  // `review` while its background work has already been queued.
-  const [pollingAfterSubmit, setPollingAfterSubmit] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const poller = useMemo(
-    () =>
-      createCompletionChainedPoller<InboxItem>({
-        request: () => api.getPendingImport(inboxId),
-        intervalMs: 1_500,
-        shouldContinue: (next, forceContinue) =>
-          !isTerminalState(next.state) && (ACTIVE_STATES.has(next.state) || forceContinue),
-        onResult: (next) => {
-          setItem(next);
-          if (isTerminalState(next.state)) setPollingAfterSubmit(false);
-          setSelected(next.manifest.selected_ids ?? []);
-          setTags(next.requested_tags.join(", "));
-          setDestination(
-            next.target_collection_id === null ? NEW_COLLECTION : String(next.target_collection_id),
-          );
-          setCollectionName(
-            capturedTitle(next) || t("inbox.defaultCollectionName", { id: String(next.id) }),
-          );
-        },
-        onError: toast.error,
-      }),
-    [api, inboxId, t],
+  const [submittedId, setSubmittedId] = useState<number | null>(null);
+  const remote = useInboxItem(
+    Number.isSafeInteger(inboxId) && inboxId > 0 ? inboxId : null,
+    api,
+    submittedId === inboxId,
   );
-  useEffect(() => {
-    if (!Number.isFinite(inboxId)) return;
-    poller.refresh();
-    return () => poller.stop();
-  }, [inboxId, poller]);
-  useEffect(() => {
-    if (!item) return;
-    if (!isTerminalState(item.state) && (pollingAfterSubmit || ACTIVE_STATES.has(item.state))) {
-      poller.start();
-    } else {
-      poller.stop();
-    }
-  }, [item, pollingAfterSubmit, poller]);
+  const commands = useInboxCommands({ ...inboxApi, ...api });
+  const taxonomy = useTaxonomyCommands({ createCollection: api.createCollection });
+  const item = remote.data ?? null;
+  type ReviewDraft = {
+    id: number;
+    base: InboxItem;
+    selected: string[];
+    tags: string;
+    destination: string;
+    pickedCollection: CollectionNodeRead | null;
+    collectionName: string;
+  };
+  const [draft, setDraft] = useState<ReviewDraft | null>(null);
+  const review =
+    draft?.id === inboxId
+      ? draft
+      : item
+        ? {
+            id: item.id,
+            base: item,
+            selected: item.manifest.selected_ids ?? [],
+            tags: item.requested_tags.join(", "),
+            destination:
+              item.target_collection_id === null
+                ? NEW_COLLECTION
+                : String(item.target_collection_id),
+            pickedCollection: null,
+            collectionName:
+              capturedTitle(item) || t("inbox.defaultCollectionName", { id: String(item.id) }),
+          }
+        : null;
+  const selected = review?.selected ?? [];
+  const tags = review?.tags ?? "";
+  const destination = review?.destination ?? NEW_COLLECTION;
+  const pickedCollection = review?.pickedCollection ?? null;
+  const collectionName = review?.collectionName ?? "";
+  function editReview(patch: Partial<ReviewDraft>) {
+    if (review) setDraft({ ...review, ...patch });
+  }
+  const setSelected = (next: string[] | ((current: string[]) => string[])) =>
+    editReview({ selected: next instanceof Function ? next(selected) : next });
+  const setTags = (tags: string) => editReview({ tags });
+  const setDestination = (destination: string) => editReview({ destination });
+  const setCollectionName = (collectionName: string) => editReview({ collectionName });
+  const destinationId =
+    destination !== NEW_COLLECTION &&
+    destination !== NO_COLLECTION &&
+    destination !== PICK_COLLECTION
+      ? Number(destination)
+      : null;
+  const savedCollection = useCollectionLookupById(destinationId);
+  const destinationCollection =
+    pickedCollection?.id === destinationId ? pickedCollection : savedCollection.data?.collection;
+  const [busyId, setBusyId] = useState<number | null>(null);
+  const busy = busyId === inboxId;
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const confirmDelete = confirmDeleteId === inboxId;
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const deleting = deletingId === inboxId;
   const choices = useMemo(() => (item ? files(item) : []), [item]);
+  if (remote.isError && !item)
+    return (
+      <PageContainer>
+        <PageHeader title={t("inbox.detailTitle")} />
+        <div role="alert">
+          <p>{userMessage(remote.error)}</p>
+          <Button variant="outline" onClick={() => void remote.refetch()}>
+            {t("inbox.retry")}
+          </Button>
+        </div>
+      </PageContainer>
+    );
   if (!item)
     return (
       <PageContainer>
@@ -198,74 +232,95 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
     setSelected((current) =>
       current.includes(fileId) ? current.filter((value) => value !== fileId) : [...current, fileId],
     );
-  const saveReview = async (collectionId: number | null) => {
-    const next = await api.updatePendingImport(item.id, {
-      collection_id: collectionId,
-      tags: tags
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-      selected_ids: selected,
+  const saveReview = async (collectionId: number | null, session: number) => {
+    await commands.update.mutateAsync({
+      session,
+      id: item.id,
+      payload: {
+        collection_id: collectionId,
+        tags: tags
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+        selected_ids: selected,
+      },
     });
-    setItem(next);
   };
-  const resolveDestination = async (): Promise<number | null> => {
+  const resolveDestination = async (session: number): Promise<number | null> => {
+    requireSessionVersion(session);
     if (destination === NO_COLLECTION) return null;
+    if (destination === PICK_COLLECTION) throw new Error("Choose a collection before importing");
     if (destination !== NEW_COLLECTION) return Number(destination);
 
     const name = collectionName.trim();
-    const existing = collections.find(
-      (collection) => collection.parent_id === null && collection.name === name,
-    );
-    if (existing) {
-      setDestination(String(existing.id));
-      return existing.id;
-    }
-    const created = await api.createCollection({ name, parent_id: null });
+    // Search is paged, so a same-named root cannot be missed behind nested matches.
+    let cursor: string | null = null;
+    do {
+      requireSessionVersion(session);
+      const page = await api.searchCollections(name, "edit", cursor);
+      requireSessionVersion(session);
+      if (routeRef.current !== inboxId) throw new DOMException("Inbox route changed", "AbortError");
+      const existing = page.items.find(
+        (collection) => collection.parent_id === null && collection.name === name,
+      );
+      if (existing) {
+        setDestination(String(existing.id));
+        return existing.id;
+      }
+      cursor = page.next_cursor;
+    } while (cursor !== null);
+    requireSessionVersion(session);
+    const created = await taxonomy.createCollection({ name, parent_id: null });
+    requireSessionVersion(session);
+    if (routeRef.current !== inboxId) throw new DOMException("Inbox route changed", "AbortError");
     setDestination(String(created.id));
     return created.id;
   };
   const importSelected = async () => {
-    poller.stop();
-    setBusy(true);
+    setBusyId(inboxId);
+    const session = getSessionVersion();
     try {
-      const collectionId = await resolveDestination();
-      await saveReview(collectionId);
-      const next = await api.importPendingImport(item.id, selected);
-      setItem(next);
-      const continuePolling = !isTerminalState(next.state);
-      setPollingAfterSubmit(continuePolling);
-      if (continuePolling) poller.start(true);
+      const collectionId = await resolveDestination(session);
+      requireSessionVersion(session);
+      if (routeRef.current !== inboxId) return;
+      await saveReview(collectionId, session);
+      requireSessionVersion(session);
+      if (routeRef.current !== inboxId) return;
+      const next = await commands.import.mutateAsync({
+        id: item.id,
+        selectedIds: selected,
+        session,
+      });
+      if (getSessionVersion() !== session || routeRef.current !== inboxId) return;
+      setSubmittedId(inboxIsTerminal(next) ? null : item.id);
     } catch (error) {
-      toast.error(error);
-      if (item && !isTerminalState(item.state)) poller.start();
+      if (getSessionVersion() === session && routeRef.current === inboxId) toast.error(error);
     } finally {
-      setBusy(false);
+      if (getSessionVersion() === session && routeRef.current === inboxId) setBusyId(null);
     }
   };
   const deleteItem = async () => {
-    setDeleting(true);
+    setDeletingId(inboxId);
+    const session = getSessionVersion();
     try {
-      await api.dismissPendingImport(item.id);
-      setConfirmDelete(false);
+      await commands.dismiss.mutateAsync({ id: item.id, session });
+      if (getSessionVersion() !== session || routeRef.current !== inboxId) return;
+      setConfirmDeleteId(null);
       router.push("/inbox");
     } catch (error) {
-      toast.error(error);
+      if (getSessionVersion() === session && routeRef.current === inboxId) toast.error(error);
     } finally {
-      setDeleting(false);
+      if (getSessionVersion() === session && routeRef.current === inboxId) setDeletingId(null);
     }
   };
   const retry = async () => {
-    poller.stop();
+    const session = getSessionVersion();
     try {
-      const next = await api.retryPendingImport(item.id);
-      setItem(next);
-      const continuePolling = !isTerminalState(next.state);
-      setPollingAfterSubmit(continuePolling);
-      if (continuePolling) poller.start(true);
+      const next = await commands.retry.mutateAsync({ id: item.id, session });
+      if (getSessionVersion() !== session || routeRef.current !== inboxId) return;
+      setSubmittedId(inboxIsTerminal(next) ? null : item.id);
     } catch (error) {
-      toast.error(error);
-      if (item && !isTerminalState(item.state)) poller.start();
+      if (getSessionVersion() === session && routeRef.current === inboxId) toast.error(error);
     }
   };
   const title = capturedTitle(item) || t("inbox.detailTitle");
@@ -279,6 +334,14 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
   const collectionNameHintId = `${collectionNameId}-hint`;
   return (
     <PageContainer>
+      {remote.isError && (
+        <div role="alert">
+          <p>{userMessage(remote.error)}</p>
+          <Button variant="outline" onClick={() => void remote.refetch()}>
+            {t("inbox.retry")}
+          </Button>
+        </div>
+      )}
       <PageHeader
         title={title}
         description={t("inbox.detailDescription")}
@@ -287,7 +350,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
             <Button variant="outline" asChild>
               <Link href="/inbox">{t("inbox.back")}</Link>
             </Button>
-            <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
+            <Button variant="destructive" onClick={() => setConfirmDeleteId(inboxId)}>
               <Trash2 className="h-4 w-4" aria-hidden="true" />
               {t("inbox.delete")}
             </Button>
@@ -416,13 +479,34 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                 >
                   <option value={NEW_COLLECTION}>{t("inbox.newCollectionFromTitle")}</option>
                   <option value={NO_COLLECTION}>{t("inbox.noCollection")}</option>
-                  {collections.map((collection) => (
-                    <option key={collection.id} value={collection.id}>
-                      {collectionDisplayPath(collections, collection.path)}
+                  <option value={PICK_COLLECTION}>{uiText("Choose existing collection")}</option>
+                  {destinationId !== null && (
+                    <option value={destinationId}>
+                      {destinationCollection?.display_path ??
+                        uiText("Collection #{value1}", { value1: String(destinationId) })}
                     </option>
-                  ))}
+                  )}
                 </select>
               </label>
+              {destination === PICK_COLLECTION && (
+                <CollectionPicker
+                  minRole="edit"
+                  selectedPath={null}
+                  emptyLabel={uiText("No editable collections.")}
+                  onSelect={(collection) => {
+                    if (collection === null) throw new Error("A collection is required");
+                    editReview({
+                      pickedCollection: collection,
+                      destination: String(collection.id),
+                    });
+                  }}
+                />
+              )}
+              {destinationId !== null && savedCollection.isError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {uiText("Folders could not be loaded.")}
+                </p>
+              )}
               {destination === NEW_COLLECTION && (
                 <div>
                   <label htmlFor={collectionNameId} className="block text-sm font-medium">
@@ -467,7 +551,11 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
                 <Button
                   className="w-full"
                   onClick={() => void importSelected()}
-                  disabled={selected.length === 0 || collectionNameMissing}
+                  disabled={
+                    selected.length === 0 ||
+                    collectionNameMissing ||
+                    destination === PICK_COLLECTION
+                  }
                   loading={busy}
                 >
                   {t("inbox.importSelected")}
@@ -513,7 +601,7 @@ export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?:
       )}
       <ConfirmModal
         open={confirmDelete}
-        onClose={() => setConfirmDelete(false)}
+        onClose={() => setConfirmDeleteId(null)}
         title={t("inbox.deleteTitle")}
         description={t("inbox.deleteDescription")}
         confirmLabel={t("inbox.deleteConfirm")}

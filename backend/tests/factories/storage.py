@@ -28,6 +28,7 @@ and lands in an `external:` namespace where ownership cannot be proven at all.
 from __future__ import annotations
 
 import hashlib
+import json
 from typing import Any
 
 from sqlmodel import Session
@@ -39,6 +40,7 @@ from app.db.models import (
     OwnedStorageObject,
     StorageDeleteIntent,
     StorageObjectState,
+    StoragePublicationLocator,
 )
 from app.modules.storage.storage_backend.contracts import (
     CreationReceipt,
@@ -73,6 +75,27 @@ def store_owned_bytes(
     return receipt
 
 
+def build_storage_publication_locator(
+    session: Session,
+    *,
+    backend: str = "local",
+    namespace: str = "local/test",
+    key: str | None = None,
+    **overrides: Any,
+) -> StoragePublicationLocator:
+    """One permanent SQL anchor, scoped to an exact backend namespace/key."""
+    key = key if key is not None else f"files/publication-{nth('storage_publication_locator')}.stl"
+    identifier = hashlib.sha256(
+        json.dumps([backend, namespace, key], separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return save(
+        session,
+        StoragePublicationLocator(
+            id=identifier, backend=backend, namespace=namespace, key=key, **overrides
+        ),
+    )
+
+
 def build_owned_storage_object(
     session: Session,
     *,
@@ -95,6 +118,7 @@ def build_owned_storage_object(
     inline is otherwise easy to make internally inconsistent (for example a
     committed remote row without either an ETag or version id).
     """
+    overrides.setdefault("publication_generation", unique_hash("storage-publication"))
     return save(
         session,
         OwnedStorageObject(

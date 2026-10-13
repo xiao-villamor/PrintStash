@@ -27,8 +27,10 @@ def main() -> None:
     import psutil
 
     from app.core.config import _overlay
+    from app.modules.media.fingerprints import FingerprintResultState
     from app.modules.media.geometry_analysis import _load, verify_paths
-    from app.modules.media.thumbnail_engine import ThumbnailEngine, ThumbnailRequest
+    from app.modules.media.mesh_contracts import ThumbnailRequest
+    from app.modules.media.thumbnail_engine import ThumbnailEngine
     from app.modules.similarity.configuration import SimilaritySettings
     from tests.paths import TESTDATA_DIR
 
@@ -46,6 +48,9 @@ def main() -> None:
     cube = TESTDATA_DIR / "Calibration Cube.stl"
     baseline = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
     with tempfile.TemporaryDirectory(prefix="similarity-resource-") as folder:
+        from app.bootstrap.native_resources import configure
+
+        configure(Path(folder) / "native-runtime")
         prepared = _load(
             source, file_type, triangle_cap=SimilaritySettings().triangle_cap
         )
@@ -56,7 +61,7 @@ def main() -> None:
         analyzed = ThumbnailEngine().generate(
             ThumbnailRequest(source, include_fingerprint=True)
         )
-        assert analyzed.fingerprint_result.state == "ready"
+        assert analyzed.fingerprint_result.state is FingerprintResultState.READY
         assert analyzed.image
         assert analyzed.complete
         analysis_seconds = time.perf_counter() - tick
@@ -92,7 +97,7 @@ def main() -> None:
             "baseline_rss_bytes": baseline,
             "seconds": time.perf_counter() - tick,
             "analysis_seconds": analysis_seconds,
-            "fingerprint_state": analyzed.fingerprint_result.state,
+            "fingerprint_state": analyzed.fingerprint_result.state.value,
             "source_triangles": analyzed.geometry["triangle_count"],
             "sample_points": evidence.sample_points,
             "evidence_class": evidence.evidence_class,

@@ -33,6 +33,11 @@ from app.db.models import (
 from app.db.projections import content_changed
 from app.db.scopes import live
 from app.modules.identity import rbac
+from app.modules.library import collection_tree
+from app.modules.storage.storage_deletion import (
+    PreparedOwnedDeletion,
+    enqueue_prepared_owned_deletion,
+)
 from app.schemas.documents import DocumentListItem
 from app.schemas.multipart_models import (
     MultipartChoiceWrite,
@@ -69,6 +74,8 @@ def _guides(
     ).all()
     return [
         DocumentListItem(
+            edit_epoch=row.edit_epoch,
+            edit_version=row.edit_version,
             id=int(row.id),
             name=row.name,
             kind=row.kind,
@@ -275,8 +282,11 @@ def _list_item(
     aggregate: MultipartModel,
     *,
     starred: bool,
+    labels: dict[str, str],
 ) -> MultipartModelListItem:
+    """One list row; *labels* are the page's collection labels, resolved once."""
     parts, model_count = _parts(session, user, int(aggregate.id))
+    collection = _collection_path(session, aggregate.collection_id)
     readable_members = [
         member for part in parts for member in part.models if member.available
     ]
@@ -294,12 +304,15 @@ def _list_item(
     )
     guides = _guides(session, user, int(aggregate.id))
     return MultipartModelListItem(
+        edit_epoch=aggregate.edit_epoch,
+        edit_version=aggregate.edit_version,
         id=int(aggregate.id),
         name=aggregate.name,
         slug=aggregate.slug,
         description=aggregate.description,
-        collection=_collection_path(session, aggregate.collection_id),
+        collection=collection,
         collection_id=aggregate.collection_id,
+        collection_label=labels.get(collection) if collection is not None else None,
         part_count=len(parts),
         model_count=model_count,
         guide_count=len(guides),
@@ -336,6 +349,9 @@ def read(session: Session, user: User, aggregate: MultipartModel) -> MultipartMo
         user,
         aggregate,
         starred=int(aggregate.id) in _starred_ids(session, user, [int(aggregate.id)]),
+        labels=collection_tree.collection_labels(
+            session, user, [_collection_path(session, aggregate.collection_id)]
+        ),
     )
     parts, _ = _parts(session, user, int(aggregate.id))
     return MultipartModelRead(
@@ -386,10 +402,11 @@ def list_visible(
     elif direct:
         stmt = stmt.where(MultipartModel.collection_id.is_(None))  # type: ignore[union-attr]
     if not user.is_superuser:
-        ids = rbac.accessible_collection_ids(session, user)
-        if not ids:
-            return []
-        stmt = stmt.where(MultipartModel.collection_id.in_(ids))  # type: ignore[union-attr]
+        stmt = stmt.where(
+            MultipartModel.collection_id.in_(  # type: ignore[union-attr]
+                rbac.accessible_collection_ids_stmt(session, user)
+            )
+        )
     if query and (needle := query.strip()):
         stmt = stmt.where(MultipartModel.name.ilike(f"%{needle}%"))  # type: ignore[union-attr]
     for tag_slug in tag_slugs or []:
@@ -411,9 +428,168 @@ def list_visible(
     ).all()
     row_ids = [int(row.id) for row in rows if row.id is not None]
     starred = _starred_ids(session, user, row_ids)
+    labels = collection_tree.collection_labels(
+        session, user, (_collection_path(session, row.collection_id) for row in rows)
+    )
     return [
-        _list_item(session, user, row, starred=int(row.id) in starred) for row in rows
+        _list_item(session, user, row, starred=int(row.id) in starred, labels=labels)
+        for row in rows
     ]
+
+
+def read_items_by_ids(
+    session: Session, user: User, ids: list[int]
+) -> list[MultipartModelListItem]:
+    """Project one bounded card page with a fixed number of SQL statements.
+
+    Member authorization remains in SQL; a private member never supplies a
+    cover, member identity or structured filter match. Full composition is a
+    detail concern, so this does not download every Part just to count cards.
+    """
+    if not ids:
+        return []
+    from sqlalchemy import or_
+    from sqlalchemy.orm import lazyload
+
+    visible = rbac.accessible_collection_ids_stmt(session, user)
+    allowed = or_(
+        col(MultipartModel.collection_id).in_(visible),
+        col(MultipartModel.collection_id).is_(None) if user.is_superuser else False,
+    )
+    rows = list(
+        session.exec(
+            select(MultipartModel).where(col(MultipartModel.id).in_(ids), allowed)
+        )
+    )
+    paths = dict(
+        session.exec(
+            select(col(Collection.id), col(Collection.path)).where(
+                col(Collection.id).in_(
+                    select(col(MultipartModel.collection_id)).where(
+                        col(MultipartModel.id).in_(ids)
+                    )
+                )
+            )
+        ).all()
+    )
+    labels = collection_tree.collection_labels(session, user, paths.values())
+    roles = rbac.effective_roles_for_collections(
+        session, user, (row.collection_id for row in rows)
+    )
+    starred = _starred_ids(session, user, ids)
+    parts = dict(
+        session.exec(
+            select(col(MultipartPart.multipart_model_id), func.count())
+            .where(col(MultipartPart.multipart_model_id).in_(ids))
+            .group_by(col(MultipartPart.multipart_model_id))
+        ).all()
+    )
+    counts = dict(
+        session.exec(
+            select(
+                col(MultipartModelChoice.multipart_model_id),
+                func.count(func.distinct(col(MultipartModelChoice.model_id))),
+            )
+            .where(col(MultipartModelChoice.multipart_model_id).in_(ids))
+            .group_by(col(MultipartModelChoice.multipart_model_id))
+        ).all()
+    )
+    guide_scope = or_(
+        col(Document.collection_id).in_(visible),
+        col(Document.collection_id).is_(None) if user.is_superuser else False,
+    )
+    guides = dict(
+        session.exec(
+            select(col(Document.multipart_model_id), func.count())
+            .where(
+                col(Document.multipart_model_id).in_(ids), live(Document), guide_scope
+            )
+            .group_by(col(Document.multipart_model_id))
+        ).all()
+    )
+    tags: dict[int, list[str]] = defaultdict(list)
+    for group_id, name in session.exec(
+        select(col(MultipartModelTagLink.multipart_model_id), col(Tag.name))
+        .join(Tag, col(Tag.id) == col(MultipartModelTagLink.tag_id))
+        .where(col(MultipartModelTagLink.multipart_model_id).in_(ids), live(Tag))
+        .order_by(col(Tag.name))
+    ):
+        tags[group_id].append(name)
+    member_scope = or_(
+        col(Model.collection_id).in_(visible),
+        col(Model.collection_id).is_(None) if user.is_superuser else False,
+    )
+    source_is_live = or_(
+        col(MultipartModelChoice.source_file_id).is_(None),
+        col(MultipartModelChoice.source_file_id).in_(
+            select(col(File.id)).where(live(File))
+        ),
+    )
+    members: dict[int, dict[int, Model]] = defaultdict(dict)
+    first_thumbnail: dict[int, str] = {}
+    for group_id, model in session.exec(
+        select(col(MultipartModelChoice.multipart_model_id), Model)
+        .join(Model, col(Model.id) == col(MultipartModelChoice.model_id))
+        .where(
+            col(MultipartModelChoice.multipart_model_id).in_(ids),
+            live(Model),
+            member_scope,
+            source_is_live,
+        )
+        .options(lazyload(Model.tags), lazyload(Model.collection_rel))
+        .order_by(
+            col(MultipartModelChoice.multipart_part_id),
+            col(MultipartModelChoice.sort_order),
+            col(MultipartModelChoice.id),
+        )
+    ):
+        members[group_id][int(model.id)] = model
+        thumbnail = models_projections.thumb_url(model)
+        if thumbnail is not None:
+            first_thumbnail.setdefault(group_id, thumbnail)
+    output = []
+    for row in rows:
+        group_id = int(row.id)
+        member_map = members[group_id]
+        cover = member_map.get(row.cover_model_id)
+        cover_thumbnail = (
+            models_projections.thumb_url(cover) if cover is not None else None
+        )
+        path = paths.get(row.collection_id)
+        uploaded = (
+            f"/api/v1/multipart-models/{group_id}/cover/content?v={row.cover_filename}"
+            if row.cover_filename is not None
+            else None
+        )
+        output.append(
+            MultipartModelListItem(
+                edit_epoch=row.edit_epoch,
+                edit_version=row.edit_version,
+                id=group_id,
+                name=row.name,
+                slug=row.slug,
+                description=row.description,
+                collection=path,
+                collection_id=row.collection_id,
+                collection_label=labels.get(path) if path is not None else None,
+                part_count=parts.get(group_id, 0),
+                model_count=counts.get(group_id, 0),
+                guide_count=guides.get(group_id, 0),
+                cover_model_id=row.cover_model_id,
+                cover_image_url=row.cover_image_url,
+                cover_image_uploaded=row.cover_filename is not None,
+                cover_thumbnail_url=uploaded
+                or row.cover_image_url
+                or cover_thumbnail
+                or first_thumbnail.get(group_id),
+                member_model_ids=sorted(member_map),
+                tags=tags[group_id],
+                starred=group_id in starred,
+                effective_role=roles[row.collection_id],
+                updated_at=row.updated_at,
+            )
+        )
+    return output
 
 
 def _choice_inputs(part: MultipartPartWrite) -> list[MultipartChoiceWrite]:
@@ -711,6 +887,7 @@ def save(
     cover_model_set: bool = False,
     cover_image_url: str | None = None,
     cover_image_set: bool = False,
+    cover_retirement: PreparedOwnedDeletion | None = None,
 ) -> MultipartModelRead:
     """Validate and commit a composition through the transactional owner."""
     save_in_transaction(
@@ -729,6 +906,9 @@ def save(
         cover_image_url=cover_image_url,
         cover_image_set=cover_image_set,
     )
+    session.flush()
+    if cover_retirement is not None:
+        enqueue_prepared_owned_deletion(session, cover_retirement, required_proof=True)
     session.commit()
     session.refresh(aggregate)
     return read(session, user, aggregate)
@@ -743,10 +923,18 @@ def replace_parts(
     return save(session, user, aggregate, requested)
 
 
-def delete_aggregate(session: Session, aggregate: MultipartModel) -> None:
+def delete_aggregate(
+    session: Session,
+    aggregate: MultipartModel,
+    *,
+    cover_retirement: PreparedOwnedDeletion | None = None,
+) -> None:
     """Delete only grouping rows; Models and their files remain untouched."""
     session.delete(aggregate)
     content_changed(session, "multipart_model", [aggregate.id])
+    session.flush()
+    if cover_retirement is not None:
+        enqueue_prepared_owned_deletion(session, cover_retirement, required_proof=True)
     session.commit()
 
 
@@ -775,10 +963,11 @@ def candidates(
     elif direct:
         stmt = stmt.where(Model.collection_id.is_(None))  # type: ignore[union-attr]
     if not user.is_superuser:
-        ids = rbac.accessible_collection_ids(session, user, CollectionRole.VIEW)
-        if not ids:
-            return []
-        stmt = stmt.where(Model.collection_id.in_(ids))  # type: ignore[union-attr]
+        stmt = stmt.where(
+            Model.collection_id.in_(  # type: ignore[union-attr]
+                rbac.accessible_collection_ids_stmt(session, user, CollectionRole.VIEW)
+            )
+        )
     if query and (needle := query.strip()):
         stmt = stmt.where(Model.name.ilike(f"%{needle}%"))  # type: ignore[union-attr]
     rows = session.exec(

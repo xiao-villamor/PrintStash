@@ -80,6 +80,7 @@ from tests.factories.identity import (
 from tests.factories.inference import (
     build_inference_endpoint as build_inference_endpoint,
 )
+from tests.factories.ingestion_scratch import build_ingestion_scratch_window
 from tests.factories.library import (
     build_collection,
     build_file,
@@ -114,6 +115,7 @@ from tests.factories.ops import (
     build_backup_retry_attempt,
     build_backup_run,
     build_derivative,
+    build_derivative_group_regeneration,
     build_discovery_directory,
     build_discovery_entry,
     build_discovery_inventory,
@@ -122,9 +124,12 @@ from tests.factories.ops import (
     build_failure_domain_declaration,
     build_filament_profile,
     build_ingest_request,
+    build_ingestion_entry,
     build_job,
     build_library_observation,
+    build_mesh_continuation,
     build_notification_channel,
+    build_printer_profile,
     build_restore_marker,
     build_share_link,
     build_storage_connection,
@@ -197,6 +202,7 @@ from tests.factories.similarity import (
 from tests.factories.storage import (
     build_owned_storage_object,
     build_storage_delete_intent,
+    build_storage_publication_locator,
     build_stored_file,
     build_unowned_file,
     store_owned_bytes,
@@ -230,6 +236,8 @@ __all__ = [
     "build_audit_finding",
     "build_audit_run",
     "build_derivative",
+    "build_mesh_continuation",
+    "build_derivative_group_regeneration",
     "build_ingest_request",
     "build_job",
     "build_work_executor",
@@ -246,6 +254,7 @@ __all__ = [
     "build_library_observation",
     "build_file",
     "build_filament_profile",
+    "build_printer_profile",
     "build_inbox_item",
     "build_inbox_result",
     "build_material_requirement",
@@ -270,6 +279,7 @@ __all__ = [
     "build_backup_retry_attempt",
     "build_stored_file",
     "build_storage_delete_intent",
+    "build_storage_publication_locator",
     "build_tag",
     "build_unowned_file",
     "build_user",
@@ -335,3 +345,7 @@ __all__ += [
 
 
 __all__ += ["build_search_projection_request"]
+
+__all__ += ["build_ingestion_entry"]
+
+__all__ += ["build_ingestion_scratch_window"]

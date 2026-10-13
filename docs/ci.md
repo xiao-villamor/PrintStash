@@ -1,8 +1,9 @@
 # CI and image publication
 
-`CI` runs on every pull request, merge queue commit and push to `main`. Its
+`CI` runs on every pull request, merge queue commit and push to `main`, and can
+be dispatched on an integration branch. Its
 backend shards cover each test file once, excluding `slow` and tests needing
-container-backed services. Core, frontend, extension and two real-backend
+container-backed services or exclusive host-native measurements. Core, frontend, extension and two real-backend
 browser flows run in parallel. Configure branch protection to require **PR
 gate** only: it fails if any of those jobs fails or is skipped. Do not add path
 filters to this required workflow.
@@ -12,12 +13,44 @@ not cancel the entire suite at the 15-minute per-job limit. The repository
 test suite checks that every backend test file belongs to exactly one shard.
 
 `Deep CI` runs nightly or by manual dispatch. It checks branch coverage and
-area/module floors, external provider contracts, Python/native compatibility,
-the full browser configurations and the extension's real backend and
-ChromeDriver flows. Before tagging a release, dispatch it on the exact `main`
+area/module floors, the `scale` lane (library reads timed at 25,000
+collections and 100,000 Models in four 13-case jobs, each capped at 30 minutes), external provider
+contracts, Python/native compatibility, the full browser configurations and the
+extension's real backend and ChromeDriver flows. Before tagging a release, dispatch it on the exact `main`
 commit to be tagged and wait for success. Release publication requires green
 `CI` and `Deep CI` runs for that SHA. Nightly and manual `latest` publication
 require a green `CI` run for the same SHA on `main`.
+
+Python compatibility runs the `full-ordinary` and `full-resources` lanes in
+independent jobs. The ordinary phase includes slow tests and retains work-stealing;
+the resource phase runs serially so each real service starts once. Tests marked
+`native_host` also run in that mandatory phase: independent test vaults have
+independent admission pools, so an xdist companion would consume CPU/RAM outside
+the pool whose wall-clock bounds are being measured. Fairness still runs real
+DBOS/native workers with the same budgets, six arrivals and 110/130-second limits.
+Coverage appends that serial phase before evaluating its unchanged floors. Their marker
+sets are disjoint and together cover the full lane, excluding the separately
+measured scale and coverage gates. Both phases must succeed; fail-fast is disabled
+so one failure preserves the other result. Each retains the 60-minute limit.
+The `full` lane and backend branch-coverage job keep their existing composition.
+
+Deep CI also measures production library startup against real disposable SQLite
+corpora: 91 Models in 27 collections and a 90-Model collection. Both jobs build
+production assets and use the production nginx template, an active service
+worker, 30 warm reloads and 20 fresh authenticated profiles in English/Spanish.
+Individual JSON samples and browser evidence are uploaded. Hosted runners record
+trends; `STARTUP_ENFORCE_BUDGET=1` enforces the 500 ms median / 800 ms p95 warm
+budget and 1 s fresh-profile median on the reference machine. Tracing is disabled
+for timing samples. Keep local measurements and acceptance reports in the
+ignored `reports/` directory.
+
+The `scale` lane runs serially within each CI job. Four separate jobs split
+budget and growth checks by administrator and granted viewer, measuring 13
+reads apiece. Running four seeded 100,000-Model databases on one CI runner
+exhausted its 30-minute cap, even after the suite was split across jobs.
+The lane and each job target the scale test module directly, so pytest does not
+collect unrelated backend tests. Jobs report the active case and per-case
+durations, and print a Python stack trace if a case waits two minutes.
 
 Publication builds all four images in one Bake graph per native architecture.
 Each architecture smokes its four digests; promotion to multiarch tags starts
@@ -53,3 +86,16 @@ step before treating the rollout as complete.
 The public history did not contain ten successful comparable pre-release image
 publications at the time of this baseline. Record the first nightly run under the
 new workflow, then compare subsequent hot-cache runs using the same timestamps.
+
+## Mesh resource gate
+
+Deep CI builds the actual full production image on amd64 and arm64 and runs
+the real API and DBOS engine with 1 GiB and 4 GiB cgroup ceilings. The gate
+fails on OOM kills, unresponsive API, renewed terminal work, leaked workers,
+unexplained staging/capacity reservations, or parent RSS growth after warm-up.
+It exercises synthetic nested 3MF expansion, malformed packages, sudden
+allocation, native STEP/STP, healthy successors, original/slicer downloads,
+viewer conversion, restart and retained-input discard. Each job publishes its
+JSON measurements and cleanup evidence even on failure.
+
+CI has no download dependency on private issue attachments.

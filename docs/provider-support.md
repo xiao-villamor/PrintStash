@@ -291,8 +291,7 @@ approval. Historical backups remain listable and recoverable; upgrading does not
 backfill independence claims or change ownership and archive locators.
 
 The [Library Sources guide](./library-sources.md) gives platform recipes and a
-disposable-data validation checklist. First-party platform citations are
-recorded in [the NAS evidence note](./research/nas-library-source-evidence.md).
+disposable-data validation checklist.
 
 ### Storage validation log
 
@@ -306,12 +305,11 @@ filesystem, protocol, auth mode and the release-validation checklist result.
 | OpenSSH contract container | Pinned CI image | SFTP | 2026-08-31 | Automated contract | Pass | Production adapter and pinned-host-key rejection |
 | _(no physical NAS validation yet)_ | | | | | | |
 
-
 ### Backup deletion and retention
 
 Backup recovery and backup deletion have separate requirements. An archive can remain listable and recoverable while its destination cannot safely delete its exact owned object. Such deletion requests return `409 backup_exact_delete_unsupported`, even when the administrator confirms storage risk. Bytes and ownership evidence remain intact.
 
-OpenDAL backup destinations require an immutable object version and compiled version-deletion support. Empty and S3 `null` versions are mutable and do not qualify. Native S3 backups continue to use an immutable version or a conditional ETag; they never substitute an unconditional delete. Automatic retention leaves unsupported replicas in place without repeating provider-error warnings. The backup operation explanation remains visible until the destination supports safe deletion.
+OpenDAL backup destinations require an immutable object version and compiled version-deletion support. Empty and S3 `null` versions are mutable and do not qualify. Native S3 backups also require an immutable version. An ETag identifies content and can recur after replacement, so it cannot authorize delayed exact deletion. Enable bucket versioning before creating archives; enabling it later does not add immutable versions to existing receipts. Automatic retention leaves unsupported replicas in place without repeating provider-error warnings. The backup operation explanation remains visible until the destination supports safe deletion.
 
 ### Remote transport contracts
 
@@ -354,17 +352,13 @@ transport cannot prove that equal-size bytes remained unchanged during a read.
 All available markers and exact lengths are checked; markerless sources are
 hashed on every scan. Connection pooling is not introduced.
 
-See [directory benchmark results](remote-discovery-benchmarks.md) for measured
-requests, connections, transferred bytes, temporary storage and memory.
-
-
 ### WebDAV cleanup evidence
 
 Pinned Nextcloud and WsgiDAV contracts exercise conditional deletion, quarantine
 moves, replacement races, lost-client-response recovery and lock expiry.
 WsgiDAV's filesystem ETag can collide across equal-size rapid replacements, and
 Nextcloud's tested configuration does not implement LOCK. Physical deletion and
-automatic retention remain disabled; see the [measured cleanup evidence](webdav-cleanup-evidence.md).
+automatic retention remain disabled. See [storage safety](storage-data-safety.md).
 
 ## Storage product presets
 

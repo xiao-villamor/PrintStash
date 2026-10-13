@@ -35,6 +35,14 @@ distance/scale/voxel metrics stay within the existing tolerance. The v2 referenc
 is retained. New reference names include both fingerprint and verifier versions.
 No labels, splits, precision/recall requirements or numeric tolerances changed.
 
+`surface-verification-v4` replaces squared-dot point distances with an owned
+SciPy KDTree index, reused across alignment hypotheses. The new measured
+`geometry-v4-sh5f4577c4-surface-verification-v4` reference retains all 20 labels,
+splits and evidence classes. The largest change in the compared distance metrics
+is below 7e-11; the existing 1e-5 tolerance remains unchanged. Both earlier
+references are retained. Large-coordinate nearest-point cancellation is covered
+separately by analytic regression tests.
+
 Exploratory raw QEM reduction was not labeled automatically as a positive match:
 on these thin/open source files it could close holes, change topology, or fail to
 reach the requested 25% face count. The positive quarter-count fixture uses an

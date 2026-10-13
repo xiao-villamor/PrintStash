@@ -15,6 +15,7 @@
  * directly, including the case where the document belongs to no collection: an
  * empty `collection_id` and an absent one are different requests.
  */
+import { anEditingBase } from "@/test-support/factories";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -26,14 +27,13 @@ import {
   uploadDocument,
   uploadDocumentImage,
 } from "@/lib/api/documents";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, lastCall, lastForm, respondWith } from "./_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -68,6 +68,27 @@ describe("getDocument", () => {
 
     // A document someone is editing must not come from cache.
     expect(lastCall().init).toMatchObject({ cache: "no-store" });
+  });
+  it("carries cancellation to the document request", async () => {
+    let respond!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          respond = resolve;
+        }),
+    );
+    const controller = new AbortController();
+    const pending = getDocument(1, controller.signal);
+
+    controller.abort();
+    respond(
+      new Response(JSON.stringify({ id: 1, name: "Manual" }), {
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    expect(lastCall().init.signal?.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });
 
@@ -112,12 +133,30 @@ describe("uploadDocument", () => {
 });
 
 describe("updateDocument", () => {
-  it("PUTs an edit", async () => {
-    respondWith({ id: 1, name: "Manual" });
+  it.each([
+    { label: "absent", epoch: undefined },
+    { label: "malformed", epoch: "not-an-epoch" },
+    { label: "different history", epoch: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+  ])("rejects an acknowledgement with $label identity", async ({ epoch }) => {
+    if (epoch === undefined) respondWith({ id: 1, edit_version: 2 });
+    else respondWith({ id: 1, edit_version: 2, edit_epoch: epoch });
+    await expect(updateDocument(1, { name: "Draft" }, anEditingBase())).rejects.toThrow(
+      /Invalid editing/,
+    );
+  });
 
-    await updateDocument(1, { body: "# Edited" });
+  it("PUTs an edit", async () => {
+    respondWith({ id: 1, name: "Manual", ...anEditingBase({ edit_version: 4 }) });
+
+    await updateDocument(1, { body: "# Edited" }, anEditingBase({ edit_version: 3 }));
 
     expectRequest("/api/v1/documents/1", "PUT");
+    expect(new Headers(lastCall().init.headers).get("If-Match")).toBe(
+      '"document-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v3"',
+    );
+    expect(new Headers(lastCall().init.headers).get("X-PrintStash-Edit-Contract")).toBe(
+      "conditional-v1",
+    );
   });
 });
 

@@ -9,6 +9,7 @@ import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import { AlertTriangle, Layers, Loader2 } from "lucide-react";
 import { getDerivedText } from "@/lib/api/request";
+import { subscribeEvents } from "@/lib/events";
 import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
 import { previewPixelRatio, usePreviewPreferences } from "@/lib/preview-preferences";
 import type { ToolpathData } from "@/lib/gcode";
@@ -195,8 +196,9 @@ function DefaultCanvasRenderer({ children, className, dpr, gl }: CanvasRendererP
 /** The outcome of one completed toolpath fetch, tagged with the url it was for. */
 interface LoadedToolpath {
   url: string;
+  fetcher: typeof getDerivedText;
   data: ToolpathData | null;
-  errorKind: "limit" | "resource" | "busy" | "invalid" | "load" | null;
+  errorKind: "limit" | "resource" | "busy" | "invalid" | "load" | "disabled" | null;
   /** The toolpath is a derivative still being produced; check again shortly. */
   preparing?: boolean;
 }
@@ -211,6 +213,7 @@ export interface GcodeViewerProps {
   canvasRenderer?: ComponentType<CanvasRendererProps>;
   toolpathParser?: typeof parseGcodeInWorker;
   toolpathFetcher?: typeof getDerivedText;
+  privateEventsEnabled?: boolean;
 }
 
 export function GcodeViewer({
@@ -219,6 +222,7 @@ export function GcodeViewer({
   canvasRenderer,
   toolpathParser = parseGcodeInWorker,
   toolpathFetcher = getDerivedText,
+  privateEventsEnabled = true,
 }: GcodeViewerProps) {
   const i18n = useOptionalI18n();
   const previewPreferences = usePreviewPreferences();
@@ -232,7 +236,17 @@ export function GcodeViewer({
   const [showTravel, setShowTravel] = useState(false);
   const [showBed, setShowBed] = useState(true);
 
-  const current = loaded?.url === url ? loaded : null;
+  useEffect(() => {
+    if (!privateEventsEnabled) return;
+    return subscribeEvents((notice) => {
+      if (notice.type === "derivative_policy" || notice.type === "resync") {
+        setLoaded(null);
+        setRetry((value) => value + 1);
+      }
+    });
+  }, [privateEventsEnabled]);
+
+  const current = loaded?.url === url && loaded.fetcher === toolpathFetcher ? loaded : null;
   const loading = current === null;
   const data = current?.data ?? null;
   const errorKind = current?.errorKind ?? null;
@@ -251,32 +265,43 @@ export function GcodeViewer({
           // A binary toolpath is converted in the background; the old response
           // was the conversion itself, now it is a derivative that may not
           // exist yet.
-          setLoaded({ url, data: null, errorKind: null, preparing: true });
+          setLoaded({
+            url,
+            fetcher: toolpathFetcher,
+            data: null,
+            errorKind: null,
+            preparing: true,
+          });
           recheck = setTimeout(() => setRetry((value) => value + 1), PREPARING_POLL_MS);
           return;
         }
         const parsed = await toolpathParser(derived.text, controller.signal);
         if (!live) return;
-        setLoaded({ url, data: parsed, errorKind: null });
+        setLoaded({ url, fetcher: toolpathFetcher, data: parsed, errorKind: null });
         setCurrentLayer(parsed.totalLayers - 1);
       })
       .catch((cause: unknown) => {
         if (!live) return;
         setLoaded({
           url,
+          fetcher: toolpathFetcher,
           data: null,
           errorKind:
-            cause instanceof ToolpathParseError
-              ? cause.code === "limit"
-                ? "limit"
-                : "invalid"
-              : cause instanceof ApiError && [413, 504].includes(cause.status)
-                ? "resource"
-                : cause instanceof ApiError && cause.status === 429
-                  ? "busy"
-                  : cause instanceof ApiError && cause.status === 422
-                    ? "invalid"
-                    : "load",
+            cause instanceof ApiError &&
+            cause.status === 409 &&
+            cause.code === "derivative_group_disabled"
+              ? "disabled"
+              : cause instanceof ToolpathParseError
+                ? cause.code === "limit"
+                  ? "limit"
+                  : "invalid"
+                : cause instanceof ApiError && [413, 504].includes(cause.status)
+                  ? "resource"
+                  : cause instanceof ApiError && cause.status === 429
+                    ? "busy"
+                    : cause instanceof ApiError && cause.status === 422
+                      ? "invalid"
+                      : "load",
         });
       });
 
@@ -295,6 +320,7 @@ export function GcodeViewer({
     busy: "viewer.converterBusy",
     invalid: "viewer.invalidToolpath",
     load: "viewer.loadFailed",
+    disabled: "viewer.processingDisabled",
   } satisfies Record<NonNullable<LoadedToolpath["errorKind"]>, MessageKey>;
   const errorCopy = viewerCopy(i18n, errors[errorKind ?? "load"]);
   const noDataCopy = viewerCopy(i18n, "viewer.noToolpathData");
@@ -310,6 +336,17 @@ export function GcodeViewer({
         <span className="font-mono text-xs">
           {current?.preparing ? viewerCopy(i18n, "viewer.preparingToolpath") : loadingCopy}
         </span>
+      </div>
+    );
+  }
+
+  if (errorKind === "disabled") {
+    return (
+      <div
+        role="status"
+        className="absolute inset-0 flex items-center justify-center text-muted-foreground"
+      >
+        <span className="font-mono text-xs">{errorCopy}</span>
       </div>
     );
   }

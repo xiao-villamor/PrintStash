@@ -211,7 +211,7 @@ def _mirror_of(module: Path) -> Path | None:
       file names inside it are endpoint or method groups.
     * `<tier>/<pkg>/test_<pkg>.py` → `<src>/<pkg>/__init__.py` — a package whose
       code lives in its own `__init__`, named for itself.
-    * `unit/scripts/test_<script>.py` → `<repo>/scripts/<script>.py` — shipped
+    * `<tier>/scripts/test_<script>.py` → `<backend or repo>/scripts/<script>.py` — shipped
       standalone hooks live outside the application package by design.
     """
     for tests_root, source_root in MIRROR_ROOTS.items():
@@ -221,10 +221,20 @@ def _mirror_of(module: Path) -> Path | None:
         if tests_root is TESTS_ROOT:
             if relative.parts[0] not in MIRRORED_TIERS:
                 return None
-            if relative.parts[0:2] == ("unit", "scripts"):
+            if relative.parts[1:2] == ("scripts",):
                 stem = relative.name.removeprefix("test_").removesuffix(".py")
-                script = TESTS_ROOT.parent.parent / "scripts" / f"{stem}.py"
-                return script if script.exists() else None
+                scripts = (
+                    TESTS_ROOT.parent / "scripts",
+                    TESTS_ROOT.parent.parent / "scripts",
+                )
+                return next(
+                    (
+                        root / f"{stem}.py"
+                        for root in scripts
+                        if (root / f"{stem}.py").exists()
+                    ),
+                    None,
+                )
             relative = Path(*relative.parts[1:])
         stem = relative.name.removeprefix("test_").removesuffix(".py")
         candidates = [
@@ -277,6 +287,12 @@ class TestSuiteHygiene:
         assert (
             _mirror_of(test)
             == TESTS_ROOT.parent / "app/modules/backups/backup/__init__.py"
+        )
+
+    def test_backend_script_retains_its_integration_mirror(self):
+        assert (
+            _mirror_of(TESTS_ROOT / "integration/scripts/test_bench_thumbnails.py")
+            == TESTS_ROOT.parent / "scripts/bench_thumbnails.py"
         )
 
     @pytest.mark.parametrize("module", _all_test_modules(), ids=_relative)

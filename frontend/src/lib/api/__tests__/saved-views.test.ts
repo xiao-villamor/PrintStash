@@ -11,7 +11,6 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { invalidateApiCache } from "@/lib/api/request";
 import {
   createSavedView,
   deleteSavedView,
@@ -24,7 +23,7 @@ import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wi
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -33,6 +32,22 @@ afterEach(() => {
 });
 
 describe("listSavedViews", () => {
+  it("forwards list cancellation to the transport", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const controller = new AbortController();
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation((_url, init) => {
+      signal = init?.signal;
+      return pending.promise;
+    });
+    const request = listSavedViews({ signal: controller.signal });
+
+    controller.abort(new DOMException("cancelled", "AbortError"));
+    pending.resolve(new Response("[]", { headers: { "Content-Type": "application/json" } }));
+
+    await expect(request).rejects.toThrow("cancelled");
+    expect(signal?.aborted).toBe(true);
+  });
   it("reads them fresh", async () => {
     respondWith([]);
 
@@ -49,6 +64,7 @@ describe("createSavedView", () => {
     respondWith({ id: 1, name: "PETG" });
 
     await createSavedView("PETG", {
+      library_view: "all",
       direct: false,
       tag: [],
       favorites: false,
@@ -58,7 +74,13 @@ describe("createSavedView", () => {
     expectRequest("/api/v1/saved-views", "POST");
     expect(lastBody()).toEqual({
       name: "PETG",
-      filters: { direct: false, tag: [], favorites: false, material_type: ["PETG"] },
+      filters: {
+        library_view: "all",
+        direct: false,
+        tag: [],
+        favorites: false,
+        material_type: ["PETG"],
+      },
     });
   });
 });

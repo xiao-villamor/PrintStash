@@ -274,8 +274,43 @@ class TestLocalAdoption:
             expected_sha256=hashlib.sha256(payload).hexdigest(),
         )
 
-        assert receipt.token == hashlib.sha256(payload).hexdigest()
+        current = key.stat(follow_symlinks=False)
+        assert receipt.size == len(payload)
+        assert (receipt.device, receipt.inode, receipt.ctime_ns) == (
+            current.st_dev,
+            current.st_ino,
+            current.st_ctime_ns,
+        )
+        assert len(receipt.token) == 64
         assert configured_backend.creation_matches(receipt)
+        assert key.read_bytes() == payload
+
+    def test_adopts_equal_bytes_as_a_distinct_physical_generation(
+        self, configured_backend: LocalStorageBackend, tmp_path: Path
+    ) -> None:
+        payload = b"legacy artifact"
+        digest = hashlib.sha256(payload).hexdigest()
+        key = tmp_path / "files" / "legacy.stl"
+        key.write_bytes(payload)
+        original = configured_backend.adopt_existing(
+            str(key),
+            expected_size=len(payload),
+            expected_sha256=digest,
+        )
+        # Keep the old inode alive so the replacement cannot reuse it.
+        retired = key.with_name("retired.stl")
+        key.rename(retired)
+        key.write_bytes(payload)
+        replacement = configured_backend.adopt_existing(
+            str(key),
+            expected_size=len(payload),
+            expected_sha256=digest,
+        )
+        assert original.inode != replacement.inode
+        assert original.token != replacement.token
+        assert not configured_backend.creation_matches(original)
+        assert configured_backend.creation_matches(replacement)
+        assert key.read_bytes() == retired.read_bytes() == payload
 
     def test_rejects_a_legacy_object_with_wrong_digest(
         self, configured_backend: LocalStorageBackend, tmp_path: Path
@@ -664,7 +699,7 @@ class TestLocalRootSafetyBranches:
             raise OSError("copy failed")
 
         monkeypatch.setattr(
-            "app.modules.storage.storage_backend.io.shutil.copyfileobj", fail_copy
+            "printstash_core.files.storage.shutil.copyfileobj", fail_copy
         )
         with pytest.raises(OSError, match="copy failed"):
             backend.create_bytes(b"backup", str(key))
@@ -930,18 +965,17 @@ class TestLocalRootSafetyBranches:
         file = root / "disappearing.bin"
         file.write_bytes(b"payload")
         real_stat = Path.stat
-        stat_calls = 0
 
         def missing_stat(path: Path, *args: object, **kwargs: object):
-            nonlocal stat_calls
             if path == file:
-                stat_calls += 1
-                if stat_calls == 2:
-                    raise OSError("file disappeared")
+                path.unlink(missing_ok=True)
             return real_stat(path, *args, **kwargs)
 
         monkeypatch.setattr(Path, "stat", missing_stat)
-        assert backend.usage(str(root))["object_count"] == 0
+        usage = backend.usage(str(root))
+        assert not file.exists()
+        assert usage["object_count"] == 0
+        assert usage["total_size_bytes"] == 0
 
     def test_rejects_an_unusable_hardlink_publication_on_a_managed_root(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -998,7 +1032,7 @@ class TestLocalRootSafetyBranches:
             ),
         )
         monkeypatch.setattr(
-            "app.modules.storage.storage_backend.io.shutil.copyfileobj",
+            "printstash_core.files.storage.shutil.copyfileobj",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("copy failed")),
         )
         with pytest.raises(OSError, match="copy failed"):

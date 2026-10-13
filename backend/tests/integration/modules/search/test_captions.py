@@ -43,7 +43,7 @@ def caption_setup(
             send_rendered_images=True,
             chat_endpoint_id=endpoint.id,
         ),
-        actor_id=actor.id,
+        actor=actor,
     )
     return actor, SearchSubject(SubjectType.MODEL, model.id), file, endpoint
 
@@ -521,7 +521,7 @@ class TestCaptions:
                 send_rendered_images=True,
                 chat_endpoint_id=chat.id,
             ),
-            actor_id=actor.id,
+            actor=actor,
         )
         captions.patch(
             db_session,
@@ -616,7 +616,7 @@ class TestCaptions:
                 send_rendered_images=True,
                 chat_endpoint_id=endpoint.id,
             ),
-            actor_id=actor.id,
+            actor=actor,
         )
         assert sweep(db_session) == 0
         assert captions.lookup(db_session, subject).state == "dismissed"

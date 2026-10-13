@@ -49,7 +49,7 @@ def main() -> None:
     )
     from app.db.session import get_engine, get_session_factory
     from app.modules.media.geometry_analysis import _load
-    from app.modules.media.mesh_processing import _detect_memory_limit_bytes
+    from app.modules.media.native_process import memory_limit_bytes
     from app.modules.similarity import configuration, runs, service
     from app.modules.similarity.processing import SimilarityProcessor
     from app.modules.storage.storage_backend.runtime import get_backend
@@ -129,7 +129,7 @@ def main() -> None:
             "platform": platform.platform(),
             "machine": platform.machine(),
             "cpu_count": os.cpu_count(),
-            "effective_memory_limit_bytes": _detect_memory_limit_bytes(),
+            "effective_memory_limit_bytes": memory_limit_bytes(),
         },
         "settings": {"enabled": True, "sample_points": 256, "max_candidates": 1},
         "source_distribution": {},

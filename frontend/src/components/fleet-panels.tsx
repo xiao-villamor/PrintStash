@@ -1,9 +1,11 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { refreshFleet } from "@/features/printers/queries";
 import { knownUiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -16,26 +18,25 @@ import {
 } from "lucide-react";
 
 import {
-  createMaintenanceLog,
-  createMaintenanceWindow,
   deleteFleetJob,
-  deleteMaintenanceLog,
-  deleteMaintenanceWindow,
   decideFleetOperatorGate,
-  listMaintenanceLog,
-  listMaintenanceWindows,
   retryFleetJob,
   resolveFleetJob,
   updateFleetJob,
-  updatePrinterRouting,
 } from "@/lib/api";
 import { useFleetQueue, useFleetSummary } from "@/lib/queries";
+import { userMessage } from "@/lib/errors";
+import { getSessionVersion } from "@/lib/session-transport";
+import {
+  usePrinterMaintenance,
+  useMaintenanceMutation,
+  maintenanceApi,
+  type MaintenanceApi,
+} from "@/features/printers/queries";
 import { toast } from "@/lib/toast";
 import type {
   CompatibilityPolicy,
   JobPriority,
-  MaintenanceLog,
-  MaintenanceWindow,
   PrinterRead,
   PrintJobRead,
   QueueJobUpdate,
@@ -122,6 +123,7 @@ export function FleetQueuePanel({
     ...deps,
   };
   const [historyLimit, setHistoryLimit] = useState(20);
+  const commandClient = useQueryClient();
   const queueQuery = useFleetQueue({ refetchInterval: 5_000, historyLimit });
   const summaryQuery = useFleetSummary({ refetchInterval: 5_000 });
   const [deleteTarget, setDeleteTarget] = useState<PrintJobRead | null>(null);
@@ -143,9 +145,12 @@ export function FleetQueuePanel({
   const recent = jobs.filter((job) => !ACTIVE.has(job.state) && job.state !== "queued");
 
   async function mutate<T>(jobId: number, action: () => Promise<T>): Promise<boolean> {
+    const session = getSessionVersion();
     setBusy(jobId);
     try {
       await action();
+      if (session !== getSessionVersion()) return false;
+      refreshFleet(commandClient, session);
       await Promise.all([queueQuery.refetch(), summaryQuery.refetch()]);
       return true;
     } catch (error) {
@@ -718,25 +723,7 @@ function QueueSection({
  * terms as `FleetQueueDeps`: omit `deps` in application code, override entries
  * in a test.
  */
-export interface FleetMaintenanceDeps {
-  listWindows: typeof listMaintenanceWindows;
-  listLog: typeof listMaintenanceLog;
-  createWindow: typeof createMaintenanceWindow;
-  createLog: typeof createMaintenanceLog;
-  deleteWindow: typeof deleteMaintenanceWindow;
-  deleteLog: typeof deleteMaintenanceLog;
-  updateRouting: typeof updatePrinterRouting;
-}
-
-const REAL_FLEET_MAINTENANCE_DEPS: FleetMaintenanceDeps = {
-  listWindows: listMaintenanceWindows,
-  listLog: listMaintenanceLog,
-  createWindow: createMaintenanceWindow,
-  createLog: createMaintenanceLog,
-  deleteWindow: deleteMaintenanceWindow,
-  deleteLog: deleteMaintenanceLog,
-  updateRouting: updatePrinterRouting,
-};
+export type FleetMaintenanceDeps = MaintenanceApi;
 
 export function FleetMaintenancePanel({
   printers,
@@ -748,10 +735,13 @@ export function FleetMaintenancePanel({
   deps?: Partial<FleetMaintenanceDeps>;
 }) {
   useUiLocale();
-  const { listWindows, listLog, createWindow, createLog, deleteWindow, deleteLog, updateRouting } =
-    { ...REAL_FLEET_MAINTENANCE_DEPS, ...deps };
-  const [windows, setWindows] = useState<MaintenanceWindow[]>([]);
-  const [logs, setLogs] = useState<MaintenanceLog[]>([]);
+  const api = { ...maintenanceApi, ...deps };
+  const maintenance = usePrinterMaintenance(
+    printers.map((printer) => printer.id),
+    api,
+  );
+  const mutation = useMaintenanceMutation(api);
+  const { windows, logs } = maintenance;
   const [selected, setSelected] = useState<PrinterRead | null>(null);
   const [mode, setMode] = useState<"window" | "log" | null>(null);
   const [startsAt, setStartsAt] = useState("");
@@ -761,66 +751,87 @@ export function FleetMaintenancePanel({
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function load() {
-    const [allWindows, allLogs] = await Promise.all([
-      Promise.all(printers.map((printer) => listWindows(printer.id))),
-      Promise.all(printers.map((printer) => listLog(printer.id))),
-    ]);
-    setWindows(allWindows.flat());
-    setLogs(allLogs.flat());
-  }
-  useEffect(() => {
-    // `load` awaits the maintenance API before it touches state; the rule follows the call but not the `await` inside it.
-    // oxlint-disable-next-line react/set-state-in-effect -- setState here is asynchronous, after the fetch resolves
-    void load().catch(toast.error);
-  }, [printers]); // eslint-disable-line react-hooks/exhaustive-deps
-
   async function toggleRouting(printer: PrinterRead, field: "default" | "drain") {
+    const scope = getSessionVersion();
     try {
-      await updateRouting(
-        printer.id,
-        field === "default"
-          ? { is_default: !printer.is_default }
-          : {
-              drain_mode: !printer.drain_mode,
-              drain_reason: printer.drain_mode ? null : "Manual soft drain",
-            },
-      );
-      onPrintersChanged();
+      await mutation.mutateAsync({
+        kind: "routing",
+        printerId: printer.id,
+        payload:
+          field === "default"
+            ? { is_default: !printer.is_default }
+            : {
+                drain_mode: !printer.drain_mode,
+                drain_reason: printer.drain_mode ? null : "Manual soft drain",
+              },
+      });
+      if (scope === getSessionVersion()) onPrintersChanged();
     } catch (error) {
-      toast.error(error);
+      if (scope === getSessionVersion()) toast.error(error);
+    }
+  }
+
+  async function removeMaintenance(
+    kind: "delete-window" | "delete-log",
+    printerId: number,
+    id: number,
+  ) {
+    const scope = getSessionVersion();
+    try {
+      await mutation.mutateAsync({ kind, printerId, id });
+    } catch (error) {
+      if (scope === getSessionVersion()) toast.error(error);
     }
   }
 
   async function submit() {
     if (!selected) return;
+    const scope = getSessionVersion();
     setBusy(true);
     try {
       if (mode === "window") {
-        await createWindow(selected.id, {
-          starts_at: new Date(startsAt).toISOString(),
-          ends_at: new Date(endsAt).toISOString(),
-          reason: reason || null,
+        await mutation.mutateAsync({
+          kind: "create-window",
+          printerId: selected.id,
+          payload: {
+            starts_at: new Date(startsAt).toISOString(),
+            ends_at: new Date(endsAt).toISOString(),
+            reason: reason || null,
+          },
+        });
+      } else if (mode === "log") {
+        await mutation.mutateAsync({
+          kind: "create-log",
+          printerId: selected.id,
+          payload: { category, note },
         });
       } else {
-        await createLog(selected.id, { category, note });
+        throw new Error("maintenance_mode_missing");
       }
+      if (scope !== getSessionVersion()) return;
       setMode(null);
       setSelected(null);
       setNote("");
       setReason("");
-      await load();
       toast.success(uiText("Maintenance updated"));
     } catch (error) {
-      toast.error(error);
+      if (scope === getSessionVersion()) toast.error(error);
     } finally {
-      setBusy(false);
+      if (scope === getSessionVersion()) setBusy(false);
     }
   }
 
   return (
     <Localized>
       <div className="space-y-5">
+        {maintenance.error && (
+          <div role="alert" className="text-sm text-destructive">
+            <p>{userMessage(maintenance.error)}</p>
+            <Button variant="outline" onClick={() => void maintenance.retry()}>
+              {uiText("Retry")}
+            </Button>
+          </div>
+        )}
         <Modal
           open={mode !== null}
           onClose={() => {
@@ -958,7 +969,7 @@ export function FleetMaintenancePanel({
                           size="icon-sm"
                           aria-label={uiText("Delete maintenance window")}
                           onClick={() =>
-                            void deleteWindow(printer.id, row.id).then(load).catch(toast.error)
+                            void removeMaintenance("delete-window", printer.id, row.id)
                           }
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -974,9 +985,7 @@ export function FleetMaintenancePanel({
                           variant="ghost"
                           size="icon-sm"
                           aria-label={uiText("Delete maintenance log")}
-                          onClick={() =>
-                            void deleteLog(printer.id, row.id).then(load).catch(toast.error)
-                          }
+                          onClick={() => void removeMaintenance("delete-log", printer.id, row.id)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>

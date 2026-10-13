@@ -11,12 +11,12 @@ from sqlalchemy import text
 from sqlmodel import Session
 
 from app.api.v1 import storage_connections as storage_connections_api
-from app.db.models import StorageConnection
+from app.db.models import LibraryRevision, StorageConnection
 from app.modules.backups.backup_destination import BackupDestinationError
 from app.modules.identity.auth import create_access_token
 from app.modules.sources.library_source import LibrarySourceError
 from app.modules.storage.storage_providers import PRESETS
-from tests.factories import build_user
+from tests.factories import build_storage_connection, build_user
 from tests.integration.modules.sources.external_library._helpers import enable_feature
 
 
@@ -1089,3 +1089,188 @@ class TestPresetConnections:
 
         assert response.status_code == 409, response.text
         assert response.json()["detail"] == "storage_connection_target_in_use"
+
+
+@pytest.fixture
+def connection_edit_resource(client, auth_headers, shared_sftp_connection_id):
+    response = client.get("/api/v1/storage-connections", headers=auth_headers)
+    assert response.status_code == 200, response.text
+    return next(
+        row for row in response.json() if row["id"] == shared_sftp_connection_id
+    )
+
+
+def _connection_base(row):
+    return {
+        "X-PrintStash-Edit-Contract": "conditional-v1",
+        "If-Match": f'"storage-connection-{row["id"]}-e{row["edit_epoch"]}-v{row["edit_version"]}"',
+    }
+
+
+class TestConditionalConnectionEditing:
+    def test_publishes_a_connection_editing_base(self, connection_edit_resource):
+        assert len(connection_edit_resource["edit_epoch"]) == 32
+        assert connection_edit_resource["edit_version"] > 0
+        assert "fixture-password" not in str(connection_edit_resource)
+
+    def test_accepts_the_captured_connection_base(
+        self, client, auth_headers, connection_edit_resource
+    ):
+        row = connection_edit_resource
+
+        response = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers={**auth_headers, **_connection_base(row)},
+            json={"name": "Reviewed connection"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["name"] == "Reviewed connection"
+        assert response.json()["edit_version"] > row["edit_version"]
+        assert response.json()["edit_epoch"] == row["edit_epoch"]
+
+    def test_rejects_a_replayed_connection_base(
+        self, client, auth_headers, connection_edit_resource
+    ):
+        row = connection_edit_resource
+        headers = {**auth_headers, **_connection_base(row)}
+        accepted = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers=headers,
+            json={"name": "Accepted"},
+        )
+        assert accepted.status_code == 200, accepted.text
+
+        rejected = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers=headers,
+            json={"name": "Stale"},
+        )
+
+        assert rejected.status_code == 412, rejected.text
+        current = client.get("/api/v1/storage-connections", headers=auth_headers).json()
+        assert current[0]["name"] == "Accepted"
+
+    def test_requires_the_opted_in_connection_base(
+        self, client, auth_headers, connection_edit_resource
+    ):
+        row = connection_edit_resource
+
+        rejected = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers={**auth_headers, "X-PrintStash-Edit-Contract": "conditional-v1"},
+            json={"name": "Unreviewed"},
+        )
+
+        assert rejected.status_code == 428, rejected.text
+
+    def test_advances_legacy_connection_edits(
+        self, client, auth_headers, connection_edit_resource
+    ):
+        row = connection_edit_resource
+        accepted = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers=auth_headers,
+            json={"enabled": False},
+        )
+        assert accepted.status_code == 200, accepted.text
+
+        rejected = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers={**auth_headers, **_connection_base(row)},
+            json={"name": "Stale"},
+        )
+
+        assert rejected.status_code == 412, rejected.text
+
+    def test_preserves_the_base_after_invalid_connection_edits(
+        self, client, auth_headers, connection_edit_resource
+    ):
+        row = connection_edit_resource
+        headers = {**auth_headers, **_connection_base(row)}
+        rejected = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers=headers,
+            json={"name": "   "},
+        )
+        assert rejected.status_code == 400, rejected.text
+        current = client.get(
+            "/api/v1/storage-connections", headers=auth_headers
+        ).json()[0]
+        assert current["edit_version"] == row["edit_version"]
+
+        accepted = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers=headers,
+            json={"name": "Valid"},
+        )
+
+        assert accepted.status_code == 200, accepted.text
+        assert accepted.json()["edit_version"] > row["edit_version"]
+
+    def test_rejects_restored_connection_history(
+        self, client, auth_headers, connection_edit_resource, db_session
+    ):
+        row = connection_edit_resource
+        history = db_session.get(LibraryRevision, 1)
+        history.epoch = "a" * 32 if history.epoch != "a" * 32 else "b" * 32
+        db_session.add(history)
+        db_session.commit()
+
+        rejected = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers={**auth_headers, **_connection_base(row)},
+            json={"name": "Old history"},
+        )
+
+        assert rejected.status_code == 412, rejected.text
+        current = client.get(
+            "/api/v1/storage-connections", headers=auth_headers
+        ).json()[0]
+        assert current["name"] == row["name"]
+
+    def test_rejects_a_recreated_connection(
+        self, client, auth_headers, connection_edit_resource, db_session
+    ):
+        row = connection_edit_resource
+        db_session.delete(db_session.get(StorageConnection, row["id"]))
+        db_session.commit()
+        replacement = build_storage_connection(db_session, id=row["id"])
+
+        rejected = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers={**auth_headers, **_connection_base(row)},
+            json={"name": "Old identity"},
+        )
+
+        assert rejected.status_code == 412, rejected.text
+        current = client.get(
+            "/api/v1/storage-connections", headers=auth_headers
+        ).json()[0]
+        assert current["name"] == replacement.name
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            '"other-e' + "a" * 32 + '-v1"',
+            '"storage-connection-1-e' + "a" * 32 + '-v9223372036854775808"',
+            "*",
+        ],
+        ids=["wrong-aggregate", "overflow", "wildcard"],
+    )
+    def test_rejects_malformed_connection_preconditions(
+        self, client, auth_headers, connection_edit_resource, value
+    ):
+        row = connection_edit_resource
+
+        rejected = client.patch(
+            f"/api/v1/storage-connections/{row['id']}",
+            headers={**auth_headers, "If-Match": value},
+            json={"name": "Invalid"},
+        )
+
+        assert rejected.status_code == 412, rejected.text
+        current = client.get(
+            "/api/v1/storage-connections", headers=auth_headers
+        ).json()[0]
+        assert current["name"] == row["name"]

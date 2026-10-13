@@ -21,11 +21,12 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import LoginPage from "@/pages/login";
+import { Link, Route, Routes } from "react-router-dom";
 import { adminSession, json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { AuthState } from "@/lib/auth-context";
 import type { AuthProvidersRead } from "@/types";
@@ -116,7 +117,9 @@ describe("LoginPage", () => {
 
       await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-      await waitFor(() => expect(login).toHaveBeenCalledWith("maker", "hunter2", false));
+      await waitFor(() =>
+        expect(login).toHaveBeenCalledWith("maker", "hunter2", false, expect.any(AbortSignal)),
+      );
     });
 
     it("asks to be remembered when the visitor said so", async () => {
@@ -131,7 +134,9 @@ describe("LoginPage", () => {
 
       await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-      await waitFor(() => expect(login).toHaveBeenCalledWith("maker", "hunter2", true));
+      await waitFor(() =>
+        expect(login).toHaveBeenCalledWith("maker", "hunter2", true, expect.any(AbortSignal)),
+      );
     });
 
     it("says the credentials were wrong for a 401", async () => {
@@ -318,5 +323,119 @@ describe("LoginPage", () => {
 
       expect(screen.getByText("Te damos la bienvenida")).toBeInTheDocument();
     });
+  });
+});
+
+describe("Login entry lifetime", () => {
+  it("aborts providers when the Login entry leaves", async () => {
+    let signal: AbortSignal | null | undefined;
+    const reply = Promise.withResolvers<Response>();
+    const view = renderLogin({
+      routes: {
+        "GET /api/v1/auth/providers": (_url, options) => {
+          signal = options?.signal;
+          return reply.promise;
+        },
+      },
+    });
+    await waitFor(() => expect(signal).toBeDefined());
+
+    view.unmount();
+    await act(async () => reply.resolve(json(WITH_SSO)));
+
+    expect(signal?.aborted).toBe(true);
+  });
+
+  it("suppresses navigation from a disposed OIDC entry", async () => {
+    landOn("?oidc=success");
+    const refresh = Promise.withResolvers<void>();
+    const user = userEvent.setup();
+    renderApp(
+      <>
+        <Link to="/leave">Leave entry</Link>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/leave" element={<p>Another entry</p>} />
+          <Route path="/" element={<p>Private destination</p>} />
+        </Routes>
+      </>,
+      {
+        at: "/login",
+        auth: signedOut({ refresh: () => refresh.promise }),
+        routes: { "GET /api/v1/auth/providers": json(NO_SSO) },
+      },
+    );
+    await user.click(screen.getByRole("link", { name: "Leave entry" }));
+
+    await act(async () => refresh.resolve());
+
+    expect(screen.getByText("Another entry")).toBeVisible();
+    expect(screen.queryByText("Private destination")).not.toBeInTheDocument();
+  });
+
+  it("aborts sign-in when the entry route leaves", async () => {
+    const login = Promise.withResolvers<void>();
+    let signal: AbortSignal | undefined;
+    const user = userEvent.setup();
+    renderApp(
+      <>
+        <Link to="/leave">Leave entry</Link>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/leave" element={<p>Another entry</p>} />
+          <Route path="/" element={<p>Private destination</p>} />
+        </Routes>
+      </>,
+      {
+        at: "/login",
+        auth: signedOut({
+          login: (_username, _password, _remember, caller) => {
+            signal = caller;
+            return login.promise;
+          },
+        }),
+        routes: { "GET /api/v1/auth/providers": json(NO_SSO) },
+      },
+    );
+    await user.type(screen.getByLabelText("Username"), "maker");
+    await user.type(screen.getByLabelText("Password"), "password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await user.click(screen.getByRole("link", { name: "Leave entry" }));
+    await act(async () => login.resolve());
+
+    expect(signal?.aborted).toBe(true);
+    expect(screen.getByText("Another entry")).toBeVisible();
+  });
+
+  it("retries unavailable login providers while retaining local sign-in", async () => {
+    const user = userEvent.setup();
+    let available = false;
+    renderLogin({
+      routes: {
+        "GET /api/v1/auth/providers": () =>
+          available ? json(WITH_SSO) : json({ detail: "unavailable" }, 503),
+      },
+    });
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled();
+    available = true;
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByRole("button", { name: "Sign in with Authentik" })).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("rejects duplicate credential submissions", async () => {
+    const login = vi.fn<AuthState["login"]>().mockReturnValue(new Promise(() => {}));
+    renderLogin({ auth: signedOut({ login }) });
+    const form = screen.getByLabelText("Username").closest("form");
+    if (!form) throw new Error("Login form missing");
+
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+
+    expect(login).toHaveBeenCalledTimes(1);
   });
 });

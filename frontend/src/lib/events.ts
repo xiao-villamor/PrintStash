@@ -16,13 +16,25 @@
  */
 
 import { createEventsTicket } from "@/lib/api/work";
+import { isLoggedIn, onAuthChange } from "@/lib/auth-store";
+import { withSessionRequest } from "@/lib/session-transport";
 import { getWsUrl } from "@/lib/api/request";
 import type { DerivativeState, JobState } from "@/types";
 
 export type EventNotice =
   | { type: "resync" }
-  | { type: "subscribed"; channel: string }
-  | { type: "job"; job_id: string; kind: string; state: JobState; progress: number | null }
+  | { type: "derivative_policy" }
+  // `revision` is present on Model channels only: the Model's derivative
+  // revision when the subscription took effect (`ModelRead.derivatives_revision`).
+  | { type: "subscribed"; channel: string; revision?: string }
+  | {
+      type: "job";
+      job_id: string;
+      kind: string;
+      state: JobState;
+      progress: number | null;
+      task_visible: boolean;
+    }
   | {
       type: "derivative";
       model_id: number;
@@ -42,26 +54,42 @@ export interface EventSocket {
   close(): void;
 }
 
-export type EventSocketFactory = () => Promise<EventSocket>;
+export type EventSocketFactory = (signal: AbortSignal) => Promise<EventSocket>;
 
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+const IDLE_CLOSE_MS = 10_000;
 
-async function openEventSocket(): Promise<EventSocket> {
-  const { ticket } = await createEventsTicket();
-  const ws = new WebSocket(getWsUrl(`/api/v1/events/ws?ticket=${encodeURIComponent(ticket)}`));
-  const adapter: EventSocket = {
-    onopen: null,
-    onclose: null,
-    onmessage: null,
-    send: (data) => ws.send(data),
-    close: () => ws.close(),
-  };
-  ws.onopen = () => adapter.onopen?.();
-  ws.onclose = () => adapter.onclose?.();
-  // The server only sends text frames.
-  ws.onmessage = (event) => adapter.onmessage?.({ data: String(event.data) });
-  return adapter;
+async function openEventSocket(signal: AbortSignal): Promise<EventSocket> {
+  let closeOpened = () => {};
+  try {
+    return await withSessionRequest(async (request) => {
+      const { ticket } = await createEventsTicket(request.signal);
+      request.assertCurrent();
+      const ws = new WebSocket(getWsUrl(`/api/v1/events/ws?ticket=${encodeURIComponent(ticket)}`));
+      closeOpened = () => ws.close();
+      const adapter: EventSocket = {
+        onopen: null,
+        onclose: null,
+        onmessage: null,
+        send: (data) => ws.send(data),
+        close: () => {
+          ws.onopen = null;
+          ws.onclose = null;
+          ws.onmessage = null;
+          ws.close();
+        },
+      };
+      ws.onopen = () => adapter.onopen?.();
+      ws.onclose = () => adapter.onclose?.();
+      // The server only sends text frames.
+      ws.onmessage = (event) => adapter.onmessage?.({ data: String(event.data) });
+      return adapter;
+    }, signal);
+  } catch (error) {
+    closeOpened();
+    throw error;
+  }
 }
 
 let socketFactory: EventSocketFactory = openEventSocket;
@@ -70,7 +98,13 @@ const followed = new Map<string, number>();
 let socket: EventSocket | null = null;
 let open = false;
 let connecting = false;
+let generation = 0;
+let ticketController: AbortController | null = null;
+let stopAuth: (() => void) | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+// A notice arrived while nobody listened; the next listener is owed a resync.
+let missed = false;
 let failures = 0;
 
 /** Point the client at a different socket (tests); resets any live connection. */
@@ -78,14 +112,18 @@ export function setEventSocketFactory(factory: EventSocketFactory): void {
   disconnect();
   socketFactory = factory;
   failures = 0;
+  void connect();
 }
 
 function isBrowser(): boolean {
   return "window" in globalThis;
 }
 
-function deliver(notice: EventNotice): void {
-  for (const listener of listeners) listener(notice);
+function deliver(notice: EventNotice, current: () => boolean): void {
+  for (const listener of listeners) {
+    if (!current()) return;
+    listener(notice);
+  }
 }
 
 function parse(data: string): EventNotice | null {
@@ -94,6 +132,7 @@ function parse(data: string): EventNotice | null {
     // with an unknown type (a newer server) is ignored rather than guessed at.
     const notice: EventNotice = JSON.parse(data);
     return notice.type === "resync" ||
+      notice.type === "derivative_policy" ||
       notice.type === "subscribed" ||
       notice.type === "job" ||
       notice.type === "derivative"
@@ -109,7 +148,7 @@ function send(message: { subscribe: string } | { unsubscribe: string }): void {
 }
 
 function scheduleReconnect(): void {
-  if (reconnectTimer !== null || listeners.size === 0) return;
+  if (reconnectTimer !== null || listeners.size === 0 || !isLoggedIn()) return;
   const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_MIN_MS * 2 ** failures);
   failures += 1;
   reconnectTimer = setTimeout(() => {
@@ -119,40 +158,73 @@ function scheduleReconnect(): void {
 }
 
 async function connect(): Promise<void> {
-  if (socket || connecting || listeners.size === 0 || !isBrowser()) return;
+  if (socket || connecting || listeners.size === 0 || !isBrowser() || !isLoggedIn()) return;
+  const version = generation;
+  const controller = new AbortController();
+  ticketController = controller;
   connecting = true;
   let next: EventSocket;
   try {
-    next = await socketFactory();
+    next = await socketFactory(controller.signal);
   } catch {
+    if (version !== generation) return;
+    ticketController = null;
     connecting = false;
     scheduleReconnect();
     return;
   }
-  connecting = false;
-  if (listeners.size === 0) {
+  if (version !== generation) {
     next.close();
     return;
   }
+  ticketController = null;
+  connecting = false;
   socket = next;
+  const current = () => version === generation && socket === next;
   next.onopen = () => {
+    if (!current()) return;
     open = true;
     failures = 0;
     for (const channel of followed.keys()) send({ subscribe: channel });
   };
   next.onmessage = (event) => {
+    if (!current()) return;
     const notice = parse(event.data);
-    if (notice) deliver(notice);
+    if (!notice) return;
+    if (listeners.size === 0) missed = true;
+    else deliver(notice, current);
   };
   next.onclose = () => {
-    if (socket !== next) return;
+    if (!current()) return;
+    next.onopen = null;
+    next.onclose = null;
+    next.onmessage = null;
     socket = null;
     open = false;
     scheduleReconnect();
   };
 }
 
+function cancelIdleClose(): void {
+  if (idleTimer === null) return;
+  clearTimeout(idleTimer);
+  idleTimer = null;
+}
+
+/** Stop listening for session changes and drop the connection. */
+function retire(): void {
+  disconnect();
+  stopAuth?.();
+  stopAuth = null;
+}
+
 function disconnect(): void {
+  generation += 1;
+  cancelIdleClose();
+  missed = false;
+  ticketController?.abort();
+  ticketController = null;
+  connecting = false;
   if (reconnectTimer !== null) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -160,17 +232,50 @@ function disconnect(): void {
   const current = socket;
   socket = null;
   open = false;
-  current?.close();
+  if (current) {
+    current.onopen = null;
+    current.onclose = null;
+    current.onmessage = null;
+    current.close();
+  }
 }
 
-/** Hear every notice this tab receives; the socket lives while anyone listens. */
+/**
+ * Hear every notice this tab receives. The socket lives while anyone listens
+ * and for `IDLE_CLOSE_MS` after the last listener leaves, so one view handing
+ * over to the next (a route change) keeps the connection instead of paying for
+ * a ticket, a handshake and the server's `resync`. A notice that arrived in
+ * such a gap reached nobody, so the next listener hears a `resync` for it.
+ */
 export function subscribeEvents(listener: EventListener): () => void {
   if (!isBrowser()) return () => {};
+  cancelIdleClose();
   listeners.add(listener);
+  if (missed) {
+    missed = false;
+    const version = generation;
+    queueMicrotask(() => deliver({ type: "resync" }, () => version === generation));
+  }
+  stopAuth ??= onAuthChange(() => {
+    if (listeners.size === 0) {
+      retire();
+      return;
+    }
+    disconnect();
+    failures = 0;
+    void connect();
+  });
   void connect();
+  let active = true;
   return () => {
+    if (!active) return;
+    active = false;
     listeners.delete(listener);
-    if (listeners.size === 0) disconnect();
+    if (listeners.size > 0) return;
+    // Only an established connection is worth keeping; a pending ticket or a
+    // reconnect timer has nothing to hand over.
+    if (socket === null) retire();
+    else idleTimer = setTimeout(retire, IDLE_CLOSE_MS);
   };
 }
 
@@ -179,13 +284,15 @@ export function subscribeEvents(listener: EventListener): () => void {
  * every `resync`, and the server's `subscribed` acknowledgement of this
  * Model's channel: a derivative that settled before the subscription took
  * effect was announced to nobody, so a follower refetches on that
- * acknowledgement. The server checks the viewer may see the Model.
+ * acknowledgement unless it already holds the revision the acknowledgement
+ * names. The server checks the viewer may see the Model.
  */
 export function followModel(modelId: number, listener: EventListener): () => void {
   const channel = `model:${modelId}`;
   const filtered: EventListener = (notice) => {
     if (
       notice.type === "resync" ||
+      notice.type === "derivative_policy" ||
       (notice.type === "subscribed" && notice.channel === channel) ||
       (notice.type === "derivative" && notice.model_id === modelId)
     )
@@ -195,7 +302,10 @@ export function followModel(modelId: number, listener: EventListener): () => voi
   const count = followed.get(channel) ?? 0;
   followed.set(channel, count + 1);
   if (count === 0) send({ subscribe: channel });
+  let active = true;
   return () => {
+    if (!active) return;
+    active = false;
     unsubscribe();
     const remaining = (followed.get(channel) ?? 1) - 1;
     if (remaining > 0) {

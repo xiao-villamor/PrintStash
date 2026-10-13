@@ -17,6 +17,59 @@ import { test, expect } from "./helpers";
 const externalRoot = process.env.PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT;
 const markerName = ".printstash-external-root.json";
 
+test.describe("library source configuration", () => {
+  test("revises a conflicting source activation in the browser", async ({ page }) => {
+    const originalResponse = await page.request.get("/api/v1/config");
+    expect(originalResponse.ok()).toBeTruthy();
+    const original = await originalResponse.json();
+    try {
+      expect(
+        (
+          await page.request.put("/api/v1/config", { data: { external_libraries_enabled: false } })
+        ).ok(),
+      ).toBeTruthy();
+      await page.goto("/settings?section=libraries");
+      const toggle = page.getByRole("switch", { name: "Library sources enabled" });
+      await expect(toggle).toHaveAttribute("aria-checked", "false");
+      expect(
+        (
+          await page.request.put("/api/v1/config", {
+            data: { currency: original.currency === "EUR" ? "USD" : "EUR" },
+          })
+        ).ok(),
+      ).toBeTruthy();
+      const [conflict] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().includes("/api/v1/config") && r.request().method() === "PUT",
+        ),
+        toggle.click(),
+      ]);
+      expect(conflict.status()).toBe(412);
+      await expect(toggle).toBeDisabled();
+      await page.getByRole("button", { name: "Review latest version" }).click();
+      const [accepted] = await Promise.all([
+        page.waitForResponse(
+          (r) => r.url().includes("/api/v1/config") && r.request().method() === "PUT",
+        ),
+        page.getByRole("button", { name: "Save my draft against this version" }).click(),
+      ]);
+      expect(accepted.status()).toBe(200);
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+    } finally {
+      expect(
+        (
+          await page.request.put("/api/v1/config", {
+            data: {
+              external_libraries_enabled: original.external_libraries_enabled,
+              currency: original.currency,
+            },
+          })
+        ).ok(),
+      ).toBeTruthy();
+    }
+  });
+});
+
 test.describe("mounted library source root recovery", () => {
   test("preserves mounted names through upload", async ({ page }) => {
     if (!externalRoot) {
@@ -211,6 +264,14 @@ test.describe("mounted library source root recovery", () => {
   });
 
   test("reenrolls a root with a missing marker before external write-back", async ({ page }) => {
+    let sourceReads = 0;
+    const enrollmentPosts: string[] = [];
+    page.on("request", (request) => {
+      const path = new URL(request.url()).pathname;
+      if (request.method() === "GET" && path === "/api/v1/libraries") sourceReads += 1;
+      if (request.method() === "POST" && path.endsWith("/root/enroll")) enrollmentPosts.push(path);
+    });
+
     if (!externalRoot) {
       test.skip(
         true,
@@ -253,8 +314,11 @@ test.describe("mounted library source root recovery", () => {
       const confirmation = page.getByRole("dialog", { name: "Enroll mounted source root?" });
       await expect(confirmation).toBeVisible();
       await expect(confirmation).toContainText(root);
+      const initialSourceReads = sourceReads;
       await confirmation.getByRole("button", { name: "Enroll root" }).click();
       await expect(page.getByText("Source verified")).toBeVisible();
+      expect(sourceReads).toBe(initialSourceReads);
+      expect(enrollmentPosts).toEqual([`/api/v1/libraries/${libraryId}/root/enroll`]);
 
       await page.goto("/");
       await page.getByRole("button", { name: "Upload", exact: true }).click();
@@ -290,6 +354,91 @@ test.describe("mounted library source root recovery", () => {
           data: { external_libraries_enabled: false },
         });
       }
+    }
+  });
+});
+
+test.describe("source conditional editing", () => {
+  test("resolves competing source editors", async ({ page, context }) => {
+    const stamp = `source-edit-${Date.now()}`;
+    await page.goto("/settings?section=libraries");
+    const config = await (await page.request.get("/api/v1/config")).json();
+    expect(
+      (
+        await page.request.put("/api/v1/config", { data: { external_libraries_enabled: true } })
+      ).ok(),
+    ).toBe(true);
+    const connectionResponse = await page.request.post("/api/v1/storage-connections", {
+      data: {
+        name: stamp,
+        kind: "s3",
+        purpose: "library",
+        configuration: { bucket: "unused-source-edit-bucket" },
+        secrets: { access_key: "FakeSourceEditAccess", secret_key: "FakeSourceEditSecret" },
+      },
+    });
+    expect(connectionResponse.status()).toBe(201);
+    const connection = await connectionResponse.json();
+    const created = await page.request.post("/api/v1/libraries", {
+      data: {
+        name: stamp,
+        source_kind: "s3",
+        connection_id: connection.id,
+        source_prefix: "models",
+        scan_schedule: "",
+      },
+    });
+    expect(created.status()).toBe(201);
+    const source = await created.json();
+    const second = await context.newPage();
+    const release = Promise.withResolvers<void>();
+    try {
+      await page.goto("/settings?section=libraries");
+      await second.goto("/settings?section=libraries");
+      const endpoint = `/api/v1/libraries/${source.id}`;
+      const held = Promise.withResolvers<void>();
+      await second.route(`**${endpoint}`, async (route) => {
+        if (route.request().method() === "PATCH") {
+          held.resolve();
+          await release.promise;
+        }
+        await route.continue();
+      });
+      const conflict = second.waitForResponse(
+        (response) => response.url().endsWith(endpoint) && response.request().method() === "PATCH",
+      );
+      await second.getByRole("switch", { name: "Auto-scan enabled" }).click();
+      await held.promise;
+      const accepted = page.waitForResponse(
+        (response) => response.url().endsWith(endpoint) && response.request().method() === "PATCH",
+      );
+      await page.getByLabel(`Scan schedule ${stamp}`, { exact: true }).selectOption("0 0 * * *");
+      expect((await accepted).status()).toBe(200);
+      release.resolve();
+      expect((await conflict).status()).toBe(412);
+      await expect(second.getByRole("switch", { name: "Auto-scan enabled" })).not.toBeChecked();
+      await expect(second.getByRole("switch", { name: "Auto-scan enabled" })).toBeDisabled();
+      await second.getByRole("button", { name: "Review current values" }).click();
+      await expect(
+        second.getByRole("region", { name: "Latest saved version" }).getByText("Daily (midnight)"),
+      ).toBeVisible();
+      const revised = second.waitForResponse(
+        (response) => response.url().endsWith(endpoint) && response.request().method() === "PATCH",
+      );
+      await second.getByRole("button", { name: "Save revised changes" }).click();
+      expect((await revised).status()).toBe(200);
+      await expect(second.getByLabel(`Scan schedule ${stamp}`, { exact: true })).toHaveValue(
+        "0 0 * * *",
+      );
+      await expect(second.getByRole("switch", { name: "Auto-scan enabled" })).not.toBeChecked();
+    } finally {
+      release.resolve();
+      await second.close();
+      await page.request.delete(`/api/v1/libraries/${source.id}`);
+      await page.request.delete(`/api/v1/storage-connections/${connection.id}`);
+      await page.request.put("/api/v1/config", {
+        data: { external_libraries_enabled: config.external_libraries_enabled },
+      });
     }
   });
 });

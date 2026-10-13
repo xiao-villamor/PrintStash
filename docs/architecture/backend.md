@@ -8,6 +8,23 @@ HTTP endpoint or persisted archive format.
 
 ## Ownership
 
+File acceptance crosses the HTTP async boundary through
+`api.command_execution`. A bounded command creates, uses and closes its SQL
+Session on one worker thread and builds its response before closing. Authentication
+returns an immutable `api.command_actor.CommandActor`; the command rechecks
+credential and current user authority inside its own Session. ORM rows and Sessions
+never cross a streamed body wait. Capture spool contexts retain only an inode
+receipt and an open descriptor.
+
+`VAULT_API_COMMAND_CONCURRENCY` bounds these commands separately from FastAPI
+ordinary workers (default 8, range 1–128 per API process). Slow SQL, storage or
+engine hints consume this capacity while lightweight requests can still progress.
+Queued cancellation starts no write; an admitted callable finishes before its
+cancellation returns. An awaited AnyIO task group joins the command worker even
+when the server cancels its native request task, preserving capacity and exact
+callable failures. This is awaited request execution; background processing
+continues through Job Definitions after durable intent is committed.
+
 | Owner | Responsibilities | Public operations and contracts |
 | --- | --- | --- |
 | `library` | Models, Artifacts, G-code Revisions, taxonomy, multipart sets, provenance and trash | `commands`, `revisions`, `model_views.{listing,pagination,detail,facets,exports,statistics,trash}`, `multipart_models`, `part_options`, `provenance`, `source_covers`, `taxonomy`, `saved_views`, `trash` |
@@ -18,7 +35,7 @@ HTTP endpoint or persisted archive format.
 | `printing` | Printers, provider adapters, fleet scheduling, materials and print history | `dispatch`, `costing`, `printer_provider`, `printer_hub`, `fleet`, `materials`, `printer_files`, `printer_jobs`, `print_results`, `multipart_builds` |
 | `similarity` | Versioned geometric evidence, indexed retrieval, durable analysis runs and explicit review | `fingerprints`, `retrieval`, `processing`, `candidates`, `review`, `composition` |
 | `inference` | Shared provider contracts, model identity and inference runtimes | `local`, `manifest`, `onnx_cpu` |
-| `media` | Mesh processing, thumbnail rendering and publication, source covers and toolpath conversion | `thumbnail_engine`, `thumbnail_publication`, `toolpath`, `source_cover_processing` |
+| `media` | Mesh processing, thumbnail rendering and publication, source covers and toolpath conversion | `mesh_contracts`, `thumbnail_engine`, `thumbnail_publication`, `toolpath`, `source_cover_processing` |
 | `derivatives` | What each Artifact owes (metadata, thumbnail, toolpath), found by anti-join and produced by Jobs | `kinds`, `records`, `source`, `producers`, `repair`, `jobs` |
 | `work` | The engine-agnostic background work model: Jobs, definitions, sources, the reconciler, fences and realtime notices | `contracts`, `catalog`, `jobs`, `sources`, `reconciler`, `submission`, `runner`, `service`, `fences`, `executors`, `events` |
 | `identity` | Product identity, collection/printer authorization, sharing and tickets | `auth`, `oidc`, `rbac`, `printer_rbac`, `share`, `ws_tickets` |
@@ -40,6 +57,13 @@ Routes import configuration, filesystem utilities and provider contracts from
 their actual owners; they must not reach them through an operation such as
 `inbox.settings` or `inbox.staging_leases`. A deliberate public re-export must
 be named in `__all__`. The architecture check enforces this boundary for HTTP.
+
+Mesh request/result types and tagged geometry codecs belong to
+`media.mesh_contracts`. Workers, supervisors, producers and tests import those
+data contracts directly; `thumbnail_engine` owns strategy selection and cleanup.
+Primitive mesh and scene owners cannot import an orchestrator, including solely
+for annotations. The contract module imports no loader or analysis owner at
+runtime, so importing a request type cannot initialize those execution paths.
 
 ## Dependency rules
 
@@ -89,9 +113,8 @@ The explicit historical path map is `backend/module-map.json`.
 
 ## Shared business and product adapters
 
-`backend/packages/printstash-core` is canonical. Cloud adoption is deferred to
-[the separate implementation guide](cloud-adoption.md). Its adapter must adopt an exact upstream
-revision through its existing pinned-source workflow. Matching interface names
+`backend/packages/printstash-core` is canonical. A product adapter must adopt an
+exact upstream revision through its existing pinned-source workflow. Matching interface names
 alone are not a compatibility claim. A pin must identify the entire copied
 package, including contract examples and tests.
 
@@ -167,7 +190,6 @@ Moving a seam includes moving its test and updating fault injection to the
 lookup actually used by production. Retain assertions about failure outcomes,
 not just successful imports. Run query budgets, OpenAPI, schema parity,
 migration upgrades and publication/restore failure cases throughout extraction.
-See `docs/backend-refactor-validation.md` for the behavior matrix and evidence.
 
 Similarity analysis is an optional derivative of committed Artifacts. Each
 unfinished `SimilarityRun` is the subject of `similarity.analyze` Jobs in the

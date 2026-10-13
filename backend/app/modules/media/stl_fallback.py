@@ -4,14 +4,26 @@ from __future__ import annotations
 
 import io
 import math
-import struct
 from array import array
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
-from typing import Iterator
+from typing import TYPE_CHECKING
 
 from printstash_core.mesh.preview_profile import PREVIEW_PROFILE
+
+from app.modules.media.stl_reader import (
+    InvalidSTL,
+    STLReadLimits,
+    STLSourceChanged,
+    check_deadline,
+    iter_stl_blocks,
+    snapshot_stl,
+)
+
+if TYPE_CHECKING:
+    import numpy as np
+    from numpy.typing import NDArray
 
 
 @dataclass(frozen=True)
@@ -21,37 +33,36 @@ class STLThumbnailResult:
     bounds_max: tuple[float, float, float]
     triangle_count: int
     sampled_triangles: int
-    scanned_bytes: int = 0
-    parsed_triangles: int = 0
-    complete: bool = True
-    raster_candidates: int = 0
+    source_complete: bool
+    scanned_bytes: int
+    parsed_triangles: int
+    complete: bool
+    raster_candidates: int
 
 
 @dataclass
-class _SampledSTL:
-    """A bounded sample and the work spent obtaining it."""
+class STLSample:
+    """Retained facets with complete validated source bounds and coverage.
+
+    source_complete certifies source facet coordinates and EOF, not binary
+    stored normals or closed topology. complete additionally covers all facets.
+    """
 
     coordinates: array
     triangle_count: int
     sampled_triangles: int
-    bounds_min: tuple[float, float, float] | None
-    bounds_max: tuple[float, float, float] | None
+    bounds_min: tuple[float, float, float]
+    bounds_max: tuple[float, float, float]
     scanned_bytes: int
     parsed_triangles: int
     complete: bool
+    source_complete: bool
 
 
-_BINARY_HEADER_BYTES = 84
-_BINARY_TRIANGLE = struct.Struct("<12fH")
-# This is a hard facet-work budget. Binary files are sampled by deterministic
-# seeks and ASCII files stop after this many parsed facets. Neither path gets
-# a second pass over the source.
+# Source validation and retained representation have independent budgets.
+# All source facets are validated; at most this many are retained for rendering.
 _MAX_SAMPLED_TRIANGLES = 100_000
 _COVERAGE_CHUNK_TRIANGLES = 2_048
-_MAX_ASCII_LINE_BYTES = 64 * 1024
-_MAX_ASCII_BYTES = 16 * 1024 * 1024
-_MAX_ASCII_LINES = 1_000_000
-_FLOAT32_MAX = 3.4028234663852886e38
 _MAX_RENDER_DIMENSION = 2048
 _MAX_COVERAGE_CANDIDATES = 2_000_000
 # Keep the footprint deliberately small: a sparse bounded sample of a
@@ -61,293 +72,139 @@ _MIN_SPLAT_RADIUS = 0.65
 _MAX_SPLAT_RADIUS = 1.0
 
 
-def _binary_stl_info(path: Path) -> tuple[int, int] | None:
-    """Return ``(declared facets, file size)`` for a valid binary STL."""
+def _sample_priorities(indices: NDArray[np.uint64]) -> NDArray[np.uint64]:
+    """A fixed bijection over source facet indices, independent of block size."""
+    import numpy as np
 
-    try:
-        size = path.stat().st_size
-        with path.open("rb") as stream:
-            header = stream.read(_BINARY_HEADER_BYTES)
-        if len(header) != _BINARY_HEADER_BYTES:
-            return None
-        count = struct.unpack("<I", header[80:84])[0]
-        expected_size = _BINARY_HEADER_BYTES + count * _BINARY_TRIANGLE.size
-        if count == 0 or size < expected_size:
-            return None
-        return count, size
-    except (OSError, struct.error):
-        return None
+    values = indices + np.uint64(0x9E3779B97F4A7C15)
+    values = (values ^ (values >> np.uint64(30))) * np.uint64(0xBF58476D1CE4E5B9)
+    values = (values ^ (values >> np.uint64(27))) * np.uint64(0x94D049BB133111EB)
+    return values ^ (values >> np.uint64(31))
 
 
-def _is_binary_stl(path: Path) -> bool:
-    return _binary_stl_info(path) is not None
+class _FacetSample:
+    """Vectorized retained facets, bounded by sample budget plus reader block."""
+
+    def __init__(self, budget: int) -> None:
+        import numpy as np
+
+        self.budget = budget
+        self.indices = np.empty(0, dtype=np.uint64)
+        self.facets = np.empty((0, 3, 3), dtype=np.float64)
+        self.first = None
+        self.last = None
+        self.parsed = 0
+
+    def add(self, facets: NDArray[np.float64]) -> None:
+        import numpy as np
+
+        if self.first is None:
+            self.first = facets[0].copy()
+        self.last = facets[-1].copy()
+        incoming = np.arange(self.parsed, self.parsed + len(facets), dtype=np.uint64)
+        self.parsed += len(facets)
+        if self.budget == 1:
+            return
+        keep = incoming != 0
+        indices = np.concatenate((self.indices, incoming[keep]))
+        candidates = np.concatenate((self.facets, facets[keep]))
+        retained = self.budget - 1
+        if len(indices) > retained:
+            selected = np.argpartition(_sample_priorities(indices), retained - 1)[
+                :retained
+            ]
+            indices = indices[selected]
+            candidates = candidates[selected]
+        self.indices, self.facets = indices, candidates
+
+    def finish(self) -> NDArray[np.float64]:
+        import numpy as np
+
+        if self.first is None or self.last is None:
+            raise InvalidSTL("empty STL sample")
+        if self.parsed == 1 or self.budget == 1:
+            return np.asarray([self.first], dtype=np.float64)
+        keep = self.indices != self.parsed - 1
+        indices = self.indices[keep]
+        facets = self.facets[keep]
+        interior = self.budget - 2
+        if len(indices) > interior:
+            selected = np.argpartition(_sample_priorities(indices), interior)[:interior]
+            indices, facets = indices[selected], facets[selected]
+        order = np.argsort(indices)
+        return np.concatenate(
+            (np.asarray([self.first]), facets[order], np.asarray([self.last]))
+        )
 
 
-def _valid_coordinate(value: float) -> bool:
-    """Return whether *value* is finite and representable in float32."""
+def read_stl_sample(
+    path: Path, *, max_triangles: int, limits: STLReadLimits | None = None
+) -> STLSample:
+    """Validate every source facet and retain a bounded deterministic subset.
 
-    return math.isfinite(value) and abs(value) <= _FLOAT32_MAX
+    This canonical seam preserves typed source/budget/snapshot failures. Legacy
+    preview and analysis adapters still map them to None until their outcome
+    contracts migrate together.
+    """
+    import numpy as np
 
-
-def _iter_binary_triangles(
-    path: Path, *, max_triangles: int = _MAX_SAMPLED_TRIANGLES
-) -> Iterator[tuple[float, ...]]:
-    """Yield at most *max_triangles* records for compatibility/debugging."""
-
-    try:
-        with path.open("rb") as stream:
-            header = stream.read(_BINARY_HEADER_BYTES)
-            if len(header) != _BINARY_HEADER_BYTES:
-                return
-            count = struct.unpack("<I", header[80:84])[0]
-            limit = min(max(max_triangles, 0), count)
-            for _ in range(limit):
-                record = stream.read(_BINARY_TRIANGLE.size)
-                if len(record) != _BINARY_TRIANGLE.size:
-                    return
-                values = _BINARY_TRIANGLE.unpack(record)
-                triangle = tuple(float(value) for value in values[3:12])
-                if all(_valid_coordinate(value) for value in triangle):
-                    yield triangle
-    except OSError:
-        return
-
-
-def _iter_ascii_triangles(
-    path: Path,
-    *,
-    max_bytes: int = _MAX_ASCII_BYTES,
-    max_lines: int = _MAX_ASCII_LINES,
-    max_triangles: int = _MAX_SAMPLED_TRIANGLES,
-) -> Iterator[tuple[float, ...]]:
-    """Yield ASCII facets while bounding bytes, lines, line size, and facets."""
-
-    vertices: list[float] = []
-    scanned_bytes = 0
-    lines = 0
-    parsed = 0
-    draining = False
-    try:
-        with path.open("rb") as stream:
-            while (
-                scanned_bytes < max(max_bytes, 0)
-                and lines < max(max_lines, 0)
-                and parsed < max(max_triangles, 0)
-            ):
-                remaining = max_bytes - scanned_bytes
-                read_limit = min(_MAX_ASCII_LINE_BYTES + 1, remaining)
-                if read_limit <= 0:
-                    return
-                raw_line = stream.readline(read_limit)
-                if not raw_line:
-                    return
-                scanned_bytes += len(raw_line)
-                if draining:
-                    if raw_line.endswith((b"\n", b"\r")):
-                        draining = False
-                    continue
-                lines += 1
-                if len(raw_line) > _MAX_ASCII_LINE_BYTES:
-                    vertices.clear()
-                    draining = not raw_line.endswith((b"\n", b"\r"))
-                    continue
-                line = raw_line.decode("ascii", errors="ignore")
-                parts = line.lstrip().split()
-                if len(parts) != 4 or parts[0].lower() != "vertex":
-                    continue
-                try:
-                    values = [float(value) for value in parts[1:]]
-                except ValueError:
-                    vertices.clear()
-                    continue
-                if not all(_valid_coordinate(value) for value in values):
-                    vertices.clear()
-                    continue
-                vertices.extend(values)
-                if len(vertices) == 9:
-                    parsed += 1
-                    yield tuple(vertices)
-                    vertices.clear()
-    except OSError:
-        return
-
-
-def _iter_stl_triangles(
-    path: Path, *, max_triangles: int = _MAX_SAMPLED_TRIANGLES
-) -> Iterator[tuple[float, ...]]:
-    if _is_binary_stl(path):
-        yield from _iter_binary_triangles(path, max_triangles=max_triangles)
-    else:
-        yield from _iter_ascii_triangles(path, max_triangles=max_triangles)
-
-
-def _update_bounds(
-    lower: list[float], upper: list[float], triangle: tuple[float, ...]
-) -> None:
-    for offset in (0, 3, 6):
-        for axis in range(3):
-            value = triangle[offset + axis]
-            lower[axis] = min(lower[axis], value)
-            upper[axis] = max(upper[axis], value)
-
-
-def _binary_sample_indices(count: int, sample_count: int) -> Iterator[int]:
-    """Yield stratified records, retaining the first and last facet."""
-
-    for sample_index in range(sample_count):
-        if sample_index == 0:
-            yield 0
-            continue
-        if sample_index == sample_count - 1:
-            yield count - 1
-            continue
-        yield (sample_index * count + count // 2) // sample_count
-
-
-def _read_binary_samples(
-    path: Path, budget: int, info: tuple[int, int] | None = None
-) -> _SampledSTL | None:
-    info = info or _binary_stl_info(path)
-    if info is None:
-        return None
-    triangle_count, _ = info
-    sample_count = min(triangle_count, budget)
-    if sample_count == 0:
-        return None
-    coordinates = array("f")
-    lower = [float("inf")] * 3
-    upper = [float("-inf")] * 3
-    parsed = 0
-    try:
-        with path.open("rb") as stream:
-            for index in _binary_sample_indices(triangle_count, sample_count):
-                stream.seek(_BINARY_HEADER_BYTES + index * _BINARY_TRIANGLE.size)
-                record = stream.read(_BINARY_TRIANGLE.size)
-                if len(record) != _BINARY_TRIANGLE.size:
-                    break
-                values = _BINARY_TRIANGLE.unpack(record)
-                triangle = tuple(float(value) for value in values[3:12])
-                if not all(_valid_coordinate(value) for value in triangle):
-                    continue
-                coordinates.extend(triangle)
-                _update_bounds(lower, upper, triangle)
-                parsed += 1
-    except (OSError, ValueError):
-        return None
-    if parsed == 0:
-        return None
-    return _SampledSTL(
+    if (
+        type(max_triangles) is not int
+        or not 1 <= max_triangles <= _MAX_SAMPLED_TRIANGLES
+    ):
+        raise ValueError("invalid_stl_sample_budget")
+    lower = np.full(3, np.inf, dtype=np.float64)
+    upper = np.full(3, -np.inf, dtype=np.float64)
+    retained = _FacetSample(max_triangles)
+    bounded = limits if limits is not None else STLReadLimits()
+    source = snapshot_stl(path)
+    for facets in iter_stl_blocks(path, bounded, snapshot=source):
+        lower = np.minimum(lower, facets.min(axis=(0, 1)))
+        upper = np.maximum(upper, facets.max(axis=(0, 1)))
+        retained.add(facets)
+    selected = retained.finish()
+    coordinates = array("d")
+    coordinates.frombytes(selected.tobytes())
+    check_deadline(bounded)
+    if snapshot_stl(path) != source:
+        raise STLSourceChanged("source changed before completing sample")
+    return STLSample(
         coordinates=coordinates,
-        triangle_count=triangle_count,
-        sampled_triangles=parsed,
-        bounds_min=(lower[0], lower[1], lower[2]),
-        bounds_max=(upper[0], upper[1], upper[2]),
-        scanned_bytes=_BINARY_HEADER_BYTES + sample_count * _BINARY_TRIANGLE.size,
-        parsed_triangles=parsed,
-        complete=parsed == sample_count and sample_count == triangle_count,
+        triangle_count=retained.parsed,
+        sampled_triangles=len(selected),
+        bounds_min=(float(lower[0]), float(lower[1]), float(lower[2])),
+        bounds_max=(float(upper[0]), float(upper[1]), float(upper[2])),
+        scanned_bytes=source.size,
+        parsed_triangles=retained.parsed,
+        complete=len(selected) == retained.parsed,
+        source_complete=True,
     )
 
 
-def _read_ascii_samples(
-    path: Path, budget: int, probe_bytes: int = _BINARY_HEADER_BYTES
-) -> _SampledSTL | None:
-    coordinates = array("f")
-    lower = [float("inf")] * 3
-    upper = [float("-inf")] * 3
-    vertices: list[float] = []
-    scanned_bytes = probe_bytes
-    lines = 0
-    parsed = 0
-    eof = False
-    valid_source = True
-    draining = False
+def _read_samples(
+    path: Path, budget: int, *, limits: STLReadLimits | None = None
+) -> STLSample | None:
     try:
-        with path.open("rb") as stream:
-            while (
-                scanned_bytes < _MAX_ASCII_BYTES
-                and lines < _MAX_ASCII_LINES
-                and parsed < budget
-            ):
-                remaining = _MAX_ASCII_BYTES - scanned_bytes
-                read_limit = min(_MAX_ASCII_LINE_BYTES + 1, remaining)
-                if read_limit <= 0:
-                    break
-                raw_line = stream.readline(read_limit)
-                if not raw_line:
-                    eof = True
-                    break
-                scanned_bytes += len(raw_line)
-                if draining:
-                    if raw_line.endswith((b"\n", b"\r")):
-                        draining = False
-                    continue
-                lines += 1
-                if len(raw_line) > _MAX_ASCII_LINE_BYTES:
-                    vertices.clear()
-                    valid_source = False
-                    draining = not raw_line.endswith((b"\n", b"\r"))
-                    continue
-                parts = raw_line.decode("ascii", errors="ignore").lstrip().split()
-                if len(parts) != 4 or parts[0].lower() != "vertex":
-                    continue
-                try:
-                    values = [float(value) for value in parts[1:]]
-                except ValueError:
-                    vertices.clear()
-                    valid_source = False
-                    continue
-                if not all(_valid_coordinate(value) for value in values):
-                    vertices.clear()
-                    valid_source = False
-                    continue
-                vertices.extend(values)
-                if len(vertices) == 9:
-                    triangle = tuple(vertices)
-                    coordinates.extend(triangle)
-                    _update_bounds(lower, upper, triangle)
-                    parsed += 1
-                    vertices.clear()
-    except OSError:
+        return read_stl_sample(path, max_triangles=budget, limits=limits)
+    except (InvalidSTL, OSError):
         return None
-    if parsed == 0:
-        return None
-    return _SampledSTL(
-        coordinates=coordinates,
-        triangle_count=parsed,
-        sampled_triangles=parsed,
-        bounds_min=(lower[0], lower[1], lower[2]),
-        bounds_max=(upper[0], upper[1], upper[2]),
-        scanned_bytes=scanned_bytes,
-        parsed_triangles=parsed,
-        complete=eof and valid_source and not vertices and not draining,
-    )
-
-
-def _read_samples(path: Path, budget: int) -> _SampledSTL | None:
-    info = _binary_stl_info(path)
-    if info is not None:
-        return _read_binary_samples(path, budget, info)
-    try:
-        probe_bytes = min(path.stat().st_size, _BINARY_HEADER_BYTES)
-    except OSError:
-        return None
-    return _read_ascii_samples(path, budget, probe_bytes)
 
 
 def sample_stl_geometry(
-    path: Path, *, max_triangles: int = 10_000
-) -> _SampledSTL | None:
+    path: Path, *, max_triangles: int = 10_000, limits: STLReadLimits | None = None
+) -> STLSample | None:
     """The same bounded sampler used for previews, exposed for partial analysis.
 
-    Sampled topology is never full topology. ``complete`` says the parser reached
-    its source boundary, not that every source triangle is present in the sample.
+    Every successful sample has validated the complete source. ``source_complete``
+    certifies that read; ``complete`` certifies that every source facet is retained.
+    Neither flag certifies closed topology.
     """
     if (
         type(max_triangles) is not int
         or not 1 <= max_triangles <= _MAX_SAMPLED_TRIANGLES
     ):
         raise ValueError("invalid_stl_sample_budget")
-    return _read_samples(path, max_triangles)
+    return _read_samples(path, max_triangles, limits=limits)
 
 
 def render_stl_thumbnail(
@@ -359,9 +216,8 @@ def render_stl_thumbnail(
 ) -> STLThumbnailResult | None:
     """Read and rasterise a bounded, spatially covered STL representation.
 
-    Binary files use midpoint-stratified seeks, so their header and selected
-    records are the only bytes read. ASCII files are consumed once with byte,
-    line, line-length, and facet budgets. Selected facets are rasterised into a
+    Binary and ASCII sources are validated to EOF within byte, line and facet
+    budgets while retaining a deterministic bounded sample. Selected facets are rasterised into a
     coarse z-buffer using their actual triangle area, then upscaled. This keeps
     CPU/memory bounded without turning triangles into bounding-box blobs.
     """
@@ -386,11 +242,11 @@ def render_stl_thumbnail(
     )
     work_budget = min(requested_budget, _MAX_SAMPLED_TRIANGLES)
     sampled = _read_samples(path, work_budget)
-    if sampled is None or sampled.bounds_min is None or sampled.bounds_max is None:
+    if sampled is None:
         return None
 
     try:
-        triangles = np.frombuffer(sampled.coordinates, dtype=np.float32).reshape(
+        triangles = np.frombuffer(sampled.coordinates, dtype=np.float64).reshape(
             (-1, 3, 3)
         )
         corners = np.asarray(
@@ -562,6 +418,7 @@ def render_stl_thumbnail(
         sampled_triangles=sampled.sampled_triangles,
         scanned_bytes=sampled.scanned_bytes,
         parsed_triangles=sampled.parsed_triangles,
-        complete=sampled.complete,
+        complete=sampled.complete and raster_budget.used < raster_budget.limit,
+        source_complete=sampled.source_complete,
         raster_candidates=raster_budget.used,
     )

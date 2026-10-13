@@ -151,3 +151,25 @@ describe("DerivativeStatus", () => {
     expect(api.list).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("disabled derivatives", () => {
+  it("shows disabled work without a spinner or retry", async () => {
+    const { container } = renderStatus(
+      stubApi([aDerivative({ state: "disabled", retryable: false })]),
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("Processing disabled");
+    expect(container.querySelector(".animate-spin")).toBeNull();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.queryByText(/failed/)).not.toBeInTheDocument();
+  });
+
+  it.each(["derivative_policy", "resync"])("refreshes on %s", async (type) => {
+    const api = stubApi([aDerivative({ state: "disabled" })]);
+    renderStatus(api);
+    await screen.findByRole("status");
+    await waitFor(() => expect(socket.onmessage).not.toBeNull());
+    api.list.mockResolvedValue([aDerivative({ state: "pending" })]);
+    socket.onmessage?.({ data: JSON.stringify({ type }) });
+    expect(await screen.findByText("Preparing Preview…")).toBeVisible();
+  });
+});

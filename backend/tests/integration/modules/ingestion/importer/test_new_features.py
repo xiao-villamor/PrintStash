@@ -432,7 +432,7 @@ class TestStlResponse:
         )
 
         request = SimpleNamespace(headers={})
-        res = files_api.stl_response(f, request)
+        res = files_api.stl_response(db_session, f, request)
 
         # Local backend hands back a real path, so the blob is streamed off disk via
         # FileResponse rather than slurped into an in-memory Response body.
@@ -464,5 +464,5 @@ class TestStlResponse:
         )
 
         request = SimpleNamespace(headers={"if-none-match": f'"{f.sha256}"'})
-        res = files_api.stl_response(f, request)
+        res = files_api.stl_response(db_session, f, request)
         assert res.status_code == 304

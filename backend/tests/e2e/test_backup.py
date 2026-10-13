@@ -1,6 +1,6 @@
 """E2E: backup -> data loss -> restore, driven through the real HTTP API.
 
-``tests/test_backup_restore.py`` already exercises ``create_backup``/
+``tests/integration/modules/backups/backup/test_core.py`` exercises ``create_backup``/
 ``restore_backup`` extensively at the service-call level (including S3 and
 corrupt-archive handling). This drives the same real functions through the
 real ``/api/v1/backups`` endpoints instead, and asserts the *application*
@@ -10,14 +10,17 @@ the service call succeeded.
 
 from __future__ import annotations
 
+import io
+import zipfile
 from pathlib import Path
 
 import pytest
-from sqlmodel import delete
 
-from app.db.models import File, Metadata, Model
+from app.db.models import File
+from app.modules.work.jobs import jobs
 from tests.e2e._backup_helpers import setup_and_login as _setup_and_login
 from tests.e2e._jobs import completed_job, create_backup
+from tests.e2e._jobs import settle as settle_jobs
 from tests.paths import FIXTURES_DIR
 
 FIXTURE = FIXTURES_DIR / "real_orca_ender3_benchy.gcode"
@@ -37,6 +40,109 @@ async def _upload_and_wait(api, headers, *, model_name: str) -> dict:
 
 class TestBackupRestore:
     @pytest.mark.asyncio
+    async def test_manual_backup_exposes_worker_phases_through_the_jobs_api(
+        self, api, tmp_path
+    ):
+        headers = await _setup_and_login(api, tmp_path)
+        accepted = await api.post("/api/v1/backups", headers=headers)
+        assert accepted.status_code == 202, accepted.text
+        job_id = accepted.json()["job_id"]
+        seen = []
+        jobs.subscribe(
+            lambda status: seen.append(status) if status.job_id == job_id else None
+        )
+
+        settle_jobs()
+
+        phases = [status.stage for status in seen]
+        assert "snapshotting" in phases
+        assert "archiving" in phases
+        assert "verifying" in phases
+        assert "publishing" in phases
+        response = await api.get(f"/api/v1/jobs/{job_id}", headers=headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["state"] == "completed"
+
+    @pytest.mark.critical
+    @pytest.mark.asyncio
+    async def test_restores_after_unused_archive_inspection(
+        self, api, tmp_path, e2e_db
+    ):
+        headers = await _setup_and_login(api, tmp_path)
+        model = await _upload_and_wait(api, headers, model_name="Recoverable Benchy")
+        detail = (
+            await api.get(f"/api/v1/models/{model['id']}", headers=headers)
+        ).json()
+        file_id = detail["files"][0]["id"]
+        backup = await create_backup(api, headers)
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("unused.gcode", FIXTURE.read_bytes())
+        inspected = await api.post(
+            "/api/v1/ingest/archive/inspect",
+            files={"file": ("unused.zip", archive.getvalue(), "application/zip")},
+            headers=headers,
+        )
+        await completed_job(api, inspected, headers)
+        deleted = await api.delete(f"/api/v1/models/{model['id']}", headers=headers)
+        assert deleted.status_code == 204, deleted.text
+        purged = await api.delete(
+            f"/api/v1/models/{model['id']}/purge", headers=headers
+        )
+        assert purged.status_code == 200, purged.text
+        missing = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        assert missing.status_code == 404, missing.text
+
+        restored = await api.post(
+            f"/api/v1/backups/{backup['backup_id']}/restore", headers=headers
+        )
+
+        assert restored.status_code == 200, restored.text
+        recovered = await api.get(f"/api/v1/models/{model['id']}", headers=headers)
+        assert recovered.status_code == 200, recovered.text
+        assert recovered.json()["name"] == "Recoverable Benchy"
+        downloaded = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        assert downloaded.status_code == 200, downloaded.text
+        assert downloaded.content == FIXTURE.read_bytes()
+
+    @pytest.mark.critical
+    @pytest.mark.asyncio
+    async def test_retains_backed_up_archive_selection(self, api, tmp_path, e2e_db):
+        headers = await _setup_and_login(api, tmp_path)
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w") as zipped:
+            zipped.writestr("pending.gcode", FIXTURE.read_bytes())
+        inspected = await api.post(
+            "/api/v1/ingest/archive/inspect",
+            files={"file": ("pending.zip", archive.getvalue(), "application/zip")},
+            headers=headers,
+        )
+        inspection = await completed_job(api, inspected, headers)
+        backup = await create_backup(api, headers)
+        restored = await api.post(
+            f"/api/v1/backups/{backup['backup_id']}/restore", headers=headers
+        )
+        assert restored.status_code == 200, restored.text
+
+        selected = await api.post(
+            f"/api/v1/ingest/archive/{inspection['result']['archive_id']}/select",
+            json={"names": ["pending.gcode"]},
+            headers=headers,
+        )
+        await completed_job(api, selected, headers)
+
+        models = (await api.get("/api/v1/models", headers=headers)).json()
+        assert len(models) == 1, models
+        detail = (
+            await api.get(f"/api/v1/models/{models[0]['id']}", headers=headers)
+        ).json()
+        downloaded = await api.get(
+            f"/api/v1/files/{detail['files'][0]['id']}/download", headers=headers
+        )
+        assert downloaded.status_code == 200, downloaded.text
+        assert downloaded.content == FIXTURE.read_bytes()
+
+    @pytest.mark.asyncio
     async def test_dxf_original_survives_backup_restore(self, api, tmp_path, e2e_db):
         headers = await _setup_and_login(api, tmp_path)
         original = b"0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n"
@@ -54,11 +160,12 @@ class TestBackupRestore:
         artifact = e2e_db.get(File, file_id)
         assert artifact is not None
         blob_path = Path(artifact.path)
-        e2e_db.exec(delete(Metadata).where(Metadata.file_id == file_id))
-        e2e_db.exec(delete(File).where(File.id == file_id))
-        e2e_db.exec(delete(Model).where(Model.id == model_id))
-        e2e_db.commit()
-        blob_path.unlink()
+        e2e_db.close()
+        deleted = await api.delete(f"/api/v1/models/{model_id}", headers=headers)
+        assert deleted.status_code == 204, deleted.text
+        purged = await api.delete(f"/api/v1/models/{model_id}/purge", headers=headers)
+        assert purged.status_code == 200, purged.text
+        assert not blob_path.exists()
 
         restored = await api.post(
             f"/api/v1/backups/{backup['backup_id']}/restore", headers=headers
@@ -91,21 +198,18 @@ class TestBackupRestore:
         listed = await api.get("/api/v1/backups", headers=headers)
         assert any(b["backup_id"] == backup_id for b in listed.json())
 
-        # Simulate real data loss: drop the DB rows and delete the blob from disk,
-        # bypassing the app entirely (a disk/DB disaster, not a soft delete).
+        # Permanently remove the model through the real API. Its cleanup removes
+        # dependent rows as production requires with foreign keys enforced.
         artifact = e2e_db.get(File, file_id)
         assert artifact is not None
         blob_path = Path(artifact.path)
         assert blob_path.is_file()
-        e2e_db.exec(delete(Metadata).where(Metadata.file_id == file_id))
-        e2e_db.exec(delete(File).where(File.id == file_id))
-        e2e_db.exec(delete(Model).where(Model.id == model_id))
-        e2e_db.commit()
-        # Remove only the artifact. The enrolled root binding is durable
-        # installation identity and must survive a blob loss; deleting the
-        # whole directory would turn a disaster simulation into a root-rebind
-        # test and could poison the next E2E case.
-        blob_path.unlink()
+        e2e_db.close()
+        deleted = await api.delete(f"/api/v1/models/{model_id}", headers=headers)
+        assert deleted.status_code == 204, deleted.text
+        purged = await api.delete(f"/api/v1/models/{model_id}/purge", headers=headers)
+        assert purged.status_code == 200, purged.text
+        # Purge removes the payload while retaining the enrolled root binding.
         assert not blob_path.exists()
 
         gone = await api.get(f"/api/v1/models/{model_id}", headers=headers)
@@ -141,11 +245,15 @@ class TestBackupRestore:
         ).json()
         artifact = e2e_db.get(File, detail["files"][0]["id"])
         assert artifact is not None
-        Path(artifact.path).unlink()
-        e2e_db.exec(delete(Metadata).where(Metadata.file_id == artifact.id))
-        e2e_db.exec(delete(File).where(File.id == artifact.id))
-        e2e_db.exec(delete(Model).where(Model.id == model["id"]))
-        e2e_db.commit()
+        blob_path = Path(artifact.path)
+        e2e_db.close()
+        deleted = await api.delete(f"/api/v1/models/{model['id']}", headers=headers)
+        assert deleted.status_code == 204, deleted.text
+        purged = await api.delete(
+            f"/api/v1/models/{model['id']}/purge", headers=headers
+        )
+        assert purged.status_code == 200, purged.text
+        assert not blob_path.exists()
         restored = await api.post(
             f"/api/v1/backups/{created['backup_id']}/restore", headers=headers
         )

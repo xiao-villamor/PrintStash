@@ -1068,11 +1068,14 @@ class TestVaultMigrations:
     def test_destination_recovery_respects_post_activation_deletion(
         self, db_session, tmp_path, migration_owner
     ):
-        from app.db.models import Model
+        from sqlmodel import select
+
+        from app.db.models import Model, OwnedStorageObject, StorageDeleteIntent
         from app.modules.library.trash import hard_delete_model
         from app.modules.storage import migration_journal, vault_migration
         from app.modules.storage.storage_backend.runtime import get_backend
         from app.modules.storage.storage_deletion import process_storage_delete_intents
+        from app.modules.storage.storage_ownership import provider_ref_for_backend
         from tests.factories import build_model, build_stored_file
 
         source = get_backend()
@@ -1088,10 +1091,24 @@ class TestVaultMigrations:
         vault_migration.record_first_destination_write()
         db_session.expire_all()
         destination_key = artifact.path
+        ownership = db_session.exec(
+            select(OwnedStorageObject).where(OwnedStorageObject.key == destination_key)
+        ).one()
+        destination_ref = provider_ref_for_backend(
+            destination, namespace=ownership.namespace
+        )
+        assert ownership.provider_ref == destination_ref
         hard_delete_model(db_session, db_session.get(Model, model_id))
         db_session.commit()
         process_storage_delete_intents()
         assert not destination.exists(destination_key)
+        deletion = db_session.exec(
+            select(StorageDeleteIntent).where(
+                StorageDeleteIntent.key == destination_key
+            )
+        ).one()
+        assert deletion.status == "completed"
+        assert deletion.provider_ref == destination_ref
 
         result = migration_owner.recover(plan["id"])
 

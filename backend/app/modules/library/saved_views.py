@@ -28,10 +28,15 @@ def uses_retired_filter(raw_filters: str) -> bool:
 
 
 def _read(row: SavedView) -> SavedViewRead:
+    raw = json.loads(row.filters_json)
+    # Compatibility is only for stored legacy presentation values. New writes
+    # are validated by SavedViewFilters and reject retired mode names.
+    if "library_view" not in raw or raw["library_view"] in {"organized", "components"}:
+        raw["library_view"] = "all"
     return SavedViewRead(
         id=row.id,
         name=row.name,
-        filters=SavedViewFilters.model_validate_json(row.filters_json),
+        filters=SavedViewFilters.model_validate(raw),
         created_at=row.created_at,
         updated_at=row.updated_at,
     )

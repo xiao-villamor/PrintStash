@@ -11,19 +11,25 @@ from __future__ import annotations
 import io
 import json
 import math
+import ssl
 import struct
 import zipfile
+from contextlib import ExitStack
 
+import httpx
 import numpy as np
 import pytest
+import pytest_asyncio
 import trimesh
 from PIL import Image
 from sqlmodel import select
 
 from app.core.config import _overlay, settings
-from app.db.models import ArtifactDerivative
+from app.db.models import ArtifactDerivative, GeometryFingerprint
 from app.schemas.orca import OrcaNativeContext
 from tests.e2e._jobs import settle
+from tests.factories.geometry import three_mf
+from tests.factories.three_mf_pilot import load_case, opc_package
 from tests.fixtures.three_mf_projects import build_3d_builder_component_project
 from tests.paths import FIXTURES_DIR
 
@@ -358,6 +364,64 @@ class TestMetadata:
         assert len(benchies) == 1, f"dedup failed, got {benchies}"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("file_type", ["stl", "obj"], ids=["stl", "obj"])
+    async def test_retains_full_geometry_with_smaller_previews(
+        self, api, tmp_path, e2e_db, monkeypatch, file_type
+    ):
+        from tests.factories.geometry import tetrahedron
+
+        monkeypatch.setitem(_overlay, "model_thumbnail_width", 512)
+        mesh = tetrahedron()
+        source = {
+            "stl": mesh.export(file_type="stl"),
+            "obj": mesh.export(file_type="obj").encode(),
+        }[file_type]
+        headers = await _setup_and_login(api, tmp_path)
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={
+                "file": (
+                    f"small-preview.{file_type}",
+                    source,
+                    "application/octet-stream",
+                )
+            },
+            data={"model_name": "Small preview"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        assert job["state"] == "completed", job
+        file_id = job["file_id"]
+        assert (await _thumbnail_derivative(api, headers, file_id))["state"] == "ready"
+        assert _thumbnail_output(e2e_db, file_id)["complete"] is True
+        from app.db.models import Metadata
+
+        metadata = e2e_db.exec(
+            select(Metadata).where(Metadata.file_id == file_id)
+        ).one()
+        assert metadata.triangle_count == 4
+        original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        assert original.status_code == 200
+        assert original.content == source
+        thumbnail = await api.get(f"/api/v1/files/{file_id}/thumbnail", headers=headers)
+        assert thumbnail.status_code == 200
+        chunks = []
+        offset = 12
+        while offset < len(thumbnail.content):
+            chunks.append(thumbnail.content[offset : offset + 4])
+            size = int.from_bytes(thumbnail.content[offset + 4 : offset + 8], "little")
+            offset += 8 + size + size % 2
+        assert b"VP8 " in chunks  # The color payload uses the lossy bitstream.
+        with Image.open(io.BytesIO(thumbnail.content)) as image:
+            assert image.size == (512, 384)
+            alpha = image.convert("RGBA").getchannel("A")
+            assert alpha.getextrema() == (0, 255)
+            left, top, right, bottom = alpha.getbbox()
+            assert 0 < left < right < 512
+            assert 0 < top < bottom < 384
+
+    @pytest.mark.asyncio
     async def test_over_cap_mesh_upload_has_a_visible_thumbnail(
         self, api, tmp_path, e2e_db, monkeypatch
     ):
@@ -428,9 +492,53 @@ class TestMetadata:
             pixels = np.asarray(image.convert("RGBA"))
         width = int(settings.model_thumbnail_width)
         assert image.size == (width, round(width * 3 / 4))
-        assert tuple(pixels[0, 0]) == (0, 0, 0, 0)
-        assert tuple(pixels[image.height // 2, image.width // 2, :3]) == color
+        assert pixels[0, 0, 3] == 0
+        np.testing.assert_allclose(
+            pixels[image.height // 2, image.width // 2, :3], color, atol=3
+        )
         assert pixels[:, :, 3].mean() > 100
+
+    @pytest.mark.asyncio
+    async def test_a_3mf_that_repeats_one_part_beyond_the_budget_keeps_its_preview(
+        self, api, tmp_path, e2e_db, monkeypatch
+    ):
+        """#259: a small project that expands past the budget cannot take the API down.
+
+        400 placements of a 4-face part are ~25 KiB of XML, which the size
+        estimate prices far under the 1,000-face budget. The derivative runs in
+        a disposable worker, so whatever the loader does with it, the upload
+        completes, the slicer's own preview is published, and the API goes on
+        answering.
+        """
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 1000)
+        monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0)
+        color = (220, 40, 120)
+        preview = io.BytesIO()
+        Image.new("RGB", (32, 24), color).save(preview, format="PNG")
+        placements = tuple((1, f"1 0 0 0 1 0 0 0 1 {i * 5} 0 0") for i in range(400))
+        archive = three_mf(
+            build=placements, extras={"Metadata/thumbnail.png": preview.getvalue()}
+        )
+        headers = await _setup_and_login(api, tmp_path)
+
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("plate.3mf", archive, "model/3mf")},
+            data={"model_name": "Repeated Part"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+
+        assert job["state"] == "completed", job
+        derivative = await _thumbnail_derivative(api, headers, job["file_id"])
+        assert derivative["state"] == "ready", derivative
+        assert _thumbnail_output(e2e_db, job["file_id"])["strategy"] == "embedded"
+        thumbnail = await api.get(
+            f"/api/v1/files/{job['file_id']}/thumbnail", headers=headers
+        )
+        assert thumbnail.status_code == 200, thumbnail.text
+        assert (await api.get("/api/v1/health")).status_code == 200
 
     @pytest.mark.asyncio
     async def test_a_3mf_whose_parts_are_placed_by_transform_previews_correctly(
@@ -463,6 +571,10 @@ class TestMetadata:
         job = await _await_job(api, headers, uploaded.json()["job_id"])
         assert job["state"] == "completed", job
 
+        accepted = await api.get(f"/api/v1/files/{job['file_id']}/stl", headers=headers)
+        assert accepted.status_code == 202, accepted.text
+        settle()
+
         response = await api.get(f"/api/v1/files/{job['file_id']}/stl", headers=headers)
 
         assert response.status_code == 200, response.text
@@ -475,6 +587,78 @@ class TestMetadata:
             np.asarray([[110.0, 220.0, 330.0], [112.0, 223.0, 334.0]]),
             atol=1e-5,
         )
+
+
+class TestThreeMFCapabilities:
+    @pytest.mark.asyncio
+    async def test_required_extension_refusal_preserves_independent_artifacts(
+        self, api, tmp_path, e2e_db
+    ):
+        preview = io.BytesIO()
+        color = (220, 40, 120)
+        Image.new("RGB", (32, 24), color).save(preview, format="PNG")
+        payload = opc_package(
+            load_case("unknown-required-extension").payload,
+            mutations={"Metadata/thumbnail.png": preview.getvalue()},
+        )
+        headers = await _setup_and_login(api, tmp_path)
+        configured = await api.patch(
+            "/api/v1/similarity/settings",
+            headers=headers,
+            json={"enabled": True, "fingerprint_on_ingest": True},
+        )
+        assert configured.status_code == 200, configured.text
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("unsupported.3mf", payload, "model/3mf")},
+            data={"model_name": "Unsupported required extension"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        assert job["state"] == "completed", job
+        file_id = job["file_id"]
+        derivatives = await api.get(
+            f"/api/v1/files/{file_id}/derivatives", headers=headers
+        )
+        assert derivatives.status_code == 200, derivatives.text
+        metadata = next(row for row in derivatives.json() if row["kind"] == "metadata")
+        assert metadata["state"] == "failed", metadata
+        assert metadata["failure_reason"] == "unsupported_capability"
+        fingerprint = e2e_db.exec(
+            select(GeometryFingerprint).where(GeometryFingerprint.file_id == file_id)
+        ).one()
+        assert fingerprint.state == "unsupported"
+        assert fingerprint.failure_code == "unsupported_3mf_capability"
+        assert fingerprint.physical_hash_0 is None
+        assert fingerprint.face_count is None
+        thumbnail = await _thumbnail_derivative(api, headers, file_id)
+        assert thumbnail["state"] == "ready", thumbnail
+        assert _thumbnail_output(e2e_db, file_id)["strategy"] == "embedded"
+        image_response = await api.get(
+            f"/api/v1/files/{file_id}/thumbnail", headers=headers
+        )
+        assert image_response.status_code == 200, image_response.text
+        with Image.open(io.BytesIO(image_response.content)) as image:
+            np.testing.assert_allclose(
+                image.convert("RGB").getpixel((image.width // 2, image.height // 2)),
+                color,
+                atol=3,
+            )
+        accepted = await api.get(f"/api/v1/files/{file_id}/stl", headers=headers)
+        assert accepted.status_code == 202, accepted.text
+        settle()
+        refused = await api.get(f"/api/v1/files/{file_id}/stl", headers=headers)
+        assert refused.status_code == 422, refused.text
+        assert refused.json()["detail"] == "unsupported_capability"
+        original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        assert original.status_code == 200, original.text
+        assert original.content == payload
+        still_ready = await api.get(
+            f"/api/v1/files/{file_id}/thumbnail", headers=headers
+        )
+        assert still_ready.status_code == 200, still_ready.text
+        assert still_ready.content == image_response.content
 
 
 class TestHardlinklessStaging:
@@ -514,3 +698,422 @@ class TestHardlinklessStaging:
         )
         assert downloaded.status_code == 200, downloaded.text
         assert downloaded.content == payload
+
+
+@pytest_asyncio.fixture(
+    params=[
+        pytest.param("vault", id="local-vault"),
+        pytest.param("mounted", id="mounted-source"),
+        pytest.param("s3", id="s3-vault", marks=pytest.mark.s3),
+    ]
+)
+async def refused_original(api, tmp_path, request, e2e_db):
+    from app.db.models import File
+    from app.modules.storage.storage_backend.runtime import bind_backend
+    from tests.e2e._jobs import completed_job
+    from tests.fakes.s3_delivery import browser_s3
+
+    headers = await _setup_and_login(api, tmp_path)
+    original = b"invalid 3mf package"
+    ca_file = None
+    with ExitStack() as stack:
+        if request.param == "s3":
+            backend, tls = stack.enter_context(
+                browser_s3(tmp_path, origin="http://app")
+            )
+            backend.ensure_setup()
+            bind_backend(backend)
+            ca_file = tls.ca_file
+        if request.param == "mounted":
+            root = tmp_path / "mounted"
+            root.mkdir()
+            (root / "broken.3mf").write_bytes(original)
+            enabled = await api.put(
+                "/api/v1/config",
+                headers=headers,
+                json={"external_libraries_enabled": True},
+            )
+            assert enabled.status_code == 200, enabled.text
+            library = await api.post(
+                "/api/v1/libraries",
+                headers=headers,
+                json={"name": "Refused mounted mesh", "root_path": str(root)},
+            )
+            assert library.status_code == 201, library.text
+            await completed_job(
+                api,
+                await api.post(
+                    f"/api/v1/libraries/{library.json()['id']}/scan", headers=headers
+                ),
+                headers,
+            )
+            e2e_db.expire_all()
+            file_id = (
+                e2e_db.exec(
+                    select(File).where(File.external_library_id == library.json()["id"])
+                )
+                .one()
+                .id
+            )
+        else:
+            uploaded = await api.post(
+                "/api/v1/ingest/model",
+                files={"file": ("broken.3mf", original, "model/3mf")},
+                data={"model_name": "Refused original"},
+                headers=headers,
+            )
+            job = await completed_job(api, uploaded, headers)
+            file_id = job["file_id"]
+        if request.param == "s3":
+            artifact = e2e_db.get(File, file_id)
+            assert not artifact.is_external
+            assert backend.read_bytes(artifact.path) == original
+        listed = await api.get(f"/api/v1/files/{file_id}/derivatives", headers=headers)
+        assert listed.status_code == 200, listed.text
+        metadata = next(row for row in listed.json() if row["kind"] == "metadata")
+        assert (metadata["state"], metadata["failure_reason"]) == (
+            "failed",
+            "invalid_source",
+        )
+        yield file_id, headers, original, ca_file
+
+
+async def _original_response_bytes(response, ca_file):
+    if ca_file is None:
+        assert response.status_code == 200, response.text
+        return response.content
+    assert response.status_code == 307, response.text
+    async with httpx.AsyncClient(
+        verify=ssl.create_default_context(cafile=str(ca_file))
+    ) as remote:
+        downloaded = await remote.get(response.headers["location"])
+    assert downloaded.status_code == 200, downloaded.text
+    return downloaded.content
+
+
+class TestMeshFailureRecovery:
+    @pytest.mark.asyncio
+    async def test_original_download_survives_viewer_failure(
+        self, api, refused_original
+    ):
+        file_id, headers, original, ca_file = refused_original
+        accepted = await api.get(f"/api/v1/files/{file_id}/stl", headers=headers)
+        assert accepted.status_code == 202, accepted.text
+        settle()
+        failed = await api.get(f"/api/v1/files/{file_id}/stl", headers=headers)
+        assert (failed.status_code, failed.json()["detail"]) == (422, "invalid_source")
+
+        response = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        downloaded = await _original_response_bytes(response, ca_file)
+
+        assert downloaded == original
+
+    @pytest.mark.asyncio
+    async def test_signed_slicer_download_survives_viewer_failure(
+        self, api, refused_original
+    ):
+        file_id, headers, original, _ca_file = refused_original
+        await api.get(f"/api/v1/files/{file_id}/stl", headers=headers)
+        settle()
+        failed = await api.get(f"/api/v1/files/{file_id}/stl", headers=headers)
+        assert (failed.status_code, failed.json()["detail"]) == (422, "invalid_source")
+        signed = await api.get(f"/api/v1/files/{file_id}/slicer-url", headers=headers)
+
+        response = await api.get(signed.json()["url"])
+
+        assert response.status_code == 200, response.text
+        assert response.content == original
+
+    @pytest.mark.asyncio
+    async def test_unchanged_terminal_failure_survives_reconciler_nudges(
+        self, api, tmp_path, e2e_db, monkeypatch
+    ):
+        from app.db.models import DerivativeKind
+        from app.modules.derivatives import kinds
+
+        monkeypatch.setitem(_overlay, "mesh_max_render_triangles", 100)
+        monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0)
+        preview = io.BytesIO()
+        Image.new("RGB", (32, 32), "red").save(preview, format="PNG")
+        data = three_mf(
+            build=tuple((1, None) for _ in range(2049)),
+            extras={"Metadata/thumbnail.png": preview.getvalue()},
+        )
+        headers = await _setup_and_login(api, tmp_path)
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("refused.3mf", data, "model/3mf")},
+            data={"model_name": "Refused geometry"},
+            headers=headers,
+        )
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        file_id = job["file_id"]
+        before = e2e_db.exec(
+            select(ArtifactDerivative).where(
+                ArtifactDerivative.file_id == file_id,
+                ArtifactDerivative.kind == DerivativeKind.METADATA,
+            )
+        ).one()
+        updated, attempts = before.updated_at, before.attempts
+        assert before.state == "failed"
+        assert before.failure_reason == "resource_limit"
+        assert before.next_attempt_at is None
+        assert attempts == settings.derivative_max_attempts
+        assert before.recipe_version == kinds.MESH_GEOMETRY_RECIPE
+        thumbnail = await _thumbnail_derivative(api, headers, file_id)
+        assert thumbnail["state"] == "ready"
+        assert thumbnail["recipe_version"] == kinds.MESH_THUMBNAIL_RECIPE
+        assert _thumbnail_output(e2e_db, file_id)["strategy"] == "embedded"
+        image_response = await api.get(
+            f"/api/v1/files/{file_id}/thumbnail", headers=headers
+        )
+        assert image_response.status_code == 200, image_response.text
+        for _ in range(3):
+            response = await api.post(
+                "/api/v1/admin/work/derivatives/metadata/regenerate",
+                headers=headers,
+                json={"mode": "missing"},
+            )
+            assert response.status_code == 202
+            settle()
+        e2e_db.expire_all()
+        after = e2e_db.get(ArtifactDerivative, before.id)
+        assert after.updated_at == updated
+        assert after.attempts == attempts
+        assert after.state == "failed"
+        assert after.failure_reason == "resource_limit"
+        assert after.next_attempt_at is None
+        assert after.recipe_version == kinds.MESH_GEOMETRY_RECIPE
+        original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+        assert original.status_code == 200, original.text
+        assert original.content == data
+        with zipfile.ZipFile(io.BytesIO(original.content)) as archive:
+            assert archive.read("Metadata/thumbnail.png") == preview.getvalue()
+        still_ready = await api.get(
+            f"/api/v1/files/{file_id}/thumbnail", headers=headers
+        )
+        assert still_ready.status_code == 200, still_ready.text
+        assert still_ready.content == image_response.content
+
+    @pytest.mark.asyncio
+    async def test_original_download_survives_geometry_failure(
+        self, api, refused_original
+    ):
+        import hashlib
+
+        file_id, headers, original, ca_file = refused_original
+        response = await api.get(
+            f"/api/v1/files/{file_id}/download",
+            headers={**headers, "Sec-Fetch-Mode": "cors", "Origin": "http://app"},
+        )
+        downloaded = await _original_response_bytes(response, ca_file)
+        assert hashlib.sha256(downloaded).digest() == hashlib.sha256(original).digest()
+
+    @pytest.mark.asyncio
+    async def test_signed_slicer_download_survives_geometry_failure(
+        self, api, refused_original
+    ):
+        import hashlib
+
+        file_id, headers, original, _ca_file = refused_original
+        signed = await api.get(f"/api/v1/files/{file_id}/slicer-url", headers=headers)
+        assert signed.status_code == 200, signed.text
+        response = await api.get(signed.json()["url"])
+        assert response.status_code == 200, response.text
+        downloaded = response.content
+        assert hashlib.sha256(downloaded).digest() == hashlib.sha256(original).digest()
+
+    @pytest.mark.asyncio
+    async def test_healthy_artifact_finishes_after_a_bad_file(self, api, tmp_path):
+        from tests.factories.content import binary_stl
+
+        headers = await _setup_and_login(api, tmp_path)
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("broken.3mf", b"invalid package", "model/3mf")},
+            data={"model_name": "Broken first"},
+            headers=headers,
+        )
+        await _await_job(api, headers, uploaded.json()["job_id"])
+        healthy = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("healthy.stl", binary_stl(), "model/stl")},
+            data={"model_name": "Healthy next"},
+            headers=headers,
+        )
+        job = await _await_job(api, headers, healthy.json()["job_id"])
+        assert job["state"] == "completed"
+        derivatives = (
+            await api.get(
+                f"/api/v1/files/{job['file_id']}/derivatives", headers=headers
+            )
+        ).json()
+        assert (
+            next(row for row in derivatives if row["kind"] == "metadata")["state"]
+            == "ready"
+        )
+
+
+class TestStagedMeshOutputs:
+    @pytest.mark.asyncio
+    async def test_basic_outputs_are_available_before_fingerprint_finishes(
+        self,
+        api,
+        tmp_path,
+        e2e_db,
+        monkeypatch,
+    ):
+        import asyncio
+        import os
+        import threading
+        import time
+
+        from app.db.session import get_session_factory, override_session_factory
+        from app.modules.media import mesh_isolation
+
+        headers = await _setup_and_login(api, tmp_path)
+        configured = await api.patch(
+            "/api/v1/similarity/settings",
+            headers=headers,
+            json={"enabled": True, "fingerprint_on_ingest": True},
+        )
+        assert configured.status_code == 200, configured.text
+        started = tmp_path / "fingerprint-started"
+        release = tmp_path / "fingerprint-release"
+        worker = tmp_path / "gated_mesh_worker.py"
+        worker.write_text(
+            "import json,sys,time\n"
+            "from pathlib import Path\n"
+            "from app.core.native_settings import install\n"
+            "install(json.loads(sys.argv[1])[\"native_settings\"])\n"
+            "from app.modules.media import thumbnail_engine,mesh_worker\n"
+            f"started=Path({str(started)!r}); release=Path({str(release)!r})\n"
+            "extract=thumbnail_engine.extract\n"
+            "def gated(prepared):\n"
+            "    started.write_text('started')\n"
+            "    deadline=time.monotonic()+15\n"
+            "    while not release.exists():\n"
+            "        if time.monotonic()>deadline: raise RuntimeError('test gate deadline')\n"
+            "        time.sleep(0.01)\n"
+            "    return extract(prepared)\n"
+            "thumbnail_engine.extract=gated\n"
+            "raise SystemExit(mesh_worker.main(sys.argv[1:]))\n"
+        )
+        monkeypatch.setenv("PYTHONPATH", str(tmp_path), prepend=os.pathsep)
+        launch = mesh_isolation.worker_command
+
+        def gated_command(module, argv, budget):
+            if module == "app.modules.media.mesh_worker":
+                return launch("gated_mesh_worker", argv, budget)
+            return launch(module, argv, budget)
+
+        monkeypatch.setattr(mesh_isolation, "worker_command", gated_command)
+        payload = three_mf()
+        response = await api.post(
+            "/api/v1/ingest/model",
+            headers=headers,
+            files={"file": ("early.3mf", payload, "application/octet-stream")},
+            data={"model_name": "Early mesh outputs"},
+        )
+        assert response.status_code == 202, response.text
+        sessions = get_session_factory()
+        failures = []
+
+        def drain():
+            # A factory crosses this boundary; each operation opens its own Session.
+            override_session_factory(sessions)
+            try:
+                settle()
+            except BaseException as exc:
+                failures.append(exc)
+
+        thread = threading.Thread(target=drain, daemon=True)
+        thread.start()
+        try:
+            deadline = time.monotonic() + 12
+            while not started.exists() and not failures and time.monotonic() < deadline:
+                await asyncio.sleep(0.01)
+            assert started.exists(), failures
+            job = await api.get(
+                f"/api/v1/jobs/{response.json()['job_id']}", headers=headers
+            )
+            assert job.status_code == 200, job.text
+            file_id = job.json()["file_id"]
+            publication_deadline = time.monotonic() + 5
+            while True:
+                assert thread.is_alive() and not release.exists()
+                derivatives = await api.get(
+                    f"/api/v1/files/{file_id}/derivatives", headers=headers
+                )
+                assert derivatives.status_code == 200, derivatives.text
+                states = {row["kind"]: row["state"] for row in derivatives.json()}
+                if states["metadata"] == states["thumbnail"] == "ready":
+                    break
+                assert time.monotonic() < publication_deadline, states
+                await asyncio.sleep(0.02)
+            assert states["metadata"] == states["thumbnail"] == "ready"
+            model = await api.get(
+                f"/api/v1/models/{job.json()['model_id']}", headers=headers
+            )
+            assert model.status_code == 200, model.text
+            assert any(file["id"] == file_id for file in model.json()["files"])
+            image = await api.get(f"/api/v1/files/{file_id}/thumbnail", headers=headers)
+            assert image.status_code == 200 and image.content
+            original = await api.get(
+                f"/api/v1/files/{file_id}/download", headers=headers
+            )
+            assert original.status_code == 200 and original.content == payload
+            e2e_db.expire_all()
+            assert (
+                e2e_db.exec(
+                    select(GeometryFingerprint).where(
+                        GeometryFingerprint.file_id == file_id
+                    )
+                ).all()
+                == []
+            )
+            assert thread.is_alive() and not release.exists()
+        finally:
+            release.touch()
+            thread.join(timeout=20)
+        assert not thread.is_alive(), "gated child did not finish/reap"
+        assert failures == []
+        e2e_db.expire_all()
+        fingerprints = e2e_db.exec(
+            select(GeometryFingerprint).where(GeometryFingerprint.file_id == file_id)
+        ).all()
+        assert fingerprints and all(row.state == "ready" for row in fingerprints)
+
+
+class TestComputePlacement:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "mode,policy",
+        [("cpu", "qualified"), ("auto", "qualified"), ("auto", "preview")],
+        ids=["cpu", "automatic", "preview-without-runtime"],
+    )
+    async def test_publishes_mesh_outputs_without_gpu_qualification(
+        self, api, tmp_path, monkeypatch, mode, policy
+    ):
+        monkeypatch.setitem(_overlay, "compute_mode", mode)
+        monkeypatch.setitem(_overlay, "compute_render_policy", policy)
+        headers = await _setup_and_login(api, tmp_path)
+        payload = trimesh.creation.box(extents=(10, 20, 30)).export(file_type="stl")
+
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("compute-box.stl", payload, "application/sla")},
+            data={"model_name": "Compute placement"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        file_id = job["file_id"]
+        thumbnail = await _thumbnail_derivative(api, headers, file_id)
+        original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+
+        assert thumbnail["state"] == "ready"
+        assert original.content == payload
+        listed = await api.get(f"/api/v1/files/{file_id}/derivatives", headers=headers)
+        metadata = next(row for row in listed.json() if row["kind"] == "metadata")
+        assert metadata["state"] == "ready"

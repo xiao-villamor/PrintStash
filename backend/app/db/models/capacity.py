@@ -1,6 +1,7 @@
 """Durable capacity claims and bounded storage evidence."""
 
 from datetime import datetime
+from typing import ClassVar
 
 from sqlalchemy import BigInteger, CheckConstraint, Column, Text
 from sqlmodel import Field
@@ -11,12 +12,19 @@ from .base import SQLModel
 
 
 class CapacityLock(SQLModel, table=True):
+    # Machine bookkeeping, taken and released around every publication: user actions on work
+    # are recorded explicitly, and a row-level trail of every heartbeat only
+    # adds a second write to each of these transactions.
+    __audit_exclude__: ClassVar[bool] = True
+
     __tablename__ = "capacity_locks"
     id: int = Field(default=1, primary_key=True)
     revision: int = Field(default=0)
 
 
 class CapacityReservation(SQLModel, table=True):
+    __audit_exclude__: ClassVar[bool] = True
+
     __tablename__ = "capacity_reservations"
     operation_id: str = Field(primary_key=True, max_length=200)
     resources_json: str = Field(sa_column=Column(Text, nullable=False))

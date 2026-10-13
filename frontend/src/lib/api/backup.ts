@@ -1,12 +1,4 @@
-import {
-  authHeaders,
-  expectOk,
-  getJson,
-  getUrl,
-  sendAction,
-  sendForm,
-  sendJson,
-} from "@/lib/api/request";
+import { expectOk, getJson, jsonHeaders, requestApi, type GetJsonOptions } from "@/lib/api/request";
 import type { JobAccepted, JobStatus, StorageOperations } from "@/types";
 
 export type BackupRunOutcome = "running" | "completed" | "partial" | "failed";
@@ -31,16 +23,18 @@ export interface BackupRun {
   destinations: BackupDestinationResult[];
 }
 
-export function listBackupRuns(): Promise<BackupRun[]> {
-  return getJson<BackupRun[]>("/api/v1/backups/runs", { fresh: true });
+export function listBackupRuns(options: GetJsonOptions = {}): Promise<BackupRun[]> {
+  return getJson<BackupRun[]>("/api/v1/backups/runs", { ...options });
 }
 
 /** Queues a retry Job for one failed destination; follow it by `job_id`. */
-export function retryBackupDestination(id: string): Promise<JobAccepted> {
-  return sendJson<JobAccepted>(
+export function retryBackupDestination(
+  id: string,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<JobAccepted> {
+  return requestApi<JobAccepted>(
     `/api/v1/backups/runs/destinations/${encodeURIComponent(id)}/retry`,
-    "POST",
-    undefined,
+    { method: "POST", headers: jsonHeaders(), signal: options.signal },
   );
 }
 
@@ -100,8 +94,12 @@ export interface BackupRestoreResult {
 }
 
 /** Queue a manual backup; a second request while one runs is 409 `backup_in_progress`. */
-export function createBackup(): Promise<JobAccepted> {
-  return sendJson<JobAccepted>("/api/v1/backups", "POST", undefined);
+export function createBackup(options: Pick<GetJsonOptions, "signal"> = {}): Promise<JobAccepted> {
+  return requestApi<JobAccepted>("/api/v1/backups", {
+    method: "POST",
+    headers: jsonHeaders(),
+    signal: options.signal,
+  });
 }
 
 /** The backup a completed `backups.create` Job produced, or null if it produced none. */
@@ -133,10 +131,17 @@ export function backupFromJob(job: JobStatus): BackupMeta | null {
   };
 }
 
-export function uploadBackup(file: File): Promise<BackupMeta> {
+export function uploadBackup(
+  file: File,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<BackupMeta> {
   const body = new FormData();
   body.append("file", file);
-  return sendForm<BackupMeta>("/api/v1/backups/upload", body);
+  return requestApi<BackupMeta>("/api/v1/backups/upload", {
+    method: "POST",
+    body,
+    signal: options.signal,
+  });
 }
 
 export function listBackups(): Promise<BackupMeta[]> {
@@ -144,41 +149,54 @@ export function listBackups(): Promise<BackupMeta[]> {
 }
 
 /** List every exact source, including replicas and ambiguous collisions. */
-export function listBackupSources(): Promise<BackupMeta[]> {
-  return getJson<BackupMeta[]>("/api/v1/backups/sources");
+export function listBackupSources(options: GetJsonOptions = {}): Promise<BackupMeta[]> {
+  return getJson<BackupMeta[]>("/api/v1/backups/sources", options);
 }
 
-export function listUnownedLocalBackups(): Promise<UnownedBackupCandidate[]> {
-  return getJson<UnownedBackupCandidate[]>("/api/v1/backups/unowned-local");
+export function listUnownedLocalBackups(
+  options: GetJsonOptions = {},
+): Promise<UnownedBackupCandidate[]> {
+  return getJson<UnownedBackupCandidate[]>("/api/v1/backups/unowned-local", options);
 }
 
-export function adoptLocalBackup(filename: string): Promise<BackupMeta> {
-  return sendJson<BackupMeta>(
+export function adoptLocalBackup(
+  filename: string,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<BackupMeta> {
+  return requestApi<BackupMeta>(
     `/api/v1/backups/adopt-local?filename=${encodeURIComponent(filename)}`,
-    "POST",
-    undefined,
+    { method: "POST", headers: jsonHeaders(), signal: options.signal },
   );
 }
 
-export function listUnownedS3Backups(): Promise<UnownedS3BackupCandidate[]> {
-  return getJson<UnownedS3BackupCandidate[]>("/api/v1/backups/unowned-s3");
+export function listUnownedS3Backups(
+  options: GetJsonOptions = {},
+): Promise<UnownedS3BackupCandidate[]> {
+  return getJson<UnownedS3BackupCandidate[]>("/api/v1/backups/unowned-s3", options);
 }
 
-export function listUnownedRemoteBackups(): Promise<UnownedRemoteBackupCandidate[]> {
-  return getJson<UnownedRemoteBackupCandidate[]>("/api/v1/backups/unowned-remote");
+export function listUnownedRemoteBackups(
+  options: GetJsonOptions = {},
+): Promise<UnownedRemoteBackupCandidate[]> {
+  return getJson<UnownedRemoteBackupCandidate[]>("/api/v1/backups/unowned-remote", options);
 }
 
 export function adoptS3Backup(
   key: string,
   sourceRef: string,
   expectedArchiveSha256: string,
+  options: Pick<GetJsonOptions, "signal"> = {},
 ): Promise<BackupMeta> {
   const params = new URLSearchParams({
     key,
     source_ref: sourceRef,
     expected_archive_sha256: expectedArchiveSha256,
   });
-  return sendJson<BackupMeta>(`/api/v1/backups/adopt-s3?${params.toString()}`, "POST", undefined);
+  return requestApi<BackupMeta>(`/api/v1/backups/adopt-s3?${params.toString()}`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    signal: options.signal,
+  });
 }
 
 export function adoptRemoteBackup(
@@ -186,6 +204,7 @@ export function adoptRemoteBackup(
   key: string,
   sourceRef: string,
   expectedArchiveSha256: string,
+  options: Pick<GetJsonOptions, "signal"> = {},
 ): Promise<BackupMeta> {
   const params = new URLSearchParams({
     connection_id: String(connectionId),
@@ -193,11 +212,11 @@ export function adoptRemoteBackup(
     source_ref: sourceRef,
     expected_archive_sha256: expectedArchiveSha256,
   });
-  return sendJson<BackupMeta>(
-    `/api/v1/backups/adopt-remote?${params.toString()}`,
-    "POST",
-    undefined,
-  );
+  return requestApi<BackupMeta>(`/api/v1/backups/adopt-remote?${params.toString()}`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    signal: options.signal,
+  });
 }
 
 function sourceQuery(sourceRef?: string | null): string {
@@ -207,40 +226,52 @@ function sourceQuery(sourceRef?: string | null): string {
 export function restoreBackup(
   backupId: string,
   sourceRef?: string | null,
+  options: Pick<GetJsonOptions, "signal"> = {},
 ): Promise<BackupRestoreResult> {
-  return sendJson<BackupRestoreResult>(
+  return requestApi<BackupRestoreResult>(
     `/api/v1/backups/${encodeURIComponent(backupId)}/restore${sourceQuery(sourceRef)}`,
-    "POST",
-    {},
+    { method: "POST", headers: jsonHeaders(), body: JSON.stringify({}), signal: options.signal },
   );
 }
 
-export function deleteBackup(backupId: string, sourceRef?: string | null): Promise<void> {
-  return sendAction(
+export function deleteBackup(
+  backupId: string,
+  sourceRef?: string | null,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<void> {
+  return requestApi<void>(
     `/api/v1/backups/${encodeURIComponent(backupId)}${sourceQuery(sourceRef)}`,
-    "DELETE",
-  );
-}
-
-export async function downloadBackup(backupId: string, sourceRef?: string | null): Promise<void> {
-  const res = await fetch(
-    getUrl(`/api/v1/backups/${encodeURIComponent(backupId)}/download${sourceQuery(sourceRef)}`),
-    {
-      headers: authHeaders(),
-      cache: "no-store",
+    { method: "DELETE", signal: options.signal },
+    async (response, session) => {
+      await expectOk(response, session);
+      session.assertCurrent();
     },
   );
-  await expectOk(res);
-  const blob = await res.blob();
-  const disposition = res.headers.get("content-disposition") ?? "";
-  const filename =
-    disposition.match(/filename="([^"]+)"/)?.[1] ?? `printstash-backup-${backupId}.tar.gz`;
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+}
+
+export async function downloadBackup(
+  backupId: string,
+  sourceRef?: string | null,
+  options: Pick<GetJsonOptions, "signal"> = {},
+): Promise<void> {
+  return requestApi(
+    `/api/v1/backups/${encodeURIComponent(backupId)}/download${sourceQuery(sourceRef)}`,
+    { cache: "no-store", signal: options.signal },
+    async (res, session) => {
+      await expectOk(res, session);
+      const blob = await res.blob();
+      session.assertCurrent();
+      const disposition = res.headers.get("content-disposition") ?? "";
+      const filename =
+        disposition.match(/filename="([^"]+)"/)?.[1] ?? `printstash-backup-${backupId}.tar.gz`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    },
+  );
 }

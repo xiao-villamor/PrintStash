@@ -20,6 +20,18 @@ from printstash_core.mesh.similarity.geometry import (
 
 
 class TestPrepareSurface:
+    def test_discards_input_array_subclass_before_analysis(self, cube):
+        class TrackedArray(np.ndarray):
+            pass
+
+        vertices, faces = cube
+        surface = prepare_surface(vertices.view(TrackedArray), faces)
+
+        assert type(surface.vertices) is np.ndarray
+        np.testing.assert_array_equal(
+            surface.vertices, prepare_surface(vertices, faces).vertices
+        )
+
     def test_preserves_verification_metrics(self, cube):
         vertices, faces = cube
         surface = prepare_surface(vertices + [30, -20, 40], faces)
@@ -73,6 +85,15 @@ class TestSampleSurface:
 
 
 class TestNearestNeighbors:
+    def test_preserves_distances_after_large_translation(self):
+        target = np.array([[1e9, 0.0, 0.0], [1e9 + 1.0, 0.0, 0.0]])
+        source = np.array([[1e9 + 0.75, 0.0, 0.0]])
+
+        distance, indices = nearest_neighbors(source, target)
+
+        np.testing.assert_array_equal(indices, [1])
+        np.testing.assert_array_equal(distance, [0.25])
+
     def test_finds_points_across_blocks(self):
         target = np.column_stack((np.arange(300), np.zeros(300), np.zeros(300)))
         source = target[::-1] + [0, 2, 0]

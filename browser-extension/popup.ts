@@ -1,12 +1,19 @@
 import {
+  CaptureOperationOwner,
+  CaptureRetiredError,
+  runCaptureRequest,
+  type CaptureOperation,
+} from "./capture-operation.ts";
+import {
   BROWSER_EXTENSION_SETUP_STORAGE_KEY,
+  CaptureAuthenticationError,
   captureModelPage,
   claimBrowserPairing,
   classifyModelPage,
   isLocalVault,
   normalizeVault,
   parseBrowserExtensionSetup,
-  verifyBrowserDevice,
+  verifyVaultReachability,
   verifyVaultConnection,
 } from "./core.ts";
 import {
@@ -141,7 +148,21 @@ let connectedConfig: Config | null = null;
 let connectedProfile: Profile | null = null;
 let accessToken: string | null = null;
 let editingConnection = false;
+// Only one connection transition owns permission cleanup or storage publication.
+// Cancel retires verification; the lock remains until its cleanup finishes.
+type ConnectionAttempt = { controller: AbortController; phase: "verifying" | "publishing" };
+let connectionAttempt: ConnectionAttempt | null = null;
+let connectionLocked = false;
+
+function lockConnection(locked: boolean) {
+  connectionLocked = locked;
+  setConnectionFormBusy(locked);
+  editButton.disabled = locked;
+  disconnectButton.disabled = locked;
+  cancelButton.disabled = locked;
+}
 let importBusy = false;
+const captureOperations = new CaptureOperationOwner();
 let pendingPrintablesCapture: BrowserCaptureMessage | null = null;
 let pendingMakerWorldCapture: BrowserCaptureMessage | null = null;
 let pendingThingiverseCapture: BrowserCaptureMessage | null = null;
@@ -213,10 +234,11 @@ async function runCaptureStage<T>(
   safeMessage: string,
   provider?: DiagnosticProvider,
   fallbackCode?: DiagnosticFallbackCode,
+  captureSignal?: AbortSignal,
 ): Promise<T> {
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const operationResult = Promise.resolve().then(() => operation(controller.signal));
+  const operationResult = runCaptureRequest([controller.signal, captureSignal], operation);
   try {
     return await new Promise<T>((resolve, reject) => {
       timer = setTimeout(() => {
@@ -226,7 +248,12 @@ async function runCaptureStage<T>(
       operationResult.then(resolve, reject);
     });
   } catch (error) {
-    if (error instanceof CaptureDiagnosticError) throw error;
+    if (
+      error instanceof CaptureDiagnosticError ||
+      error instanceof CaptureRetiredError ||
+      error instanceof CaptureAuthenticationError
+    )
+      throw error;
     const message = messageFrom(error);
     throw new CaptureDiagnosticError(
       failureCode,
@@ -279,34 +306,39 @@ function safeCaptureMessage(error: unknown) {
   return "Capture could not be completed.";
 }
 
-const runVaultStage: CaptureStageRunner = (stage: CaptureUploadStage, operation) => {
-  const timeoutCode: DiagnosticCode =
-    stage === "slot_create"
-      ? "capture_vault_slot_create_timeout"
-      : stage === "slot_upload"
-        ? "capture_vault_slot_upload_timeout"
-        : "capture_vault_finalize_timeout";
-  const failureCode: DiagnosticCode =
-    stage === "slot_create"
-      ? "capture_vault_slot_create_failed"
-      : stage === "slot_upload"
-        ? "capture_vault_slot_upload_failed"
-        : "capture_vault_finalize_failed";
-  return runCaptureStage(
-    async (signal) => {
-      try {
-        return await operation(signal);
-      } catch (error) {
-        if (error instanceof CaptureCapacityError)
-          throw new CaptureDiagnosticError(failureCode, error.message);
-        throw error;
-      }
-    },
-    timeoutCode,
-    failureCode,
-    "PrintStash could not finish the selected file upload. Try again from Pending Imports.",
-  );
-};
+function vaultStage(capture: CaptureOperation<Config>): CaptureStageRunner {
+  return (stage: CaptureUploadStage, operation) => {
+    const timeoutCode: DiagnosticCode =
+      stage === "slot_create"
+        ? "capture_vault_slot_create_timeout"
+        : stage === "slot_upload"
+          ? "capture_vault_slot_upload_timeout"
+          : "capture_vault_finalize_timeout";
+    const failureCode: DiagnosticCode =
+      stage === "slot_create"
+        ? "capture_vault_slot_create_failed"
+        : stage === "slot_upload"
+          ? "capture_vault_slot_upload_failed"
+          : "capture_vault_finalize_failed";
+    return runCaptureStage(
+      async (signal) => {
+        try {
+          return await operation(signal);
+        } catch (error) {
+          if (error instanceof CaptureCapacityError)
+            throw new CaptureDiagnosticError(failureCode, error.message);
+          throw error;
+        }
+      },
+      timeoutCode,
+      failureCode,
+      "PrintStash could not finish the selected file upload. Try again from Pending Imports.",
+      undefined,
+      undefined,
+      capture.signal,
+    );
+  };
+}
 
 function messageFrom(error: unknown) {
   return error instanceof Error ? error.message : "Something went wrong.";
@@ -348,6 +380,25 @@ function showStatus(
 function showDiagnosticStatus(error: unknown, fallbackMessage?: string) {
   const diagnostic = diagnosticStatus(error, fallbackMessage);
   showStatus(diagnostic.message, "error", diagnostic.diagnosticCode, diagnostic.providerCode);
+}
+
+function retireCapture() {
+  captureOperations.retire();
+  importBusy = false;
+  setButtonBusy(captureButton, false);
+  clearCandidateSelection();
+  clearManualFileSelection();
+}
+
+function recoverCaptureConnection() {
+  retireCapture();
+  clearInboxAction();
+  accessToken = null;
+  editingConnection = false;
+  connectionPanel.hidden = false;
+  cancelButton.hidden = true;
+  renderConnection("error", { detail: "Reconnect PrintStash to continue importing." });
+  showStatus();
 }
 
 function clearInboxAction() {
@@ -485,6 +536,13 @@ function permissionOrigin(config: Config) {
     : `${vault.origin}/*`;
 }
 
+function hasBuiltInVaultPermission(config: Config) {
+  const vault = new URL(config.vault);
+  // These exact HTTP hosts are required by the extension manifest. Other
+  // local addresses still use optional grants that Disconnect must remove.
+  return vault.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(vault.hostname);
+}
+
 function connectionHost(config: Config) {
   try {
     return new URL(config.vault).host;
@@ -519,9 +577,11 @@ function renderConnection(
 
   if (state === "connected") {
     if (!config) throw new Error("Connected state requires a configuration.");
-    const role = profile?.is_superuser ? "Admin" : "Member";
     connectionTitle.textContent = "Connected";
-    connectionDetail.textContent = `${profile?.username || (config.deviceCredential ? "Paired browser" : config.username)} · ${connectionHost(config)} · ${role}`;
+    const identity =
+      profile?.username || (config.deviceCredential ? "Paired browser" : config.username);
+    const role = profile ? ` · ${profile.is_superuser ? "Admin" : "Member"}` : "";
+    connectionDetail.textContent = `${identity} · ${connectionHost(config)}${role}`;
   } else if (state === "checking") {
     connectionTitle.textContent = "Checking connection…";
     connectionDetail.textContent =
@@ -579,35 +639,44 @@ async function establishConnection(
   config: Config,
   { requestPermission, persist }: { requestPermission: boolean; persist: boolean },
 ) {
+  if (connectionLocked) return false;
+  const attempt: ConnectionAttempt = { controller: new AbortController(), phase: "verifying" };
+  connectionAttempt = attempt;
+  const signal = attempt.controller.signal;
+  const fetchImpl: typeof fetch = async (input, options) => {
+    signal.throwIfAborted();
+    const result = await fetch(input, { ...options, signal });
+    signal.throwIfAborted();
+    return result;
+  };
   const previous = connectedConfig
     ? { config: connectedConfig, profile: connectedProfile, token: accessToken }
     : null;
   const preservePrevious = Boolean(previous && editingConnection);
+  retireCapture();
   renderConnection("checking", { config });
-  setConnectionFormBusy(true);
+  lockConnection(true);
+  cancelButton.disabled = !preservePrevious;
   showStatus();
   try {
     await ensureVaultPermission(config, requestPermission);
+    signal.throwIfAborted();
     let verified;
     let normalized;
     if (config.pairingCode) {
       verified = await claimBrowserPairing({
+        fetchImpl,
         vault: config.vault,
         code: config.pairingCode,
         name: "Browser extension",
       });
       normalized = { vault: verified.base, deviceCredential: verified.deviceCredential };
-      if (persist) {
-        await browser.storage.set(normalized);
-        await browser.storage.remove(["username", "apiKey"]);
-      }
     } else if (config.deviceCredential) {
-      verified = await verifyBrowserDevice(config);
+      verified = await verifyVaultReachability({ vault: config.vault, fetchImpl });
       normalized = { vault: verified.base, deviceCredential: config.deviceCredential };
-      if (persist) await browser.storage.set(normalized);
     } else {
       verified = await verifyVaultConnection({
-        fetchImpl: fetch,
+        fetchImpl,
         vault: config.vault,
         username: config.username || "",
         apiKey: config.apiKey || "",
@@ -617,7 +686,23 @@ async function establishConnection(
         username: config.username || "",
         apiKey: config.apiKey || "",
       };
-      if (persist) await browser.storage.set(normalized);
+    }
+
+    // Parsing the response body is asynchronous too; retirement is checked
+    // again at the publication boundary, after every verification response.
+    signal.throwIfAborted();
+    attempt.phase = "publishing";
+    cancelButton.disabled = true;
+    if (persist) {
+      const credentials: Config = normalized;
+      // One set publishes the vault and its credential kind together. Nulls
+      // erase inactive secrets; initialization only accepts string credentials.
+      await browser.storage.set({
+        vault: credentials.vault,
+        username: credentials.username ?? null,
+        apiKey: credentials.apiKey ?? null,
+        deviceCredential: credentials.deviceCredential ?? null,
+      });
     }
 
     if (previous && permissionOrigin(previous.config) !== permissionOrigin(normalized)) {
@@ -637,6 +722,7 @@ async function establishConnection(
     disconnectButton.hidden = true;
     fillConnectionForm(normalized);
     renderConnection("connected", { config: normalized, profile: verifiedConnection.user });
+    return true;
   } catch (error) {
     let failedOrigin = null;
     let previousOrigin = null;
@@ -649,6 +735,7 @@ async function establishConnection(
     if (requestPermission && failedOrigin && failedOrigin !== previousOrigin) {
       await browser.permissions.remove({ origins: [failedOrigin] }).catch(() => false);
     }
+    if (signal.aborted) return false;
     if (preservePrevious && previous) {
       connectedConfig = previous.config;
       connectedProfile = previous.profile;
@@ -663,7 +750,8 @@ async function establishConnection(
     connectionPanel.hidden = false;
     throw error;
   } finally {
-    setConnectionFormBusy(false);
+    connectionAttempt = null;
+    lockConnection(false);
     connectButton.textContent = editingConnection ? "Update connection" : "Connect";
   }
 }
@@ -679,7 +767,10 @@ async function ensureOriginPermissions(origins: string[]) {
     throw new Error("Permission to download the selected source files was not granted.");
 }
 
-async function ensurePrintablesFilePermissions(links: readonly string[]) {
+async function ensurePrintablesFilePermissions(
+  links: readonly string[],
+  captureSignal: AbortSignal,
+) {
   const origins = [...new Set(links.map((link) => `${new URL(link).origin}/*`))];
   const alreadyGranted = await runCaptureStage(
     () => browser.permissions.contains({ origins }),
@@ -688,6 +779,7 @@ async function ensurePrintablesFilePermissions(links: readonly string[]) {
     "Permission check for Printables files timed out. Attach downloaded files in Pending Imports.",
     "Printables",
     "cors_failure",
+    captureSignal,
   );
   if (alreadyGranted) return;
   const granted = await runCaptureStage(
@@ -697,6 +789,7 @@ async function ensurePrintablesFilePermissions(links: readonly string[]) {
     "Permission request for Printables files timed out. Attach downloaded files in Pending Imports.",
     "Printables",
     "cors_failure",
+    captureSignal,
   );
   if (!granted) {
     throw new CaptureDiagnosticError(
@@ -708,7 +801,11 @@ async function ensurePrintablesFilePermissions(links: readonly string[]) {
   }
 }
 
-async function ensureMetadataPermission(origin: string, provider: "Printables" | "MakerWorld") {
+async function ensureMetadataPermission(
+  origin: string,
+  provider: "Printables" | "MakerWorld",
+  captureSignal: AbortSignal,
+) {
   const origins = [origin];
   const alreadyGranted = await runCaptureStage(
     () => browser.permissions.contains({ origins }),
@@ -717,6 +814,7 @@ async function ensureMetadataPermission(origin: string, provider: "Printables" |
     `Permission check for ${provider} metadata timed out. Choose a downloaded ${provider} file to attach it in Pending Imports.`,
     provider,
     "cors_failure",
+    captureSignal,
   );
   if (alreadyGranted) return;
   const granted = await runCaptureStage(
@@ -726,6 +824,7 @@ async function ensureMetadataPermission(origin: string, provider: "Printables" |
     `Permission request for ${provider} metadata timed out. Choose a downloaded ${provider} file to attach it in Pending Imports.`,
     provider,
     "cors_failure",
+    captureSignal,
   );
   if (!granted) {
     throw new CaptureDiagnosticError(
@@ -790,6 +889,7 @@ function printablesMediaType(
 async function resolvePrintablesLinks(
   capture: BrowserCaptureMessage,
   selected: readonly PrintablesSelectedFile[],
+  captureSignal: AbortSignal,
 ): Promise<Array<{ id: string; url: string }>> {
   if (!activePage?.id || !capture.source.source_item_id) {
     throw new Error(
@@ -822,12 +922,14 @@ async function resolvePrintablesLinks(
     "Printables could not resolve the selected files. Choose a downloaded Printables file to attach it in Pending Imports.",
     "Printables",
     "request_failed",
+    captureSignal,
   );
 }
 
 async function resolveMakerWorldLinks(
   capture: BrowserCaptureMessage,
   selected: readonly BrowserCaptureMessage["candidates"][number][],
+  captureSignal: AbortSignal,
 ): Promise<Array<{ id: string; url: string }>> {
   if (!activePage?.id || !capture.source.source_item_id || !activePage.url) {
     throw new Error(makerWorldFailureMessage("contract_changed"));
@@ -872,6 +974,7 @@ async function resolveMakerWorldLinks(
     "MakerWorld could not resolve the selected package. Download it normally, then attach it in Pending Imports.",
     "MakerWorld",
     "request_failed",
+    captureSignal,
   );
 }
 
@@ -883,7 +986,9 @@ function isRichProvider(source: Source): source is Exclude<Source, "Direct file"
     source === "Cults"
   );
 }
-async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
+async function readVisibleCapture(
+  captureSignal: AbortSignal,
+): Promise<BrowserCaptureMessage | null> {
   if (!activePage?.id || !activePage.url || !isRichProvider(activeSource)) return null;
   const tabId = activePage.id;
   const pageUrl = activePage.url;
@@ -932,6 +1037,9 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
       "capture_visible_capture_timeout",
       "capture_visible_capture_failed",
       "The active page could not be read. Choose a downloaded file to attach it in Pending Imports.",
+      undefined,
+      undefined,
+      captureSignal,
     );
     const visible = results[0]?.result as VisibleCaptureResult | undefined;
     if (!visible || !Array.isArray(visible.jsonLd)) return fallbackVisibleCapture();
@@ -991,6 +1099,7 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
         "MakerWorld metadata could not be read. Download the package normally, then attach it in Pending Imports.",
         "MakerWorld",
         "request_failed",
+        captureSignal,
       );
     }
     if (provider === "Thingiverse") {
@@ -1004,18 +1113,20 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
       }
       const sourceItemId = capture.source.source_item_id;
       if (!sourceItemId) return capture;
-      const fileResults = await browser.scripting.executeScript({
-        target: { tabId },
-        world: "MAIN",
-        func: requestThingiverseFilesInMainWorld,
-        args: [
-          {
-            sourceItemId,
-            endpoint: `${new URL(pageUrl).origin}/api/v2/things/${encodeURIComponent(sourceItemId)}/complete`,
-            maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
-          },
-        ],
-      });
+      const fileResults = await runCaptureRequest([captureSignal], () =>
+        browser.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: requestThingiverseFilesInMainWorld,
+          args: [
+            {
+              sourceItemId,
+              endpoint: `${new URL(pageUrl).origin}/api/v2/things/${encodeURIComponent(sourceItemId)}/complete`,
+              maxResponseBytes: THINGIVERSE_MAX_METADATA_RESPONSE_BYTES,
+            },
+          ],
+        }),
+      );
       const fileResult = fileResults[0]?.result as ThingiverseFilesPageResult | undefined;
       if (!fileResult?.ok) {
         const failureCode = fileResult?.reason || fileResult?.code || "request_failed";
@@ -1100,6 +1211,7 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
       "Printables metadata could not be read. Choose a downloaded Printables file to attach it in Pending Imports.",
       "Printables",
       "request_failed",
+      captureSignal,
     );
     const enriched = buildBrowserCaptureMessage({
       provider,
@@ -1130,7 +1242,8 @@ async function readVisibleCapture(): Promise<BrowserCaptureMessage | null> {
           }),
     };
   } catch (error) {
-    if (error instanceof CaptureDiagnosticError) throw error;
+    if (error instanceof CaptureDiagnosticError || error instanceof CaptureRetiredError)
+      throw error;
     return fallbackVisibleCapture("request_failed");
   }
 }
@@ -1203,10 +1316,12 @@ async function takePreparedSetup(page: Page) {
 
 connectionForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (connectionLocked) return;
   try {
     const config = configFromForm();
-    await establishConnection(config, { requestPermission: true, persist: true });
-    showStatus("Connection verified. This browser is ready to import.", "success");
+    if (await establishConnection(config, { requestPermission: true, persist: true })) {
+      showStatus("Connection verified. This browser is ready to import.", "success");
+    }
   } catch (error) {
     if (connectionState === "connected") {
       showStatus(`Connection was not updated. ${messageFrom(error)}`, "error");
@@ -1218,6 +1333,7 @@ connectionForm.addEventListener("submit", async (event) => {
 });
 
 editButton.addEventListener("click", () => {
+  if (connectionLocked) return;
   editingConnection = true;
   connectionPanel.hidden = false;
   editButton.hidden = true;
@@ -1230,6 +1346,8 @@ editButton.addEventListener("click", () => {
 });
 
 cancelButton.addEventListener("click", () => {
+  if (connectionLocked && connectionAttempt?.phase !== "verifying") return;
+  connectionAttempt?.controller.abort();
   editingConnection = false;
   fillConnectionForm(connectedConfig);
   connectionPanel.hidden = Boolean(connectedConfig);
@@ -1244,17 +1362,21 @@ cancelButton.addEventListener("click", () => {
 });
 
 disconnectButton.addEventListener("click", async () => {
+  if (connectionLocked) return;
+  lockConnection(true);
   const previous = connectedConfig;
-  const loopbackPermission = previous ? isLocalVault(previous.vault) : false;
+  retireCapture();
+  const builtInPermission = previous ? hasBuiltInVaultPermission(previous) : false;
   try {
     await browser.storage.remove(["apiKey", "username", "deviceCredential"]);
   } catch (error) {
     showStatus(`Couldn't remove the stored browser credential. ${messageFrom(error)}`, "error");
+    lockConnection(false);
     return;
   }
 
   let permissionStillGranted = false;
-  if (previous && !loopbackPermission) {
+  if (previous && !builtInPermission) {
     const origins = [permissionOrigin(previous)];
     try {
       await browser.permissions.remove({ origins });
@@ -1276,10 +1398,11 @@ disconnectButton.addEventListener("click", async () => {
   disconnectButton.hidden = true;
   connectButton.textContent = "Connect";
   renderConnection("disconnected");
+  lockConnection(false);
   showStatus(
     permissionStillGranted
       ? "Disconnected and removed the stored browser credential, but Chrome kept the vault permission. Remove it from the extension's site access settings."
-      : loopbackPermission
+      : builtInPermission
         ? "Disconnected. The stored browser credential was removed; built-in loopback access contains no credentials."
         : "Disconnected. The stored browser credential and vault permission were removed from this browser.",
     permissionStillGranted ? "error" : "success",
@@ -1300,40 +1423,55 @@ captureButton.addEventListener("click", async () => {
     showStatus("Connect PrintStash before importing.", "error");
     return;
   }
-  if (activeSource === "Printables" && !pendingPrintablesCapture && !pendingManualCapture) {
-    try {
-      await ensureMetadataPermission(PRINTABLES_METADATA_PERMISSION_ORIGIN, "Printables");
-    } catch (error) {
-      const fallback = fallbackVisibleCapture("cors_failure");
-      if (fallback) {
-        renderManualFileSelection(fallback);
-        showDiagnosticStatus(error);
-      } else {
-        showDiagnosticStatus(error);
-      }
-      return;
-    }
+  if (importBusy) return;
+  const config = { ...connectedConfig };
+  const authorization = accessToken || config.deviceCredential;
+  if (!authorization) {
+    showStatus("The browser connection expired. Connect PrintStash again.", "error");
+    return;
   }
+  const capture = captureOperations.begin(config, authorization);
+  const runStage = vaultStage(capture);
   importBusy = true;
   setButtonBusy(captureButton, true, "Sending…");
   renderImportAvailability();
   showStatus();
   try {
+    if (activeSource === "Printables" && !pendingPrintablesCapture && !pendingManualCapture) {
+      try {
+        await ensureMetadataPermission(
+          PRINTABLES_METADATA_PERMISSION_ORIGIN,
+          "Printables",
+          capture.signal,
+        );
+      } catch (error) {
+        capture.assertCurrent();
+        const fallback = fallbackVisibleCapture("cors_failure");
+        if (fallback) {
+          renderManualFileSelection(fallback);
+          showDiagnosticStatus(error);
+        } else {
+          showDiagnosticStatus(error);
+        }
+        return;
+      }
+    }
+    capture.assertCurrent();
     if (pendingManualCapture) {
-      const authorization = accessToken || connectedConfig.deviceCredential;
-      if (!authorization)
-        throw new Error("The browser connection expired. Connect PrintStash again.");
-      const file = selectedManualFile(pendingManualCapture);
-      await captureRichFiles({
-        vault: connectedConfig.vault,
-        authorization,
-        sourceUrl: pendingManualCapture.source.canonical_url,
-        title: activePage?.title,
-        captureSource: pendingManualCapture.source,
-        files: [file],
-        runStage: runVaultStage,
-      });
-      const inboxUrl = `${normalizeVault(connectedConfig.vault)}/inbox`;
+      const draft = pendingManualCapture;
+      const file = selectedManualFile(draft);
+      await capture.run(() =>
+        captureRichFiles({
+          vault: capture.config.vault,
+          authorization,
+          sourceUrl: draft.source.canonical_url,
+          title: activePage?.title,
+          captureSource: draft.source,
+          files: [file],
+          runStage,
+        }),
+      );
+      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
       clearManualFileSelection();
       inboxButton.hidden = false;
       inboxButton.dataset.url = inboxUrl;
@@ -1341,22 +1479,23 @@ captureButton.addEventListener("click", async () => {
       return;
     }
     if (pendingPrintablesCapture) {
-      const selected = selectedPrintablesCandidates(pendingPrintablesCapture);
+      const draft = pendingPrintablesCapture;
+      const selected = selectedPrintablesCandidates(draft);
       if (selected.length === 0) {
         showStatus("Select at least one Printables file to upload.", "error");
         return;
       }
-      const authorization = accessToken || connectedConfig.deviceCredential;
-      if (!authorization)
-        throw new Error("The browser connection expired. Connect PrintStash again.");
-      const links = await resolvePrintablesLinks(pendingPrintablesCapture, selected);
+      const links = await resolvePrintablesLinks(draft, selected, capture.signal);
       const linksById = new Map(links.map((link) => [link.id, link.url]));
       const selectedLinks = selected.map((candidate) => {
         const link = linksById.get(candidate.id);
         if (!link) throw new Error("Printables link mapping changed.");
         return { candidate, link };
       });
-      await ensurePrintablesFilePermissions(selectedLinks.map(({ link }) => link));
+      await ensurePrintablesFilePermissions(
+        selectedLinks.map(({ link }) => link),
+        capture.signal,
+      );
       const files = await Promise.all(
         selectedLinks.map(({ candidate, link }) =>
           runCaptureStage(
@@ -1366,19 +1505,22 @@ captureButton.addEventListener("click", async () => {
             "The selected Printables file could not be downloaded. Attach it manually in Pending Imports.",
             "Printables",
             "request_failed",
+            capture.signal,
           ),
         ),
       );
-      await captureRichFiles({
-        vault: connectedConfig.vault,
-        authorization,
-        sourceUrl: pendingPrintablesCapture.source.canonical_url,
-        title: activePage?.title,
-        captureSource: pendingPrintablesCapture.source,
-        files,
-        runStage: runVaultStage,
-      });
-      const inboxUrl = `${normalizeVault(connectedConfig.vault)}/inbox`;
+      await capture.run(() =>
+        captureRichFiles({
+          vault: capture.config.vault,
+          authorization,
+          sourceUrl: draft.source.canonical_url,
+          title: activePage?.title,
+          captureSource: draft.source,
+          files,
+          runStage,
+        }),
+      );
+      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
       clearCandidateSelection();
       inboxButton.hidden = false;
       inboxButton.dataset.url = inboxUrl;
@@ -1386,15 +1528,13 @@ captureButton.addEventListener("click", async () => {
       return;
     }
     if (pendingMakerWorldCapture) {
-      const selected = selectedPrintablesCandidates(pendingMakerWorldCapture);
+      const draft = pendingMakerWorldCapture;
+      const selected = selectedPrintablesCandidates(draft);
       if (selected.length === 0) {
         showStatus("Select at least one MakerWorld package to upload.", "error");
         return;
       }
-      const authorization = accessToken || connectedConfig.deviceCredential;
-      if (!authorization)
-        throw new Error("The browser connection expired. Connect PrintStash again.");
-      const links = await resolveMakerWorldLinks(pendingMakerWorldCapture, selected);
+      const links = await resolveMakerWorldLinks(draft, selected, capture.signal);
       const linksById = new Map(links.map((link) => [link.id, link.url]));
       const files: BrowserCaptureFile[] = [];
       let totalBytes = 0;
@@ -1420,20 +1560,23 @@ captureButton.addEventListener("click", async () => {
           "The selected MakerWorld package could not be downloaded. Attach it manually in Pending Imports.",
           "MakerWorld",
           "request_failed",
+          capture.signal,
         );
         totalBytes += file.file.size;
         files.push(file);
       }
-      await captureRichFiles({
-        vault: connectedConfig.vault,
-        authorization,
-        sourceUrl: pendingMakerWorldCapture.source.canonical_url,
-        title: activePage?.title,
-        captureSource: pendingMakerWorldCapture.source,
-        files,
-        runStage: runVaultStage,
-      });
-      const inboxUrl = `${normalizeVault(connectedConfig.vault)}/inbox`;
+      await capture.run(() =>
+        captureRichFiles({
+          vault: capture.config.vault,
+          authorization,
+          sourceUrl: draft.source.canonical_url,
+          title: activePage?.title,
+          captureSource: draft.source,
+          files,
+          runStage,
+        }),
+      );
+      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
       clearCandidateSelection();
       inboxButton.hidden = false;
       inboxButton.dataset.url = inboxUrl;
@@ -1441,14 +1584,12 @@ captureButton.addEventListener("click", async () => {
       return;
     }
     if (pendingThingiverseCapture) {
-      const selected = selectedPrintablesCandidates(pendingThingiverseCapture);
+      const draft = pendingThingiverseCapture;
+      const selected = selectedPrintablesCandidates(draft);
       if (selected.length === 0) {
         showStatus("Select at least one Thingiverse file to upload.", "error");
         return;
       }
-      const authorization = accessToken || connectedConfig.deviceCredential;
-      if (!authorization)
-        throw new Error("The browser connection expired. Connect PrintStash again.");
       const files: BrowserCaptureFile[] = [];
       for (const candidate of selected) {
         const link = pendingThingiverseLinks.get(candidate.id);
@@ -1465,26 +1606,33 @@ captureButton.addEventListener("click", async () => {
             "capture_download_timeout",
             "capture_download_failed",
             "The selected Thingiverse file could not be downloaded. Attach it manually in Pending Imports.",
+            undefined,
+            undefined,
+            capture.signal,
           ),
         );
       }
-      await captureRichFiles({
-        vault: connectedConfig.vault,
-        authorization,
-        sourceUrl: pendingThingiverseCapture.source.canonical_url,
-        title: activePage?.title,
-        captureSource: pendingThingiverseCapture.source,
-        files,
-        runStage: runVaultStage,
-      });
-      const inboxUrl = `${normalizeVault(connectedConfig.vault)}/inbox`;
+      await capture.run(() =>
+        captureRichFiles({
+          vault: capture.config.vault,
+          authorization,
+          sourceUrl: draft.source.canonical_url,
+          title: activePage?.title,
+          captureSource: draft.source,
+          files,
+          runStage,
+        }),
+      );
+      const inboxUrl = `${normalizeVault(capture.config.vault)}/inbox`;
       clearCandidateSelection();
       inboxButton.hidden = false;
       inboxButton.dataset.url = inboxUrl;
       showStatus("Selected Thingiverse files sent to Pending Imports.", "success");
       return;
     }
-    const visibleCapture = (await readVisibleCapture()) ?? fallbackVisibleCapture();
+    const visibleCapture =
+      (await capture.run((signal) => readVisibleCapture(signal))) ?? fallbackVisibleCapture();
+    capture.assertCurrent();
     const captureRoute = browserCaptureRoute(visibleCapture);
     if (captureRoute === "manual_file") {
       if (!visibleCapture) throw new Error("The active tab has no normalized capture source.");
@@ -1513,17 +1661,25 @@ captureButton.addEventListener("click", async () => {
     }
     const pageUrl = activePage?.url;
     if (!pageUrl) throw new Error("The active tab has no capture URL.");
-    const result = await captureModelPage({
-      ...connectedConfig,
-      accessToken: accessToken ?? undefined,
-      pageUrl,
-      title: activePage?.title ?? undefined,
-      captureSource: visibleCapture?.source,
-    });
+    const result = await capture.run((signal) =>
+      captureModelPage({
+        ...capture.config,
+        accessToken: capture.authorization,
+        signal,
+        pageUrl,
+        title: activePage?.title ?? undefined,
+        captureSource: visibleCapture?.source,
+      }),
+    );
     inboxButton.hidden = false;
     inboxButton.dataset.url = result.inboxUrl;
     showStatus(`Model from ${result.source} sent to Pending Imports.`, "success");
   } catch (error) {
+    if (!captureOperations.isCurrent(capture) || error instanceof CaptureRetiredError) return;
+    if (error instanceof CaptureAuthenticationError) {
+      recoverCaptureConnection();
+      return;
+    }
     if (error instanceof CaptureDiagnosticError) {
       const fallback =
         pendingPrintablesCapture ||
@@ -1565,24 +1721,21 @@ captureButton.addEventListener("click", async () => {
       "browser connection is no longer valid",
     ].some((marker) => message.includes(marker));
     if (connectionLost) {
-      accessToken = null;
-      editingConnection = false;
-      connectionPanel.hidden = false;
-      cancelButton.hidden = true;
-      renderConnection("error", { detail: "Reconnect PrintStash to continue importing." });
-      showStatus();
+      recoverCaptureConnection();
     } else {
       showStatus(safeCaptureMessage(error), "error", "capture_failed");
     }
   } finally {
-    importBusy = false;
-    setButtonBusy(captureButton, false);
-    if (pendingPrintablesCapture || pendingMakerWorldCapture || pendingThingiverseCapture) {
-      captureButton.textContent = "Confirm and upload selected files";
-    } else if (pendingManualCapture) {
-      captureButton.textContent = "Upload selected file";
+    if (captureOperations.finish(capture)) {
+      importBusy = false;
+      setButtonBusy(captureButton, false);
+      if (pendingPrintablesCapture || pendingMakerWorldCapture || pendingThingiverseCapture) {
+        captureButton.textContent = "Confirm and upload selected files";
+      } else if (pendingManualCapture) {
+        captureButton.textContent = "Upload selected file";
+      }
+      renderImportAvailability();
     }
-    renderImportAvailability();
   }
 });
 
@@ -1591,6 +1744,7 @@ inboxButton.addEventListener("click", () => {
 });
 
 async function initialize() {
+  lockConnection(true);
   const [stored, tabs] = await Promise.all([
     browser.storage.get(["vault", "username", "apiKey", "deviceCredential"]),
     browser.tabs.query({ active: true, currentWindow: true }),
@@ -1607,6 +1761,7 @@ async function initialize() {
     connectButton.textContent = "Finish setup";
     const origins = [permissionOrigin(prepared)];
     const alreadyAllowed = await browser.permissions.contains({ origins }).catch(() => false);
+    lockConnection(false);
     if (alreadyAllowed) {
       try {
         await establishConnection(prepared, { requestPermission: false, persist: true });
@@ -1628,6 +1783,7 @@ async function initialize() {
       : {}),
   };
   fillConnectionForm(storedConfig);
+  lockConnection(false);
 
   if (
     !storedConfig.vault ||
@@ -1645,6 +1801,7 @@ async function initialize() {
 }
 
 initialize().catch((error) => {
+  lockConnection(false);
   connectionPanel.hidden = false;
   renderConnection("error", { detail: messageFrom(error) });
   showStatus(messageFrom(error), "error");

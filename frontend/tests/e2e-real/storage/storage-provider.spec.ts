@@ -130,6 +130,35 @@ test.describe("storage provider setup", () => {
     await expect(page.getByText("Storage safety: Guarded")).toBeVisible();
     await expect(page.getByPlaceholder("Stored — leave blank to keep")).toBeVisible();
 
+    // A concurrent configuration command cannot silently authorize this draft.
+    await page.getByPlaceholder("Stored — leave blank to keep").fill("webdav-password");
+    expect(
+      (await page.request.put("/api/v1/config", { data: { currency: "EUR" } })).ok(),
+    ).toBeTruthy();
+    const [conflict] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().includes("/api/v1/config") && response.request().method() === "PUT",
+      ),
+      page.getByRole("button", { name: "Save configuration" }).click(),
+    ]);
+    expect(conflict.status()).toBe(412);
+    await expect(page.getByPlaceholder("Stored — leave blank to keep")).toHaveValue(
+      "webdav-password",
+    );
+    await page.getByRole("button", { name: "Review latest version" }).click();
+    await expect(page.getByRole("region", { name: "Latest saved version" })).toBeVisible();
+    const [saved] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().includes("/api/v1/config") && response.request().method() === "PUT",
+      ),
+      page.getByRole("button", { name: "Save my draft against this version" }).click(),
+    ]);
+    expect(saved.status()).toBe(200);
+    expect(saved.request().headers()["x-printstash-edit-contract"]).toBe("conditional-v1");
+    await expect(page.getByPlaceholder("Stored — leave blank to keep")).toHaveValue("");
+
     // Continue through the public UI after restart. This deliberately does not
     // bind a backend instance: the upload, trash, preview, and refusal
     // result must all cross the configured provider boundary.

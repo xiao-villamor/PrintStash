@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.core.time import ensure_utc
 from app.db.models import CollectionRole, FileRevisionStatus, FileType, PrintJobState
+from app.schemas.editing import EditingBase
+from app.schemas.mesh_measurements import VolumeMeasurementRead
 from app.schemas.orca import OrcaNativeContext
 from app.schemas.printers import (
     PrintJobIdentityRead,
@@ -40,11 +42,24 @@ class MetadataRead(BaseModel):
     material_brand: Optional[str] = None
     native_context: Optional[OrcaNativeContext] = None
 
-    bbox_x_mm: Optional[float] = None
-    bbox_y_mm: Optional[float] = None
-    bbox_z_mm: Optional[float] = None
-    volume_mm3: Optional[float] = None
+    bbox_x_mm: Optional[float] = Field(
+        default=None, strict=True, allow_inf_nan=False, ge=0
+    )
+    bbox_y_mm: Optional[float] = Field(
+        default=None, strict=True, allow_inf_nan=False, ge=0
+    )
+    bbox_z_mm: Optional[float] = Field(
+        default=None, strict=True, allow_inf_nan=False, ge=0
+    )
+    volume_mm3: Optional[float] = Field(default=None, strict=True, allow_inf_nan=False)
+    volume_measurement: VolumeMeasurementRead
     triangle_count: Optional[int] = None
+
+    @model_validator(mode="after")
+    def volume_scalar_matches_evidence(self):
+        if self.volume_mm3 != self.volume_measurement.value_mm3:
+            raise ValueError("volume scalar disagrees with evidence")
+        return self
 
 
 class FileRead(BaseModel):
@@ -136,7 +151,7 @@ class ModelSimilarityRead(BaseModel):
     confirmed: int = 0
 
 
-class ModelRead(BaseModel):
+class ModelRead(EditingBase):
     similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
     id: int
     name: str
@@ -144,6 +159,7 @@ class ModelRead(BaseModel):
     hash: str
     collection: Optional[str] = None
     collection_id: Optional[int] = None
+    collection_label: Optional[str]
     description: Optional[str] = None
     source_url: Optional[str] = None
     effective_role: Optional[CollectionRole] = None
@@ -154,6 +170,9 @@ class ModelRead(BaseModel):
     files: List[FileRead] = []
     trashed_source_files: List[TrashedSourceFileRead] = []
     starred: bool = False
+    # Opaque; equal to the `revision` of a later `subscribed` acknowledgement on
+    # this Model's channel when no derivative changed in between.
+    derivatives_revision: str
 
 
 class ModelPrinterFileRead(BaseModel):
@@ -238,13 +257,15 @@ class PrintSummaryRead(BaseModel):
     total_cost: Optional[float] = None
 
 
-class ModelListItem(BaseModel):
+class ModelListItem(EditingBase):
     similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
     id: int
     name: str
     slug: str
     collection: Optional[str] = None
     collection_id: Optional[int] = None
+    # The collection's name path (``Parts/Brackets``); None outside a collection.
+    collection_label: Optional[str] = None
     source_url: Optional[str] = None
     effective_role: Optional[CollectionRole] = None
     tags: List[str] = []
@@ -279,11 +300,17 @@ class ModelPageRead(BaseModel):
     total: int
 
 
-class OutlinerModelRead(BaseModel):
+class OutlinerItemRead(BaseModel):
     id: int
     name: str
     collection: Optional[str] = None
     collection_id: Optional[int] = None
+    # The collection's name path (``Parts/Brackets``); None outside a collection.
+    collection_label: Optional[str] = None
+
+
+class OutlinerModelRead(OutlinerItemRead, EditingBase):
+    pass
 
 
 class ModelFilters(BaseModel):
@@ -404,10 +431,18 @@ class ModelBatchResult(BaseModel):
     failed_count: int = 0
 
 
+class ModelEditBatchResult(ModelBatchResult):
+    # Exact versions acknowledged by this mutation, captured before commit.
+    succeeded_versions: dict[str, EditingBase]
+
+
 class ModelBatchMove(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_ids: List[int] = Field(min_length=1, max_length=500)
+    expected_versions: dict[int, EditingBase] | None = Field(
+        default=None, max_length=500
+    )
     # Same semantics as ModelUpdate.collection: "" (or missing) means root.
     collection: str = Field(default="", max_length=1024)
 
@@ -416,6 +451,9 @@ class ModelBatchTags(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model_ids: List[int] = Field(min_length=1, max_length=500)
+    expected_versions: dict[int, EditingBase] | None = Field(
+        default=None, max_length=500
+    )
     add: List[str] = Field(default_factory=list, max_length=100)
     remove: List[str] = Field(default_factory=list, max_length=100)
 
@@ -585,6 +623,35 @@ class CollectionRead(BaseModel):
     has_readme: bool = False
 
 
+class CollectionNodeRead(CollectionRead):
+    """One collection in the lazily loaded tree.
+
+    ``model_count`` covers the whole subtree, as ``descendant_count`` does for
+    collections. ``display_path`` joins the names of
+    the ancestors the caller can see, so a row can be labelled without the tree
+    above it having been loaded.
+    """
+
+    child_count: int
+    # Every collection below this one, at any depth.
+    descendant_count: int
+    display_path: str
+
+
+class CollectionPage(BaseModel):
+    """A page of collections; ``next_cursor`` is ``None`` on the last one."""
+
+    items: List[CollectionNodeRead]
+    next_cursor: Optional[str] = None
+
+
+class CollectionLookupRead(BaseModel):
+    """A collection found by path, with the visible ancestors above it, root first."""
+
+    collection: CollectionNodeRead
+    ancestors: List[CollectionNodeRead]
+
+
 class CollectionCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -669,7 +736,7 @@ class FilamentProfileUpdate(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=4096)
 
 
-class FilamentProfileRead(FilamentProfileBase):
+class FilamentProfileRead(FilamentProfileBase, EditingBase):
     id: int
     usage_count: int = 0
     # Present when this preset mirrors a Spoolman filament — the UI shows a
@@ -703,7 +770,7 @@ class PrinterProfileUpdate(BaseModel):
     notes: Optional[str] = Field(default=None, max_length=4096)
 
 
-class PrinterProfileRead(PrinterProfileBase):
+class PrinterProfileRead(PrinterProfileBase, EditingBase):
     id: int
     usage_count: int = 0
     created_at: datetime

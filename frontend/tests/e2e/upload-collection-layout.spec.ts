@@ -12,30 +12,42 @@ test.describe("Upload collection selector", () => {
   test("keeps a nested collection path inside the upload selector", async ({ page }) => {
     test.setTimeout(60_000);
     await page.setViewportSize({ width: 625, height: 844 });
-    await page.route("**/api/v1/collections", (route) =>
+    // The destination picker searches; it never lists the whole library (#295).
+    const folder = {
+      model_count: 0,
+      effective_role: "admin",
+      tags: [],
+      has_readme: false,
+      child_count: 0,
+      descendant_count: 0,
+    };
+    await page.route("**/api/v1/collections/search**", (route) =>
       route.fulfill({
-        json: [
-          {
-            id: 1,
-            name: "PrintStash Data",
-            slug: "printstash-data",
-            path: "printstash-data",
-            parent_id: null,
-            model_count: 0,
-            effective_role: "admin",
-            tags: [],
-          },
-          {
-            id: 2,
-            name: "Stackable Vertical Garden Planter With Extra Parts",
-            slug: "stackable-vertical-garden-planter-with-extra-parts",
-            path: nestedPath,
-            parent_id: 1,
-            model_count: 0,
-            effective_role: "admin",
-            tags: [],
-          },
-        ],
+        json: {
+          items: [
+            {
+              ...folder,
+              id: 1,
+              name: "PrintStash Data",
+              slug: "printstash-data",
+              path: "printstash-data",
+              parent_id: null,
+              display_path: "PrintStash Data",
+              child_count: 1,
+              descendant_count: 1,
+            },
+            {
+              ...folder,
+              id: 2,
+              name: "Stackable Vertical Garden Planter With Extra Parts",
+              slug: "stackable-vertical-garden-planter-with-extra-parts",
+              path: nestedPath,
+              parent_id: 1,
+              display_path: nestedDisplayPath,
+            },
+          ],
+          next_cursor: null,
+        },
       }),
     );
 

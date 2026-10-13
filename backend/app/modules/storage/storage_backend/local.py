@@ -1128,7 +1128,12 @@ class LocalStorageBackend(StorageBackend):
         receipt = CreationReceipt(
             key=str(path),
             size=after.st_size,
-            token=expected_sha256.lower(),
+            # The opaque token identifies this physical generation. Content
+            # alone aliases later same-byte objects in the deletion outbox.
+            token=hashlib.sha256(
+                f"local-adoption:{expected_sha256.lower()}:{after.st_dev}:"
+                f"{after.st_ino}:{after.st_ctime_ns}:{after.st_size}".encode("ascii")
+            ).hexdigest(),
             backend="local",
             namespace=namespace,
             device=after.st_dev,

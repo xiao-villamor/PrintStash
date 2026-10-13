@@ -1,3 +1,5 @@
+import type { EditingBase } from "./editing";
+
 export type CaptureProvider = "myminifactory" | "cults";
 
 /** A connection status deliberately excludes any provider credential. */
@@ -23,7 +25,7 @@ export interface BrowserPairingCreateRead {
 }
 
 /** A paired browser's public record. Device credentials are never returned here. */
-export interface BrowserDeviceRead {
+export interface BrowserDeviceRead extends EditingBase {
   id: number;
   name: string;
   created_at: string;

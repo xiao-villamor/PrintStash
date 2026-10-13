@@ -1,0 +1,8 @@
+**/.git
+**/.venv
+**/node_modules
+**/.data
+**/reports
+**/__pycache__
+**/.env
+**/.env.*

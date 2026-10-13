@@ -11,10 +11,75 @@ import pytest
 
 from printstash_core.mesh.similarity import verification
 from printstash_core.mesh.similarity.fingerprint import GeometryError
+from printstash_core.mesh.similarity.time_budget import deadline_after
 from printstash_core.mesh.similarity.verification import verify_meshes
 
 
 class TestVerifyMeshes:
+    @pytest.mark.parametrize("stretch", [1, 1.002], ids=["exact", "near-shape"])
+    def test_preserves_evidence_with_available_verification_time(self, tetra, stretch):
+        vertices, faces = tetra
+        right = vertices * [1, 1, stretch]
+        unlimited = verify_meshes(vertices, faces, right, faces, sample_points=256)
+        bounded = verify_meshes(
+            vertices,
+            faces,
+            right,
+            faces,
+            sample_points=256,
+            deadline=deadline_after(10),
+        )
+
+        assert bounded == unlimited
+
+    def test_propagates_verification_time_limit_from_voxelization(
+        self, tetra, monkeypatch
+    ):
+        def expired(*args, **kwargs):
+            raise GeometryError("verification_time_limit")
+
+        monkeypatch.setattr(verification, "voxelize", expired)
+
+        with pytest.raises(GeometryError, match="verification_time_limit"):
+            verify_meshes(*tetra, *tetra, sample_points=256)
+
+    def test_propagates_verification_time_limit_from_mirror_check(
+        self, cube, monkeypatch
+    ):
+        original = verification.voxelize
+        calls = 0
+
+        def expire_mirror(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls > 2:
+                raise GeometryError("verification_time_limit")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(verification, "voxelize", expire_mirror)
+
+        with pytest.raises(GeometryError, match="verification_time_limit"):
+            verify_meshes(*cube, *cube, sample_points=256)
+
+    @pytest.mark.parametrize("stretch", [1, 1.002], ids=["exact", "near-shape"])
+    def test_preserves_evidence_for_array_subclasses(self, tetra, stretch):
+        class TrackedArray(np.ndarray):
+            pass
+
+        vertices, faces = tetra
+        right = vertices * [1, 1, stretch]
+
+        plain = verify_meshes(vertices, faces, right, faces, sample_points=256)
+        tracked = verify_meshes(
+            vertices.view(TrackedArray),
+            faces.view(TrackedArray),
+            right.view(TrackedArray),
+            faces.view(TrackedArray),
+            sample_points=256,
+        )
+
+        assert tracked == plain
+
     @pytest.mark.parametrize("scale", [1, 0.5, 2, 25.4], ids=str)
     def test_verifies_uniform_scale(self, tetra, scale):
         vertices, faces = tetra

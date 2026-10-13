@@ -28,6 +28,8 @@ def _job(state: JobState = JobState.RUNNING, *, attempts: int = 1, **fields) -> 
         subject_key="s",
         state=state,
         attempts=attempts,
+        execution_epoch="test-epoch",
+        submitted_epoch=fields.pop("submitted_epoch", "test-epoch"),
         updated_at=fields.pop("updated_at", NOW - timedelta(minutes=10)),
         **fields,
     )

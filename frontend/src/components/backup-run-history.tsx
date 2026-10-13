@@ -1,47 +1,53 @@
 import { currentLocale } from "@/lib/locale";
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { listBackupRuns, retryBackupDestination } from "@/lib/api/backup";
+import { backupRunsOptions, useBackupDestinationRetry } from "@/lib/queries/settings-backup-runs";
+import { useAuth } from "@/lib/auth-context";
+import { onAuthChange } from "@/lib/auth-store";
+import { getSessionVersion } from "@/lib/session-transport";
+import { parseApiError } from "@/lib/errors";
 import { useI18n } from "@/lib/i18n";
-import { waitForImportJob } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 
-export function BackupRunHistory({
-  refreshKey,
-  onPublished,
-}: {
-  refreshKey: number;
-  onPublished: () => void;
-}) {
+export function BackupRunHistory({ onPublished }: { onPublished: () => void }) {
   const { t } = useI18n();
-  const {
-    data: runs = [],
-    isPending: loading,
-    isError: failed,
-    refetch,
-  } = useQuery({
-    queryKey: ["backup-runs", refreshKey],
-    queryFn: listBackupRuns,
-  });
-  const [retrying, setRetrying] = useState<string | null>(null);
-
+  const { user } = useAuth();
+  const admin = useRef(!!user?.is_superuser);
+  useLayoutEffect(() => {
+    admin.current = !!user?.is_superuser;
+  }, [user?.is_superuser]);
+  const live = useRef(true);
+  const [retired, setRetired] = useState(false);
+  const history = useQuery({ ...backupRunsOptions(), enabled: !!user?.is_superuser && !retired });
+  const command = useBackupDestinationRetry();
+  const retrying = command.retrying;
+  const denied = history.isError && [401, 403, 404].includes(parseApiError(history.error).status);
+  const runs = user?.is_superuser && !denied && !retired ? (history.data ?? []) : [];
+  const loading = !!user?.is_superuser && history.isPending;
+  const failed = history.isError || !user?.is_superuser;
+  useEffect(() => {
+    live.current = true;
+    const release = onAuthChange(() => setRetired(true));
+    return () => {
+      live.current = false;
+      release();
+    };
+  }, []);
   async function retry(id: string) {
-    setRetrying(id);
+    const session = getSessionVersion();
+    function current() {
+      return live.current && admin.current && !retired && session === getSessionVersion();
+    }
     try {
-      const accepted = await retryBackupDestination(id);
-      const job = await waitForImportJob(accepted.job_id, t("settings.backupRetryTask"));
-      if (job.state !== "completed")
-        throw new Error(job.error ?? "backup_retry_publication_failed");
+      await command.retry({ session, destinationId: id, taskTitle: t("settings.backupRetryTask") });
+      if (!current()) return;
       toast.success(t("settings.backupRetryDone"));
       onPublished();
     } catch (error) {
-      toast.error(error);
-    } finally {
-      await refetch();
-      setRetrying(null);
+      if (current()) toast.error(error);
     }
   }
 
@@ -65,6 +71,7 @@ export function BackupRunHistory({
     return t("settings.backupReplicaUnavailable");
   }
 
+  if (retired) return null;
   return (
     <Card>
       <CardHeader className="flex-row items-start justify-between gap-3">
@@ -75,9 +82,9 @@ export function BackupRunHistory({
         <Button
           variant="ghost"
           size="icon"
-          disabled={loading || retrying !== null}
+          disabled={!user?.is_superuser || loading || retrying !== null}
           aria-label={t("settings.backupRunRefresh")}
-          onClick={() => void refetch()}
+          onClick={() => void history.refetch()}
         >
           <RefreshCw className="h-4 w-4" />
         </Button>
@@ -118,17 +125,26 @@ export function BackupRunHistory({
                         ? `${t("settings.backupLastVerified")}: ${new Date(destination.verified_at).toLocaleString(currentLocale())}`
                         : t("settings.backupNeverVerified")}
                     </p>
-                    {destination.error_code && (
+                    {run.outcome === "failed" && run.archive_sha256 === null ? (
+                      <p className="max-w-prose text-sm text-destructive">
+                        {t("settings.backupRetryNewRequired")}
+                      </p>
+                    ) : destination.error_code ? (
                       <p className="max-w-prose text-sm text-destructive">
                         {reason(destination.error_code)}
                       </p>
-                    )}
+                    ) : null}
                   </div>
                   {destination.outcome === "failed" && (
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={retrying !== null || run.outcome === "running"}
+                      disabled={
+                        retrying !== null ||
+                        failed ||
+                        run.outcome === "running" ||
+                        run.archive_sha256 === null
+                      }
                       onClick={() => void retry(destination.id)}
                     >
                       {retrying === destination.id

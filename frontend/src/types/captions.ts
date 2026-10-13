@@ -13,8 +13,7 @@ export interface SubjectCaption {
   updated_at: string | null;
   error_code: string | null;
 }
-export interface CaptionPatch {
-  action: "edit" | "dismiss" | "reset" | "generate";
-  text?: string;
-  version_token?: string;
-}
+export type CaptionPatch = (
+  | { action: "edit"; text: string }
+  | { action: "dismiss" | "reset" | "generate"; text?: never }
+) & { version_token?: string };

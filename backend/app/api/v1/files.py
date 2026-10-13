@@ -1,9 +1,7 @@
-"""File download + thumbnail + on-the-fly STL conversion."""
+"""Original delivery, thumbnails and on-demand derived STL previews."""
 
 from __future__ import annotations
 
-import secrets
-import tempfile
 from pathlib import Path
 from urllib.parse import quote
 
@@ -13,12 +11,11 @@ from fastapi import (
     HTTPException,
     Query,
     Request,
-    Response,
 )
 from fastapi.responses import (
     PlainTextResponse,
 )
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.api.artifact_responses import delivery_request, render_delivery
 from app.core.config import settings
@@ -26,7 +23,8 @@ from app.core.http import get_or_404
 from app.core.logging import get_logger
 from app.core.security import get_current_user, require_auth, require_user
 from app.db.models import CollectionRole, DerivativeKind, File, FileType, Model, User
-from app.db.session import get_session, get_session_factory
+from app.db.scopes import live
+from app.db.session import get_session
 from app.modules.identity import auth, rbac
 from app.modules.media.three_mf_preview import (
     EmbeddedGcodeError,
@@ -44,9 +42,7 @@ from app.modules.storage.artifact_delivery import (
     plan_stored_representation,
 )
 from app.modules.storage.delivery_contracts import content_disposition
-from app.modules.storage.storage_backend.contracts import StorageCollisionError
 from app.modules.storage.storage_backend.runtime import get_backend
-from app.modules.storage.storage_ownership import publish_bytes
 from app.schemas.jobs import DerivativeRead
 
 logger = get_logger(__name__)
@@ -68,17 +64,20 @@ def _live_file(session: Session, file_id: int) -> File:
 
 
 def _accessible_file(session: Session, file_id: int, user: User) -> File:
-    f = _live_file(session, file_id)
-    model = session.get(Model, f.model_id)
-    if model is None:
+    # Authorization needs the live owner's collection, not its tags, collection
+    # relationship or rich Model projection. Read it with the Artifact once.
+    row = session.exec(
+        select(File, Model.collection_id)
+        .join(Model, Model.id == File.model_id)
+        .where(File.id == file_id, live(File), live(Model))
+    ).one_or_none()
+    if row is None:
         raise HTTPException(status_code=404, detail="file_not_found")
+    artifact, collection_id = row
     rbac.require_model_collection_role(
-        session,
-        user,
-        model.collection_id,
-        CollectionRole.VIEW,
+        session, user, collection_id, CollectionRole.VIEW
     )
-    return f
+    return artifact
 
 
 def serve_artifact(
@@ -303,7 +302,8 @@ def thumbnail_response(
     summary="Serve any mesh file as STL for 3D preview",
     description=(
         "If the file is already STL it is served directly. 3MF and OBJ files are "
-        "converted to binary STL on the fly via trimesh."
+        "converted to binary STL by background Jobs on first viewer access. "
+        "Pending previews return 202; failed previews return 422 with their reason."
     ),
 )
 def file_as_stl(
@@ -313,16 +313,18 @@ def file_as_stl(
     session: Session = Depends(get_session),
 ):
     f = _accessible_file(session, file_id, current_user)
-    return stl_response(f, request)
+    return stl_response(session, f, request)
 
 
 def stl_response(
-    f: File, request: Request, purpose: DeliveryPurpose = DeliveryPurpose.TRANSFORMED
+    session: Session,
+    f: File,
+    request: Request,
+    purpose: DeliveryPurpose = DeliveryPurpose.TRANSFORMED,
 ):
     """Serve a mesh File as binary STL (cached). No access checks — callers
     are responsible for authorising access to *f* first."""
     stem = Path(f.original_filename).stem
-    delivery = delivery_request(request, f"{stem}.stl", "application/sla", purpose)
     if Path(f.original_filename).suffix.lower() == ".stl":
         return serve_artifact(
             f,
@@ -334,64 +336,9 @@ def stl_response(
             else purpose,
         )
 
-    backend = get_backend()
-    cache_key = backend.stl_cache_key(f.sha256)
-    if backend.exists(cache_key):
-        return render_delivery(plan_stored_representation(backend, cache_key, delivery))
+    from app.api.stl_response import derived_stl_response
 
-    # Lazy import: trimesh is heavy; pull it in only when we must convert.
-    from app.modules.media import mesh_processing
-    from app.modules.storage.capacity import CapacityManager, CapacityResource
-    from app.modules.storage.capacity_estimates import vault_allocation
-
-    estimate = max(f.size_bytes * 3, 16 * 1024**2)
-    with CapacityManager(get_session_factory()).hold(
-        f"media-conversion:{secrets.token_hex(12)}",
-        [
-            CapacityResource.for_path(
-                Path(tempfile.gettempdir()), estimate, role="mesh conversion"
-            ),
-            vault_allocation(estimate, role="derived STL publication"),
-        ],
-    ):
-        try:
-            with resolve(f).materialize(capacity_claimed=True) as path:
-                data = mesh_processing.to_stl_bytes(path, file_type=f.file_type.value)
-        except ArtifactContentMissingError as exc:
-            raise HTTPException(status_code=410, detail="file_blob_missing") from exc
-        if data is None:
-            raise HTTPException(status_code=500, detail="stl_conversion_failed")
-
-        cached = False
-        try:
-            with get_session_factory().scoped_session() as ownership_session:
-                publish_bytes(
-                    ownership_session,
-                    backend,
-                    cache_key,
-                    data,
-                    object_kind="derived_stl_cache",
-                )
-                ownership_session.commit()
-                cached = True
-        except StorageCollisionError:
-            # Another request won the create-only race. Serve our in-memory result;
-            # subsequent requests will use the already-published cache object.
-            pass
-        except Exception:
-            logger.warning("stl cache write failed for file %s", f.id, exc_info=True)
-
-        if cached:
-            return render_delivery(
-                plan_stored_representation(backend, cache_key, delivery)
-            )
-        status_code, headers = bytes_response_headers(data, delivery)
-        return Response(
-            content=data if status_code == 200 else b"",
-            status_code=status_code,
-            media_type="application/sla",
-            headers=headers,
-        )
+    return derived_stl_response(session, f, request, purpose)
 
 
 @router.get(
@@ -400,7 +347,7 @@ def stl_response(
     summary="Derivative states of one Artifact at the current recipes",
     description=(
         "Every derivative kind that applies to the Artifact (metadata, thumbnail, "
-        "toolpath) with its state. `pending` means no attempt exists yet at the "
+        "toolpath, and requested viewer STL) with its state. `pending` means no attempt exists yet at the "
         "current recipe, so every value the kind supplies is still unknown."
     ),
 )
@@ -442,6 +389,13 @@ def retry_file_derivative(
     recipes = recipes_for(file)
     if kind not in recipes:
         raise HTTPException(status_code=404, detail="derivative_kind_not_found")
+    from app.modules.derivatives import policy
+    from app.modules.derivatives.kinds import groups_for
+
+    policy.lock(session)
+    for group in groups_for(file):
+        if kind in group.kinds:
+            policy.require_enabled(session, group.definition)
     if not records.reset(session, file, {kind: recipes[kind]}):
         raise HTTPException(status_code=409, detail="derivative_not_retryable")
     session.commit()

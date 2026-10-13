@@ -24,6 +24,14 @@ is worth as much as the one that replaced it.
 | [0005](0005-similar-models-evidence.md) | Similar Models fingerprints retrieve evidence without defining identity | Accepted; first geometry-core increment implemented |
 | [0007](0007-model-families.md) | Preserve Model identity through Family relationships | Accepted and implemented |
 | [0008](0008-job-engine.md) | Run background work level-triggered on a durable engine | Accepted and implemented |
+| [0009](0009-3mf-loader-capabilities.md) | Preserve 3MF precision behind an explicit scene reader | Accepted direction; optional pilot only |
+| [0010](0010-native-convex-hull.md) | Normalized native convex hull volume | Accepted; integrated rollout validation pending |
+| [0011](0011-reusable-point-neighbors.md) | Reusable exact sample-point lookup | Accepted; integrated rollout validation pending |
+| [0012](0012-local-native-resource-admission.md) | Process-shared native and prepared-source resource budgets | Implementation in progress; integrated qualification pending |
+| [0013](0013-prepared-geometry-cache.md) | Evaluate a disposable prepared-geometry cache before adoption | Accepted; measured pilot completed; no production adoption |
+| [0014](0014-viewer-representation.md) | Qualify viewer representations before replacing STL | Accepted; measured pilot completed; no automatic GLB/LOD adoption |
+| [0015](0015-gpu-rendering.md) | Qualify optional GPU rendering against complete visual cost | Accepted; measured pilot completed; no application GPU adoption |
+| [0016](0016-native-worker-startup.md) | Reduce unused imports without reusing native parser state | Accepted; measured reduction of parent-only imports |
 
 ADR-0001 and ADR-0002 are cited from code comments but were never written down.
 Numbering starts at 0003 so those citations keep pointing at the decisions they

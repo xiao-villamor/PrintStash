@@ -1,6 +1,5 @@
 /** Similarity clients preserve scopes, review identity, cursor and every privacy-sensitive filter. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { invalidateApiCache } from "@/lib/api/request";
 import {
   cancelSimilarityRun,
   decideSimilarity,
@@ -12,13 +11,15 @@ import {
   listSimilarityRuns,
   saveSimilaritySettings,
   startSimilarityRun,
+  searchSimilarModels,
+  previewSimilaritySelection,
 } from "@/lib/api/similarity";
 import { expectRequest, fetchMock, lastBody, lastCall, respondWith } from "./_wire";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   respondWith({});
 });
 afterEach(() => {
@@ -104,5 +105,37 @@ describe("similarity commands", () => {
     await decideSimilarity(7, { action: "confirm_evidence", request_id: "intent-1", version: 4 });
     expectRequest("/api/v1/similarity/candidates/7/decision", "POST");
     expect(lastBody()).toEqual({ action: "confirm_evidence", request_id: "intent-1", version: 4 });
+  });
+});
+
+describe("similarity reader lifetime", () => {
+  it.each([
+    { label: "status", read: (signal: AbortSignal) => getSimilarityStatus({ signal }) },
+    { label: "candidate", read: (signal: AbortSignal) => getSimilarityCandidate(1, { signal }) },
+    { label: "queue", read: (signal: AbortSignal) => listSimilarityCandidates({}, { signal }) },
+    { label: "run", read: (signal: AbortSignal) => getSimilarityRun(1, { signal }) },
+    { label: "history", read: (signal: AbortSignal) => listSimilarityRuns(undefined, { signal }) },
+    {
+      label: "semantic neighbors",
+      read: (signal: AbortSignal) => searchSimilarModels({ model_id: 1 }, { signal }),
+    },
+    {
+      label: "selection preview",
+      read: (signal: AbortSignal) =>
+        previewSimilaritySelection({ minimum_confidence: 0.9, class_overrides: {} }, { signal }),
+    },
+  ])("aborts an active $label read", async ({ read }) => {
+    const controller = new AbortController();
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          const signal = options?.signal;
+          if (!signal) throw new Error("Signal required");
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        }),
+    );
+    const outcome = read(controller.signal).catch((error: Error) => error);
+    controller.abort();
+    await expect(outcome).resolves.toMatchObject({ name: "AbortError" });
   });
 });

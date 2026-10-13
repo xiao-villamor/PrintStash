@@ -70,7 +70,7 @@ describe("registerServiceWorker", () => {
 
   it("reloads once when an updated service worker takes control", () => {
     const reload = vi.fn<() => void>();
-    const handleControllerChange = createControllerChangeHandler(reload);
+    const handleControllerChange = createControllerChangeHandler(reload, true);
 
     handleControllerChange();
     handleControllerChange();
@@ -78,12 +78,28 @@ describe("registerServiceWorker", () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves the first visit when the installed worker takes control", () => {
+    const reload = vi.fn<() => void>();
+    const handler = createControllerChangeHandler(reload, false);
+    handler();
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("reloads a later update after the first installation", () => {
+    const reload = vi.fn<() => void>();
+    const handler = createControllerChangeHandler(reload, false);
+    handler();
+    handler();
+    handler();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
   it("uses versioned caches, offline navigation fallback, and revalidation", () => {
     const source = readFileSync(`${process.cwd()}/public/sw.js`, "utf8");
 
-    expect(source).toContain('const CACHE = "printstash-shell-v4"');
-    expect(source).toContain('caches.match("/offline.html")');
-    expect(source).toContain("event.waitUntil(network.catch");
+    expect(source).toContain('const CACHE = "printstash-shell-v6"');
+    expect(source).toContain('cached("/offline.html")');
+    expect(source).toMatch(/event\.waitUntil\(\s*network\.then/);
     expect(source).toContain('event.data?.type === "SKIP_WAITING"');
   });
 });

@@ -161,6 +161,21 @@ describe("TopBar", () => {
       expect(screen.getByRole("button", { name: /admin/ })).toBeInTheDocument();
     });
 
+    it.each([
+      { label: "administrator", isAdmin: true },
+      { label: "regular user", isAdmin: false },
+    ])("omits Wiki from the profile dropdown for a $label", async ({ isAdmin }) => {
+      const user = userEvent.setup();
+      renderTopBar({
+        auth: session({ user: { id: 1, username: "admin", email: null, is_superuser: isAdmin } }),
+      });
+
+      await openProfileMenu(user);
+
+      expect(screen.getByRole("menu")).toBeInTheDocument();
+      expect(screen.queryByRole("menuitem", { name: "Wiki" })).toBeNull();
+    });
+
     it("links Pending at the inbox route", async () => {
       const user = userEvent.setup();
       renderTopBar();

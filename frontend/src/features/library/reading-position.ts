@@ -1,0 +1,329 @@
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useLocation } from "react-router-dom";
+import { getSessionVersion } from "@/lib/session-transport";
+import {
+  readLibraryPosition,
+  saveLibraryPosition,
+  type LibraryEntry,
+  type LibraryLayout,
+  type LibraryReadingPosition,
+} from "./navigation-state";
+
+interface ReadingPages {
+  count: number;
+  more: boolean;
+  pending: boolean;
+  failed: boolean;
+  next: () => void;
+}
+export interface LibraryReadingPagination {
+  ready: boolean;
+  models: ReadingPages;
+  folders: ReadingPages;
+}
+type Recovery = {
+  entry: LibraryEntry | undefined;
+  layout: LibraryLayout;
+  current: boolean;
+} & (
+  | { status: "restoring"; saved: LibraryReadingPosition; failed: boolean }
+  | { status: "refreshing"; saved: LibraryReadingPosition }
+  | { status: "ready" | "reset" }
+);
+
+/** Own nested scroll restoration and its bounded page reconstruction, never remote data. */
+export function useLibraryReadingPosition(
+  entry: LibraryEntry | undefined,
+  layout: LibraryLayout,
+  mainRef: RefObject<HTMLElement | null>,
+  listRef: RefObject<HTMLDivElement | null>,
+  enabled: boolean,
+  pagination: LibraryReadingPagination,
+) {
+  const location = useLocation();
+  const current = enabled && entry?.session === getSessionVersion() && entry.key === location.key;
+  const operation = useRef(0);
+  const captured = useRef<{
+    entry: LibraryEntry;
+    layout: LibraryLayout;
+    position: LibraryReadingPosition;
+  } | null>(null);
+  function beginRecovery(): Recovery {
+    const saved = current && entry ? readLibraryPosition(entry, layout) : undefined;
+    return saved
+      ? { entry, layout, current, status: "restoring", saved, failed: false }
+      : { entry, layout, current, status: "ready" };
+  }
+  const [recovery, setRecovery] = useState<Recovery>(beginRecovery);
+  if (recovery.entry !== entry || recovery.layout !== layout || recovery.current !== current)
+    setRecovery(beginRecovery());
+  const requested = useRef<{ models: number | null; folders: number | null }>({
+    models: null,
+    folders: null,
+  });
+  useLayoutEffect(() => {
+    return () => {
+      operation.current += 1;
+    };
+  }, [entry, layout, current]);
+  useLayoutEffect(() => {
+    if (!current || !entry) return;
+    requested.current = { models: null, folders: null };
+    if (!readLibraryPosition(entry, layout)) {
+      if (mainRef.current) mainRef.current.scrollTop = 0;
+      if (listRef.current) listRef.current.scrollTop = 0;
+    }
+  }, [entry, layout, current, mainRef, listRef]);
+
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    if (
+      !current ||
+      !entry ||
+      !main ||
+      recovery?.entry !== entry ||
+      recovery.layout !== layout ||
+      recovery.status !== "restoring"
+    )
+      return;
+    const { saved } = recovery;
+    const list = listRef.current;
+    const failed = recovery.failed || pagination.models.failed || pagination.folders.failed;
+    if (!pagination.ready && !failed) return;
+    const missingPages =
+      (pagination.models.count < saved.pages.models && pagination.models.more) ||
+      (pagination.folders.count < saved.pages.folders && pagination.folders.more);
+    if (!failed && (missingPages || pagination.models.pending || pagination.folders.pending))
+      return;
+    let restored = !failed;
+    main.scrollTop = saved.main;
+    if (list) list.scrollTop = saved.list ?? 0;
+    if (saved.anchor && restored) {
+      const anchor = main.querySelector<HTMLElement>(
+        `[data-library-entry="${CSS.escape(saved.anchor.key)}"]`,
+      );
+      const container = saved.anchor.container === "list" ? list : main;
+      if (!anchor || !container) restored = false;
+      else
+        container.scrollTop +=
+          anchor.getBoundingClientRect().top -
+          container.getBoundingClientRect().top -
+          saved.anchor.offset;
+    } else if (restored) {
+      restored =
+        Math.abs(main.scrollTop - saved.main) < 1 &&
+        (!list || Math.abs(list.scrollTop - (saved.list ?? 0)) < 1);
+    }
+    if (!restored) {
+      main.scrollTop = 0;
+      if (list) list.scrollTop = 0;
+      saveLibraryPosition(entry, layout, {
+        main: 0,
+        list: list ? 0 : null,
+        anchor: null,
+        adjacent: null,
+        pages: { models: pagination.models.count, folders: pagination.folders.count },
+      });
+    }
+    setRecovery({ entry, layout, current, status: restored ? "ready" : "reset" });
+  }, [current, entry, layout, recovery, pagination, mainRef, listRef]);
+
+  useEffect(() => {
+    if (
+      !current ||
+      !entry ||
+      !pagination.ready ||
+      recovery?.entry !== entry ||
+      recovery.layout !== layout ||
+      recovery.status !== "restoring" ||
+      recovery.failed ||
+      pagination.models.failed ||
+      pagination.folders.failed
+    )
+      return;
+    for (const kind of ["models", "folders"] as const) {
+      const page = pagination[kind];
+      if (
+        page.count >= recovery.saved.pages[kind] ||
+        !page.more ||
+        page.pending ||
+        requested.current[kind] === page.count
+      )
+        continue;
+      requested.current[kind] = page.count;
+      page.next();
+    }
+  }, [current, entry, layout, recovery, pagination]);
+
+  const capturePosition = useCallback(
+    (
+      captureAnchor: boolean,
+      target: HTMLElement | null = null,
+      departing?: { main: HTMLElement; list: HTMLDivElement | null },
+    ) => {
+      const main = departing ? departing.main : mainRef.current;
+      if (!current || !entry || !main) return;
+      const list = departing ? departing.list : listRef.current;
+      const previous = readLibraryPosition(entry, layout);
+      const offsetChanged =
+        previous?.main !== main.scrollTop || previous.list !== (list?.scrollTop ?? null);
+      // A scroll event queued before the click may arrive after its snapshot.
+      // Keep that anchor when no actual offset changed; real scrolling retires it.
+      let anchor: LibraryReadingPosition["anchor"] = !offsetChanged
+        ? (previous?.anchor ?? null)
+        : null;
+      let adjacent = anchor ? (previous?.adjacent ?? null) : null;
+      // Scan visible entries only at a gesture, never for every scroll event.
+      if (captureAnchor) {
+        // A list may grow inside main instead of owning an independent scroll range.
+        const container = list && list.scrollHeight > list.clientHeight ? list : main;
+        const bounds = container.getBoundingClientRect();
+        const candidates = Array.from(main.querySelectorAll<HTMLElement>("[data-library-entry]"));
+        const visible =
+          target ??
+          candidates.find((node) => {
+            const rect = node.getBoundingClientRect();
+            return rect.bottom > bounds.top && rect.top < bounds.bottom;
+          });
+        const key = visible?.dataset.libraryEntry;
+        if (visible && key) {
+          anchor = {
+            key,
+            offset: visible.getBoundingClientRect().top - bounds.top,
+            container: container === list ? "list" : "main",
+          };
+          const index = candidates.indexOf(visible);
+          const neighbor = candidates[index + 1] ?? candidates[index - 1];
+          const neighborKey = neighbor?.dataset.libraryEntry;
+          adjacent =
+            neighbor && neighborKey
+              ? {
+                  key: neighborKey,
+                  offset: neighbor.getBoundingClientRect().top - bounds.top,
+                  container: container === list ? "list" : "main",
+                }
+              : null;
+        }
+      }
+      saveLibraryPosition(entry, layout, {
+        main: main.scrollTop,
+        list: list?.scrollTop ?? null,
+        anchor,
+        adjacent,
+        pages: { models: pagination.models.count, folders: pagination.folders.count },
+      });
+      const position = readLibraryPosition(entry, layout);
+      if (
+        position &&
+        (captureAnchor ||
+          offsetChanged ||
+          captured.current?.entry !== entry ||
+          captured.current.layout !== layout)
+      )
+        captured.current = { entry, layout, position };
+      return position;
+    },
+    [current, entry, layout, mainRef, listRef, pagination.models.count, pagination.folders.count],
+  );
+
+  // An own confirmed removal promotes the saved neighbor in navigation-state.
+  // Apply that promotion to the mounted view once its old card has actually left
+  // the displayed snapshot. No new fetch, history entry or animation is involved.
+  useLayoutEffect(() => {
+    const previous = captured.current;
+    const main = mainRef.current;
+    if (
+      !current ||
+      !entry ||
+      !main ||
+      previous?.entry !== entry ||
+      previous.layout !== layout ||
+      recovery.status !== "ready"
+    )
+      return;
+    const saved = readLibraryPosition(entry, layout);
+    const before = previous.position.anchor;
+    const after = saved?.anchor;
+    if (
+      !before ||
+      !after ||
+      before.key === after.key ||
+      previous.position.adjacent?.key !== after.key
+    )
+      return;
+    if (main.querySelector(`[data-library-entry="${CSS.escape(before.key)}"]`)) return;
+    const anchor = main.querySelector<HTMLElement>(
+      `[data-library-entry="${CSS.escape(after.key)}"]`,
+    );
+    const container = after.container === "list" ? listRef.current : main;
+    if (!anchor || !container) return;
+    container.scrollTop +=
+      anchor.getBoundingClientRect().top - container.getBoundingClientRect().top - after.offset;
+    capturePosition(true, anchor);
+  }, [current, entry, layout, recovery.status, pagination, mainRef, listRef, capturePosition]);
+
+  async function refresh(replace: () => Promise<void>) {
+    const saved = capturePosition(true);
+    if (!saved || !entry || !current) return;
+    const token = ++operation.current;
+    requested.current = { models: null, folders: null };
+    setRecovery({ entry, layout, current, status: "refreshing", saved });
+    let failed = false;
+    try {
+      await replace();
+    } catch (error) {
+      failed = true;
+      throw error;
+    } finally {
+      if (operation.current === token && entry.session === getSessionVersion())
+        setRecovery({ entry, layout, current, status: "restoring", saved, failed });
+    }
+  }
+
+  useLayoutEffect(() => {
+    const main = mainRef.current;
+    if (
+      !current ||
+      !entry ||
+      !main ||
+      recovery?.entry !== entry ||
+      recovery.layout !== layout ||
+      recovery.status === "restoring" ||
+      recovery.status === "refreshing"
+    )
+      return;
+    const list = listRef.current;
+    const capture = (event: Event) => {
+      capturePosition(
+        event.type === "click",
+        event.target instanceof Element
+          ? (event.target.closest<HTMLElement>("[data-library-entry]") ??
+              event.target.closest("article")?.querySelector<HTMLElement>("[data-library-entry]") ??
+              null)
+          : null,
+      );
+    };
+    main.addEventListener("scroll", capture, true);
+    main.addEventListener("click", capture, true);
+    return () => {
+      main.removeEventListener("scroll", capture, true);
+      main.removeEventListener("click", capture, true);
+      // A history traversal can beat the last scroll event. Retain the actual
+      // departing containers: React may have detached their refs already.
+      capturePosition(false, null, { main, list });
+    };
+  }, [
+    current,
+    entry,
+    layout,
+    recovery,
+    capturePosition,
+    mainRef,
+    listRef,
+    pagination.models.count,
+    pagination.folders.count,
+  ]);
+  const status =
+    recovery?.entry === entry && recovery.layout === layout ? recovery.status : "ready";
+  return { status: status === "refreshing" ? "restoring" : status, refresh };
+}

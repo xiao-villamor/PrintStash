@@ -58,6 +58,7 @@ from app.modules.storage.storage_backend.local import (
 from app.modules.storage.storage_backend.runtime import get_bound_backend
 from app.modules.storage.storage_ownership import (
     matching_creation_receipt,
+    provider_ref_for_backend,
     record_creation,
 )
 from app.modules.storage.storage_providers import (
@@ -862,14 +863,6 @@ class VaultMigrations:
                         activate_uploads(
                             session, objects, source=source, destination=candidate
                         )
-                        for obj in objects:
-                            assert obj.destination_receipt is not None
-                            record_creation(
-                                session,
-                                CreationReceipt(**json.loads(obj.destination_receipt)),
-                                object_kind=obj.resource_type,
-                                sha256=obj.sha256,
-                            )
                         with activating_storage_configuration():
                             config = update_storage_provider(
                                 session,
@@ -897,6 +890,23 @@ class VaultMigrations:
                         )
                         transition(session, run, "active")
                         session.add(generation)
+                        session.flush()
+                        for obj in sorted(
+                            objects, key=lambda item: item.destination_key
+                        ):
+                            assert obj.destination_receipt is not None
+                            receipt = CreationReceipt(
+                                **json.loads(obj.destination_receipt)
+                            )
+                            record_creation(
+                                session,
+                                receipt,
+                                object_kind=obj.resource_type,
+                                sha256=obj.sha256,
+                                provider_ref=provider_ref_for_backend(
+                                    candidate, namespace=receipt.namespace
+                                ),
+                            )
                         session.commit()
                         committed = True
                         migration_journal.append(

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-import shutil
 import tempfile
 from pathlib import Path
 from typing import BinaryIO
 
 from printstash_core.files import publish_staged_file
 
+from app.core.cancellation import checkpoint
 from app.core.logging import get_logger
 
 from .contracts import StorageCollisionError
@@ -37,9 +37,15 @@ def _copy_stream_create_only(src: BinaryIO, dest: Path) -> Path:
     temp = Path(temp_name)
     try:
         with os.fdopen(fd, "wb") as destination:
-            shutil.copyfileobj(src, destination)
+            while True:
+                checkpoint()
+                chunk = src.read(1024 * 1024)
+                if not chunk:
+                    break
+                destination.write(chunk)
             destination.flush()
             os.fsync(destination.fileno())
+        checkpoint(force=True)
         try:
             publish_staged_file(temp, dest)
         except FileExistsError as exc:

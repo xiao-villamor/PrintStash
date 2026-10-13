@@ -28,11 +28,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UploadModal } from "@/components/upload-modal";
 import { TaskList } from "@/components/task-list";
 import type { ArtifactUploadCreate, ArtifactUploadStatus } from "@/lib/api/artifact-uploads";
+import { librarySourceKeys } from "@/lib/queries/settings-library-sources";
 import { queryKeys } from "@/lib/query-client";
-import { listTasks, setJobSource, syncImportJobs } from "@/lib/task-center";
-import { aCollection, aJob as aSharedJob, aTag } from "@/test-support/factories";
+import { clearLogin, storeLogin } from "@/lib/auth-store";
+import {
+  listTasks,
+  setJobSource,
+  syncImportJobs,
+  startTaskCenterSessionScope,
+} from "@/lib/task-center";
+import { collectionTreeRoutes } from "@/test-support/collection-tree";
+import { aCollection, aJob as aSharedJob, aTag, aVaultConfig } from "@/test-support/factories";
 import { FetchBackedXhr } from "@/test-support/fetch-backed-xhr";
-import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
+import {
+  adminSession,
+  memberSession,
+  json,
+  renderApp,
+  type RenderAppOptions,
+} from "@/test-support/render";
 import type { ExternalLibrary, JobStatus, ModelRead } from "@/types";
 
 const FROZEN_NOW = "2026-01-01T00:00:00Z";
@@ -52,12 +66,15 @@ function aJob(over: Partial<JobStatus> = {}): JobStatus {
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    edit_version: 1,
     id: 1,
     name: "Cube",
     slug: "cube",
     hash: "a".repeat(64),
     collection: null,
     collection_id: null,
+    collection_label: null,
     description: null,
     source_url: null,
     effective_role: null,
@@ -67,12 +84,15 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
     updated_at: FROZEN_NOW,
     files: [],
     starred: false,
+    derivatives_revision: "0",
     ...over,
   };
 }
 
 function aLibrary(over: Partial<ExternalLibrary> = {}): ExternalLibrary {
   return {
+    edit_epoch: "a".repeat(32),
+    edit_version: 1,
     id: 4,
     name: "NAS models",
     root_path: "/mnt/nas/models",
@@ -94,10 +114,16 @@ function aLibrary(over: Partial<ExternalLibrary> = {}): ExternalLibrary {
   };
 }
 
-function renderUpload(options: RenderAppOptions & { onUploaded?: () => Promise<void> } = {}) {
+function renderUpload(
+  options: RenderAppOptions & {
+    onUploaded?: () => Promise<void>;
+    beforeChunk?: () => Promise<void>;
+  } = {},
+) {
   const {
     seed = [],
     routes = {},
+    beforeChunk,
     onUploaded = vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     ...rest
   } = options;
@@ -148,11 +174,11 @@ function renderUpload(options: RenderAppOptions & { onUploaded?: () => Promise<v
   const result = renderApp(
     <UploadModal open onClose={onClose} onUploaded={onUploaded} defaultCollection={null} />,
     {
-      seed: [[queryKeys.collections, [aCollection()]], [queryKeys.tags, [aTag()]], ...seed],
+      seed: [[queryKeys.tags, [aTag()]], ...seed],
       routes: {
         "GET /api/v1/libraries": json([]),
-        "GET /api/v1/config": json({ external_libraries_enabled: false }),
-        "GET /api/v1/collections": json([aCollection()]),
+        "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: false })),
+        ...collectionTreeRoutes([aCollection()]),
         "GET /api/v1/tags": json([aTag()]),
         "GET /api/v1/models/1": json(aModel()),
         "POST /api/v1/ingest/model": capture(json(queued())),
@@ -170,7 +196,8 @@ function renderUpload(options: RenderAppOptions & { onUploaded?: () => Promise<v
             expires_at: FROZEN_NOW,
           });
         },
-        "PUT /api/v1/artifact-uploads/": (url) => {
+        "PUT /api/v1/artifact-uploads/": async (url) => {
+          await beforeChunk?.();
           const { id, request } = requestForUrl(url);
           return json({
             session: status(id, request, {
@@ -210,8 +237,11 @@ function fileInputs(container: HTMLElement) {
   return container.ownerDocument.querySelectorAll<HTMLInputElement>('input[type="file"]');
 }
 
+let stopSessionScope: (() => void) | undefined;
+
 beforeEach(() => {
   window.localStorage.clear();
+  stopSessionScope = startTaskCenterSessionScope();
   FetchBackedXhr.requests = [];
   vi.stubGlobal("XMLHttpRequest", FetchBackedXhr);
   jobSeq += 1;
@@ -231,6 +261,7 @@ afterEach(async () => {
     { timeout: 5000 },
   );
   setJobSource(async () => []);
+  stopSessionScope?.();
   vi.unstubAllGlobals();
 });
 
@@ -242,7 +273,7 @@ describe("UploadModal ingestion", () => {
       const unbound = aLibrary({ id: 6, name: "Legacy NAS", binding_state: "unbound" });
       renderUpload({
         routes: {
-          "GET /api/v1/config": json({ external_libraries_enabled: true }),
+          "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
           "GET /api/v1/libraries": json([safe, disabled, unbound]),
         },
       });
@@ -252,6 +283,108 @@ describe("UploadModal ingestion", () => {
       ).toBeInTheDocument();
       expect(screen.queryByRole("option", { name: "Paused NAS (library source)" })).toBeNull();
       expect(screen.queryByRole("option", { name: "Legacy NAS (library source)" })).toBeNull();
+    });
+
+    it("avoids administrative source reads for members", async () => {
+      const result = renderUpload({ auth: memberSession() });
+      await screen.findByText(".stl .3mf .obj .step .dxf");
+      expect(
+        result
+          .requestsWithMethod("GET")
+          .filter((row) => ["/api/v1/config", "/api/v1/libraries"].includes(row.url)),
+      ).toHaveLength(0);
+    });
+    it("recovers a failed destination catalog", async () => {
+      const result = renderUpload({
+        routes: {
+          "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+          "GET /api/v1/libraries": json({ detail: "unavailable" }, 503),
+        },
+      });
+      await userEvent.upload(fileInputs(result.container)[0], new File(["x"], "cube.stl"));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Could not load upload destinations.",
+      );
+      result.route({ "GET /api/v1/libraries": json([aLibrary({ name: "Recovered NAS" })]) });
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      expect(
+        await screen.findByRole("option", { name: "Recovered NAS (library source)" }),
+      ).toBeVisible();
+      expect(screen.getByDisplayValue("cube")).toBeVisible();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+    it("follows canonical source updates while open", async () => {
+      const result = renderUpload({
+        routes: {
+          "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+          "GET /api/v1/libraries": json([aLibrary({ name: "Old name" })]),
+        },
+      });
+      await screen.findByRole("option", { name: "Old name (library source)" });
+      act(() =>
+        result.client.setQueryData(librarySourceKeys.all, {
+          kind: "enabled",
+          items: [aLibrary({ name: "Confirmed name" })],
+        }),
+      );
+      expect(
+        await screen.findByRole("option", { name: "Confirmed name (library source)" }),
+      ).toBeVisible();
+      expect(
+        result.requestsWithMethod("GET").filter((row) => row.url === "/api/v1/libraries"),
+      ).toHaveLength(1);
+    });
+    it.each([403, 503])("blocks a selected destination after a %s refresh", async (status) => {
+      const result = renderUpload({
+        routes: {
+          "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+          "GET /api/v1/libraries": json([aLibrary({ name: "Private NAS" })]),
+        },
+      });
+      const option = await screen.findByRole("option", { name: "Private NAS (library source)" });
+      const destination = option.closest("select");
+      if (!destination) throw new Error("destination select missing");
+      await userEvent.selectOptions(destination, "4");
+      await userEvent.upload(fileInputs(result.container)[0], new File(["x"], "cube.stl"));
+      result.route({
+        "GET /api/v1/libraries": json(
+          { detail: status === 403 ? "forbidden" : "unavailable" },
+          status,
+        ),
+      });
+      await act(async () => {
+        await result.client.invalidateQueries({ queryKey: librarySourceKeys.all });
+      });
+      await screen.findByRole("alert");
+      expect(screen.queryByRole("option", { name: "Private NAS (library source)" })).toBeNull();
+      expect(destination).toHaveValue("4");
+      expect(screen.getByRole("button", { name: "Upload to vault" })).toBeDisabled();
+      expect(result.uploadRequests()).toHaveLength(0);
+      result.route({ "GET /api/v1/libraries": json([aLibrary({ name: "Private NAS" })]) });
+      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Upload to vault" })).toBeEnabled(),
+      );
+      expect(destination).toHaveValue("4");
+      expect(screen.getByDisplayValue("cube")).toBeVisible();
+      expect(result.uploadRequests()).toHaveLength(0);
+    });
+
+    it("dispatches to the selected eligible source", async () => {
+      const result = renderUpload({
+        routes: {
+          "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+          "GET /api/v1/libraries": json([aLibrary({ name: "Chosen NAS" })]),
+        },
+      });
+      const option = await screen.findByRole("option", { name: "Chosen NAS (library source)" });
+      const destination = option.closest("select");
+      if (!destination) throw new Error("destination select missing");
+      await userEvent.selectOptions(destination, "4");
+      await userEvent.upload(fileInputs(result.container)[0], new File(["x"], "cube.stl"));
+      await userEvent.click(screen.getByRole("button", { name: "Upload to vault" }));
+      await waitFor(() => expect(result.uploadRequests()).toHaveLength(1));
+      expect(result.uploadRequests()[0].target_library_id).toBe(4);
     });
 
     it.each([
@@ -270,62 +403,33 @@ describe("UploadModal ingestion", () => {
           }),
         ],
       },
-    ])("resets a selected target when a refresh $label", async ({ refreshedLibraries }) => {
+    ])("requires destination review when a refresh $label", async ({ refreshedLibraries }) => {
       const safe = aLibrary({ id: 4, name: "Safe NAS" });
-      let listCalls = 0;
       const result = renderUpload({
         routes: {
-          "GET /api/v1/config": json({ external_libraries_enabled: true }),
-          "GET /api/v1/libraries": () =>
-            json(listCalls++ === 0 ? [safe] : listCalls === 2 ? refreshedLibraries : [safe]),
+          "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
+          "GET /api/v1/libraries": json([safe]),
         },
       });
-
       const vaultOption = await screen.findByRole("option", { name: "Vault storage" });
       const destination = vaultOption.closest("select");
       if (!destination) throw new Error("destination select missing");
-      await userEvent.setup().selectOptions(destination, "4");
-      expect(destination).toHaveValue("4");
-
-      result.rerender(
-        <UploadModal
-          open={false}
-          onClose={vi.fn<() => void>()}
-          onUploaded={vi.fn<() => Promise<void>>().mockResolvedValue(undefined)}
-          defaultCollection={null}
-        />,
+      await userEvent.selectOptions(destination, "4");
+      await userEvent.upload(fileInputs(result.container)[0], new File(["x"], "cube.stl"));
+      result.route({ "GET /api/v1/libraries": json(refreshedLibraries) });
+      await act(async () => {
+        await result.client.invalidateQueries({ queryKey: librarySourceKeys.all });
+      });
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Choose an available destination before uploading.",
       );
-      result.rerender(
-        <UploadModal
-          open
-          onClose={vi.fn<() => void>()}
-          onUploaded={vi.fn<() => Promise<void>>().mockResolvedValue(undefined)}
-          defaultCollection={null}
-        />,
-      );
-
-      await waitFor(() => expect(screen.queryByRole("option", { name: /Safe NAS/ })).toBeNull());
-
-      result.rerender(
-        <UploadModal
-          open={false}
-          onClose={vi.fn<() => void>()}
-          onUploaded={vi.fn<() => Promise<void>>().mockResolvedValue(undefined)}
-          defaultCollection={null}
-        />,
-      );
-      result.rerender(
-        <UploadModal
-          open
-          onClose={vi.fn<() => void>()}
-          onUploaded={vi.fn<() => Promise<void>>().mockResolvedValue(undefined)}
-          defaultCollection={null}
-        />,
-      );
-      const restoredVaultOption = await screen.findByRole("option", { name: "Vault storage" });
-      const restoredDestination = restoredVaultOption.closest("select");
-      if (!restoredDestination) throw new Error("destination select missing after refresh");
-      expect(restoredDestination).toHaveValue("");
+      expect(screen.getByRole("button", { name: "Upload to vault" })).toBeDisabled();
+      expect(screen.getByDisplayValue("cube")).toBeVisible();
+      expect(result.uploadRequests()).toHaveLength(0);
+      await userEvent.selectOptions(destination, "");
+      await userEvent.click(screen.getByRole("button", { name: "Upload to vault" }));
+      await waitFor(() => expect(result.uploadRequests()).toHaveLength(1));
+      expect(result.uploadRequests()[0].target_library_id).toBeUndefined();
     });
   });
 
@@ -434,6 +538,96 @@ describe("UploadModal ingestion", () => {
   });
 
   describe("a bulk drop", () => {
+    it("reports a failed final bulk publication", async () => {
+      const user = userEvent.setup();
+      const onUploaded = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValue(new Error("Refresh failed"));
+      const { container } = renderUpload({ onUploaded });
+      await user.click(screen.getByRole("button", { name: /\s*Bulk\s*/ }));
+      await user.upload(fileInputs(container)[0], [
+        new File(["x"], "a.stl"),
+        new File(["x"], "b.stl"),
+      ]);
+      await user.click(await screen.findByRole("button", { name: /Upload 2 models/ }));
+      expect(
+        await screen.findByText(
+          "Something went wrong reaching the server. Check that PrintStash is running and try again.",
+        ),
+      ).toBeInTheDocument();
+      expect(onUploaded).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(["transfer", "job"] as const)(
+      "retires remaining bulk files during a held %s",
+      async (phase) => {
+        const held = Promise.withResolvers<void>();
+        let entered = false;
+        const beforeChunk =
+          phase === "transfer"
+            ? async () => {
+                entered = true;
+                await held.promise;
+              }
+            : undefined;
+        if (phase === "job")
+          setJobSource(async () => {
+            entered = true;
+            await held.promise;
+            return [aJob()];
+          });
+        const user = userEvent.setup();
+        const { container, uploadRequests, onUploaded } = renderUpload({ beforeChunk });
+        await user.click(screen.getByRole("button", { name: /\s*Bulk\s*/ }));
+        await user.upload(fileInputs(container)[0], [
+          new File(["x"], "private-a.stl"),
+          new File(["x"], "private-b.stl"),
+        ]);
+        await user.click(await screen.findByRole("button", { name: /Upload 2 models/ }));
+        await waitFor(() => expect(entered).toBe(true));
+        await act(async () => {
+          clearLogin();
+          const replacement = adminSession().user;
+          if (!replacement) throw new Error("Missing replacement account");
+          storeLogin("", { ...replacement, id: 90 });
+          held.resolve();
+          // Flush the released transfer and any incorrectly dispatched WebCrypto work.
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        });
+        try {
+          expect(uploadRequests().map((request) => request.filename)).toEqual(["private-a.stl"]);
+          expect(onUploaded).not.toHaveBeenCalled();
+          expect(listTasks()).toEqual([]);
+        } finally {
+          // A red regression can have incorrectly registered new-session work.
+          act(() => clearLogin());
+        }
+      },
+    );
+
+    it("continues accepted bulk work after the form unmounts", async () => {
+      const held = Promise.withResolvers<void>();
+      let entered = false;
+      const user = userEvent.setup();
+      const { container, uploadRequests, onUploaded, unmount } = renderUpload({
+        beforeChunk: async () => {
+          entered = true;
+          await held.promise;
+        },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*Bulk\s*/ }));
+      await user.upload(fileInputs(container)[0], [
+        new File(["x"], "a.stl"),
+        new File(["x"], "b.stl"),
+      ]);
+      await user.click(await screen.findByRole("button", { name: /Upload 2 models/ }));
+      await waitFor(() => expect(entered).toBe(true));
+      unmount();
+      held.resolve();
+      await waitFor(() => expect(onUploaded).toHaveBeenCalledTimes(1));
+      expect(uploadRequests()).toHaveLength(2);
+    });
+
     it("queues one job per file", async () => {
       const user = userEvent.setup();
       const { container, uploadRequests } = renderUpload();
@@ -583,6 +777,32 @@ describe("UploadModal ingestion", () => {
       expect(listTasks().find((task) => task.title === "Upload oversized.zip")?.detail).toBe(
         "upload_too_large",
       );
+    });
+
+    it("retires ZIP transfer feedback with its session", async () => {
+      const user = userEvent.setup();
+      const pending = Promise.withResolvers<Response>();
+      const { container } = renderUpload({
+        routes: { "POST /api/v1/ingest/archive/inspect": () => pending.promise },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File(["x"], "private.zip"));
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      await act(async () => {
+        clearLogin();
+        storeLogin("", { id: 90, username: "replacement", email: null, is_superuser: true });
+        pending.resolve(json(queued()));
+      });
+
+      expect(listTasks()).toEqual([]);
+      expect(screen.queryByText("Something went wrong. Please try again.")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(
+          "ZIP preparation continues in the background. We'll notify you when it's ready.",
+        ),
+      ).not.toBeInTheDocument();
+      expect(document.querySelector("[data-sonner-toast]")).toBeNull();
     });
 
     it("cancels an in-flight ZIP upload from Tasks", async () => {

@@ -1,3 +1,7 @@
+<!-- First line: `Closes #X` if this PR fully resolves the issue (it closes on
+merge; one keyword per issue), or `Refs #X` if it only partially addresses it,
+with a note on what remains. -->
+
 ## Summary
 
 - 

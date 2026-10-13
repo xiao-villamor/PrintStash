@@ -44,7 +44,7 @@ async function readJson<T>(response: Response, action: string): Promise<T> {
 }
 
 describe("production extension capture against a real backend", () => {
-  it("pairs a browser device, uploads a slot, and finalizes a Pending Import", async () => {
+  it("enforces the paired-device capture lifecycle", async () => {
     const vault = requiredEnvironment("PRINTSTASH_EXTENSION_CAPTURE_BASE_URL").replace(/\/$/, "");
     const preparation = await fetch(`${vault}/api/v1/setup/session`, {
       method: "POST",
@@ -119,7 +119,7 @@ describe("production extension capture against a real backend", () => {
     expect(capture.candidates).toHaveLength(0);
     expect(capture.state).toBe("manual_file_required");
 
-    const captureResult = await captureRichFiles({
+    const captureRequest: Parameters<typeof captureRichFiles>[0] = {
       vault,
       authorization: claimed.deviceCredential,
       sourceUrl: capture.source.canonical_url,
@@ -133,13 +133,14 @@ describe("production extension capture against a real backend", () => {
           mediaType: "model/3mf",
         },
       ],
-    });
+    };
+    const captureResult = await captureRichFiles(captureRequest);
     if (!isCaptureResult(captureResult)) throw new Error("Finalize returned an invalid capture");
     const finalized = captureResult;
     expect(finalized.state).toBe("review");
     expect(finalized.id).toBeGreaterThan(0);
 
-    const devices = await readJson<Array<{ name: string }>>(
+    const devices = await readJson<Array<{ id: number; name: string }>>(
       await fetch(`${vault}/api/v1/browser-pairings`, {
         headers: { Authorization: `Bearer ${setup.access_token}` },
       }),
@@ -154,5 +155,26 @@ describe("production extension capture against a real backend", () => {
       "Pending Import readback",
     );
     expect(inbox.some((item) => item.id === finalized.id && item.state === "review")).toBe(true);
+
+    const device = devices.find((candidate) => candidate.name === `CI browser ${suffix}`);
+    if (!device) throw new Error("Paired browser missing from its owner's device list");
+    const revoked = await fetch(`${vault}/api/v1/browser-pairings/${device.id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${setup.access_token}` },
+    });
+    expect(revoked.status).toBe(204);
+    await expect(captureRichFiles(captureRequest)).rejects.toMatchObject({
+      name: "CaptureAuthenticationError",
+      message: "The PrintStash connection expired. Reconnect and try again.",
+    });
+    const afterRevocation = await readJson<Array<{ id: number; state: string }>>(
+      await fetch(`${vault}/api/v1/inbox?include_completed=true`, {
+        headers: { Authorization: `Bearer ${setup.access_token}` },
+      }),
+      "Pending Import readback after revoked capture",
+    );
+    expect(afterRevocation.map(({ id, state }) => ({ id, state }))).toEqual(
+      inbox.map(({ id, state }) => ({ id, state })),
+    );
   });
 });

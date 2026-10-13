@@ -38,6 +38,14 @@ function cssBlock(selector: string): string {
   return popupCss.slice(blockStart + 1, blockEnd);
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
 async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -45,6 +53,7 @@ async function settle() {
 
 describe("popup browser adapters", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -112,6 +121,73 @@ describe("popup browser adapters", () => {
       });
     },
   );
+
+  it.each(["stored", "new pairing"])(
+    "displays paired browser readiness without inventing a user role: %s",
+    async (mode) => {
+      if (mode === "stored") {
+        await fakeBrowser.storage.local.set({
+          vault: "https://prints.example.com",
+          deviceCredential: "device-secret",
+        });
+      }
+      const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+        if (String(input).endsWith("/health"))
+          return response({ status: "ok", name: "PrintStash" });
+        if (String(input).endsWith("/browser-pairings/claim"))
+          return response({ credential: "device-secret", device: { id: 3, name: "Browser" } });
+        throw new Error("Unexpected readiness request");
+      });
+      vi.stubGlobal("fetch", fetchImpl);
+      await import("../popup.ts");
+      await settle();
+      if (mode === "new pairing") {
+        requiredElement("#vault", HTMLInputElement).value = "https://prints.example.com";
+        requiredElement("#pairing-code", HTMLInputElement).value = "pairing-code";
+        button("#connect").click();
+        await settle();
+      }
+
+      expect(element("#connection-title").textContent).toBe("Connected");
+      expect(element("#connection-detail").textContent).toBe("Paired browser · prints.example.com");
+      expect(element("#import-panel").hidden).toBe(false);
+      expect(button("#capture").disabled).toBe(false);
+      expect(fetchImpl.mock.calls.map(([url]) => String(url))).toEqual([
+        "https://prints.example.com/api/v1/health",
+        ...(mode === "new pairing"
+          ? ["https://prints.example.com/api/v1/browser-pairings/claim"]
+          : []),
+      ]);
+    },
+  );
+
+  it.each([
+    { isSuperuser: true, role: "Admin" },
+    { isSuperuser: false, role: "Member" },
+  ])("preserves the verified legacy account role: $role", async ({ isSuperuser, role }) => {
+    await fakeBrowser.storage.local.set({
+      vault: "https://prints.example.com",
+      username: "owner",
+      apiKey: "legacy-key",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        if (String(input).endsWith("/health"))
+          return response({ status: "ok", name: "PrintStash" });
+        if (String(input).endsWith("/login")) return response({ access_token: "vault-jwt" });
+        if (String(input).endsWith("/me"))
+          return response({ username: "owner", is_superuser: isSuperuser });
+        throw new Error("Unexpected account request");
+      }),
+    );
+    await import("../popup.ts");
+    await settle();
+
+    expect(element("#connection-title").textContent).toBe("Connected");
+    expect(element("#connection-detail").textContent).toBe(`owner · prints.example.com · ${role}`);
+    expect(button("#capture").disabled).toBe(false);
+  });
 
   it("keeps an empty Vault address required", () => {
     const input = requiredElement("#vault", HTMLInputElement);
@@ -663,6 +739,332 @@ describe("popup browser adapters", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
+  describe("connection lifecycle", () => {
+    const previous = { vault: "https://vault-a.example.com", deviceCredential: "device-a" };
+    const nextVault = "https://vault-b.example.com";
+
+    async function openConnectionEditor() {
+      await fakeBrowser.storage.local.set(previous);
+      await import("../popup.ts");
+      await settle();
+      button("#edit-connection").click();
+      requiredElement("#vault", HTMLInputElement).value = nextVault;
+      requiredElement("#pairing-code", HTMLInputElement).value = "test-new-code";
+    }
+
+    it.each([200, 400])(
+      "preserves the previous connection after cancelled verification: %s",
+      async (status) => {
+        const claim = deferred<Response>();
+        let claimStarted = false;
+        let requestSignal: AbortSignal | null | undefined;
+        vi.stubGlobal(
+          "fetch",
+          vi.fn<typeof fetch>(async (url, options) => {
+            if (String(url).endsWith("/claim")) {
+              claimStarted = true;
+              requestSignal = options?.signal;
+              return claim.promise;
+            }
+            return response({ status: "ok", name: "PrintStash" });
+          }),
+        );
+        await openConnectionEditor();
+        button("#connect").click();
+        await vi.waitFor(() => expect(claimStarted).toBe(true));
+        expect(button("#cancel-edit").hidden).toBe(false);
+        expect(button("#cancel-edit").disabled).toBe(false);
+        button("#cancel-edit").click();
+        claim.resolve(response({ credential: "device-b" }, status));
+        await settle();
+        expect(await fakeBrowser.storage.local.get()).toEqual(previous);
+        expect(element("#connection-detail").textContent).toContain("vault-a.example.com");
+        expect(element("#connection-panel").hidden).toBe(true);
+        expect(element("#status").hidden).toBe(true);
+        expect(requestSignal?.aborted).toBe(true);
+        expect(fakeBrowser.permissions.remove).not.toHaveBeenCalledWith({
+          origins: ["https://vault-a.example.com/*"],
+        });
+        expect(fakeBrowser.permissions.remove).toHaveBeenCalledWith({
+          origins: ["https://vault-b.example.com/*"],
+        });
+      },
+    );
+
+    it("stops a cancelled health check before sending credentials", async () => {
+      const health = deferred<Response>();
+      const requests: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (url) => {
+          requests.push(String(url));
+          if (String(url).startsWith(nextVault)) return health.promise;
+          return response({ status: "ok", name: "PrintStash" });
+        }),
+      );
+      await openConnectionEditor();
+      button("#connect").click();
+      await settle();
+      button("#cancel-edit").click();
+      health.resolve(response({ status: "ok", name: "PrintStash", credential: "device-b" }));
+      await settle();
+      expect(requests.filter((url) => url.startsWith(nextVault))).toEqual([
+        `${nextVault}/api/v1/health`,
+      ]);
+      expect(await fakeBrowser.storage.local.get()).toEqual(previous);
+    });
+
+    it("keeps publication exclusive until storage settles", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async () =>
+          response({ status: "ok", name: "PrintStash", credential: "device-b" }),
+        ),
+      );
+      await openConnectionEditor();
+      const publication = deferred<void>();
+      const originalSet = fakeBrowser.storage.local.set.bind(fakeBrowser.storage.local);
+      vi.spyOn(fakeBrowser.storage.local, "set").mockImplementation(async (values) => {
+        await publication.promise;
+        await originalSet(values);
+      });
+      button("#connect").click();
+      await settle();
+      expect(button("#cancel-edit").disabled).toBe(true);
+      button("#cancel-edit").click();
+      expect(element("#connection-title").textContent).toBe("Checking connection…");
+      publication.resolve(undefined);
+      await settle();
+      expect(await fakeBrowser.storage.local.get()).toEqual({
+        vault: nextVault,
+        deviceCredential: "device-b",
+      });
+      expect(element("#connection-detail").textContent).toContain("vault-b.example.com");
+    });
+
+    it("preserves the previous connection when publication fails", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async () =>
+          response({ status: "ok", name: "PrintStash", credential: "device-b" }),
+        ),
+      );
+      await openConnectionEditor();
+      vi.spyOn(fakeBrowser.storage.local, "set").mockRejectedValue(
+        new Error("Storage unavailable"),
+      );
+      button("#connect").click();
+      await settle();
+      expect(await fakeBrowser.storage.local.get()).toEqual(previous);
+      expect(element("#connection-detail").textContent).toContain("vault-a.example.com");
+      expect(element("#status").textContent).toContain("Connection was not updated.");
+      expect(button("#cancel-edit").disabled).toBe(false);
+      expect(button("#connect").disabled).toBe(false);
+    });
+
+    it("ignores a cancelled response body after headers arrive", async () => {
+      let body: ReadableStreamDefaultController<Uint8Array> | undefined;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          body = controller;
+        },
+      });
+      let claimStarted = false;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (url) => {
+          if (String(url).endsWith("/claim")) {
+            claimStarted = true;
+            return new Response(stream, { headers: { "Content-Type": "application/json" } });
+          }
+          return response({ status: "ok", name: "PrintStash" });
+        }),
+      );
+      await openConnectionEditor();
+      button("#connect").click();
+      await vi.waitFor(() => expect(claimStarted).toBe(true));
+      button("#cancel-edit").click();
+      body?.enqueue(new TextEncoder().encode(JSON.stringify({ credential: "device-b" })));
+      body?.close();
+      await settle();
+      expect(await fakeBrowser.storage.local.get()).toEqual(previous);
+      expect(element("#status").hidden).toBe(true);
+      expect(element("#connection-detail").textContent).toContain("vault-a.example.com");
+    });
+
+    it("finishes cancelled permission cleanup before a same-origin retry", async () => {
+      const permission = deferred<boolean>();
+      const cleanup = deferred<boolean>();
+      const grantedOrigins = new Set(["https://vault-a.example.com/*"]);
+      fakeBrowser.permissions.request = vi.fn(async ({ origins }) => {
+        await permission.promise;
+        for (const origin of origins ?? []) grantedOrigins.add(origin);
+        return true;
+      });
+      fakeBrowser.permissions.remove = vi.fn(async ({ origins }) => {
+        await cleanup.promise;
+        for (const origin of origins ?? []) grantedOrigins.delete(origin);
+        return true;
+      });
+      const requests: string[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (url) => {
+          requests.push(String(url));
+          return response({ status: "ok", name: "PrintStash", credential: "device-b" });
+        }),
+      );
+      await openConnectionEditor();
+      button("#connect").click();
+      button("#cancel-edit").click();
+      permission.resolve(true);
+      await settle();
+      expect(button("#edit-connection").disabled).toBe(true);
+      expect(requests).toEqual([`${previous.vault}/api/v1/health`]);
+      cleanup.resolve(true);
+      await settle();
+      expect(grantedOrigins).toEqual(new Set(["https://vault-a.example.com/*"]));
+      button("#edit-connection").click();
+      requiredElement("#vault", HTMLInputElement).value = nextVault;
+      requiredElement("#pairing-code", HTMLInputElement).value = "test-retry-code";
+      button("#connect").click();
+      await settle();
+      expect(grantedOrigins).toEqual(new Set(["https://vault-b.example.com/*"]));
+      expect((await fakeBrowser.storage.local.get()).deviceCredential).toBe("device-b");
+    });
+
+    it.each(["pairing", "api-key"])(
+      "replaces the previous credential kind in one publication: %s",
+      async (kind) => {
+        const oldCredential =
+          kind === "pairing"
+            ? { vault: previous.vault, username: "old-user", apiKey: "test-old-key" }
+            : previous;
+        await fakeBrowser.storage.local.set(oldCredential);
+        vi.stubGlobal(
+          "fetch",
+          vi.fn<typeof fetch>(async (url) => {
+            if (String(url).endsWith("/login")) return response({ access_token: "test-jwt" });
+            if (String(url).endsWith("/me"))
+              return response({ username: "test-user", is_superuser: false });
+            return response({ status: "ok", name: "PrintStash", credential: "device-b" });
+          }),
+        );
+        await import("../popup.ts");
+        await settle();
+        button("#edit-connection").click();
+        requiredElement("#vault", HTMLInputElement).value = nextVault;
+        requiredElement("#pairing-code", HTMLInputElement).value =
+          kind === "pairing" ? "test-code" : "";
+        requiredElement("#username", HTMLInputElement).value = "test-user";
+        requiredElement("#key", HTMLInputElement).value = "test-new-key";
+        button("#connect").click();
+        await settle();
+        const expected =
+          kind === "pairing"
+            ? { vault: nextVault, deviceCredential: "device-b" }
+            : { vault: nextVault, username: "test-user", apiKey: "test-new-key" };
+        expect(await fakeBrowser.storage.local.get()).toEqual(expected);
+        vi.resetModules();
+        document.documentElement.innerHTML = popupHtml;
+        await import("../popup.ts");
+        await settle();
+        expect(element("#connection-title").textContent).toBe("Connected");
+        expect(element("#connection-detail").textContent).toContain("vault-b.example.com");
+      },
+    );
+
+    it.each([
+      { label: "denied permission", granted: false, status: 200 },
+      { label: "rejected pairing", granted: true, status: 400 },
+    ])(
+      "preserves the previous connection after a failed update: $label",
+      async ({ granted, status }) => {
+        vi.stubGlobal(
+          "fetch",
+          vi.fn<typeof fetch>(async (url) =>
+            String(url).endsWith("/claim")
+              ? response({ detail: "invalid_code" }, status)
+              : response({ status: "ok", name: "PrintStash" }),
+          ),
+        );
+        await openConnectionEditor();
+        fakeBrowser.permissions.request = vi.fn().mockResolvedValue(granted);
+        button("#connect").click();
+        await settle();
+        expect(await fakeBrowser.storage.local.get()).toEqual(previous);
+        expect(element("#connection-detail").textContent).toContain("vault-a.example.com");
+        expect(element("#status").textContent).toContain("Connection was not updated.");
+        expect(button("#connect").disabled).toBe(false);
+        expect(button("#cancel-edit").disabled).toBe(false);
+      },
+    );
+
+    it("locks setup while prepared setup is pending", async () => {
+      const prepared = deferred<Awaited<ReturnType<typeof fakeBrowser.scripting.executeScript>>>();
+      fakeBrowser.scripting.executeScript = vi.fn().mockReturnValue(prepared.promise);
+      await import("../popup.ts");
+      await settle();
+      expect(button("#connect").disabled).toBe(true);
+      prepared.resolve([{ frameId: 0, result: null }]);
+      await settle();
+      expect(button("#connect").disabled).toBe(false);
+    });
+
+    it("locks setup while initialization reads are pending", async () => {
+      const settings = deferred<Record<string, never>>();
+      vi.spyOn(fakeBrowser.storage.local, "get").mockReturnValue(settings.promise);
+      await import("../popup.ts");
+      expect(button("#connect").disabled).toBe(true);
+      settings.resolve({});
+      await settle();
+      expect(button("#connect").disabled).toBe(false);
+    });
+
+    it("locks connection controls during disconnect", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async () => response({ status: "ok", name: "PrintStash" })),
+      );
+      await openConnectionEditor();
+      const removal = deferred<void>();
+      const originalRemove = fakeBrowser.storage.local.remove.bind(fakeBrowser.storage.local);
+      vi.spyOn(fakeBrowser.storage.local, "remove").mockImplementation(async (keys) => {
+        await removal.promise;
+        await originalRemove(keys);
+      });
+      button("#disconnect").click();
+      expect(button("#cancel-edit").disabled).toBe(true);
+      expect(button("#connect").disabled).toBe(true);
+      expect(button("#disconnect").disabled).toBe(true);
+      removal.resolve(undefined);
+      await settle();
+      expect(await fakeBrowser.storage.local.get()).toEqual({ vault: previous.vault });
+      expect(element("#connection-title").textContent).toBe("Not connected");
+      expect(button("#connect").disabled).toBe(false);
+    });
+
+    it("keeps the previous connection when disconnect storage fails", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async () => response({ status: "ok", name: "PrintStash" })),
+      );
+      await openConnectionEditor();
+      vi.spyOn(fakeBrowser.storage.local, "remove").mockRejectedValue(
+        new Error("Storage unavailable"),
+      );
+      button("#disconnect").click();
+      await settle();
+      expect(await fakeBrowser.storage.local.get()).toEqual(previous);
+      expect(element("#status").textContent).toContain(
+        "Couldn't remove the stored browser credential.",
+      );
+      expect(button("#connect").disabled).toBe(false);
+      expect(button("#cancel-edit").disabled).toBe(false);
+      expect(button("#disconnect").disabled).toBe(false);
+    });
+  });
+
   it("opens the Imports settings section used for browser pairing", async () => {
     await fakeBrowser.storage.local.set({
       vault: "https://prints.example.com",
@@ -713,6 +1115,257 @@ describe("popup browser adapters", () => {
     expect(await fakeBrowser.storage.local.get("deviceCredential")).toEqual({});
     expect(fakeBrowser.permissions.remove).toHaveBeenCalledWith({
       origins: ["https://prints.example.com/*"],
+    });
+  });
+
+  describe("disconnect host permissions", () => {
+    async function connectSavedDevice(vault: string) {
+      await fakeBrowser.storage.local.set({ vault, deviceCredential: "device-secret" });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async () => response({ status: "ok", name: "PrintStash" })),
+      );
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+      vi.mocked(fakeBrowser.permissions.contains).mockClear();
+      button("#edit-connection").click();
+    }
+
+    it.each([
+      { vault: "http://192.168.1.20:8000", origin: "http://192.168.1.20/*" },
+      { vault: "http://prints.local:8000", origin: "http://prints.local/*" },
+      { vault: "http://printstash:8000", origin: "http://printstash/*" },
+      { vault: "http://vault.localhost:8000", origin: "http://vault.localhost/*" },
+      { vault: "http://[fd00::1]:8000", origin: "http://[fd00::1]/*" },
+      { vault: "http://127.0.0.2:8000", origin: "http://127.0.0.2/*" },
+      { vault: "https://localhost:8443", origin: "https://localhost/*" },
+      { vault: "https://127.0.0.1:8443", origin: "https://127.0.0.1/*" },
+      { vault: "https://[::1]:8443", origin: "https://[::1]/*" },
+    ])("removes optional local vault access on disconnect: $vault", async ({ vault, origin }) => {
+      await connectSavedDevice(vault);
+      vi.mocked(fakeBrowser.permissions.contains).mockResolvedValue(false);
+
+      button("#disconnect").click();
+      await vi.waitFor(() =>
+        expect(element("#connection-title").textContent).toBe("Not connected"),
+      );
+
+      expect(await fakeBrowser.storage.local.get()).toEqual({ vault });
+      expect(fakeBrowser.permissions.remove).toHaveBeenCalledExactlyOnceWith({ origins: [origin] });
+      expect(fakeBrowser.permissions.contains).toHaveBeenCalledExactlyOnceWith({
+        origins: [origin],
+      });
+      expect(element("#status-message").textContent).toBe(
+        "Disconnected. The stored browser credential and vault permission were removed from this browser.",
+      );
+    });
+
+    it.each(["http://localhost:8000", "http://127.0.0.1:8000", "http://[::1]:8000"])(
+      "explains retained built-in loopback access: %s",
+      async (vault) => {
+        await connectSavedDevice(vault);
+
+        button("#disconnect").click();
+        await vi.waitFor(() =>
+          expect(element("#connection-title").textContent).toBe("Not connected"),
+        );
+
+        expect(await fakeBrowser.storage.local.get()).toEqual({ vault });
+        expect(fakeBrowser.permissions.remove).not.toHaveBeenCalled();
+        expect(fakeBrowser.permissions.contains).not.toHaveBeenCalled();
+        expect(element("#status-message").textContent).toBe(
+          "Disconnected. The stored browser credential was removed; built-in loopback access contains no credentials.",
+        );
+      },
+    );
+
+    it.each(["retained", "rejected"])(
+      "explains an optional local permission that the browser retained: %s",
+      async (outcome) => {
+        const vault = "http://192.168.1.20:8000";
+        await connectSavedDevice(vault);
+        if (outcome === "rejected")
+          vi.mocked(fakeBrowser.permissions.remove).mockRejectedValue(
+            new Error("Permission removal failed"),
+          );
+        else vi.mocked(fakeBrowser.permissions.remove).mockResolvedValue(false);
+
+        button("#disconnect").click();
+        await vi.waitFor(() =>
+          expect(element("#connection-title").textContent).toBe("Not connected"),
+        );
+
+        expect(await fakeBrowser.storage.local.get()).toEqual({ vault });
+        expect(fakeBrowser.permissions.remove).toHaveBeenCalledExactlyOnceWith({
+          origins: ["http://192.168.1.20/*"],
+        });
+        expect(element("#status-message").textContent).toBe(
+          "Disconnected and removed the stored browser credential, but Chrome kept the vault permission. Remove it from the extension's site access settings.",
+        );
+      },
+    );
+  });
+
+  describe("capture authentication retirement", () => {
+    const stages = ["slot_create", "slot_upload", "slot_finalize"] as const;
+    const stored = { vault: "https://vault-a.example.com", deviceCredential: "test-credential-a" };
+
+    async function startRichFailure(stage: (typeof stages)[number], status: number, hold = false) {
+      await fakeBrowser.storage.local.set(stored);
+      fakeBrowser.scripting.executeScript = vi
+        .fn()
+        .mockResolvedValue([{ frameId: 0, result: { pageTitle: "Part", jsonLd: [] } }]);
+      const held = deferred<Response>();
+      const requests: { url: string; method: string; authorization: string | null }[] = [];
+      let rejectionEnabled = false;
+      let rejectionReached = false;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (input, options = {}) => {
+          const url = String(input);
+          requests.push({
+            url,
+            method: options.method ?? "GET",
+            authorization: new Headers(options.headers).get("Authorization"),
+          });
+          if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+          if (url.endsWith("/claim")) return response({ credential: "test-credential-b" });
+          if (url.includes("api.printables.com")) return response({}, 503);
+          if (options.method === "DELETE") return new Response(null, { status: 204 });
+          const currentStage = url.endsWith("/capture-upload-slots")
+            ? "slot_create"
+            : options.method === "PUT"
+              ? "slot_upload"
+              : "slot_finalize";
+          if (rejectionEnabled && currentStage === stage) {
+            rejectionReached = true;
+            return hold
+              ? held.promise
+              : response(
+                  { detail: status === 401 ? "invalid_browser_credential" : "insufficient_scope" },
+                  status,
+                );
+          }
+          if (currentStage === "slot_create") {
+            const body = JSON.parse(stringBody(options));
+            return response({
+              item: { id: 44 },
+              slots: body.files.map(
+                (file: {
+                  id: string;
+                  filename: string;
+                  media_type: string;
+                  size_bytes: number;
+                  sha256: string;
+                }) => ({ ...file, id: "slot-a", role: "file", source_file_id: file.id }),
+              ),
+            });
+          }
+          return currentStage === "slot_finalize"
+            ? response({ id: 44, state: "review" })
+            : new Response(null, { status: 204 });
+        }),
+      );
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+      async function sendManualFile() {
+        button("#capture").click();
+        await vi.waitFor(() => expect(element("#manual-file-panel").hidden).toBe(false));
+        const input = requiredElement("#manual-file", HTMLInputElement);
+        const file = new File(["mesh"], "part.stl", { type: "model/stl" });
+        Object.defineProperty(input, "files", {
+          configurable: true,
+          value: { 0: file, length: 1, item: (index: number) => (index === 0 ? file : null) },
+        });
+        button("#capture").click();
+      }
+      await sendManualFile();
+      await vi.waitFor(() =>
+        expect(element("#status").textContent).toContain("sent to Pending Imports"),
+      );
+      expect(button("#open-inbox").hidden).toBe(false);
+      rejectionEnabled = true;
+      await sendManualFile();
+      await vi.waitFor(() => expect(rejectionReached).toBe(true));
+      return { held, requests };
+    }
+
+    it.each(stages)(
+      "retires the connection after rich capture authentication failure: %s",
+      async (stage) => {
+        await startRichFailure(stage, 401);
+        await settle();
+        expect(element("#connection-title").textContent).toBe("Connection failed");
+        expect(element("#connection-detail").textContent).toBe(
+          "Reconnect PrintStash to continue importing.",
+        );
+        expect(element("#connection-panel").hidden).toBe(false);
+        expect(button("#capture").disabled).toBe(true);
+        expect(button("#open-inbox").hidden).toBe(true);
+        expect(element("#manual-file-panel").hidden).toBe(true);
+        expect(element("#candidate-panel").hidden).toBe(true);
+        expect(await fakeBrowser.storage.local.get()).toEqual(stored);
+      },
+    );
+
+    it.each(stages)(
+      "keeps the connection after rich capture permission failure: %s",
+      async (stage) => {
+        await startRichFailure(stage, 403);
+        await settle();
+        expect(element("#connection-title").textContent).toBe("Connected");
+        expect(element("#status").textContent).toContain("capture_vault_");
+        expect(button("#capture").disabled).toBe(false);
+        expect(element("#manual-file-panel").hidden).toBe(false);
+        expect(await fakeBrowser.storage.local.get()).toEqual(stored);
+      },
+    );
+
+    it("ignores retired rich authentication failures", async () => {
+      const { held, requests } = await startRichFailure("slot_upload", 401, true);
+      button("#edit-connection").click();
+      requiredElement("#vault", HTMLInputElement).value = "https://vault-b.example.com";
+      requiredElement("#pairing-code", HTMLInputElement).value = "test-code-b";
+      button("#connect").click();
+      await vi.waitFor(() =>
+        expect(element("#connection-detail").textContent).toContain("vault-b.example.com"),
+      );
+      held.resolve(response({ detail: "invalid_browser_credential" }, 401));
+      await settle();
+      expect(element("#connection-title").textContent).toBe("Connected");
+      expect(element("#status").textContent).toContain("Connection verified");
+      expect(
+        requests.filter(
+          (request) =>
+            request.url.startsWith("https://vault-b.example.com") && request.authorization !== null,
+        ),
+      ).toEqual([]);
+      expect((await fakeBrowser.storage.local.get()).deviceCredential).toBe("test-credential-b");
+    });
+
+    it("retires the connection after direct capture authentication failure", async () => {
+      await fakeBrowser.storage.local.set(stored);
+      fakeBrowser.tabs.query = vi
+        .fn()
+        .mockResolvedValue([{ id: 42, title: "Part", url: "https://models.example.com/part.stl" }]);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn<typeof fetch>(async (url) =>
+          String(url).endsWith("/health")
+            ? response({ status: "ok", name: "PrintStash" })
+            : response({ detail: "invalid_browser_credential" }, 401),
+        ),
+      );
+      await import("../popup.ts");
+      await settle();
+      button("#capture").click();
+      await settle();
+      expect(element("#connection-title").textContent).toBe("Connection failed");
+      expect(element("#connection-detail").textContent).toBe(
+        "Reconnect PrintStash to continue importing.",
+      );
+      expect(button("#capture").disabled).toBe(true);
+      expect(await fakeBrowser.storage.local.get()).toEqual(stored);
     });
   });
 
@@ -1961,5 +2614,215 @@ describe("popup browser adapters", () => {
       "https://prints.example.com/api/v1/inbox/62/capture-upload-finalize",
     ]);
     expect(element("#status").textContent).toContain("sent to Pending Imports");
+  });
+
+  it.each(["visible_page", "thingiverse_files", "printables_metadata"])(
+    "retires the fallback after held %s metadata is cancelled",
+    async (stage) => {
+      fakeBrowser.tabs.query = vi.fn().mockResolvedValue([
+        {
+          id: 42,
+          title: "Whistle",
+          url:
+            stage === "printables_metadata"
+              ? "https://www.printables.com/model/3161-3d-benchy/files"
+              : "https://www.thingiverse.com/thing:763622/files",
+        },
+      ]);
+      let holdCapture = false;
+      let releaseMetadata: (() => void) | undefined;
+      let metadataSignal: AbortSignal | null | undefined;
+      fakeBrowser.scripting.executeScript = vi.fn(async (details) => {
+        const fileRead = details.func?.name === "requestThingiverseFilesInMainWorld";
+        const visibleRead =
+          Array.isArray(details.args) &&
+          details.args[0] &&
+          typeof details.args[0] === "object" &&
+          "maxScripts" in details.args[0];
+        if (
+          holdCapture &&
+          ((stage === "visible_page" && visibleRead) || (stage === "thingiverse_files" && fileRead))
+        ) {
+          await new Promise<void>((resolve) => {
+            releaseMetadata = resolve;
+          });
+        }
+        return [{ frameId: 0, result: { pageTitle: "Whistle", jsonLd: [] } }];
+      });
+      await fakeBrowser.storage.local.set({
+        vault: "https://vault-a.example.com",
+        deviceCredential: "credential-a",
+      });
+      const fetchImpl = vi.fn<typeof fetch>(async (input, options = {}) => {
+        const url = String(input);
+        if (url === "https://api.printables.com/graphql/") {
+          metadataSignal = options.signal;
+          return new Promise<Response>((resolve) => {
+            releaseMetadata = () => resolve(response({}));
+          });
+        }
+        if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+        if (url.endsWith("/browser-pairings/claim"))
+          return response({ credential: "credential-b" });
+        throw new Error(`Unexpected request ${url}`);
+      });
+      vi.stubGlobal("fetch", fetchImpl);
+      await import("../popup.ts");
+      await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+      holdCapture = true;
+      button("#capture").click();
+      await vi.waitFor(() => expect(releaseMetadata).toBeTypeOf("function"));
+      button("#edit-connection").click();
+      requiredElement("#vault", HTMLInputElement).value = "https://vault-b.example.com";
+      requiredElement("#pairing-code", HTMLInputElement).value = "pair-b";
+      button("#connect").click();
+      await vi.waitFor(() =>
+        expect(element("#connection-detail").textContent).toContain("vault-b.example.com"),
+      );
+      releaseMetadata?.();
+      await settle();
+
+      if (stage === "printables_metadata") expect(metadataSignal?.aborted).toBe(true);
+      expect(element("#manual-file-panel").hidden).toBe(true);
+      expect(element("#candidate-panel").hidden).toBe(true);
+      expect(button("#capture").textContent).toBe("Send to Pending Imports");
+      expect(element("#status").textContent).toContain("Connection verified");
+      expect(fetchImpl.mock.calls.some(([input]) => String(input).includes("/inbox"))).toBe(false);
+    },
+  );
+
+  async function startHeldThingiverseCapture() {
+    fakeBrowser.tabs.query = vi
+      .fn()
+      .mockResolvedValue([
+        { id: 42, title: "Whistle", url: "https://www.thingiverse.com/thing:763622/files" },
+      ]);
+    fakeBrowser.scripting.executeScript = vi.fn(async (details) =>
+      details.func?.name === "requestThingiverseFilesInMainWorld"
+        ? [
+            {
+              frameId: 0,
+              result: {
+                ok: true,
+                files: [
+                  {
+                    id: "991001",
+                    filename: "whistle.stl",
+                    fileType: "stl",
+                    url: "https://www.thingiverse.com/download:991001",
+                  },
+                ],
+              },
+            },
+          ]
+        : [{ frameId: 0, result: { pageTitle: "Whistle", jsonLd: [] } }],
+    );
+    await fakeBrowser.storage.local.set({
+      vault: "https://vault-a.example.com",
+      deviceCredential: "credential-a",
+    });
+    const downloads: Array<{ signal: AbortSignal | null; release: (response: Response) => void }> =
+      [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, options = {}) => {
+      const url = String(input);
+      if (url.endsWith("/health")) return response({ status: "ok", name: "PrintStash" });
+      if (url.endsWith("/browser-pairings/claim")) return response({ credential: "credential-b" });
+      if (url === "https://www.thingiverse.com/download:991001") {
+        return new Promise<Response>((release) => {
+          downloads.push({ signal: options.signal ?? null, release });
+        });
+      }
+      if (url.endsWith("/capture-upload-slots")) return response({ item: { id: 99 }, slots: [] });
+      throw new Error(`Unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchImpl);
+    await import("../popup.ts");
+    await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Connected"));
+    button("#capture").click();
+    await vi.waitFor(() => expect(element("#candidate-panel").hidden).toBe(false));
+    button("#capture").click();
+    await vi.waitFor(() => expect(downloads).toHaveLength(1));
+    const releaseDownload = (index: number) => {
+      const download = downloads[index];
+      if (!download) throw new Error("Download not started");
+      const downloaded = new Response("mesh", {
+        headers: { "Content-Length": "4", "Content-Type": "model/stl" },
+      });
+      Object.defineProperty(downloaded, "url", {
+        value: "https://cdn.thingiverse.com/assets/991001/whistle.stl",
+      });
+      download.release(downloaded);
+    };
+    return { fetchImpl, downloads, releaseDownload };
+  }
+
+  it("retires a held provider download when switching vaults", async () => {
+    const { fetchImpl, downloads, releaseDownload } = await startHeldThingiverseCapture();
+
+    button("#edit-connection").click();
+    requiredElement("#vault", HTMLInputElement).value = "https://vault-b.example.com";
+    requiredElement("#pairing-code", HTMLInputElement).value = "pair-b";
+    button("#connect").click();
+    await vi.waitFor(async () =>
+      expect((await fakeBrowser.storage.local.get("vault")).vault).toBe(
+        "https://vault-b.example.com",
+      ),
+    );
+    releaseDownload(0);
+    await vi.waitFor(() => expect(button("#capture").disabled).toBe(false));
+    await settle();
+    expect(
+      fetchImpl.mock.calls.filter(([input]) => String(input).includes("/capture-upload")),
+    ).toEqual([]);
+    expect(downloads[0]?.signal?.aborted).toBe(true);
+    expect(element("#connection-detail").textContent).toContain("vault-b.example.com");
+    expect(element("#status").textContent).not.toContain("sent to Pending Imports");
+    expect(element("#status").textContent).toContain("Connection verified");
+  });
+
+  it("preserves disconnect feedback after a retired download completes", async () => {
+    const { fetchImpl, downloads, releaseDownload } = await startHeldThingiverseCapture();
+    button("#edit-connection").click();
+    button("#disconnect").click();
+    await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Not connected"));
+    releaseDownload(0);
+    await settle();
+    expect(downloads[0]?.signal?.aborted).toBe(true);
+    expect(fetchImpl.mock.calls.some(([input]) => String(input).includes("/capture-upload"))).toBe(
+      false,
+    );
+    expect(element("#status").textContent).toContain("Disconnected");
+    expect(button("#capture").disabled).toBe(true);
+  });
+
+  it("keeps the newer capture busy after the retired download completes", async () => {
+    const { fetchImpl, downloads, releaseDownload } = await startHeldThingiverseCapture();
+    button("#edit-connection").click();
+    requiredElement("#vault", HTMLInputElement).value = "https://vault-b.example.com";
+    requiredElement("#pairing-code", HTMLInputElement).value = "pair-b";
+    button("#connect").click();
+    await vi.waitFor(async () =>
+      expect((await fakeBrowser.storage.local.get("vault")).vault).toBe(
+        "https://vault-b.example.com",
+      ),
+    );
+    button("#capture").click();
+    await vi.waitFor(() => expect(element("#candidate-panel").hidden).toBe(false));
+    button("#capture").click();
+    await vi.waitFor(() => expect(downloads).toHaveLength(2));
+    releaseDownload(0);
+    await settle();
+    expect(button("#capture").disabled).toBe(true);
+    expect(downloads[1]?.signal?.aborted).toBe(false);
+    expect(fetchImpl.mock.calls.some(([input]) => String(input).includes("/capture-upload"))).toBe(
+      false,
+    );
+    expect(element("#import-hint").textContent).toContain("Keep this popup open");
+    button("#edit-connection").click();
+    button("#disconnect").click();
+    await vi.waitFor(() => expect(element("#connection-title").textContent).toBe("Not connected"));
+    releaseDownload(1);
+    await settle();
+    expect(downloads[1]?.signal?.aborted).toBe(true);
   });
 });

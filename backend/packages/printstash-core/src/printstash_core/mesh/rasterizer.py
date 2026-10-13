@@ -28,14 +28,11 @@ O(chunk_size) rather than O(total_faces) — a million-triangle mesh no longer
 materialises several ~70 MB float32 arrays at once (#29). Only the vertex-scale
 arrays (the projected vertices and the welded smooth-normal table) are held whole.
 
-Future architecture (not yet implemented): ``render_mesh_thumbnail`` is a pure
-function — it takes an already-loaded mesh and returns PNG bytes, touching no
-shared state — so it can be moved wholesale into a separate thumbnail worker
-process. The intended split is: the API process accepts the upload; a worker
-renders one job at a time under a timeout and the memory-aware cap; on failure or
-over-cap it falls back to the embedded preview; and an OOM kills only the worker,
-never the API. Keeping this function isolatable is what makes that move a
-drop-in later.
+The backend invokes ``render_mesh_thumbnail`` in a disposable mesh worker through
+its bounded isolation seam. This function takes an already-loaded mesh and
+returns PNG bytes; process admission, deadlines, memory limits and embedded
+preview selection belong to backend owners. An OOM therefore terminates the
+worker rather than the API process.
 """
 
 from __future__ import annotations
@@ -43,9 +40,18 @@ from __future__ import annotations
 import io
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, runtime_checkable
 
 from .preview_profile import PREVIEW_PROFILE
+from .render_geometry import (
+    MeshRenderInput,
+    PreparedRender,
+    SceneRenderInput,
+    prepare_mesh_render,
+    prepare_scene_render,
+)
+from .similarity.components import ExpandedScene
 
 if TYPE_CHECKING:
     import numpy as np
@@ -60,9 +66,10 @@ FLAT_MESH_THICKNESS_RATIO = PREVIEW_PROFILE.flat_thickness_ratio
 
 # Cap candidate-pixel expansion per rasteriser chunk (~tens of MB of
 # temporaries at this size).
-# Smaller batches bound dense-model temporaries without reducing the image or
-# sampling faces. Every triangle still resolves through the same z-buffer.
-_CHUNK_PIXEL_BUDGET = 250_000
+# Smaller batches leave room for candidate and winner-normal temporaries inside
+# a 512 MiB worker. This bounds allocation, without reducing cumulative work,
+# sampling faces or cropping coverage; all triangles use the same z-buffer.
+_CHUNK_PIXEL_BUDGET = 125_000
 
 
 @dataclass
@@ -102,6 +109,188 @@ class Rasteriser(Protocol):
     ) -> int | None: ...
 
 
+@runtime_checkable
+class DeferredRasteriser(Rasteriser, Protocol):
+    """Publish a private frame once, after all chunks and silhouette recovery.
+
+    Deferred implementations keep drawing state outside the CPU image arrays.
+    ``finish`` must complete pending drawing and populate both arrays before
+    common alpha, downsampling and vignette processing. The caller owns backend
+    resources; a failed chunk never publishes a partial frame. Plain rasterizer
+    callbacks retain their existing immediate-write contract.
+    """
+
+    def finish(self, img: UInt8Array, zbuf: FloatArray) -> None: ...
+
+
+@runtime_checkable
+class PreparedRasteriser(DeferredRasteriser, Protocol):
+    """Optional persistent backend accepting one camera-independent geometry set.
+
+    Framing and final encoding stay canonical. Native allocation, ownership and
+    qualification belong to the caller; core never imports a device runtime.
+    """
+
+    def draw_prepared(
+        self,
+        geometry: PreparedRender,
+        rotation: FloatArray,
+        screen: FloatArray,
+        width: int,
+        height: int,
+        matte: bool,
+    ) -> None: ...
+
+
+class RGBBackground(str, Enum):
+    IGNORE_ALPHA = "ignore_alpha"
+    WHITE = "white"
+
+
+@dataclass(frozen=True)
+class RenderedPixels:
+    width: int
+    height: int
+    rgba: bytes
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.width) is not int
+            or self.width < 1
+            or type(self.height) is not int
+            or self.height < 1
+            or type(self.rgba) is not bytes
+            or len(self.rgba) != self.width * self.height * 4
+        ):
+            raise ValueError("invalid_rendered_pixels")
+
+    def rgb(self, background: RGBBackground) -> bytes:
+        from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
+
+        if type(background) is not RGBBackground:
+            raise TypeError("invalid_rgb_background")
+        image = Image.frombytes("RGBA", (self.width, self.height), self.rgba)
+        if background is RGBBackground.WHITE:
+            image = Image.alpha_composite(
+                Image.new("RGBA", image.size, (255, 255, 255, 255)), image
+            )
+        return image.convert("RGB").tobytes()
+
+
+def encode_rendered_pixels(
+    pixels: RenderedPixels, *, output_format: Literal["PNG", "WEBP"] = "PNG"
+) -> bytes:
+    """Encode a completed frame with the versioned thumbnail compression policy."""
+    if output_format not in ("PNG", "WEBP"):
+        raise ValueError("invalid_thumbnail_format")
+    from PIL import Image
+
+    image = Image.frombytes("RGBA", (pixels.width, pixels.height), pixels.rgba)
+    buffer = io.BytesIO()
+    if output_format == "WEBP":
+        image.save(
+            buffer,
+            format="WEBP",
+            lossless=PREVIEW_PROFILE.encoding_lossless,
+            exact=PREVIEW_PROFILE.encoding_exact,
+            alpha_quality=100,
+            method=PREVIEW_PROFILE.encoding_method,
+            quality=PREVIEW_PROFILE.encoding_quality,
+        )
+    else:
+        image.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+def _render_thumbnail(
+    source: MeshRenderInput | SceneRenderInput,
+    name: str,
+    width: int = 640,
+    height: int = 480,
+    *,
+    face_chunk_size: int = 64_000,
+    logger: LogSink | None = None,
+    rasterise_triangles: Rasteriser | None = None,
+    output_format: Literal["PNG", "WEBP"] = "PNG",
+    view_rotation: FloatArray | None = None,
+    matte: bool = False,
+) -> bytes | None:
+    try:
+        # Keep optional dependency refusal ahead of source allocations.
+        from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
+
+        del Image
+        prepared = (
+            prepare_scene_render(source.scene, face_chunk_size=face_chunk_size)
+            if isinstance(source, SceneRenderInput)
+            else prepare_mesh_render(source.mesh, face_chunk_size=face_chunk_size)
+        )
+        if prepared is None:
+            if logger is not None:
+                logger.warning("mesh_render: empty mesh for %s", name)
+            return None
+    except ImportError:
+        if logger is not None:
+            logger.error(
+                "mesh_render: numpy/Pillow unavailable; cannot render thumbnail"
+            )
+        return None
+    except Exception:
+        if logger is not None:
+            logger.warning(
+                "mesh_render: render_thumbnail failed for %s", name, exc_info=True
+            )
+        return None
+    return render_prepared_thumbnail(
+        prepared,
+        name,
+        width,
+        height,
+        face_chunk_size=face_chunk_size,
+        logger=logger,
+        rasterise_triangles=rasterise_triangles,
+        output_format=output_format,
+        view_rotation=view_rotation,
+        matte=matte,
+    )
+
+
+def render_prepared_thumbnail(
+    prepared: PreparedRender,
+    name: str,
+    width: int = 640,
+    height: int = 480,
+    *,
+    face_chunk_size: int = 64_000,
+    logger: LogSink | None = None,
+    rasterise_triangles: Rasteriser | None = None,
+    output_format: Literal["PNG", "WEBP"] = "PNG",
+    view_rotation: FloatArray | None = None,
+    matte: bool = False,
+) -> bytes | None:
+    pixels = render_prepared_pixels(
+        prepared,
+        name,
+        width,
+        height,
+        face_chunk_size=face_chunk_size,
+        logger=logger,
+        rasterise_triangles=rasterise_triangles,
+        view_rotation=view_rotation,
+        matte=matte,
+    )
+    if pixels is None:
+        return None
+    try:
+        return encode_rendered_pixels(pixels, output_format=output_format)
+    except Exception:
+        if logger is not None:
+            logger.warning(
+                "mesh_render: render_thumbnail failed for %s", name, exc_info=True
+            )
+        return None
+
+
 def render_mesh_thumbnail(
     mesh: Any,
     name: str,
@@ -115,17 +304,71 @@ def render_mesh_thumbnail(
     view_rotation: FloatArray | None = None,
     matte: bool = False,
 ) -> bytes | None:
-    """Render a PNG thumbnail from an already-loaded mesh.
+    """Render a loaded structural mesh through the shared prepared geometry path."""
+    return _render_thumbnail(
+        MeshRenderInput(mesh),
+        name,
+        width,
+        height,
+        face_chunk_size=face_chunk_size,
+        logger=logger,
+        rasterise_triangles=rasterise_triangles,
+        output_format=output_format,
+        view_rotation=view_rotation,
+        matte=matte,
+    )
 
-    Lets callers that need both geometry and a thumbnail load the mesh once.
-    Returns raw PNG bytes, or None on failure.
+
+def render_scene_thumbnail(
+    scene: ExpandedScene,
+    name: str,
+    width: int = 640,
+    height: int = 480,
+    *,
+    face_chunk_size: int = 64_000,
+    logger: LogSink | None = None,
+    rasterise_triangles: Rasteriser | None = None,
+    output_format: Literal["PNG", "WEBP"] = "PNG",
+    view_rotation: FloatArray | None = None,
+    matte: bool = False,
+) -> bytes | None:
+    """Render retained scene resources without source materialization."""
+    return _render_thumbnail(
+        SceneRenderInput(scene),
+        name,
+        width,
+        height,
+        face_chunk_size=face_chunk_size,
+        logger=logger,
+        rasterise_triangles=rasterise_triangles,
+        output_format=output_format,
+        view_rotation=view_rotation,
+        matte=matte,
+    )
+
+
+def render_prepared_pixels(
+    prepared: PreparedRender,
+    name: str,
+    width: int = 640,
+    height: int = 480,
+    *,
+    face_chunk_size: int = 64_000,
+    logger: LogSink | None = None,
+    rasterise_triangles: Rasteriser | None = None,
+    view_rotation: FloatArray | None = None,
+    matte: bool = False,
+) -> RenderedPixels | None:
+    """Render final RGBA pixels using cached camera-independent geometry.
+
+    Downsampling, vignette and raster math match the encoded-thumbnail path.
+    No image serialization or decoding occurs here.
     """
     try:
         import numpy as np
 
-        # Pillow 10 does not ship the ``py.typed`` marker that later supported
-        # versions provide. Runtime imports are still valid across the matrix.
-        from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
+        # Preserve the early optional-dependency failure before geometry work.
+        __import__("PIL", fromlist=["Image"])
     except ImportError:
         if logger is not None:
             logger.error(
@@ -133,24 +376,9 @@ def render_mesh_thumbnail(
             )
         return None
 
-    if (
-        mesh is None
-        or len(mesh.vertices) == 0
-        or mesh.faces is None
-        or len(mesh.faces) == 0
-    ):
-        if logger is not None:
-            logger.warning("mesh_render: empty mesh for %s", name)
-        return None
-
     try:
-        # float32 throughout the per-face geometry/shading pipeline halves the
-        # peak RSS of the arrays that scale with triangle count — and the render
-        # is ~3/4 of a dense mesh's memory cost (#29). Screen-space thumbnail
-        # rendering doesn't need float64 precision; the view-selection and weld
-        # quantisation below are unaffected at this scale.
-        verts = np.asarray(mesh.vertices, dtype=np.float32)
-        faces = np.asarray(mesh.faces, dtype=np.int64)
+        geometry = prepared
+        verts = geometry.vertices
 
         supersample = PREVIEW_PROFILE.supersample_for(width)
         ss_width = width * supersample
@@ -159,8 +387,8 @@ def render_mesh_thumbnail(
         # ------------------------------------------------------------------
         # 1. Centre and normalise the mesh to a unit-ish bounding sphere.
         # ------------------------------------------------------------------
-        center = (verts.max(axis=0) + verts.min(axis=0)) * 0.5
-        verts = verts - center
+        # Preparation already removed the shared float64 world origin before
+        # allocating the relative float32 positions used throughout rendering.
 
         # ------------------------------------------------------------------
         # 2. Pick a camera view.
@@ -204,75 +432,14 @@ def render_mesh_thumbnail(
         screen = np.stack([px, py, pz], axis=1)  # (N, 3)
 
         # ------------------------------------------------------------------
-        # 4. Weld coincident vertices once (vertex-scale, O(N) — held whole).
-        #     Quantise + pack each position into one integer key so the weld is a
-        #     fast 1-D unique; the smoothed per-position normal table is then
-        #     accumulated chunk-by-chunk below so we never build a (3F, 3) corner
-        #     array for the whole mesh at once.
+        # 4. Reuse welded position identities and smooth object-space normals.
+        #    Preparation computed these once, independently of this camera.
         # ------------------------------------------------------------------
-        extent = float(np.linalg.norm(verts.max(axis=0) - verts.min(axis=0))) or 1.0
-        q = np.round(verts / (extent * 1e-5)).astype(np.int64)
-        q -= q.min(axis=0)
-        span = q.max(axis=0) + 1
-        key = (q[:, 0] * span[1] + q[:, 1]) * span[2] + q[:, 2]
-        _, pos_id = np.unique(key, return_inverse=True)
-        n_pos = int(pos_id.max()) + 1
-        del q, key
-
-        rot_T = rotation.T  # original-space -> view-space, applied per chunk
-        n_faces = int(faces.shape[0])
-        # Per-face arrays below are each O(faces); building them one chunk at a
-        # time keeps peak render memory O(chunk_size) rather than O(total_faces).
+        pos_id = geometry.position_ids
+        vsm = geometry.smooth_normals
+        rot_T = rotation.T
         chunk = max(int(face_chunk_size), 1)
         rasterise = rasterise_triangles or _rasterise_triangles
-
-        # ------------------------------------------------------------------
-        # 4b. Crease-aware smooth normals — accumulation pass.
-        #     Average each welded position's incident face normals into one
-        #     smoothed normal. Smooth normals let shading interpolate across a
-        #     triangle (Gouraud, below) instead of flat-shading every facet; the
-        #     crease test in the shading pass falls back to the flat face normal
-        #     across hard edges so mechanical parts keep crisp corners while
-        #     organic models read smooth. bincount accumulation is additive, so
-        #     summing it chunk-by-chunk (rather than over a full (3F, 3) array)
-        #     gives the same table at O(chunk_size) memory.
-        # ------------------------------------------------------------------
-        vacc = np.zeros((n_pos, 3), dtype=np.float64)
-        for s in range(0, n_faces, chunk):
-            fc = faces[s : s + chunk]
-            f_obj = verts[fc]  # (c, 3, 3)
-            fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
-            fn = fn / np.where(
-                np.linalg.norm(fn, axis=1, keepdims=True) == 0,
-                1.0,
-                np.linalg.norm(fn, axis=1, keepdims=True),
-            )
-            # Angle-weighted normals (Thürmer–Wüthrich): weight each face's
-            # contribution to a vertex by the triangle's interior angle there.
-            # Plain incident-face averaging over-counts directions that simply
-            # have more (or thinner) triangles — which skews the normal at mesh
-            # "poles" (many triangles fanning into one vertex) and irregular
-            # tessellation, the source of the radial "fan" streaks. Angle weights
-            # make the smoothed normal independent of how the surface is cut up.
-            e_ab = f_obj[:, [1, 2, 0]] - f_obj  # edge to "next" corner, per corner
-            e_ac = f_obj[:, [2, 0, 1]] - f_obj  # edge to "prev" corner, per corner
-            e_ab /= np.maximum(np.linalg.norm(e_ab, axis=2, keepdims=True), 1e-20)
-            e_ac /= np.maximum(np.linalg.norm(e_ac, axis=2, keepdims=True), 1e-20)
-            ang = np.arccos(np.clip(np.sum(e_ab * e_ac, axis=2), -1.0, 1.0))  # (c,3)
-            flat_pos = pos_id[fc].ravel()  # (3c,) welded id per face corner
-            # Each corner contributes its face normal scaled by that corner angle.
-            fn_per_corner = np.repeat(fn, 3, axis=0) * ang.ravel()[:, None]  # (3c,3)
-            for a in range(3):
-                vacc[:, a] += np.bincount(
-                    flat_pos, weights=fn_per_corner[:, a], minlength=n_pos
-                )
-            del f_obj, fn, flat_pos, fn_per_corner, e_ab, e_ac, ang
-        vsm = vacc / np.where(
-            np.linalg.norm(vacc, axis=1, keepdims=True) == 0,
-            1.0,
-            np.linalg.norm(vacc, axis=1, keepdims=True),
-        )
-        del vacc
 
         # ------------------------------------------------------------------
         # 5. Three-light shading + specular constants (per corner). Defined once,
@@ -365,93 +532,106 @@ def render_mesh_thumbnail(
         img = np.zeros((ss_height, ss_width, 3), dtype=np.uint8)
         zbuf = np.full((ss_height, ss_width), np.inf, dtype=np.float64)
 
-        visible_total = 0
-        for s in range(0, n_faces, chunk):
-            fc = faces[s : s + chunk]
-            tri = screen[fc]  # (c, 3, 3) screen-space
-            view_tri = view[fc]  # (c, 3, 3) view-space
-
-            edge1 = view_tri[:, 1] - view_tri[:, 0]
-            edge2 = view_tri[:, 2] - view_tri[:, 0]
-            # Back-face cull: in right-handed view-space visible faces have raw
-            # z<0; a negative-determinant (front-on flat) view flips that sign.
-            raw_normals = np.cross(edge1, edge2)  # (c, 3)
-            norm_len = np.linalg.norm(raw_normals, axis=1)  # (c,)
-
-            # Object-space face normals for the crease test (the view normals are
-            # flipped toward the camera, which would corrupt smoothing across
-            # silhouettes).
-            f_obj = verts[fc]  # (c, 3, 3)
-            fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
-            fn = fn / np.where(
-                np.linalg.norm(fn, axis=1, keepdims=True) == 0,
-                1.0,
-                np.linalg.norm(fn, axis=1, keepdims=True),
+        if isinstance(rasterise, PreparedRasteriser):
+            rasterise.draw_prepared(
+                geometry, rotation, screen, ss_width, ss_height, matte
             )
+        else:
+            visible_total = 0
+            for fc in geometry.face_chunks(chunk):
+                tri = screen[fc]  # (c, 3, 3) screen-space
+                view_tri = view[fc]  # (c, 3, 3) view-space
 
-            corner_smooth = vsm[pos_id[fc]]  # (c, 3, 3) object-space
-            # Blend each corner between its smoothed normal and the flat face
-            # normal by how far the two diverge (a crease measure). A *smooth*
-            # blend (smoothstep), not a hard threshold, is essential: a binary
-            # flip snaps neighbouring corners between smooth and flat, which on
-            # coarse fillets paints a comb of sharp light/dark streaks. The window
-            # cos(41°)=0.75 → cos(23°)=0.92 keeps a 90° edge's 45° half-angle
-            # (cos 0.707, below the window) fully flat so box/mechanical edges stay
-            # crisp, while curved fillets blend gradually and read smooth.
-            cos_crease = np.sum(corner_smooth * fn[:, None, :], axis=2)  # (c, 3)
-            t = np.clip((cos_crease - 0.75) / (0.92 - 0.75), 0.0, 1.0)
-            t = (t * t * (3.0 - 2.0 * t))[..., None]  # smoothstep, (c, 3, 1)
-            corner_n = t * corner_smooth + (1.0 - t) * fn[:, None, :]
-            corner_n = corner_n / np.where(
-                np.linalg.norm(corner_n, axis=2, keepdims=True) == 0,
-                1.0,
-                np.linalg.norm(corner_n, axis=2, keepdims=True),
-            )
-            # Into view-space and flip toward the camera (+Z). These per-corner
-            # normals are interpolated per pixel in the rasteriser (Phong); the
-            # Fresnel rim, diffuse and specular are all evaluated there from the
-            # interpolated normal, so there is no separate per-vertex colour pass.
-            cvn = corner_n @ rot_T  # (c, 3, 3)
-            cvn = np.where(cvn[..., 2:3] >= 0, cvn, -cvn)
+                edge1 = view_tri[:, 1] - view_tri[:, 0]
+                edge2 = view_tri[:, 2] - view_tri[:, 0]
+                # Back-face cull: in right-handed view-space visible faces have raw
+                # z<0; a negative-determinant (front-on flat) view flips that sign.
+                raw_normals = np.cross(edge1, edge2)  # (c, 3)
+                norm_len = np.linalg.norm(raw_normals, axis=1)  # (c,)
 
-            front = (raw_normals[:, 2] * view_handedness) < 0.0
-            valid = front & (norm_len > 1e-8)
-            tri = tri[valid]
-            cvn = cvn[valid]
-            visible_total += int(tri.shape[0])
-
-            rasterise(img, zbuf, tri, cvn, _shade, base_color, ss_width, ss_height)
-            # Free this chunk's temporaries before the next one so only one
-            # chunk's worth of per-face arrays is ever live. No gc.collect() here:
-            # there are no reference cycles in the hot loop, and the per-file
-            # _reclaim_memory() in mesh_processing already returns arenas to the OS.
-            del view_tri, edge1, edge2, raw_normals, norm_len, f_obj, fn
-            del corner_smooth, cos_crease, corner_n, cvn, tri, valid
-
-        if visible_total == 0:
-            # Degenerate / fully back-facing mesh: paint every face flat so the
-            # silhouette still reads, matching the single-pass fallback.
-            if logger is not None:
-                logger.warning(
-                    "mesh_render: no visible triangles for %s — using silhouette",
-                    name,
+                # Object-space face normals for the crease test (the view normals are
+                # flipped toward the camera, which would corrupt smoothing across
+                # silhouettes).
+                f_obj = verts[fc]  # (c, 3, 3)
+                fn = np.cross(f_obj[:, 1] - f_obj[:, 0], f_obj[:, 2] - f_obj[:, 0])
+                fn = fn / np.where(
+                    np.linalg.norm(fn, axis=1, keepdims=True) == 0,
+                    1.0,
+                    np.linalg.norm(fn, axis=1, keepdims=True),
                 )
-            flat_color = albedo * 0.6
 
-            def _flat_shade(
-                n: FloatArray,
-                _c: FloatArray = flat_color,
-            ) -> FloatArray:
-                return np.broadcast_to(_c, n.shape)
-
-            for s in range(0, n_faces, chunk):
-                fc = faces[s : s + chunk]
-                tri = screen[fc]
-                nrm = np.zeros((tri.shape[0], 3, 3), dtype=np.float32)
-                rasterise(
-                    img, zbuf, tri, nrm, _flat_shade, base_color, ss_width, ss_height
+                corner_smooth = vsm[pos_id[fc]]  # (c, 3, 3) object-space
+                # Blend each corner between its smoothed normal and the flat face
+                # normal by how far the two diverge (a crease measure). A *smooth*
+                # blend (smoothstep), not a hard threshold, is essential: a binary
+                # flip snaps neighbouring corners between smooth and flat, which on
+                # coarse fillets paints a comb of sharp light/dark streaks. The window
+                # cos(41°)=0.75 → cos(23°)=0.92 keeps a 90° edge's 45° half-angle
+                # (cos 0.707, below the window) fully flat so box/mechanical edges stay
+                # crisp, while curved fillets blend gradually and read smooth.
+                cos_crease = np.sum(corner_smooth * fn[:, None, :], axis=2)  # (c, 3)
+                t = np.clip((cos_crease - 0.75) / (0.92 - 0.75), 0.0, 1.0)
+                t = (t * t * (3.0 - 2.0 * t))[..., None]  # smoothstep, (c, 3, 1)
+                corner_n = t * corner_smooth + (1.0 - t) * fn[:, None, :]
+                corner_n = corner_n / np.where(
+                    np.linalg.norm(corner_n, axis=2, keepdims=True) == 0,
+                    1.0,
+                    np.linalg.norm(corner_n, axis=2, keepdims=True),
                 )
-                del tri, nrm
+                # Into view-space and flip toward the camera (+Z). These per-corner
+                # normals are interpolated per pixel in the rasteriser (Phong); the
+                # Fresnel rim, diffuse and specular are all evaluated there from the
+                # interpolated normal, so there is no separate per-vertex colour pass.
+                cvn = corner_n @ rot_T  # (c, 3, 3)
+                cvn = np.where(cvn[..., 2:3] >= 0, cvn, -cvn)
+
+                front = (raw_normals[:, 2] * view_handedness) < 0.0
+                valid = front & (norm_len > 1e-8)
+                tri = tri[valid]
+                cvn = cvn[valid]
+                visible_total += int(tri.shape[0])
+
+                rasterise(img, zbuf, tri, cvn, _shade, base_color, ss_width, ss_height)
+                # Free this chunk's temporaries before the next one so only one
+                # chunk's worth of per-face arrays is ever live. No gc.collect() here:
+                # there are no reference cycles in the hot loop, and the per-file
+                # The application mesh policy returns retired arenas to the OS.
+                del view_tri, edge1, edge2, raw_normals, norm_len, f_obj, fn
+                del corner_smooth, cos_crease, corner_n, cvn, tri, valid
+
+            if visible_total == 0:
+                # Degenerate / fully back-facing mesh: paint every face flat so the
+                # silhouette still reads, matching the single-pass fallback.
+                if logger is not None:
+                    logger.warning(
+                        "mesh_render: no visible triangles for %s — using silhouette",
+                        name,
+                    )
+                flat_color = albedo * 0.6
+
+                def _flat_shade(
+                    n: FloatArray,
+                    _c: FloatArray = flat_color,
+                ) -> FloatArray:
+                    return np.broadcast_to(_c, n.shape)
+
+                for fc in geometry.face_chunks(chunk):
+                    tri = screen[fc]
+                    nrm = np.zeros((tri.shape[0], 3, 3), dtype=np.float32)
+                    rasterise(
+                        img,
+                        zbuf,
+                        tri,
+                        nrm,
+                        _flat_shade,
+                        base_color,
+                        ss_width,
+                        ss_height,
+                    )
+                    del tri, nrm
+
+        if isinstance(rasterise, DeferredRasteriser):
+            rasterise.finish(img, zbuf)
 
         # Alpha = 255 wherever a triangle was painted, 0 elsewhere.
         alpha = np.where(zbuf < np.inf, np.uint8(255), np.uint8(0)).astype(np.uint8)
@@ -460,33 +640,7 @@ def render_mesh_thumbnail(
         # ------------------------------------------------------------------
         # 7. Post-process: Lanczos downsample (anti-aliasing) + subtle vignette.
         # ------------------------------------------------------------------
-        pil = Image.frombytes("RGBA", (ss_width, ss_height), rgba.tobytes())
-        # ``Resampling`` is present in both supported Pillow lines (10 and 12),
-        # while Pillow 12's typing no longer exposes the legacy Image.LANCZOS.
-        if supersample > 1:
-            pil = pil.resize((width, height), Image.Resampling.LANCZOS)
-
-        # Vignette: darken the corners slightly so the model "pops"
-        vx = np.linspace(-1, 1, width, dtype=np.float32)
-        vy = np.linspace(-1, 1, height, dtype=np.float32)
-        gx, gy = np.meshgrid(vx, vy)
-        vignette = 1.0 - 0.18 * np.clip(gx**2 + gy**2, 0, 1)
-        vig_arr = np.array(pil, dtype=np.float32)
-        vig_arr[:, :, :3] *= vignette[:, :, None]  # vignette RGB only, keep alpha
-        pil = Image.fromarray(np.clip(vig_arr, 0, 255).astype(np.uint8), mode="RGBA")
-
-        buf = io.BytesIO()
-        if output_format == "WEBP":
-            pil.save(
-                buf,
-                format="WEBP",
-                lossless=True,
-                exact=True,
-                method=PREVIEW_PROFILE.encoding_method,
-            )
-        else:
-            pil.save(buf, format="PNG", optimize=True)
-        return buf.getvalue()
+        return postprocess_rgba(rgba.tobytes(), width, height)
 
     except Exception:
         if logger is not None:
@@ -494,6 +648,31 @@ def render_mesh_thumbnail(
                 "mesh_render: render_thumbnail failed for %s", name, exc_info=True
             )
         return None
+
+
+def postprocess_rgba(rgba: bytes, width: int, height: int) -> RenderedPixels:
+    """Apply the same canonical downsample/vignette to CPU or GPU raster pixels."""
+    import numpy as np
+    from PIL import Image  # pyright: ignore[reportMissingTypeStubs]
+
+    supersample = PREVIEW_PROFILE.supersample_for(width)
+    ss_width, ss_height = width * supersample, height * supersample
+    pil = Image.frombytes("RGBA", (ss_width, ss_height), rgba)
+    # ``Resampling`` is present in both supported Pillow lines (10 and 12),
+    # while Pillow 12's typing no longer exposes the legacy Image.LANCZOS.
+    if supersample > 1:
+        pil = pil.resize((width, height), Image.Resampling.LANCZOS)
+
+    # Vignette: darken the corners slightly so the model "pops"
+    vx = np.linspace(-1, 1, width, dtype=np.float32)
+    vy = np.linspace(-1, 1, height, dtype=np.float32)
+    gx, gy = np.meshgrid(vx, vy)
+    vignette = 1.0 - 0.18 * np.clip(gx**2 + gy**2, 0, 1)
+    vig_arr = np.array(pil, dtype=np.float32)
+    vig_arr[:, :, :3] *= vignette[:, :, None]  # vignette RGB only, keep alpha
+    pil = Image.fromarray(np.clip(vig_arr, 0, 255).astype(np.uint8), mode="RGBA")
+
+    return RenderedPixels(width, height, pil.tobytes())
 
 
 # ---------------------------------------------------------------------------
@@ -587,6 +766,17 @@ def _rasterise_triangles(
 
     if tri.shape[0] == 0:
         return 0
+
+    if budget is None and len(tri) > 1:
+        # Identical oriented triangles cover the same pixels at identical depths.
+        # Depth ties already keep the first fragment, including its normals. Keep
+        # that input order while avoiding repeated candidate expansion. This is
+        # local to the caller's face chunk; budgeted fallback retains its existing
+        # candidate accounting and coverage policy.
+        _, first = np.unique(tri.reshape(len(tri), -1), axis=0, return_index=True)
+        if len(first) != len(tri):
+            first.sort()
+            tri, vert_nrm = tri[first], vert_nrm[first]
 
     xs = tri[:, :, 0]
     ys = tri[:, :, 1]

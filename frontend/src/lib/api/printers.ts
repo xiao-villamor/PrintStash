@@ -1,11 +1,12 @@
+import { editHeaders, requireEditingReceipt } from "./editing";
+import type { EditingBase } from "@/types/editing";
+import { withSessionRequest } from "@/lib/session-transport";
 import {
   getJson,
   GetJsonOptions,
   getWsUrl,
-  authHeaders,
-  getUrl,
-  handleResponse,
-  invalidateApiCache,
+  requestApi,
+  jsonHeaders,
   sendAction,
   sendJson,
 } from "@/lib/api/request";
@@ -36,54 +37,76 @@ export function getDashboard(options?: GetJsonOptions): Promise<Dashboard> {
   return getJson<Dashboard>("/api/v1/printers/dashboard", options);
 }
 
-export function getPrinter(id: number): Promise<PrinterRead> {
-  return getJson<PrinterRead>(`/api/v1/printers/${id}`);
+export function getPrinter(id: number, options?: GetJsonOptions): Promise<PrinterRead> {
+  return getJson<PrinterRead>(`/api/v1/printers/${id}`, options);
 }
 
-export function getPrinterDiagnostics(id: number): Promise<PrinterDiagnostics> {
+export function getPrinterDiagnostics(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<PrinterDiagnostics> {
   // Live connectivity check — caching it would defeat the "re-run checks" button.
-  return getJson<PrinterDiagnostics>(`/api/v1/printers/${id}/diagnostics`, {
-    fresh: true,
-  });
+  return getJson<PrinterDiagnostics>(`/api/v1/printers/${id}/diagnostics`, options);
 }
 
-export function getMoonrakerConfig(id: number): Promise<MoonrakerConfigRead> {
-  return getJson<MoonrakerConfigRead>(`/api/v1/printers/${id}/config`, {
-    fresh: true,
-  });
+export function getMoonrakerConfig(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<MoonrakerConfigRead> {
+  return getJson<MoonrakerConfigRead>(`/api/v1/printers/${id}/config`, options);
 }
 
 export function createPrinter(payload: PrinterCreate): Promise<PrinterRead> {
   return sendJson<PrinterRead>("/api/v1/printers", "POST", payload);
 }
 
-export function updatePrinter(id: number, payload: PrinterUpdate): Promise<PrinterRead> {
-  return sendJson<PrinterRead>(`/api/v1/printers/${id}`, "PATCH", payload);
+export async function updatePrinter(
+  id: number,
+  payload: PrinterUpdate,
+  options: { base: EditingBase; signal?: AbortSignal },
+): Promise<PrinterRead> {
+  const saved = await requestApi<PrinterRead>(`/api/v1/printers/${id}`, {
+    method: "PATCH",
+    headers: { ...jsonHeaders(), ...editHeaders("printer", id, options.base) },
+    body: JSON.stringify(payload),
+    signal: options.signal,
+  });
+  requireEditingReceipt(saved, options.base);
+  if (saved.id !== id) throw new Error("printer_identity_mismatch");
+  return saved;
 }
 
-export function getPrinterMaterialState(id: number): Promise<PrinterMaterialStateRead> {
-  return getJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state`, {
-    fresh: true,
-  });
+export function getPrinterMaterialState(
+  id: number,
+  options?: GetJsonOptions,
+): Promise<PrinterMaterialStateRead> {
+  return getJson<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state`, options);
 }
 
 export function updatePrinterManualMaterialState(
   id: number,
   payload: ManualMaterialStateUpdate,
+  options: GetJsonOptions = {},
 ): Promise<PrinterMaterialStateRead> {
-  return sendJson<PrinterMaterialStateRead>(
-    `/api/v1/printers/${id}/material-state/manual`,
-    "PUT",
-    payload,
-  );
+  return requestApi<PrinterMaterialStateRead>(`/api/v1/printers/${id}/material-state/manual`, {
+    method: "PUT",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+    signal: options.signal,
+  });
 }
 
 export function deletePrinter(id: number): Promise<void> {
   return sendAction(`/api/v1/printers/${id}`, "DELETE");
 }
 
-export function listPrinterPermissions(id: number): Promise<PrinterPermissionRead[]> {
-  return getJson<PrinterPermissionRead[]>(`/api/v1/printers/${id}/permissions`, { fresh: true });
+export function listPrinterPermissions(
+  id: number,
+  options: GetJsonOptions = {},
+): Promise<PrinterPermissionRead[]> {
+  return getJson<PrinterPermissionRead[]>(`/api/v1/printers/${id}/permissions`, {
+    ...options,
+  });
 }
 
 export function updatePrinterPermission(
@@ -91,23 +114,34 @@ export function updatePrinterPermission(
   userId: number,
   role: PrinterRole,
 ): Promise<PrinterPermissionRead> {
-  return sendJson<PrinterPermissionRead>(
-    `/api/v1/printers/${printerId}/permissions/${userId}`,
-    "PUT",
-    { role },
-  );
+  return requestApi<PrinterPermissionRead>(`/api/v1/printers/${printerId}/permissions/${userId}`, {
+    method: "PUT",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ role }),
+  });
 }
 
 export function deletePrinterPermission(printerId: number, userId: number): Promise<void> {
-  return sendAction(`/api/v1/printers/${printerId}/permissions/${userId}`, "DELETE");
+  return requestApi<void>(`/api/v1/printers/${printerId}/permissions/${userId}`, {
+    method: "DELETE",
+  });
 }
 
 export function sendToPrinter(id: number, payload: SendToPrinter): Promise<PrintJobRead> {
   return sendJson<PrintJobRead>(`/api/v1/printers/${id}/send`, "POST", payload);
 }
 
-export function startPrinterFile(id: number, payload: StartPrinterFile): Promise<PrintJobRead> {
-  return sendJson<PrintJobRead>(`/api/v1/printers/${id}/start`, "POST", payload);
+export function startPrinterFile(
+  id: number,
+  payload: StartPrinterFile,
+  options?: GetJsonOptions,
+): Promise<PrintJobRead> {
+  return requestApi<PrintJobRead>(`/api/v1/printers/${id}/start`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(payload),
+    signal: options?.signal,
+  });
 }
 
 function printerControl(id: number, action: "pause" | "resume" | "cancel"): Promise<void> {
@@ -147,40 +181,58 @@ export function emergencyStopPrinter(id: number): Promise<void> {
 
 export function getPrinterStatus(id: number): Promise<PrinterStatusResponse> {
   // One-shot live snapshot — always fetch fresh.
-  return getJson<PrinterStatusResponse>(`/api/v1/printers/${id}/status`, {
-    fresh: true,
+  return getJson<PrinterStatusResponse>(`/api/v1/printers/${id}/status`, {});
+}
+
+export function listPrinterFiles(id: number, options?: GetJsonOptions): Promise<PrinterFileRead[]> {
+  return getJson<PrinterFileRead[]>(`/api/v1/printers/${id}/files`, options);
+}
+
+export function syncPrinterFiles(id: number, options?: GetJsonOptions): Promise<PrinterFileRead[]> {
+  return requestApi<PrinterFileRead[]>(`/api/v1/printers/${id}/files/sync`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options?.signal,
   });
-}
-
-export function listPrinterFiles(id: number): Promise<PrinterFileRead[]> {
-  return getJson<PrinterFileRead[]>(`/api/v1/printers/${id}/files`);
-}
-
-export function syncPrinterFiles(id: number): Promise<PrinterFileRead[]> {
-  return sendJson<PrinterFileRead[]>(`/api/v1/printers/${id}/files/sync`, "POST", {});
 }
 
 export async function deletePrinterFile(
   id: number,
   printerFileId: number,
+  options?: GetJsonOptions,
 ): Promise<PrinterFileRead[]> {
-  const res = await fetch(getUrl(`/api/v1/printers/${id}/files/${printerFileId}`), {
+  return requestApi<PrinterFileRead[]>(`/api/v1/printers/${id}/files/${printerFileId}`, {
     method: "DELETE",
-    headers: authHeaders(),
+    signal: options?.signal,
   });
-  invalidateApiCache(`/api/v1/printers/${id}/files/${printerFileId}`);
-  return handleResponse<PrinterFileRead[]>(res);
 }
 
-export function listPrinterJobs(id: number, limit = 50): Promise<PrintJobRead[]> {
-  return getJson<PrintJobRead[]>(`/api/v1/printers/${id}/jobs?limit=${limit}`);
+export function listPrinterJobs(
+  id: number,
+  limit = 50,
+  options?: GetJsonOptions,
+): Promise<PrintJobRead[]> {
+  return getJson<PrintJobRead[]>(`/api/v1/printers/${id}/jobs?limit=${limit}`, options);
 }
 
-export async function openPrinterWS(id: number): Promise<WebSocket> {
-  const { ticket } = await sendJson<{ ticket: string; expires_in: number }>(
-    `/api/v1/printers/${id}/ws-ticket`,
-    "POST",
-    {},
-  );
-  return new WebSocket(getWsUrl(`/api/v1/printers/${id}/ws?ticket=${encodeURIComponent(ticket)}`));
+export async function openPrinterWS(id: number, signal?: AbortSignal): Promise<WebSocket> {
+  let closeOpened = () => {};
+  try {
+    return await withSessionRequest(async (request) => {
+      const { ticket } = await requestApi<{ ticket: string; expires_in: number }>(
+        `/api/v1/printers/${id}/ws-ticket`,
+        { method: "POST", headers: jsonHeaders(), body: "{}", signal: request.signal },
+      );
+      request.assertCurrent();
+      const ws = new WebSocket(
+        getWsUrl(`/api/v1/printers/${id}/ws?ticket=${encodeURIComponent(ticket)}`),
+      );
+      closeOpened = () => ws.close();
+      return ws;
+    }, signal);
+  } catch (error) {
+    closeOpened();
+    throw error;
+  }
 }

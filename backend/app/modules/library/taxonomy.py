@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Mapping, Optional
 
 from sqlmodel import Session, select
 
@@ -161,6 +161,28 @@ def collection_descendant_paths(session: Session, root_path: str) -> List[str]:
         (Collection.path == root_path) | (Collection.path.startswith(root_path + "/"))  # type: ignore[attr-defined]
     )
     return list(session.exec(stmt).all())
+
+
+def subtree_totals(direct: Mapping[str, int]) -> dict[str, int]:
+    """Roll per-collection counts up the tree: each path's own plus its subtree's.
+
+    *direct* maps every collection path in the result to its own count. A path
+    whose parent is absent (trashed, or outside what the caller may see) adds
+    into its nearest present ancestor, exactly as a ``path/`` prefix test would.
+
+    One pass, deepest first: every descendant path sorts after its ancestor, so
+    reverse order finishes a subtree before its parent reads it. Comparing every
+    path against every other took 67 s for 9k collections (#295).
+    """
+    totals = dict(direct)
+    for path in sorted(direct, reverse=True):
+        ancestor = path
+        while "/" in ancestor:
+            ancestor = ancestor.rsplit("/", 1)[0]
+            if ancestor in totals:
+                totals[ancestor] += totals[path]
+                break
+    return totals
 
 
 def resolve_or_create_tags(session: Session, names: Iterable[str]) -> List[Tag]:

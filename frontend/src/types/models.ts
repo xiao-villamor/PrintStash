@@ -1,3 +1,4 @@
+import type { EditingBase } from "./editing";
 import type {
   PrintJobIdentityRead,
   PrintJobReportedMetadataRead,
@@ -5,6 +6,47 @@ import type {
   PrintJobState,
   ReproducibilityLevel,
 } from "./printers";
+
+/** Volume evidence uses cubic millimetres; legacy values carry no topology proof. */
+export type VolumeMeasurement =
+  | {
+      state: "measured";
+      unit: "mm3";
+      method: "mesh_surface_integral";
+      value_mm3: number;
+      cause: null;
+    }
+  | {
+      state: "unavailable";
+      unit: "mm3";
+      method: "mesh_surface_integral";
+      value_mm3: null;
+      cause:
+        | "not_watertight"
+        | "inconsistent_winding"
+        | "non_positive_integral"
+        | "nonfinite_integral"
+        | "measurement_failed";
+    }
+  | {
+      state: "not_calculated";
+      unit: "mm3";
+      method: null;
+      value_mm3: null;
+      cause:
+        | "enrichment_pending"
+        | "not_applicable"
+        | "not_requested"
+        | "geometry_unavailable"
+        | "topology_not_evaluated";
+    }
+  | {
+      state: "legacy_unassessed";
+      unit: "mm3";
+      method: null;
+      value_mm3: number | null;
+      cause: null;
+    };
 
 export interface MetadataRead {
   slicer_name: string | null;
@@ -30,6 +72,7 @@ export interface MetadataRead {
   bbox_y_mm: number | null;
   bbox_z_mm: number | null;
   volume_mm3: number | null;
+  volume_measurement: VolumeMeasurement;
   triangle_count: number | null;
 }
 
@@ -74,6 +117,8 @@ export interface ModelSimilarityRead {
 }
 
 export interface ModelRead {
+  edit_epoch: string;
+  edit_version: number;
   similarity?: ModelSimilarityRead;
   id: number;
   name: string;
@@ -81,6 +126,7 @@ export interface ModelRead {
   hash: string;
   collection: string | null;
   collection_id: number | null;
+  collection_label: string | null;
   description: string | null;
   source_url: string | null;
   effective_role: CollectionRole | null;
@@ -91,6 +137,8 @@ export interface ModelRead {
   files: FileRead[];
   trashed_source_files?: TrashedSourceFileRead[];
   starred: boolean;
+  /** Opaque; equal to a later `subscribed` acknowledgement's `revision` when no derivative changed. */
+  derivatives_revision: string;
 }
 
 export interface ModelPrinterFileRead {
@@ -167,12 +215,16 @@ export interface PrintSummaryRead {
 }
 
 export interface ModelListItem {
+  edit_epoch: string;
+  edit_version: number;
   similarity?: ModelSimilarityRead;
   id: number;
   name: string;
   slug: string;
   collection: string | null;
   collection_id: number | null;
+  /** Names of the collection's visible ancestors, e.g. `Parts/Brackets`; null outside one. */
+  collection_label: string | null;
   source_url: string | null;
   effective_role: CollectionRole | null;
   tags: string[];
@@ -269,6 +321,10 @@ export interface ModelBatchResult {
   failed_count: number;
 }
 
+export interface ModelEditBatchResult extends ModelBatchResult {
+  succeeded_versions: Record<number, EditingBase>;
+}
+
 export interface RevisionBatchResult {
   succeeded_ids: number[];
   succeeded_count: number;
@@ -351,7 +407,7 @@ export interface PrintStatisticsRead {
 
 export interface ModelUpdate {
   name?: string;
-  description?: string;
+  description?: string | null;
   source_url?: string | null;
   collection?: string;
   tags?: string[];
@@ -406,6 +462,7 @@ export type JobKind =
   | "derivatives.gcode"
   | "derivatives.mesh"
   | "derivatives.toolpath"
+  | "derivatives.viewer_stl"
   | "identity.retention"
   | "inference.model_download"
   | "ingestion.archive_inspect"
@@ -420,6 +477,7 @@ export type JobKind =
   | "ingestion.upload_recovery"
   | "ingestion.url"
   | "ingestion.url_selection"
+  | "ingestion.scratch_cleanup"
   | "notifications.deliver"
   | "notifications.retention"
   | "printing.dispatch"
@@ -452,12 +510,20 @@ export type LaneName =
   | "similarity";
 
 /** An output derived from an Artifact's bytes: the backend's `DerivativeKind`. */
-export type DerivativeKind = "metadata" | "thumbnail" | "toolpath";
+export type DerivativeKind = "metadata" | "thumbnail" | "toolpath" | "viewer_stl";
 
 export type WorkPriority = "interactive" | "backfill";
 
 /** One background Job, from `/api/v1/jobs`. */
+export interface JobStagingSummary {
+  retained_bytes: number;
+  lease_count: number;
+  earliest_expiry: string;
+  discard_available: boolean;
+}
+
 export interface JobStatus {
+  staging: JobStagingSummary | null;
   job_id: string;
   kind: JobKind;
   state: JobState;
@@ -485,6 +551,11 @@ export interface JobStatus {
     | "extracting"
     | "hashing"
     | "ingesting"
+    | "snapshotting"
+    | "archiving"
+    | "verifying"
+    | "publishing"
+    | "finalizing"
     | "completed"
     | null;
   current_item: string | null;
@@ -503,6 +574,7 @@ export interface JobStatus {
  * attempted at the current recipe: every value it would supply is unknown.
  */
 export type DerivativeState =
+  | "disabled"
   | "pending"
   | "queued"
   | "running"
@@ -533,6 +605,9 @@ export interface WorkLane {
 }
 
 export interface WorkDefinition {
+  enabled: boolean;
+  default_enabled: boolean;
+  overridden: boolean;
   name: JobKind;
   label: string;
   lane: LaneName;
@@ -770,11 +845,18 @@ export interface ModelPageRead {
   total: number;
 }
 
-export interface OutlinerModelRead {
+export interface OutlinerItemRead {
   id: number;
   name: string;
   collection: string | null;
   collection_id: number | null;
+  /** Names of the collection's visible ancestors, e.g. `Parts/Brackets`; null outside one. */
+  collection_label: string | null;
+}
+
+export interface OutlinerModelRead extends OutlinerItemRead {
+  edit_epoch: string;
+  edit_version: number;
 }
 
 export interface ListModelPageParams extends Omit<ListModelsParams, "offset"> {
@@ -782,7 +864,10 @@ export interface ListModelPageParams extends Omit<ListModelsParams, "offset"> {
   cursor?: string;
 }
 
+export type LibraryViewMode = "all" | "multipart";
+
 export interface SavedViewFilters {
+  library_view: LibraryViewMode;
   sort?: ModelSort | null;
   collection?: string | null;
   direct: boolean;
@@ -861,6 +946,28 @@ export interface CollectionRead {
   has_readme: boolean;
 }
 
+/** One collection of the lazily loaded tree (`/collections/children`, `/lookup`, `/search`). */
+export interface CollectionNodeRead extends CollectionRead {
+  /** Direct children; zero means the row has nothing to expand into. */
+  child_count: number;
+  /** Every collection below this one, at any depth. */
+  descendant_count: number;
+  /** Names of the visible ancestors and this collection, e.g. `Parts/Brackets`. */
+  display_path: string;
+}
+
+export interface CollectionPage {
+  items: CollectionNodeRead[];
+  /** Null on the last page. */
+  next_cursor: string | null;
+}
+
+export interface CollectionLookupRead {
+  collection: CollectionNodeRead;
+  /** Visible ancestors, root first. */
+  ancestors: CollectionNodeRead[];
+}
+
 export interface CollectionPermissionRead {
   user_id: number;
   username: string;
@@ -873,7 +980,7 @@ export interface CollectionPermissionUpdate {
   role: CollectionRole;
 }
 
-export interface FilamentProfileRead {
+export interface FilamentProfileRead extends EditingBase {
   id: number;
   name: string;
   material_type: string | null;
@@ -904,7 +1011,7 @@ export interface FilamentProfileUpdate {
   notes?: string | null;
 }
 
-export interface PrinterProfileRead {
+export interface PrinterProfileRead extends EditingBase {
   id: number;
   name: string;
   printer_model: string | null;

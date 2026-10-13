@@ -1,14 +1,18 @@
 /** Vault migration requires a verified plan and explicit cutover; uncertain recovery never resumes writes implicitly. */
-import { screen, waitFor } from "@testing-library/react";
+import { focusManager } from "@tanstack/react-query";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { migrationKeys } from "@/lib/queries/settings-vault-migration";
+import { clearLogin } from "@/lib/auth-store";
 import { VaultMigrationPanel } from "@/components/vault-migration-panel";
 import { aMigrationBackup, aMigrationProvider, aVaultMigration } from "@/test-support/factories";
 import { json, renderApp, type RouteTable } from "@/test-support/render";
 import type { VaultMigrationRun } from "@/lib/api/vault-migration";
 
-function setup(runs: VaultMigrationRun[] = [], routes: RouteTable = {}) {
+function setup(runs: VaultMigrationRun[] = [], routes: RouteTable = {}, strictMode = false) {
   return renderApp(<VaultMigrationPanel />, {
+    reactStrictMode: strictMode,
     routes: {
       "GET /api/v1/storage/migrations/migration-1/report": () =>
         json({ ...aVaultMigration(), ...runs[0], resource_kind_totals: [], recent_failures: [] }),
@@ -21,6 +25,46 @@ function setup(runs: VaultMigrationRun[] = [], routes: RouteTable = {}) {
   });
 }
 describe("VaultMigrationPanel", () => {
+  it("waits for the current startup request", async () => {
+    const retired = Promise.withResolvers<Response>();
+    const current = Promise.withResolvers<Response>();
+    let requests = 0;
+    setup(
+      [],
+      {
+        "GET /api/v1/storage/migrations": () =>
+          ++requests === 1 ? retired.promise : current.promise,
+      },
+      true,
+    );
+
+    await act(async () => retired.resolve(json([])));
+    expect(screen.getByRole("status", { name: "Loading migrations…" })).toBeVisible();
+    expect(screen.queryByLabelText("Data directory")).not.toBeInTheDocument();
+    await act(async () => current.resolve(json([])));
+    expect(await screen.findByLabelText("Data directory")).toBeVisible();
+  });
+
+  it("preserves edits after a retired startup response", async () => {
+    const retired = Promise.withResolvers<Response>();
+    let requests = 0;
+    setup(
+      [],
+      {
+        "GET /api/v1/storage/migrations": () => (++requests === 1 ? retired.promise : json([])),
+      },
+      true,
+    );
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText("Data directory"), "/new/files");
+    await user.type(screen.getByLabelText("Thumbnail directory"), "/new/thumbs");
+
+    await act(async () => retired.resolve(json([])));
+
+    expect(screen.getByLabelText("Data directory")).toHaveValue("/new/files");
+    expect(screen.getByLabelText("Thumbnail directory")).toHaveValue("/new/thumbs");
+  });
+
   it("reserves the destination layout while migrations load", async () => {
     let finish: (response: Response) => void = () => {};
     const pending = new Promise<Response>((resolve) => {
@@ -589,5 +633,190 @@ describe("Migration candidate credentials", () => {
       .setup()
       .selectOptions(await screen.findByLabelText("Recent backup"), "backup-1:exact-backup-source");
     expect(screen.getByRole("button", { name: "Check migration plan" })).toBeDisabled();
+  });
+});
+
+describe("Migration read ownership", () => {
+  afterEach(() => focusManager.setFocused(undefined));
+  it("aborts migration startup when its view is disposed", async () => {
+    const held = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const app = setup([], {
+      "GET /api/v1/storage/migrations": (_url, init) => {
+        signal = init?.signal;
+        return held.promise;
+      },
+    });
+    await waitFor(() => expect(signal).toBeDefined());
+    app.unmount();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => held.resolve(json([])));
+  });
+  it("exposes backup discovery failure without reporting an empty catalog", async () => {
+    setup([aVaultMigration({ state: "paused", recovery_required: true })], {
+      "GET /api/v1/backups/sources": () => json({ detail: "unavailable" }, 503),
+    });
+    expect(await screen.findByRole("button", { name: "Recover migration" })).toBeVisible();
+    expect(screen.getByRole("alert")).toBeVisible();
+  });
+  it("retires migration confirmations with their private session", async () => {
+    const app = setup([aVaultMigration()]);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Discard copied destination" }),
+    );
+    act(() => clearLogin());
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+  it("cancels an obsolete status read before publishing an acknowledged pause", async () => {
+    const held = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const run = aVaultMigration({ state: "copying" });
+    const app = setup([run], {
+      "GET /api/v1/storage/migrations/migration-1": (_url, init) => {
+        signal = init?.signal;
+        return held.promise;
+      },
+      "POST /api/v1/storage/migrations/migration-1/pause": () => json({ ...run, state: "paused" }),
+    });
+    await screen.findByRole("button", { name: "Pause after this batch" });
+    let pending: Promise<void>;
+    act(() => {
+      pending = app.client.invalidateQueries({ queryKey: migrationKeys.run(run.id), exact: true });
+    });
+    await waitFor(() => expect(signal).toBeDefined());
+    await userEvent.click(screen.getByRole("button", { name: "Pause after this batch" }));
+    expect(await screen.findByRole("button", { name: "Resume copy" })).toBeVisible();
+    expect(signal?.aborted).toBe(true);
+    await act(async () => {
+      held.resolve(json(run));
+      await pending;
+    });
+    expect(screen.getByRole("button", { name: "Resume copy" })).toBeVisible();
+  });
+  it("keeps migration commands disabled after access is denied", async () => {
+    const app = setup([aVaultMigration()]);
+    await screen.findByRole("button", { name: "Start verified copy" });
+    app.route({ "GET /api/v1/storage/migrations": () => json({ detail: "forbidden" }, 403) });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh migration status" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Start verified copy" })).toBeNull(),
+    );
+    expect(screen.queryByText("source-identity")).toBeNull();
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+  it("requires renewed review after the confirmed migration changes", async () => {
+    const run = aVaultMigration();
+    const app = setup([run]);
+    await userEvent.click(await screen.findByRole("button", { name: "Start verified copy" }));
+    act(() =>
+      app.client.setQueryData(migrationKeys.run(run.id), { ...run, plan_digest: "different-plan" }),
+    );
+    await userEvent.click(screen.getAllByRole("button", { name: "Start verified copy" }).at(-1)!);
+    expect(await screen.findByRole("alert")).toBeVisible();
+    expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+  it("preserves migration destination edits across catalog refresh", async () => {
+    const app = setup();
+    await userEvent.type(await screen.findByLabelText("Data directory"), "/new/kept");
+    app.route({ "GET /api/v1/storage/providers": () => json([aMigrationProvider()]) });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh migration status" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh migration status" })).toBeEnabled(),
+    );
+    expect(screen.getByLabelText("Data directory")).toHaveValue("/new/kept");
+  });
+
+  it("stops automatic status retries after a read failure", async () => {
+    let reads = 0;
+    const app = setup([aVaultMigration({ state: "copying" })], {
+      "GET /api/v1/storage/migrations/migration-1": () => {
+        reads += 1;
+        return json({ detail: "unavailable" }, 503);
+      },
+    });
+    app.client.setDefaultOptions({
+      queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: true },
+    });
+    expect(await screen.findByRole("alert", {}, { timeout: 3500 })).toBeVisible();
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2200));
+    });
+    expect(reads).toBe(1);
+    app.route({
+      "GET /api/v1/storage/migrations": () => json([aVaultMigration({ state: "ready" })]),
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh migration status" }));
+    expect(await screen.findByRole("button", { name: "Switch Vault storage" })).toBeEnabled();
+  }, 10000);
+  it("preserves the selected migration across history reorder", async () => {
+    const current = aVaultMigration({ source_provider_ref: "selected-source" });
+    const another = aVaultMigration({ id: "migration-2", source_provider_ref: "other-source" });
+    const app = setup([current, another], {
+      "GET /api/v1/storage/migrations/migration-2/report": () =>
+        json({ ...another, resource_kind_totals: [], recent_failures: [] }),
+    });
+    await screen.findByText(/selected-source/);
+    app.route({ "GET /api/v1/storage/migrations": () => json([another, current]) });
+    await userEvent.click(screen.getByRole("button", { name: "Refresh migration status" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Refresh migration status" })).toBeEnabled(),
+    );
+    expect(screen.getByText(/selected-source/)).toBeVisible();
+    expect(screen.queryByText(/other-source/)).toBeNull();
+  });
+
+  it("retains required provider defaults when editing a destination", async () => {
+    const provider = aMigrationProvider();
+    const app = setup([], {
+      "GET /api/v1/storage/providers": () =>
+        json([
+          aMigrationProvider({
+            fields: [
+              {
+                name: "root",
+                label: "Root",
+                help: "Dedicated folder",
+                input_type: "path",
+                required: true,
+                secret: false,
+                default: "vault-data",
+              },
+              ...provider.fields,
+            ],
+          }),
+        ]),
+      "POST /api/v1/storage/migrations/preflight": () => json(aVaultMigration()),
+    });
+    await userEvent.type(await screen.findByLabelText("Data directory"), "/new/files");
+    await userEvent.type(screen.getByLabelText("Thumbnail directory"), "/new/thumbs");
+    await userEvent.selectOptions(
+      screen.getByLabelText("Recent backup"),
+      "backup-1:exact-backup-source",
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Check migration plan" }));
+    expect(await screen.findByRole("button", { name: "Start verified copy" })).toBeVisible();
+    expect(JSON.parse(app.requestsWithMethod("POST")[0].body).destination).toEqual({
+      provider: "local",
+      root: "vault-data",
+      data_dir: "/new/files",
+      thumb_dir: "/new/thumbs",
+    });
+  });
+
+  it("hides a migration when command recovery confirms revoked access", async () => {
+    setup([aVaultMigration({ state: "copying" })], {
+      "POST /api/v1/storage/migrations/migration-1/pause": () => json({ detail: "forbidden" }, 403),
+      "GET /api/v1/storage/migrations/migration-1": () => json({ detail: "forbidden" }, 403),
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Pause after this batch" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Pause after this batch" })).toBeNull(),
+    );
+    expect(screen.queryByText(/source-identity/)).toBeNull();
   });
 });

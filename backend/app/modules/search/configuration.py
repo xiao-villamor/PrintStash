@@ -3,28 +3,73 @@
 from sqlmodel import Session
 
 from app.core.errors import ErrorKind, OperationError
-from app.db.models import InferenceEndpoint, JobKind
+from app.db.models import InferenceEndpoint, JobKind, User
+from app.db.transactions import rollback_on_failure
 from app.modules.administration import audit
-from app.modules.administration.config_repository import get_or_create
+from app.modules.derivatives import policy
 from app.modules.inference.configuration import list_endpoints
 from app.modules.inference.environment import configured
+from app.modules.search import settings_edits
 from app.modules.search.settings import settings
+from app.schemas.editing import EditingBase
 from app.schemas.inference import SearchSettings, SearchSettingsRead
 
 __all__ = ["settings", "read", "update"]
 
 
 def read(session: Session) -> SearchSettingsRead:
+    base, value = settings_edits.read(session)
     return SearchSettingsRead(
-        settings=settings(session),
+        **base.model_dump(),
+        settings=value,
         endpoints=list_endpoints(session),
         environment_endpoints=configured(),
     )
 
 
 def update(
-    session: Session, value: SearchSettings, *, actor_id: int | None = None
+    session: Session,
+    value: SearchSettings,
+    *,
+    actor: User | None = None,
+    base: EditingBase | None = None,
+    partial: bool = False,
 ) -> SearchSettingsRead:
+    with rollback_on_failure(session):
+        row = policy.lock(session)
+        settings_edits.claim(session, actor, row, base)
+        if partial:
+            value = SearchSettings.model_validate(
+                settings(session).model_dump() | value.model_dump(exclude_unset=True)
+            )
+        _validate(session, value)
+        row.ai_search_settings_json = value.model_dump_json()
+        if actor is not None:
+            row.ai_search_configured_by = actor.id
+        session.add(row)
+        session.flush()
+        receipt = read(session)
+        # Register before audit.record commits the settings and audit together.
+        from app.modules.work.submission import nudge_after_commit
+
+        for definition in (
+            JobKind.SEARCH_PROJECT,
+            JobKind.SEARCH_INDEX,
+            JobKind.SEARCH_REPAIR,
+            JobKind.SEARCH_CAPTION_QUEUE,
+            JobKind.SEARCH_EXPAND,
+        ):
+            nudge_after_commit(session, definition)
+        audit.record(
+            session,
+            action="ai_search_settings_changed",
+            resource_type="ai_search",
+            diff=value.model_dump(),
+        )
+        return receipt
+
+
+def _validate(session: Session, value: SearchSettings) -> None:
     endpoint = (
         session.get(InferenceEndpoint, value.chat_endpoint_id)
         if value.chat_endpoint_id
@@ -57,26 +102,3 @@ def update(
                 raise EmbeddingError("embedding_sparse_required")
         except EmbeddingError as exc:
             raise OperationError(exc.code, kind=ErrorKind.INVALID) from None
-    row = get_or_create(session, commit=False)
-    row.ai_search_settings_json = value.model_dump_json()
-    if actor_id is not None:
-        row.ai_search_configured_by = actor_id
-    session.add(row)
-    audit.record(
-        session,
-        action="ai_search_settings_changed",
-        resource_type="ai_search",
-        diff=value.model_dump(),
-    )
-    # Enabling a feature makes its work owed now, not at the next tick.
-    from app.modules.work.submission import nudge_after_commit
-
-    for definition in (
-        JobKind.SEARCH_PROJECT,
-        JobKind.SEARCH_INDEX,
-        JobKind.SEARCH_REPAIR,
-        JobKind.SEARCH_CAPTION_QUEUE,
-        JobKind.SEARCH_EXPAND,
-    ):
-        nudge_after_commit(session, definition)
-    return read(session)

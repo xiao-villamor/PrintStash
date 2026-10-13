@@ -18,12 +18,14 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { useState } from "react";
 
 import { AuthProvider } from "@/lib/auth-provider";
 import { useAuth, type AuthApi } from "@/lib/auth-context";
-import { clearLogin, storeLogin } from "@/lib/auth-store";
+import { clearLogin, getUser, storeLogin } from "@/lib/auth-store";
 import type { UserRead } from "@/types";
 
 function aUser(over: Partial<UserRead> = {}): UserRead {
@@ -57,6 +59,7 @@ function Probe() {
   return (
     <div>
       <p>{loading ? "loading" : user ? `signed in as ${user.username}` : "signed out"}</p>
+      <span>{user?.is_superuser ? "administrator" : "member"}</span>
       <button type="button" onClick={() => void login("maker", "hunter2").catch(() => {})}>
         sign in
       </button>
@@ -100,6 +103,34 @@ afterEach(() => {
 });
 
 describe("AuthProvider", () => {
+  it("discards private component state on a new session", async () => {
+    function PrivateDraft() {
+      const [draft, setDraft] = useState("");
+      return (
+        <input
+          aria-label="Private draft"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      );
+    }
+    withStoredSession();
+    render(
+      <AuthProvider api={stubApi()}>
+        <Probe />
+        <PrivateDraft />
+      </AuthProvider>,
+    );
+    await screen.findByText("signed in as maker");
+    fireEvent.change(screen.getByRole("textbox", { name: "Private draft" }), {
+      target: { value: "Previous scope draft" },
+    });
+
+    await act(async () => withStoredSession());
+
+    expect(screen.getByRole("textbox", { name: "Private draft" })).toHaveValue("");
+  });
+
   describe("a visitor with no stored session", () => {
     it("is ready at once", () => {
       // There is nothing to confirm, so waiting would put a spinner in front of
@@ -165,6 +196,52 @@ describe("AuthProvider", () => {
     });
   });
 
+  it("keeps session validation pending through unrelated storage events", async () => {
+    withStoredSession();
+    let deliver: (user: UserRead) => void = () => {};
+    renderProvider({
+      getMe: () =>
+        new Promise<UserRead>((resolve) => {
+          deliver = resolve;
+        }),
+    });
+    act(() =>
+      window.dispatchEvent(
+        new StorageEvent("storage", { key: "printstash.locale", newValue: "es" }),
+      ),
+    );
+    expect(screen.getByText("loading")).toBeVisible();
+    await act(async () => deliver(aUser()));
+    expect(screen.getByText("signed in as maker")).toBeVisible();
+  });
+
+  it("accepts same-user auth changes after session validation", async () => {
+    withStoredSession();
+    renderProvider();
+    expect(await screen.findByText("signed in as maker")).toBeVisible();
+    act(() => storeLogin("", { id: 7, username: "maker", email: null, is_superuser: true }));
+    expect(screen.getByText("administrator")).toBeVisible();
+    act(() => clearLogin());
+    expect(screen.getByText("signed out")).toBeVisible();
+  });
+
+  it("ignores bootstrap identity from a previous session", async () => {
+    withStoredSession();
+    let deliver: (user: UserRead) => void = () => {};
+    renderProvider({
+      getMe: () =>
+        new Promise<UserRead>((resolve) => {
+          deliver = resolve;
+        }),
+    });
+    act(() => clearLogin());
+    expect(screen.getByText("signed out")).toBeVisible();
+    act(() => storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false }));
+    await act(async () => deliver(aUser()));
+    expect(screen.getByText("signed in as new-owner")).toBeVisible();
+    expect(screen.queryByText("signed in as maker")).toBeNull();
+  });
+
   describe("signing in", () => {
     it("exchanges the credentials for a token", async () => {
       const { api } = renderProvider();
@@ -172,11 +249,14 @@ describe("AuthProvider", () => {
       screen.getByRole("button", { name: "sign in" }).click();
 
       await waitFor(() =>
-        expect(api.login).toHaveBeenCalledWith({
-          username: "maker",
-          password: "hunter2",
-          remember_me: false,
-        }),
+        expect(api.login).toHaveBeenCalledWith(
+          {
+            username: "maker",
+            password: "hunter2",
+            remember_me: false,
+          },
+          expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        ),
       );
     });
 
@@ -268,5 +348,204 @@ describe("AuthProvider", () => {
 
       await waitFor(() => expect(screen.getByText("signed out")).toBeInTheDocument());
     });
+  });
+});
+
+/** A late lifecycle operation must not replace or clear a newer verified session. */
+describe("session transition races", () => {
+  it("retains verified identity after stale refresh", async () => {
+    withStoredSession();
+    const refresh = Promise.withResolvers<UserRead>();
+    const getMe = vi
+      .fn<AuthApi["getMe"]>()
+      .mockResolvedValueOnce(aUser())
+      .mockReturnValueOnce(refresh.promise);
+    renderProvider({ getMe });
+    expect(await screen.findByText("signed in as maker")).toBeVisible();
+    screen.getByRole("button", { name: "refresh" }).click();
+    await waitFor(() => expect(getMe).toHaveBeenCalledTimes(2));
+    act(() => storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false }));
+    await act(async () => refresh.resolve(aUser()));
+    expect(screen.getByText("signed in as new-owner")).toBeVisible();
+  });
+
+  it("retains verified identity after stale logout", async () => {
+    withStoredSession();
+    const logout = Promise.withResolvers<void>();
+    renderProvider({ logout: () => logout.promise });
+    expect(await screen.findByText("signed in as maker")).toBeVisible();
+    screen.getByRole("button", { name: "sign out" }).click();
+    act(() => storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false }));
+    await act(async () => logout.resolve());
+    expect(screen.getByText("signed in as new-owner")).toBeVisible();
+  });
+
+  it("rejects stale login identity publication", async () => {
+    const me = Promise.withResolvers<UserRead>();
+    const getMe = vi.fn<AuthApi["getMe"]>().mockReturnValue(me.promise);
+    renderProvider({ getMe });
+    screen.getByRole("button", { name: "sign in" }).click();
+    await waitFor(() => expect(getMe).toHaveBeenCalledOnce());
+    act(() => storeLogin("", { id: 9, username: "new-owner", email: null, is_superuser: false }));
+    await act(async () => me.resolve(aUser()));
+    expect(screen.getByText("signed in as new-owner")).toBeVisible();
+  });
+});
+
+/** Retiring a cookie session is immediate; identity is published only after verification. */
+describe("auth transition boundaries", () => {
+  it("retires the displayed session while logout awaits the server", async () => {
+    withStoredSession();
+    const logout = Promise.withResolvers<void>();
+    renderProvider({ logout: () => logout.promise });
+    expect(await screen.findByText("signed in as maker")).toBeVisible();
+    await act(async () => screen.getByRole("button", { name: "sign out" }).click());
+    expect(screen.getByText("signed out")).toBeVisible();
+    await act(async () => logout.resolve());
+  });
+
+  it("publishes no provisional identity during login verification", async () => {
+    const me = Promise.withResolvers<UserRead>();
+    const getMe = vi.fn<AuthApi["getMe"]>().mockReturnValue(me.promise);
+    renderProvider({ getMe });
+    screen.getByRole("button", { name: "sign in" }).click();
+    await waitFor(() => expect(getMe).toHaveBeenCalledOnce());
+    expect(window.localStorage.getItem("printstash.user")).toBeNull();
+    await act(async () => me.resolve(aUser()));
+    expect(screen.getByText("signed in as maker")).toBeVisible();
+  });
+});
+
+describe("authentication entry lifetime", () => {
+  it("preserves the entry form while login verifies identity", async () => {
+    const me = Promise.withResolvers<UserRead>();
+    const api = stubApi({ getMe: () => me.promise });
+    function Entry() {
+      const { login } = useAuth();
+      const [draft, setDraft] = useState("");
+      return (
+        <>
+          <input
+            aria-label="Entry draft"
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          <button onClick={() => void login("maker", "password").catch(() => {})}>
+            Verify entry
+          </button>
+        </>
+      );
+    }
+    render(
+      <AuthProvider boundary="entry" api={api}>
+        <Entry />
+      </AuthProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Entry draft"), { target: { value: "Current entry" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Verify entry" }));
+
+    expect(screen.getByLabelText("Entry draft")).toHaveValue("Current entry");
+    await act(async () => me.resolve(aUser()));
+  });
+
+  it("discards a superseded credential response", async () => {
+    const token = Promise.withResolvers<Awaited<ReturnType<AuthApi["login"]>>>();
+    const api = stubApi({
+      login: vi
+        .fn<AuthApi["login"]>()
+        .mockReturnValueOnce(token.promise)
+        .mockResolvedValue({ access_token: "new-token", token_type: "bearer" }),
+    });
+    render(
+      <AuthProvider boundary="entry" api={api}>
+        <Probe />
+      </AuthProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "sign in" }));
+    fireEvent.click(screen.getByRole("button", { name: "sign in" }));
+    await screen.findByText("signed in as maker");
+
+    await act(async () => token.resolve({ access_token: "old-token", token_type: "bearer" }));
+
+    expect(api.getMe).toHaveBeenCalledTimes(1);
+    expect(getUser()?.username).toBe("maker");
+  });
+
+  it("aborts identity verification with its login caller", async () => {
+    const caller = new AbortController();
+    const me = Promise.withResolvers<UserRead>();
+    const api = stubApi({ getMe: vi.fn<AuthApi["getMe"]>().mockReturnValue(me.promise) });
+    function Entry() {
+      const { login } = useAuth();
+      return (
+        <button
+          onClick={() => void login("maker", "password", false, caller.signal).catch(() => {})}
+        >
+          Verify entry
+        </button>
+      );
+    }
+    render(
+      <AuthProvider boundary="entry" api={api}>
+        <Entry />
+      </AuthProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Verify entry" }));
+    await waitFor(() => expect(api.getMe).toHaveBeenCalledTimes(1));
+
+    caller.abort();
+    await act(async () => me.resolve(aUser()));
+
+    expect(getUser()).toBeNull();
+    expect(vi.mocked(api.getMe).mock.calls[0]?.[0]?.signal?.aborted).toBe(true);
+  });
+
+  it("discards an aborted identity refresh", async () => {
+    const caller = new AbortController();
+    withStoredSession();
+    const me = Promise.withResolvers<UserRead>();
+    const api = stubApi({
+      getMe: vi
+        .fn<AuthApi["getMe"]>()
+        .mockResolvedValueOnce(aUser())
+        .mockReturnValueOnce(me.promise),
+    });
+    function Entry() {
+      const { refresh } = useAuth();
+      return (
+        <button onClick={() => void refresh(caller.signal).catch(() => {})}>Refresh entry</button>
+      );
+    }
+    render(
+      <AuthProvider boundary="entry" api={api}>
+        <Entry />
+      </AuthProvider>,
+    );
+    await waitFor(() => expect(api.getMe).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh entry" }));
+    await waitFor(() => expect(api.getMe).toHaveBeenCalledTimes(2));
+
+    caller.abort();
+    await act(async () => me.reject(new Error("late failure")));
+
+    expect(getUser()?.username).toBe("maker");
+  });
+
+  it("aborts bootstrap identity when its provider leaves", async () => {
+    withStoredSession();
+    const me = Promise.withResolvers<UserRead>();
+    const api = stubApi({ getMe: vi.fn<AuthApi["getMe"]>().mockReturnValue(me.promise) });
+    const view = render(
+      <AuthProvider api={api}>
+        <Probe />
+      </AuthProvider>,
+    );
+
+    view.unmount();
+    await act(async () => me.resolve(aUser({ username: "late" })));
+
+    expect(vi.mocked(api.getMe).mock.calls[0]?.[0]?.signal?.aborted).toBe(true);
+    expect(getUser()?.username).toBe("maker");
   });
 });

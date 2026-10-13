@@ -14,12 +14,23 @@ from pathlib import Path
 
 import pytest
 
+from app.core.config import DATA_ROOT_LAYOUT
 from tests.paths import REPO_ROOT
 
 ENTRYPOINT = REPO_ROOT / "backend" / "docker-entrypoint.sh"
+MANAGED_DIRECTORIES = sorted(
+    {Path(path).parts[0] for path in DATA_ROOT_LAYOUT.values()}
+)
 # A developer shell may export these; each test chooses its own layout.
 _PATH_OVERRIDES = frozenset(
-    {"VAULT_DATA_DIR", "VAULT_THUMB_DIR", "VAULT_STAGING_DIR", "VAULT_BACKUP_DIR"}
+    {
+        "VAULT_DATA_DIR",
+        "VAULT_THUMB_DIR",
+        "VAULT_STAGING_DIR",
+        "VAULT_BACKUP_DIR",
+        "VAULT_ARTIFACT_CACHE_ROOT",
+        "VAULT_EMBEDDING_CACHE_DIR",
+    }
 )
 
 
@@ -58,6 +69,12 @@ FAKE_UID=${spec%:*} FAKE_GID=${spec#*:} exec "$@"
         fake_bin / "chown",
         f"""#!/bin/sh
 printf 'chown:%s\\n' "$*" >> {command_log}
+for entry in "$@"; do
+  if [ -n "${{FAKE_READ_ONLY_ROOT:-}}" ] && [ "$entry" = "$FAKE_READ_ONLY_ROOT" ]; then
+    printf 'chown: %s: Read-only file system\\n' "$entry" >&2
+    exit 1
+  fi
+done
 if [ "$1" = "-R" ]; then
   shift
   shift
@@ -104,6 +121,7 @@ def _run_entrypoint(
         key: value for key, value in os.environ.items() if key not in _PATH_OVERRIDES
     }
     env.pop("VAULT_PROCESS_ROLE", None)
+    env.pop("FAKE_READ_ONLY_ROOT", None)
     if role is not None:
         env["VAULT_PROCESS_ROLE"] = role
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
@@ -169,9 +187,7 @@ class TestDockerEntrypointIdentity:
             for line in log.read_text().splitlines()
         )
 
-    @pytest.mark.parametrize(
-        "directory", ["files", "thumbs", "staging", "backups", "db"]
-    )
+    @pytest.mark.parametrize("directory", MANAGED_DIRECTORIES)
     def test_creates_the_layout_under_the_data_root(
         self, tmp_path: Path, directory: str
     ) -> None:
@@ -184,19 +200,12 @@ class TestDockerEntrypointIdentity:
 
     @pytest.mark.parametrize(
         "directory",
-        # A cache the app creates later is re-owned as well: the root pass
-        # covers whatever lives on the volume, not a list to keep in sync.
-        ["files", "thumbs", "staging", "backups", "db", "ai-models"],
+        MANAGED_DIRECTORIES,
     )
-    def test_re_owns_every_directory_under_the_data_root(
+    def test_re_owns_app_owned_directories_under_the_data_root(
         self, tmp_path: Path, directory: str
     ) -> None:
-        """Every directory, not the ones a contributor remembered.
-
-        A directory left owned by the previous uid is one the container can read
-        and not write, which surfaces later as a single feature failing —
-        thumbnails, or backups — rather than as a startup error.
-        """
+        """Every app-owned directory must remain writable after an ID change."""
         script, log, fake_bin, server = _entrypoint_harness(tmp_path)
         (tmp_path / "data" / "ai-models").mkdir(parents=True)
 
@@ -212,6 +221,112 @@ class TestDockerEntrypointIdentity:
         assert result.returncode == 0, result.stderr
         repaired = _repaired_paths(log, "1234:2345")
         assert str(tmp_path / "data" / directory) in repaired
+
+    @pytest.mark.parametrize(
+        "relative_path", ["library", "sources/library with spaces"]
+    )
+    def test_starts_with_an_external_read_only_directory(
+        self, tmp_path: Path, relative_path: str
+    ) -> None:
+        script, log, fake_bin, server = _entrypoint_harness(tmp_path)
+        source = tmp_path / "data" / relative_path
+        source.mkdir(parents=True)
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            overrides={"FAKE_READ_ONLY_ROOT": str(source)},
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert _steps(log) == ["migration", "server"]
+
+    def test_does_not_repair_external_directory_contents(self, tmp_path: Path) -> None:
+        script, log, fake_bin, server = _entrypoint_harness(tmp_path)
+        source_file = tmp_path / "data" / "library" / "part.stl"
+        source_file.parent.mkdir(parents=True)
+        source_file.write_bytes(b"solid")
+
+        result = _run_entrypoint(script, fake_bin, server, tmp_path=tmp_path)
+
+        assert result.returncode == 0, result.stderr
+        assert str(source_file) not in _repaired_paths(log, "10001:10001")
+
+    @pytest.mark.parametrize(
+        ("variable", "directory"),
+        [
+            pytest.param(
+                "VAULT_ARTIFACT_CACHE_ROOT", "artifact-cache", id="artifact-cache"
+            ),
+            pytest.param("VAULT_EMBEDDING_CACHE_DIR", "ai-models", id="ai-models"),
+        ],
+    )
+    def test_creates_an_overridden_cache_directory(
+        self, tmp_path: Path, variable: str, directory: str
+    ) -> None:
+        script, _log, fake_bin, server = _entrypoint_harness(tmp_path)
+        cache = tmp_path / "ssd" / directory
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            overrides={variable: str(cache)},
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert cache.is_dir()
+
+    @pytest.mark.parametrize(
+        ("variable", "directory"),
+        [
+            pytest.param(
+                "VAULT_ARTIFACT_CACHE_ROOT", "artifact-cache", id="artifact-cache"
+            ),
+            pytest.param("VAULT_EMBEDDING_CACHE_DIR", "ai-models", id="ai-models"),
+        ],
+    )
+    def test_re_owns_an_overridden_cache_directory(
+        self, tmp_path: Path, variable: str, directory: str
+    ) -> None:
+        script, log, fake_bin, server = _entrypoint_harness(tmp_path)
+        cache = tmp_path / "ssd" / directory
+        cache.mkdir(parents=True)
+        cached = cache / "cached.bin"
+        cached.write_bytes(b"cache")
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            overrides={variable: str(cache)},
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert str(cached) in _repaired_paths(log, "10001:10001")
+
+    @pytest.mark.parametrize("directory", [".", *MANAGED_DIRECTORIES])
+    def test_managed_ownership_failure_stops_before_migration(
+        self, tmp_path: Path, directory: str
+    ) -> None:
+        script, log, fake_bin, server = _entrypoint_harness(tmp_path)
+        managed = tmp_path / "data" / directory
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            overrides={"FAKE_READ_ONLY_ROOT": str(managed)},
+        )
+
+        assert result.returncode != 0
+        assert "Read-only file system" in result.stderr
+        assert _steps(log) == []
 
     def test_repairs_each_entry_once(self, tmp_path: Path) -> None:
         # The managed children sit on the root's own mount here, so a root walk
@@ -264,7 +379,19 @@ class TestDockerEntrypointIdentity:
         assert result.returncode == 0, result.stderr
         assert str(backups) in _repaired_paths(log, "1234:2345")
 
-    def test_treats_an_empty_override_as_the_default(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize(
+        ("variable", "directory"),
+        [
+            pytest.param("VAULT_STAGING_DIR", "staging", id="staging"),
+            pytest.param(
+                "VAULT_ARTIFACT_CACHE_ROOT", "artifact-cache", id="artifact-cache"
+            ),
+            pytest.param("VAULT_EMBEDDING_CACHE_DIR", "ai-models", id="ai-models"),
+        ],
+    )
+    def test_treats_an_empty_override_as_the_default(
+        self, tmp_path: Path, variable: str, directory: str
+    ) -> None:
         # An unset Compose variable renders as an empty string, which must mean
         # the layout path and never the working directory.
         script, _log, fake_bin, server = _entrypoint_harness(tmp_path)
@@ -274,11 +401,11 @@ class TestDockerEntrypointIdentity:
             fake_bin,
             server,
             tmp_path=tmp_path,
-            overrides={"VAULT_STAGING_DIR": ""},
+            overrides={variable: ""},
         )
 
         assert result.returncode == 0, result.stderr
-        assert (tmp_path / "data" / "staging").is_dir()
+        assert (tmp_path / "data" / directory).is_dir()
 
     def test_preserves_metadata_for_entries_already_owned_by_runtime_identity(
         self, tmp_path: Path
@@ -455,3 +582,13 @@ class TestDockerEntrypointRole:
         _run_entrypoint(script, fake_bin, server, tmp_path=tmp_path, role="worker")
 
         assert log.read_text().splitlines()[-1].startswith("server:10001:10001:")
+
+
+class TestWorkerBytecode:
+    def test_ships_compiled_worker_application_code(self):
+        dockerfile = (REPO_ROOT / "backend" / "Dockerfile").read_text()
+
+        assert "PYTHONDONTWRITEBYTECODE=1" in dockerfile
+        assert dockerfile.index(
+            "COPY --chown=printstash:printstash app ./app"
+        ) < dockerfile.index("RUN .venv/bin/python -m compileall -q app")

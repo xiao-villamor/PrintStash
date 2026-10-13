@@ -123,3 +123,108 @@ class TestJobDefinition:
                 steps=(Step("a", _noop),),
                 label="  ",
             )
+
+
+class TestDiscoveryBudget:
+    @pytest.mark.parametrize(
+        "total,interactive,backfill", [(0, 0, 0), (1, 1, 1), (2, 1, 1), (1, 1, 0)]
+    )
+    def test_keeps_explicit_priority_caps(self, total, interactive, backfill):
+        from app.modules.work.contracts import DiscoveryBudget
+
+        budget = DiscoveryBudget(
+            total=total, interactive=interactive, backfill=backfill
+        )
+        assert (budget.total, budget.interactive, budget.backfill) == (
+            total,
+            interactive,
+            backfill,
+        )
+
+    @pytest.mark.parametrize(
+        "total,interactive,backfill",
+        [
+            (-1, 1, 1),
+            (True, 1, 1),
+            (1.5, 1, 1),
+            (1, -1, 1),
+            (1, True, 1),
+            (1, 1, -1),
+            (1, 1, True),
+            (3, 1, 1),
+        ],
+    )
+    def test_refuses_invalid_priority_caps(self, total, interactive, backfill):
+        from app.modules.work.contracts import DiscoveryBudget
+
+        with pytest.raises(ValueError):
+            DiscoveryBudget(total=total, interactive=interactive, backfill=backfill)
+
+
+class TestLaneOrder:
+    def test_existing_lanes_default_to_priority_order(self):
+        from app.modules.work.contracts import LaneOrder
+
+        assert Lane(LaneName.MAINTENANCE, 1).queue_order is LaneOrder.PRIORITY
+
+    def test_queue_order_requires_a_closed_enum(self):
+        with pytest.raises(TypeError):
+            Lane(LaneName.MAINTENANCE, 1, queue_order="fifo")
+
+    @pytest.mark.parametrize("factor", [1, 8])
+    def test_fifo_lane_headroom_matches_reserved_pending_slots(
+        self, monkeypatch, factor
+    ):
+        from app.core.config import _overlay
+        from app.modules.work.contracts import LaneOrder
+
+        monkeypatch.setitem(_overlay, "jobs_lane_headroom_factor", factor)
+        fifo = Lane(LaneName.DERIVE_NATIVE, 2, queue_order=LaneOrder.FIFO)
+        priority = Lane(LaneName.MAINTENANCE, 2, queue_order=LaneOrder.PRIORITY)
+        assert fifo.headroom == 3
+        assert priority.headroom == 2 * factor
+
+
+class TestLanePace:
+    def test_a_lane_is_prompt_unless_declared_otherwise(self):
+        from app.modules.work.contracts import LanePace
+
+        assert Lane(LaneName.INGEST, 1).pace is LanePace.PROMPT
+
+    def test_pace_requires_a_closed_enum(self):
+        with pytest.raises(TypeError, match="lane_pace"):
+            Lane(LaneName.MAINTENANCE, 1, pace="relaxed")
+
+    @pytest.mark.parametrize(
+        "lane",
+        [
+            LaneName.INGEST,
+            LaneName.DERIVE_NATIVE,
+            LaneName.DERIVE_LIGHT,
+            LaneName.NETWORK,
+            LaneName.PRINTING,
+            LaneName.RECONCILE,
+        ],
+    )
+    def test_lanes_someone_waits_on_stay_prompt(self, lane):
+        from app.modules.work.catalog import default_lanes
+        from app.modules.work.contracts import LanePace
+
+        assert default_lanes()[lane].pace is LanePace.PROMPT
+
+    @pytest.mark.parametrize(
+        "lane",
+        [
+            LaneName.SEARCH,
+            LaneName.MAINTENANCE,
+            LaneName.NOTIFY,
+            LaneName.SIMILARITY,
+            LaneName.CAPTIONS,
+            LaneName.EXPANSION,
+        ],
+    )
+    def test_background_upkeep_lanes_are_relaxed(self, lane):
+        from app.modules.work.catalog import default_lanes
+        from app.modules.work.contracts import LanePace
+
+        assert default_lanes()[lane].pace is LanePace.RELAXED

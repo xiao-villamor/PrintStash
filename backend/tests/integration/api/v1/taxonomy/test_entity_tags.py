@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app.db.models import (
+    Collection,
     CollectionRole,
     CollectionTagLink,
     FileTagLink,
     FileType,
     ModelTagLink,
     MultipartModelTagLink,
+    Tag,
 )
 from tests.factories import (
     bearer,
@@ -27,6 +31,7 @@ from tests.factories import (
     tag_model,
     tag_multipart_model,
 )
+from tests.factories.protocols import MakeCollection, MakeModel, TagCollection
 
 
 def _assert_replace_collection_tags_is_idempotent(
@@ -182,6 +187,34 @@ def _assert_delete_tag_cleans_every_link_table(
 
 
 class TestEntityTagEndpoints:
+    def test_tag_count_includes_nested_collection_models_once(
+        self,
+        client: TestClient,
+        auth_headers: dict[str, str],
+        make_collection: MakeCollection,
+        make_model: MakeModel,
+        make_tag: Callable[[str], Tag],
+        tag_collection: TagCollection,
+    ) -> None:
+        root: Collection = make_collection("Tagged root")
+        child = make_collection("Tagged child", parent=root)
+        leaf = make_collection("Tagged leaf", parent=child)
+        tag = make_tag("Inherited")
+        tag_collection(root, tag)
+        tag_collection(child, tag)
+        make_model("Child model", collection=child)
+        make_model("Leaf model", collection=leaf)
+
+        response = client.get("/api/v1/tags", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert (
+            next(row for row in response.json() if row["slug"] == tag.slug)[
+                "model_count"
+            ]
+            == 2
+        )
+
     def test_replace_collection_tags_is_idempotent(
         self,
         client: TestClient,

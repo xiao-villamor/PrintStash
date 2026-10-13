@@ -32,8 +32,8 @@ test.describe("AI Search", () => {
           meshFile: { name: `${name}.stl`, mimeType: "model/stl", buffer: mesh },
         });
         const href = await modelCard(page, name).getAttribute("href");
-        expect(href).toMatch(/\/models\/\d+$/);
-        ids.push(Number(href!.split("/").at(-1)));
+        expect(new URL(href!, page.url()).pathname).toMatch(/^\/models\/\d+$/);
+        ids.push(Number(new URL(href!, page.url()).pathname.split("/").at(-1)));
       }
       const source: ModelRead = await (
         await page.request.get(`${API}/api/v1/models/${ids[0]}`)
@@ -143,7 +143,7 @@ test.describe("AI Search", () => {
         .fill("A clamp that holds a lamp on a bicycle handlebar. Fit the two halves with bolts.");
       await page.getByRole("button", { name: "Save", exact: true }).click();
       await expect(page).toHaveURL(/\/documents\/\d+$/);
-      documentId = page.url().split("/").at(-1);
+      documentId = new URL(page.url()).pathname.split("/").at(-1);
       await page.goto("/settings?section=ai-search");
       await page.getByRole("tab", { name: "Technical" }).click();
       const form = page.getByRole("form", { name: "AI Search", exact: true });
@@ -210,7 +210,9 @@ test.describe("AI Search", () => {
         true,
       );
       await box.press("Enter");
-      await expect(page).toHaveURL(/\/\?q=bike\+lamp\+attachment/);
+      await expect(page).toHaveURL(
+        (url) => url.pathname === "/" && url.searchParams.get("q") === "bike lamp attachment",
+      );
       await box.click();
       await page.getByRole("button", { name: "Search with AI" }).click();
       await expect(page).toHaveURL(/\/search\?q=bike\+lamp\+attachment/);
@@ -258,7 +260,12 @@ test.describe("AI Search", () => {
       await page.getByRole("button", { name: "List view", exact: true }).click();
       await expect(link).toBeVisible();
       await page.getByRole("button", { name: "Clear search", exact: true }).click();
-      await expect(page).toHaveURL(/\/$/);
+      await expect(page).toHaveURL(
+        (url) =>
+          url.pathname === "/" &&
+          url.searchParams.get("type") === "all" &&
+          url.searchParams.get("sort") === "date-desc",
+      );
       await expect(box).toHaveValue("");
       await expect(page.getByRole("heading", { name: "Search results", exact: true })).toHaveCount(
         0,
@@ -308,7 +315,11 @@ test.describe("AI Search", () => {
         gcode: false,
         meshFile: { name: `${name}.stl`, mimeType: "model/stl", buffer: mesh },
       });
-      modelId = Number((await modelCard(page, name).getAttribute("href"))!.split("/").at(-1));
+      modelId = Number(
+        new URL((await modelCard(page, name).getAttribute("href"))!, page.url()).pathname
+          .split("/")
+          .at(-1),
+      );
       await page.goto("/settings?section=ai-search");
       await page.getByRole("tab", { name: "Technical" }).click();
       const form = page.getByRole("form", { name: "AI Search", exact: true });
@@ -397,7 +408,7 @@ test.describe("AI Search", () => {
     try {
       await uploadModel(page, name, { mesh: true, gcode: false });
       const href = await modelCard(page, name).getAttribute("href");
-      id = Number(href!.split("/").at(-1));
+      id = Number(new URL(href!, page.url()).pathname.split("/").at(-1));
       const response = await page.request.patch(`${API}/api/v1/models/${id}`, {
         data: { description: "Human description remains separate." },
       });

@@ -10,12 +10,13 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timedelta
 from typing import Any, Optional, cast
 
-from sqlalchemy import delete, func, or_
+from sqlalchemy import delete, func, literal, or_
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import Session, col, select
 
 from app.core.config import settings
@@ -24,6 +25,7 @@ from app.core.time import ensure_utc, utcnow
 from app.db.affected import affected
 from app.db.models import (
     ACTIVE_JOB_STATES,
+    IngestionScratchWindow,
     Job,
     JobKind,
     JobState,
@@ -31,6 +33,7 @@ from app.db.models import (
     WorkPriority,
 )
 from app.db.session import get_session_factory
+from app.db.transactions import begin_write
 from app.schemas.jobs import JobFailedItem, JobStatus
 
 from .contracts import JobOutcome
@@ -56,8 +59,22 @@ _STATUS_FIELDS = frozenset(JobStatus.model_fields) - {
     "started_at",
     "finished_at",
     "updated_at",
+    "staging",
 }
 _COUNT_FIELDS = ("processed", "total", "succeeded", "deduplicated", "skipped", "failed")
+
+
+def active_job_predicate() -> ColumnElement[bool]:
+    """Expose closed active states to the database's partial-index planner.
+
+    These values come only from the canonical enum, never request input. Bound
+    state parameters prevent SQLite from proving the active-subject index's
+    predicate; escaped SQLAlchemy literals preserve that proof on both dialects.
+    Other query inputs remain bound parameters.
+    """
+    return col(Job.state).in_(
+        [literal(state.value, literal_execute=True) for state in ACTIVE_JOB_STATES]
+    )
 
 
 class ActiveJobExists(Exception):
@@ -120,6 +137,7 @@ def status_of(row: Job) -> JobStatus:
     payload = json.loads(row.status_json)
     return JobStatus(
         job_id=row.id,
+        staging=None,
         kind=row.kind,
         owner_user_id=row.owner_user_id,
         state=row.state,
@@ -271,43 +289,236 @@ class JobStore:
         with get_session_factory().scoped_session() as session:
             return self._active_id(session, definition, subject_key)
 
+    @staticmethod
+    def lock_execution(
+        session: Session,
+        job_id: str,
+        *,
+        epoch: str | None = None,
+        attempt: int | None = None,
+        states: Iterable[JobState] | None = None,
+    ) -> Job | None:
+        """Lock and validate execution authority in the caller's transaction."""
+        begin_write(session, immediate=True)
+        row = session.exec(
+            select(Job)
+            .where(Job.id == job_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        if (
+            row is None
+            or (epoch is not None and row.execution_epoch != epoch)
+            or (attempt is not None and row.attempts != attempt)
+            or (states is not None and row.state not in states)
+        ):
+            return None
+        return row
+
+    @staticmethod
+    def owns_execution(
+        session: Session, job_id: str, *, epoch: str, attempt: int, state: JobState
+    ) -> bool:
+        """Whether this attempt still holds the Job, read without locking it."""
+        row = session.exec(
+            select(Job.execution_epoch, Job.attempts, Job.state).where(Job.id == job_id)
+        ).first()
+        return row is not None and tuple(row) == (epoch, attempt, state)
+
     # -- status -------------------------------------------------------------
 
-    def update(self, job_id: str, **fields: Any) -> None:
+    def update(
+        self,
+        job_id: str,
+        *,
+        expected_attempt: int | None = None,
+        expected_epoch: str | None = None,
+        **fields: Any,
+    ) -> None:
         """Merge progress into an active Job.
 
         A terminal Job is immutable: a step still reporting after its Job was
         cancelled (the cancel races the running step) changes nothing.
         """
-        self._write(job_id, None, fields)
+        self._write(
+            job_id,
+            None,
+            fields,
+            expected_attempt=expected_attempt,
+            expected_epoch=expected_epoch,
+        )
 
-    def finish(self, job_id: str, outcome: JobOutcome, **fields: Any) -> None:
+    def finish(
+        self,
+        job_id: str,
+        outcome: JobOutcome,
+        *,
+        expected_attempt: int | None = None,
+        expected_epoch: str | None = None,
+        **fields: Any,
+    ) -> None:
         """The single terminal transition for every Job; the first one wins.
 
         A failure always says why: ``error`` is required with ``FAILED``.
         """
         if outcome is JobOutcome.FAILED and not fields.get("error"):
             raise ValueError("failed_job_requires_error")
-        self._write(job_id, outcome, fields)
+        self._write(
+            job_id,
+            outcome,
+            fields,
+            expected_attempt=expected_attempt,
+            expected_epoch=expected_epoch,
+        )
+
+    def cancel_attempt(
+        self,
+        job_id: str,
+        attempt: int,
+        *,
+        execution_epoch: str,
+        expected_state: JobState,
+        withdraw: Callable[[Session, str], None],
+    ) -> JobStatus | None:
+        """Withdraw intent and cancel atomically; a withdrawal error aborts both."""
+        return self._write(
+            job_id,
+            JobOutcome.CANCELLED,
+            {"error": "cancelled_by_user"},
+            expected_attempt=attempt,
+            expected_epoch=execution_epoch,
+            expected_state=expected_state,
+            before_transition=withdraw,
+        )
+
+    def settle_attempt(
+        self,
+        job_id: str,
+        attempt: int,
+        outcome: JobOutcome,
+        *,
+        execution_epoch: str,
+        on_failure: Callable[[Session, str, str], None],
+        error: str | None = None,
+        expected_state: JobState | None = None,
+        **fields: Any,
+    ) -> JobStatus | None:
+        """Atomically settle matching engine evidence and its subject failure hook.
+
+        Workers omit expected_state, which excludes a queued retry. Reconciliation
+        supplies the state it observed, so evidence for a queued Job is explicit.
+        """
+        if outcome is JobOutcome.FAILED and error is None:
+            raise ValueError("failed_job_requires_error")
+        if error is not None:
+            fields["error"] = error
+            fields.setdefault("retryable", outcome is JobOutcome.FAILED)
+        return self._write(
+            job_id,
+            outcome,
+            fields,
+            expected_attempt=attempt,
+            expected_epoch=execution_epoch,
+            expected_state=expected_state,
+            failure_hook=on_failure,
+        )
+
+    def reconcile_settled_attempt(
+        self,
+        job_id: str,
+        attempt: int,
+        hook: Callable[[Session, str], None],
+        *,
+        execution_epoch: str,
+    ) -> None:
+        """Replay cleanup only while the same attempt remains terminal.
+
+        Retry takes this Job lock too. The staging hook may reclaim only exact
+        receipts and is idempotent; holding the lock keeps its reads and cleanup
+        from crossing into a new attempt that reuses this Job's leases.
+        """
+        with get_session_factory().scoped_session() as session:
+            row = self.lock_execution(
+                session,
+                job_id,
+                epoch=execution_epoch,
+                attempt=attempt,
+                states=TERMINAL_STATES,
+            )
+            if row is None:
+                return
+            try:
+                hook(session, row.subject_key)
+                session.commit()
+            except Exception:  # noqa: BLE001 - startup retries exact-receipt cleanup
+                session.rollback()
+                logger.exception(
+                    "job settlement cleanup failed", extra={"job_id": job_id}
+                )
 
     def _write(
-        self, job_id: str, outcome: JobOutcome | None, fields: dict[str, Any]
-    ) -> None:
+        self,
+        job_id: str,
+        outcome: JobOutcome | None,
+        fields: dict[str, Any],
+        *,
+        expected_attempt: int | None,
+        expected_epoch: str | None,
+        expected_state: JobState | None = None,
+        failure_hook: Callable[[Session, str, str], None] | None = None,
+        before_transition: Callable[[Session, str], None] | None = None,
+    ) -> JobStatus | None:
         with get_session_factory().scoped_session() as session:
-            row = session.get(Job, job_id)
-            if row is None or row.state in TERMINAL_STATES:
-                return
-            payload = _merge(json.loads(row.status_json), fields)
-            now = utcnow()
-            if outcome is not None:
-                self._apply_terminal(row, payload, outcome, now)
-            row.status_json = json.dumps(payload, separators=(",", ":"))
-            row.updated_at = now
-            session.add(row)
-            session.commit()
-            session.refresh(row)
+            if expected_attempt is not None and expected_epoch is None:
+                raise ValueError("execution_epoch_required")
+            row = self.lock_execution(
+                session, job_id, epoch=expected_epoch, attempt=expected_attempt
+            )
+            if row is None or (
+                expected_attempt is not None
+                and (
+                    (row.state is JobState.QUEUED and expected_state is None)
+                    or (expected_state is not None and row.state is not expected_state)
+                )
+            ):
+                return None
+            terminal = row.state in TERMINAL_STATES
+            if terminal and failure_hook is None:
+                return None
+            if not terminal:
+                if before_transition is not None:
+                    before_transition(session, row.subject_key)
+                payload = _merge(json.loads(row.status_json), fields)
+                now = utcnow()
+                if outcome is not None:
+                    self._apply_terminal(row, payload, outcome, now)
+                row.status_json = json.dumps(payload, separators=(",", ":"))
+                row.updated_at = now
+                session.add(row)
+                session.flush()
             status = status_of(row)
-        self._changed(status)
+            if (
+                not terminal
+                and failure_hook is not None
+                and row.state
+                in {
+                    JobState.FAILED,
+                    JobState.CANCELLED,
+                }
+            ):
+                if status.error is None:
+                    raise RuntimeError(f"failed_job_without_error:{job_id}")
+                try:
+                    with session.begin_nested():
+                        failure_hook(session, row.subject_key, status.error)
+                except Exception:  # noqa: BLE001 - settlement survives a broken hook
+                    logger.exception(
+                        "job failure hook failed", extra={"job_id": job_id}
+                    )
+            session.commit()
+        if not terminal:
+            self._changed(status)
+        return status
 
     @staticmethod
     def _apply_terminal(
@@ -347,7 +558,13 @@ class JobStore:
     def get(self, job_id: str) -> Optional[JobStatus]:
         with get_session_factory().scoped_session() as session:
             row = session.get(Job, job_id)
-            return status_of(row) if row is not None else None
+            if row is None:
+                return None
+            from app.modules.ingestion.staging_views import attach_summaries
+
+            status = status_of(row)
+            attach_summaries(session, [status], select(Job.id).where(Job.id == job_id))
+            return status
 
     def row(self, session: Session, job_id: str) -> Job | None:
         return session.get(Job, job_id)
@@ -366,8 +583,9 @@ class JobStore:
     ) -> list[JobStatus]:
         """Active Jobs, the most recent terminal ones, and any tracked by id.
 
-        A user sees only Jobs they own. An administrator additionally sees
-        system Jobs (no owner) when ``include_system`` asks for them.
+        A user sees only Jobs they own. An administrator sees user-owned Jobs
+        and scheduled backups in Tasks; other system Jobs (no owner) require
+        ``include_system`` so high-volume maintenance does not bury Tasks.
         """
         terminal_limit = max(0, min(100, terminal_limit))
         with get_session_factory().scoped_session() as session:
@@ -375,7 +593,12 @@ class JobStore:
             if is_superuser and include_system:
                 pass
             elif is_superuser:
-                scope.append(col(Job.owner_user_id).is_not(None))
+                scope.append(
+                    or_(
+                        col(Job.owner_user_id).is_not(None),
+                        col(Job.kind) == JobKind.BACKUPS_AUTOMATIC,
+                    )
+                )
             else:
                 scope.append(Job.owner_user_id == user_id)
             if kinds is not None:
@@ -401,17 +624,50 @@ class JobStore:
             )
             rows = {row.id: row for row in [*active, *terminal, *tracked]}
             ordered = sorted(rows.values(), key=lambda r: r.updated_at, reverse=True)
-            return [status_of(row) for row in ordered]
+            from app.modules.ingestion.staging_views import attach_summaries
 
-    def failed(self, *, limit: int = 50) -> list[JobStatus]:
+            statuses = [status_of(row) for row in ordered]
+            selected = select(Job.id).where(
+                *scope,
+                or_(
+                    col(Job.state).in_(ACTIVE_JOB_STATES),
+                    col(Job.id).in_(
+                        select(Job.id)
+                        .where(*scope, col(Job.state).in_(TERMINAL_STATES))
+                        .order_by(col(Job.updated_at).desc())
+                        .limit(terminal_limit)
+                    ),
+                    col(Job.id).in_(tracked_job_ids),
+                ),
+            )
+            attach_summaries(session, statuses, selected)
+            return statuses
+
+    def failed(
+        self, *, limit: int = 50, excluded_kinds: Sequence[JobKind] = ()
+    ) -> list[JobStatus]:
         with get_session_factory().scoped_session() as session:
             rows = session.exec(
                 select(Job)
-                .where(Job.state == JobState.FAILED)
+                .where(
+                    Job.state == JobState.FAILED, col(Job.kind).not_in(excluded_kinds)
+                )
                 .order_by(col(Job.updated_at).desc())
                 .limit(limit)
             ).all()
-            return [status_of(row) for row in rows]
+            from app.modules.ingestion.staging_views import attach_summaries
+
+            statuses = [status_of(row) for row in rows]
+            selected = (
+                select(Job.id)
+                .where(
+                    Job.state == JobState.FAILED, col(Job.kind).not_in(excluded_kinds)
+                )
+                .order_by(col(Job.updated_at).desc())
+                .limit(limit)
+            )
+            attach_summaries(session, statuses, selected)
+            return statuses
 
     def counts_by_definition(self) -> dict[JobKind, dict[JobState, int]]:
         with get_session_factory().scoped_session() as session:
@@ -451,7 +707,7 @@ class JobStore:
     # -- retention ----------------------------------------------------------
 
     def prune(self, *, now: datetime | None = None) -> int:
-        """Drop terminal Jobs past retention, never one a staging lease still owns.
+        """Drop terminal history only after durable input and scratch custody end.
 
         User Jobs are kept ``jobs_retention_days`` and capped per user; system
         Jobs (no owner) are high-volume backfill records and keep a day.
@@ -463,12 +719,21 @@ class JobStore:
         unleased = ~col(Job.id).in_(
             select(StagingLease.job_id).where(col(StagingLease.job_id).is_not(None))
         )
+        # A retry may move the input lease to a new Job while the old actor
+        # still reads it. Preserve the origin's subject authority until its
+        # exact scratch receipt is retired, even after job_id is detached.
+        without_scratch = ~col(Job.id).in_(
+            select(IngestionScratchWindow.origin_job_id).where(
+                col(IngestionScratchWindow.origin_job_id).is_not(None)
+            )
+        )
         with get_session_factory().scoped_session() as session:
             removed = affected(
                 session,
                 delete(Job).where(
                     col(Job.state).in_(terminal),
                     unleased,
+                    without_scratch,
                     or_(
                         (col(Job.owner_user_id).is_(None))
                         & (col(Job.finished_at) < system_cutoff),
@@ -496,6 +761,7 @@ class JobStore:
                         col(Job.owner_user_id) == owner,
                         col(Job.state).in_(terminal),
                         unleased,
+                        without_scratch,
                         ~col(Job.id).in_(keep),
                     ),
                 )

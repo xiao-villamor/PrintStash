@@ -8,10 +8,13 @@
  * mean "whatever the server was started with".
  */
 import "@testing-library/jest-dom/vitest";
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
+import { clearLogin } from "@/lib/auth-store";
+import { setLocale } from "@/lib/locale";
+import { queryKeys } from "@/lib/query-client";
 import { SetupStorageChoice } from "@/components/setup-storage-choice";
 import { aVaultConfig } from "@/test-support/factories";
 import { json, renderApp, type RouteTable } from "@/test-support/render";
@@ -33,6 +36,79 @@ function renderChoice(routes: RouteTable = {}, onPrepared = vi.fn<() => void>())
 }
 
 describe("SetupStorageChoice", () => {
+  it("retains a storage draft when locale changes", async () => {
+    const choice = renderChoice();
+    const root = await screen.findByLabelText("Models directory");
+    await userEvent.clear(root);
+    await userEvent.type(root, "/my/models");
+    await act(async () => setLocale("es"));
+    expect(root).toHaveValue("/my/models");
+    expect(choice.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/config")).toHaveLength(
+      1,
+    );
+  });
+  it("retires a pending storage choice on unmount", async () => {
+    const response = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const onPrepared = vi.fn<() => void>();
+    const choice = renderChoice(
+      {
+        "POST /api/v1/setup/prepare-storage": (_url, init) => {
+          signal = init?.signal;
+          return response.promise;
+        },
+      },
+      onPrepared,
+    );
+    await screen.findByLabelText("Models directory");
+    await userEvent.click(screen.getByRole("button", { name: "Use this storage" }));
+    choice.unmount();
+    await act(async () => response.resolve(json(PREPARED)));
+    expect(signal?.aborted).toBe(true);
+    expect(onPrepared).not.toHaveBeenCalled();
+  });
+  it("shares configuration with the setup storage picker", async () => {
+    const choice = renderApp(<SetupStorageChoice onPrepared={() => {}} />, {
+      seed: [[queryKeys.vaultConfig, aVaultConfig({ data_dir: "/cached/models" })]],
+      routes: { "GET /api/v1/storage/providers": json(storageProviderCatalogue) },
+    });
+    expect(await screen.findByLabelText("Models directory")).toHaveValue("/cached/models");
+    expect(choice.requestsWithMethod("GET").some((r) => r.url === "/api/v1/config")).toBe(false);
+  });
+
+  it("retires a storage choice when the session changes", async () => {
+    const response = Promise.withResolvers<Response>();
+    let signal: AbortSignal | null | undefined;
+    const onPrepared = vi.fn<() => void>();
+    const choice = renderChoice(
+      {
+        "POST /api/v1/setup/prepare-storage": (_url, init) => {
+          signal = init?.signal;
+          return response.promise;
+        },
+      },
+      onPrepared,
+    );
+    await screen.findByLabelText("Models directory");
+    await userEvent.click(screen.getByRole("button", { name: "Use this storage" }));
+    expect(choice.client.getMutationCache().getAll()).toHaveLength(0);
+    await act(async () => clearLogin());
+    await act(async () => response.resolve(json(PREPARED)));
+    expect(signal?.aborted).toBe(true);
+    expect(onPrepared).not.toHaveBeenCalled();
+  });
+  it("retains a storage draft during config refresh", async () => {
+    const choice = renderChoice();
+    const root = await screen.findByLabelText("Models directory");
+    await userEvent.clear(root);
+    await userEvent.type(root, "/my/models");
+    choice.route({ "GET /api/v1/config": json(aVaultConfig({ data_dir: "/new/default" })) });
+    await act(async () => {
+      await choice.client.invalidateQueries({ queryKey: queryKeys.vaultConfig });
+    });
+    expect(root).toHaveValue("/my/models");
+  });
+
   it("starts from the deployment's own local roots", async () => {
     renderChoice();
 

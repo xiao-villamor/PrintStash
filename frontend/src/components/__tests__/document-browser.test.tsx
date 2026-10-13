@@ -30,6 +30,8 @@ const FROZEN_NOW = "2026-01-01T00:00:00Z";
 function aDocument(over: Partial<DocumentListItem> = {}): DocumentListItem {
   return {
     id: 3,
+    edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    edit_version: 1,
     name: "Assembly guide",
     kind: "markdown",
     collection: "parts",
@@ -116,14 +118,48 @@ describe("DocumentBrowser", () => {
       expect(screen.queryByText("Create a markdown doc or upload a PDF.")).toBeNull();
     });
 
-    it("treats a folder whose documents cannot be read as empty", async () => {
-      // The folder still has its models; an error where the list should be
-      // takes the whole panel away for a side feature.
+    it("distinguishes document list failure from empty success", async () => {
       renderBrowser({
         routes: { "GET /api/v1/documents": json({ detail: "boom" }, 500) },
       });
 
-      expect(await screen.findByText("No documents here yet.")).toBeInTheDocument();
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(screen.queryByText("No documents here yet.")).toBeNull();
+      expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    });
+  });
+
+  describe("read recovery", () => {
+    it("retries a failed document list", async () => {
+      const user = userEvent.setup();
+      const app = renderBrowser({
+        routes: { "GET /api/v1/documents": json({ detail: "offline" }, 500) },
+      });
+      await screen.findByRole("alert");
+      app.route({ "GET /api/v1/documents": json([aDocument()]) });
+      await user.click(screen.getByRole("button", { name: "Retry" }));
+      expect(await screen.findByText("Assembly guide")).toBeInTheDocument();
+    });
+
+    it("ignores a document list from a previous collection", async () => {
+      let resolveOld!: (response: Response) => void;
+      const oldResponse = new Promise<Response>((resolve) => {
+        resolveOld = resolve;
+      });
+      const app = renderBrowser({
+        routes: {
+          "GET /api/v1/documents?collection=parts": () => oldResponse,
+          "GET /api/v1/documents?collection=new": json([
+            aDocument({ name: "Current notes", collection: "new" }),
+          ]),
+        },
+      });
+      await waitFor(() => expect(app.requests()).toHaveLength(1));
+      app.rerender(<DocumentBrowser collectionId={2} collectionPath="new" canCreate={true} />);
+      expect(await screen.findByText("Current notes")).toBeInTheDocument();
+      resolveOld(json([aDocument()]));
+      await waitFor(() => expect(screen.queryByText("Assembly guide")).toBeNull());
+      expect(screen.getByText("Current notes")).toBeInTheDocument();
     });
   });
 

@@ -23,10 +23,14 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { adminSession, memberSession } from "@/test-support/render";
 import { aJob } from "@/test-support/factories";
+import { uiMessage } from "@/lib/locale";
+import { aSimilarityRun } from "@/test-support/similarity";
 import type { EventSocket } from "@/lib/events";
 import type { JobSource } from "@/lib/task-center";
 import type { JobStatus } from "@/types";
+import type { SimilarityRun } from "@/types/similarity";
 
 // task-center holds module-private state, so each test gets a fresh module via
 // resetModules() + dynamic import. Fake timers (which also fake Date.now in
@@ -37,6 +41,7 @@ import type { JobStatus } from "@/types";
 type TaskCenter = typeof import("@/lib/task-center");
 
 const listJobs = vi.fn<JobSource>();
+const getSimilarityRun = vi.fn<(id: number) => Promise<SimilarityRun>>();
 
 /** A socket the test drives: `deliver` is the server sending one frame. */
 class FakeEventSocket implements EventSocket {
@@ -46,20 +51,27 @@ class FakeEventSocket implements EventSocket {
   send = vi.fn<(data: string) => void>();
   close = vi.fn<() => void>();
 
-  deliver(frame: { type: string; job_id?: string; state?: string }): void {
+  deliver(frame: { type: string; job_id?: string; state?: string; task_visible?: boolean }): void {
     this.onmessage?.({ data: JSON.stringify(frame) });
   }
 }
 
 let socket: FakeEventSocket;
+let stopTaskScope: () => void = () => {};
 
 /** Fresh module instance, wired to the stubbed job source and events socket. */
 async function loadTaskCenter(): Promise<TaskCenter> {
+  stopTaskScope();
+  // A reset module graph has no catalogs yet; the app loads one before it renders.
+  const locale = await import("@/lib/locale");
+  await Promise.all(locale.SUPPORTED_LOCALES.map(locale.ensureLocaleCatalog));
   const taskCenter = await import("@/lib/task-center");
+  stopTaskScope = taskCenter.startTaskCenterSessionScope();
   const events = await import("@/lib/events");
   socket = new FakeEventSocket();
   events.setEventSocketFactory(async () => socket);
   taskCenter.setJobSource(listJobs);
+  taskCenter.setSimilarityRunSource(getSimilarityRun);
   return taskCenter;
 }
 
@@ -69,13 +81,19 @@ beforeEach(async () => {
   vi.resetModules();
   listJobs.mockReset();
   listJobs.mockResolvedValue([]);
+  getSimilarityRun.mockReset();
   localStorage.clear();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-06-14T12:00:00Z"));
+  const auth = await import("@/lib/auth-store");
+  const user = adminSession().user;
+  if (!user) throw new Error("missing_admin_fixture");
+  auth.storeLogin("", user, { silent: true });
   tc = await loadTaskCenter();
 });
 
 afterEach(() => {
+  stopTaskScope();
   vi.useRealTimers();
 });
 
@@ -120,6 +138,104 @@ describe("resetTasksForNewSetup", () => {
 });
 
 describe("createTask", () => {
+  it.each(["pending", "running"] as const)(
+    "marks an orphaned %s browser task interrupted after reload",
+    async (status) => {
+      tc.createTask({
+        title: "Upload holder/base.stl",
+        status,
+        detail: uiMessage("Queued"),
+        expectedJobCount: 1,
+        retryable: true,
+      });
+
+      vi.resetModules();
+      tc = await loadTaskCenter();
+      await tc.syncImportJobs();
+
+      const task = tc.listTasks()[0];
+      expect(task).toMatchObject({ status: "failed", progress: 100, retryable: false });
+      expect(tc.taskDetail(task)).toBe("Task interrupted. Start it again.");
+    },
+  );
+
+  it("allows clearing an orphaned browser upload after reload", async () => {
+    tc.createTask({ title: "Upload palette/base.stl", detail: "Queued", expectedJobCount: 1 });
+
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    await tc.syncImportJobs();
+    tc.clearCompletedTasks();
+
+    expect(tc.listTasks()).toEqual([]);
+    expect(JSON.parse(localStorage.getItem("printstash:import-tasks:v1")!)).toEqual([]);
+  });
+
+  it("retains an interrupted upload session for recovery after reload", async () => {
+    tc.createTask({
+      title: "Upload holder.stl",
+      status: "running",
+      uploadSessionId: "recoverable-upload",
+    });
+
+    vi.resetModules();
+    tc = await loadTaskCenter();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      status: "failed",
+      uploadSessionId: "recoverable-upload",
+      uploadPaused: true,
+      retryable: true,
+    });
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(
+      "Upload interrupted. Select the same file to resume.",
+    );
+  });
+
+  it("keeps a grouped server upload active after reload", async () => {
+    const id = tc.createTask({
+      title: "Upload holder.stl",
+      status: "running",
+      expectedJobCount: 1,
+    });
+    tc.linkTaskToJob(id, "durable-mesh-job");
+
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    listJobs.mockResolvedValue([aJob({ job_id: "durable-mesh-job", state: "running" })]);
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      id,
+      status: "running",
+      jobIds: ["durable-mesh-job"],
+    });
+  });
+
+  it.each(["completed", "failed"] as const)(
+    "preserves a %s task summary after reload",
+    async (status) => {
+      const id = tc.createTask({
+        title: "Upload finished.stl",
+        status,
+        detail: "Original summary",
+      });
+
+      vi.resetModules();
+      tc = await loadTaskCenter();
+
+      expect(tc.listTasks()[0]).toMatchObject({ id, status, detail: "Original summary" });
+    },
+  );
+
+  it("keeps a live browser upload pending while syncing an idle server", async () => {
+    const id = tc.createTask({ title: "Upload holder.stl", detail: "Queued", expectedJobCount: 1 });
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({ id, status: "pending", detail: "Queued" });
+  });
+
   it("marks a browser ZIP transfer interrupted after reload", async () => {
     tc.createTask({ title: "Prepare parts.zip", status: "running", archiveUploading: true });
 
@@ -292,6 +408,70 @@ describe("trackServerJob", () => {
   });
 });
 
+describe("trackSimilarityRun", () => {
+  it("shows a queued analysis in Tasks as soon as it starts", () => {
+    const id = tc.trackSimilarityRun(aSimilarityRun());
+
+    expect(tc.listTasks()).toMatchObject([
+      { id, similarityRunId: 1, title: "Similar model analysis", status: "pending" },
+    ]);
+  });
+
+  it("keeps one analysis task across reloads", async () => {
+    const id = tc.trackSimilarityRun(aSimilarityRun());
+
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.trackSimilarityRun(aSimilarityRun())).toBe(id);
+    expect(tc.listTasks()).toHaveLength(1);
+  });
+
+  it("shows running comparison counts from the durable run", async () => {
+    tc.trackSimilarityRun(aSimilarityRun());
+    getSimilarityRun.mockResolvedValue(
+      aSimilarityRun({ state: "running", counters: { artifacts_processed: 3, verified: 2 } }),
+    );
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      similarityRunId: 1,
+      status: "running",
+      detail: "3 Artifacts · 2 comparisons",
+    });
+  });
+
+  it("completes the task only when the analysis run completes", async () => {
+    tc.trackSimilarityRun(aSimilarityRun());
+    getSimilarityRun.mockResolvedValue(aSimilarityRun({ state: "completed" }));
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({ status: "completed", progress: 100 });
+  });
+
+  it("reports a failed analysis in Tasks", async () => {
+    tc.trackSimilarityRun(aSimilarityRun());
+    getSimilarityRun.mockResolvedValue(aSimilarityRun({ state: "failed" }));
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({
+      status: "failed",
+      detail: "Analysis stopped. Check the run details and try again.",
+    });
+  });
+
+  it("reports a cancelled analysis in Tasks", async () => {
+    tc.trackSimilarityRun(aSimilarityRun());
+    getSimilarityRun.mockResolvedValue(aSimilarityRun({ state: "cancelled" }));
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({ status: "failed", detail: "Cancelled" });
+  });
+});
+
 describe("clearCompletedTasks", () => {
   it("removes completed/failed but keeps active tasks", () => {
     const a = tc.createTask({ title: "running", status: "running" });
@@ -428,6 +608,7 @@ describe("groupUploadJobs", () => {
   });
 
   it("removes a duplicate pending row persisted by an older client", async () => {
+    localStorage.setItem("printstash:task-owner:v1", "1");
     localStorage.setItem(
       "printstash:import-tasks:v1",
       JSON.stringify([
@@ -560,6 +741,46 @@ describe("subscribeTasks", () => {
 });
 
 describe("syncImportJobs", () => {
+  it("shows the number of ZIP models imported while the job runs", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "zip-import",
+        kind: "ingestion.archive_selection",
+        state: "running",
+        stage: "ingesting",
+        processed: 2,
+        succeeded: 1,
+        failed: 1,
+        total: 4,
+        progress: 50,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(
+      "1 of 4 models imported · continues in background",
+    );
+  });
+
+  it("uses the live ZIP job percentage for task progress", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "zip-import",
+        kind: "ingestion.archive_selection",
+        state: "running",
+        stage: "ingesting",
+        processed: 2,
+        total: 4,
+        progress: 50,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0].progress).toBe(50);
+  });
+
   it("shows live portable import counts from the job", async () => {
     listJobs.mockResolvedValue([
       aJob({
@@ -741,6 +962,152 @@ describe("syncImportJobs", () => {
     expect(tc.taskTitle(tc.listTasks()[0])).toBe("Backup");
   });
 
+  it("describes manual backup archive progress from its Job", async () => {
+    tc.trackImportJob("backup-progress", "Backup");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "backup-progress",
+        kind: "backups.create",
+        state: "running",
+        stage: "archiving",
+        processed: 3,
+        total: 8,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(
+      "Archiving 3 of 8 files · continues in background",
+    );
+  });
+
+  it("describes the scheduled backup publication destination", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "scheduled-backup",
+        kind: "backups.automatic",
+        state: "running",
+        stage: "publishing",
+        current_item: "Offsite",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(
+      "Publishing backup to Offsite · continues in background",
+    );
+  });
+
+  it("shows a scheduled backup that finished before the browser discovered it", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "fast-scheduled-backup",
+        kind: "backups.automatic",
+        state: "completed",
+        completion: "complete",
+        updated_at: "2026-06-14T11:59:00Z",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toMatchObject([
+      {
+        jobId: "fast-scheduled-backup",
+        status: "completed",
+        detail: "Backup created",
+      },
+    ]);
+  });
+
+  it("does not restore an older scheduled backup after clearing the latest", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "older-scheduled-backup",
+        kind: "backups.automatic",
+        state: "completed",
+        updated_at: "2026-06-14T10:00:00Z",
+      }),
+      aJob({
+        job_id: "latest-scheduled-backup",
+        kind: "backups.automatic",
+        state: "completed",
+        updated_at: "2026-06-14T11:00:00Z",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+    expect(tc.listTasks().map((task) => task.jobId)).toEqual(["latest-scheduled-backup"]);
+
+    tc.clearCompletedTasks();
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toEqual([]);
+  });
+
+  it("ignores stale scheduled backup history", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "stale-scheduled-backup",
+        kind: "backups.automatic",
+        state: "completed",
+        updated_at: "2026-06-12T11:00:00Z",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toEqual([]);
+  });
+
+  it("reports a partial backup instead of a generic Job count", async () => {
+    tc.trackImportJob("partial-backup", "Backup");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "partial-backup",
+        kind: "backups.create",
+        state: "completed",
+        completion: "partial",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe("Backup created; some destinations failed");
+  });
+
+  it("titles a discovered scratch cleanup Job with its supplied label", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "scratch-cleanup-job",
+        kind: "ingestion.scratch_cleanup",
+        label: "Ingestion temporary files",
+        state: "running",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskTitle(tc.listTasks()[0])).toBe("Ingestion temporary files");
+  });
+
+  it("titles a discovered archive inspection Job as ZIP preparation", async () => {
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "archive-inspect-job",
+        kind: "ingestion.archive_inspect",
+        label: "ingestion.archive_inspect",
+        state: "running",
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskTitle(tc.listTasks()[0])).toBe("Prepare ZIP");
+  });
+
   it("titles a discovered import Job as an import", async () => {
     listJobs.mockResolvedValue([
       aJob({ job_id: "url-job", kind: "ingestion.url", label: "ingestion.url", state: "running" }),
@@ -769,10 +1136,185 @@ describe("syncImportJobs", () => {
   });
 });
 
+describe("attachTaskToImportJob", () => {
+  it("preserves a discovered Job after local task removal", async () => {
+    const localId = tc.createTask({ title: "Prepare parts.zip", status: "completed" });
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "running" }),
+    ]);
+    await tc.syncImportJobs();
+    tc.clearCompletedTasks();
+    const discovered = tc.listTasks();
+
+    tc.attachTaskToImportJob(localId, "zip-job");
+
+    expect(tc.listTasks()).toEqual(discovered);
+    expect(tc.listTasks()).toMatchObject([{ jobId: "zip-job", status: "running" }]);
+  });
+
+  it("attaches a ZIP receipt after Job discovery", async () => {
+    const taskId = tc.createTask({
+      title: "Prepare parts.zip",
+      archiveSizeBytes: 100,
+      archiveCollection: "Parts",
+      archiveTags: ["tag"],
+      archiveUploading: true,
+    });
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "running" }),
+    ]);
+    await tc.syncImportJobs();
+
+    tc.attachTaskToImportJob(taskId, "zip-job");
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "completed" }),
+    ]);
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toMatchObject([
+      {
+        id: taskId,
+        title: "Prepare parts.zip",
+        status: "completed",
+        archiveCollection: "Parts",
+        archiveTags: ["tag"],
+      },
+    ]);
+    expect(tc.needsArchiveReview(tc.listTasks()[0])).toBe(true);
+  });
+
+  it("attaches a ZIP receipt after terminal discovery", async () => {
+    const taskId = tc.createTask({
+      title: "Prepare parts.zip",
+      archiveSizeBytes: 100,
+      archiveUploading: true,
+    });
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "running" }),
+    ]);
+    await tc.syncImportJobs();
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "completed" }),
+    ]);
+    await tc.syncImportJobs();
+
+    tc.attachTaskToImportJob(taskId, "zip-job");
+
+    expect(tc.listTasks()).toMatchObject([
+      { id: taskId, title: "Prepare parts.zip", status: "completed" },
+    ]);
+    expect(tc.needsArchiveReview(tc.listTasks()[0])).toBe(true);
+  });
+
+  it("repairs a persisted duplicate ZIP task", async () => {
+    tc.createTask({
+      title: "Prepare ZIP",
+      jobId: "zip-job",
+      status: "completed",
+      jobKind: "ingestion.archive_inspect",
+    });
+    const taskId = tc.createTask({
+      title: "Prepare parts.zip",
+      jobId: "zip-job",
+      archiveSizeBytes: 100,
+      archiveCollection: "Parts",
+      archiveTags: ["tag"],
+      status: "pending",
+    });
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    listJobs.mockResolvedValue([
+      aJob({ job_id: "zip-job", kind: "ingestion.archive_inspect", state: "completed" }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()).toMatchObject([
+      {
+        id: taskId,
+        title: "Prepare parts.zip",
+        status: "completed",
+        archiveCollection: "Parts",
+        archiveTags: ["tag"],
+      },
+    ]);
+    expect(tc.needsArchiveReview(tc.listTasks()[0])).toBe(true);
+  });
+});
+
 describe("createImportJobSynchronizer", () => {
+  async function handshake() {
+    await vi.advanceTimersByTimeAsync(0);
+    socket.deliver({ type: "resync" });
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it("resumes Job synchronization when the tab becomes visible", async () => {
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    listJobs.mockResolvedValue([aJob({ job_id: "visible-job", state: "running" })]);
+    const stop = tc.startImportJobSync();
+    try {
+      await handshake();
+      visibility.mockReturnValue("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+      listJobs.mockResolvedValue([aJob({ job_id: "visible-job", state: "completed" })]);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(listJobs).toHaveBeenCalledTimes(1);
+      expect(tc.listTasks()).toMatchObject([{ jobId: "visible-job", status: "running" }]);
+
+      visibility.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(listJobs).toHaveBeenCalledTimes(2);
+      expect(tc.listTasks()).toMatchObject([{ jobId: "visible-job", status: "completed" }]);
+    } finally {
+      stop();
+      visibility.mockRestore();
+    }
+  });
+
+  it("shares one handshake snapshot between subscribers", async () => {
+    const stopA = tc.startImportJobSync();
+    const stopB = tc.startImportJobSync();
+    await handshake();
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(listJobs).toHaveBeenCalledTimes(1);
+    stopA();
+    stopB();
+  });
+
+  it("falls back after one second without a socket notice", async () => {
+    const stop = tc.startImportJobSync();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(listJobs).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(listJobs).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("retains a Job notice received during a snapshot", async () => {
+    let deliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise<JobStatus[]>((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const stop = tc.startImportJobSync();
+    await handshake();
+    socket.deliver({ type: "job", job_id: "changed-job", state: "completed" });
+    listJobs.mockResolvedValue([aJob({ job_id: "changed-job", state: "completed" })]);
+    deliver([aJob({ job_id: "changed-job", state: "running" })]);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listJobs).toHaveBeenCalledTimes(2);
+    expect(tc.listTasks()).toMatchObject([{ jobId: "changed-job", status: "completed" }]);
+    stop();
+  });
+
   it("stops polling after the initial sync when the server is idle", async () => {
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     expect(listJobs).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(10_000);
@@ -793,7 +1335,7 @@ describe("createImportJobSynchronizer", () => {
       }),
     ]);
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     expect(listJobs).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(1_000);
@@ -805,7 +1347,7 @@ describe("createImportJobSynchronizer", () => {
 
   it("wakes an idle synchronizer when a new server job is tracked", async () => {
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     expect(listJobs).toHaveBeenCalledTimes(1);
 
     tc.trackImportJob("new-job", "Scan library");
@@ -817,7 +1359,7 @@ describe("createImportJobSynchronizer", () => {
   it("backs off after a failed sync even without a local task record", async () => {
     listJobs.mockRejectedValueOnce(new Error("offline")).mockResolvedValue([]);
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     expect(listJobs).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(999);
@@ -829,7 +1371,7 @@ describe("createImportJobSynchronizer", () => {
 
   it("wakes immediately when connectivity returns", async () => {
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     window.dispatchEvent(new Event("online"));
     await vi.advanceTimersByTimeAsync(0);
     expect(listJobs).toHaveBeenCalledTimes(2);
@@ -840,7 +1382,7 @@ describe("createImportJobSynchronizer", () => {
     // A worker finished the Job; without the notice an idle Task Center would
     // show the old state until something else woke it.
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
     expect(listJobs).toHaveBeenCalledTimes(1);
 
     socket.deliver({ type: "job", job_id: "j1", state: "completed" });
@@ -850,20 +1392,50 @@ describe("createImportJobSynchronizer", () => {
     stop();
   });
 
-  it("refetches after the events socket reconnects", async () => {
+  it("ignores maintenance outside the Task Center", async () => {
+    listJobs.mockResolvedValue([aJob({ state: "completed" })]);
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
+    for (let i = 0; i < 60; i++) {
+      socket.deliver({
+        type: "job",
+        job_id: `maintenance-${i}`,
+        state: "completed",
+        task_visible: false,
+      });
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    expect(listJobs).toHaveBeenCalledTimes(1);
+    stop();
+  });
 
+  it("refreshes tasks for visible Job notices", async () => {
+    const stop = tc.startImportJobSync();
+    await handshake();
+    socket.deliver({ type: "job", job_id: "owned-job", state: "completed", task_visible: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(listJobs).toHaveBeenCalledTimes(2);
+    stop();
+  });
+
+  it("refetches after the events socket reconnects", async () => {
+    listJobs.mockResolvedValue([aJob({ job_id: "reconnected-job", state: "running" })]);
+    const stop = tc.startImportJobSync();
+    await handshake();
+    expect(tc.listTasks()).toMatchObject([{ jobId: "reconnected-job", status: "running" }]);
+
+    listJobs.mockResolvedValue([aJob({ job_id: "reconnected-job", state: "completed" })]);
     socket.deliver({ type: "resync" });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(listJobs).toHaveBeenCalledTimes(2);
+    expect(tc.listTasks()).toMatchObject([{ jobId: "reconnected-job", status: "completed" }]);
     stop();
   });
 
   it("ignores notices about derivatives", async () => {
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
 
     socket.deliver({ type: "derivative", state: "ready" });
     await vi.advanceTimersByTimeAsync(0);
@@ -874,9 +1446,11 @@ describe("createImportJobSynchronizer", () => {
 
   it("closes the events socket when nothing shows the Task Center", async () => {
     const stop = tc.startImportJobSync();
-    await vi.advanceTimersByTimeAsync(0);
+    await handshake();
 
     stop();
+    // The connection outlives its last listener by the events idle window.
+    await vi.advanceTimersByTimeAsync(10_000);
 
     expect(socket.close).toHaveBeenCalled();
   });
@@ -1012,5 +1586,315 @@ describe("task localization", () => {
       "Falta un archivo necesario para la copia de seguridad. Comprueba el almacenamiento y vuelve a intentarlo.",
     );
     setLocale("en");
+  });
+});
+
+describe("policy cancellation", () => {
+  it("settles neutrally without failure notifications", async () => {
+    const completion = vi.fn<(job: JobStatus) => void>();
+    const stop = tc.subscribeImportJobCompletions(completion);
+    tc.trackImportJob("disabled-1", "Mesh derivatives");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "disabled-1",
+        kind: "derivatives.mesh",
+        state: "cancelled",
+        error: "derivative_group_disabled",
+        retryable: false,
+      }),
+    ]);
+    await tc.syncImportJobs();
+    expect(tc.listTasks()[0]).toMatchObject({
+      status: "completed",
+      jobReason: "derivative_group_disabled",
+      detail: "Processing disabled",
+      retryable: false,
+    });
+    expect(completion).not.toHaveBeenCalled();
+    stop();
+  });
+});
+
+describe("private task scope", () => {
+  it("retains recovery for the same verified owner", async () => {
+    tc.createTask({ title: "Private upload", uploadSessionId: "recovery", status: "running" });
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.listTasks()).toMatchObject([
+      { title: "Private upload", uploadSessionId: "recovery" },
+    ]);
+  });
+
+  it.each(["legacy", "mismatched"])("discards %s persisted tasks", async (owner) => {
+    tc.createTask({ title: "Old private label", uploadSessionId: "private-recovery" });
+    if (owner === "legacy") localStorage.removeItem("printstash:task-owner:v1");
+    else localStorage.setItem("printstash:task-owner:v1", "2");
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.listTasks()).toEqual([]);
+    expect(localStorage.getItem("printstash:import-tasks:v1")).toBeNull();
+  });
+
+  it.each(["identity", "access", "logout"])(
+    "retires private history on %s change",
+    async (change) => {
+      const auth = await import("@/lib/auth-store");
+      tc.trackImportJob("dismissed", "Private label");
+      listJobs.mockResolvedValue([aJob({ job_id: "dismissed", state: "completed" })]);
+      await tc.syncImportJobs();
+      tc.clearCompletedTasks();
+      tc.createTask({ title: "Private upload", uploadSessionId: "private-recovery" });
+      if (change === "access") auth.retirePrivateSessionScope();
+      else if (change === "logout") auth.clearLogin();
+      else {
+        const user = memberSession().user;
+        if (!user) throw new Error("missing_member_fixture");
+        auth.storeLogin("", user);
+      }
+      expect(tc.listTasks()).toEqual([]);
+      for (const key of [
+        "printstash:import-tasks:v1",
+        "printstash:dismissed-import-jobs:v1",
+        "printstash:emitted-import-terminals:v1",
+      ])
+        expect(localStorage.getItem(key)).toBeNull();
+      if (change === "logout") {
+        const user = adminSession().user;
+        if (!user) throw new Error("missing_admin_fixture");
+        auth.storeLogin("", user);
+      }
+      listJobs.mockResolvedValue([aJob({ job_id: "dismissed", state: "running" })]);
+      await tc.syncImportJobs();
+      expect(tc.listTasks()).toMatchObject([{ jobId: "dismissed", status: "running" }]);
+      const waiting = tc.waitForImportJob("dismissed");
+      const rejected = waiting.catch((error: Error) => error);
+      auth.retirePrivateSessionScope();
+      await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    },
+  );
+
+  it("rejects a retired completion waiter", async () => {
+    listJobs.mockImplementation(() => new Promise(() => {}));
+    const waiting = tc.waitForImportJob("pending");
+    const rejected = waiting.catch((error: Error) => error);
+    (await import("@/lib/auth-store")).retirePrivateSessionScope();
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    expect(tc.listTasks()).toEqual([]);
+  });
+
+  it("rejects late source publication after retirement", async () => {
+    let deliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    tc.trackImportJob("old", "Old private label");
+    const completed = vi.fn<(job: JobStatus) => void>();
+    const stop = tc.subscribeImportJobCompletions(completed);
+    const syncing = tc.syncImportJobs();
+    const rejected = syncing.catch((error: Error) => error);
+    (await import("@/lib/auth-store")).retirePrivateSessionScope();
+    deliver([aJob({ job_id: "old", state: "completed" })]);
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    expect(tc.listTasks()).toEqual([]);
+    expect(completed).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it("coalesces concurrent snapshots within a scope", async () => {
+    let deliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const first = tc.syncImportJobs();
+    const second = tc.syncImportJobs();
+    expect(first).toBe(second);
+    expect(listJobs).toHaveBeenCalledTimes(1);
+    deliver([]);
+    await Promise.all([first, second]);
+  });
+
+  it("keeps a newer flight after an old finalizer", async () => {
+    let oldDeliver: (jobs: JobStatus[]) => void = () => {};
+    let newDeliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          oldDeliver = resolve;
+        }),
+    );
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          newDeliver = resolve;
+        }),
+    );
+    const first = tc.syncImportJobs();
+    const rejected = first.catch((error: Error) => error);
+    (await import("@/lib/auth-store")).retirePrivateSessionScope();
+    const newer = tc.syncImportJobs();
+    oldDeliver([]);
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    expect(tc.syncImportJobs()).toBe(newer);
+    expect(listJobs).toHaveBeenCalledTimes(2);
+    newDeliver([]);
+    await newer;
+  });
+
+  it("fences reentrant terminal subscribers", async () => {
+    const auth = await import("@/lib/auth-store");
+    tc.trackImportJob("terminal", "Private label");
+    const stopFirst = tc.subscribeImportJobCompletions(() => auth.retirePrivateSessionScope());
+    const second = vi.fn<(job: JobStatus) => void>();
+    const stopSecond = tc.subscribeImportJobCompletions(second);
+    listJobs.mockResolvedValue([aJob({ job_id: "terminal", state: "completed" })]);
+    await expect(tc.syncImportJobs()).rejects.toMatchObject({ name: "AbortError" });
+    expect(second).not.toHaveBeenCalled();
+    expect(tc.listTasks()).toEqual([]);
+    stopFirst();
+    stopSecond();
+  });
+
+  it("freezes both source readers for each snapshot", async () => {
+    tc.trackSimilarityRun(aSimilarityRun({ id: 42, state: "running" }));
+    const original = vi
+      .fn<(id: number) => Promise<SimilarityRun>>()
+      .mockResolvedValue(aSimilarityRun({ id: 42, state: "completed" }));
+    const replacement = vi
+      .fn<(id: number) => Promise<SimilarityRun>>()
+      .mockResolvedValue(aSimilarityRun({ id: 42, state: "failed" }));
+    tc.setSimilarityRunSource(original);
+    listJobs.mockImplementationOnce(async () => {
+      tc.setSimilarityRunSource(replacement);
+      tc.setJobSource(async () => [aJob({ job_id: "replacement", state: "running" })]);
+      return [];
+    });
+    await tc.syncImportJobs();
+    expect(original).toHaveBeenCalledWith(42);
+    expect(replacement).not.toHaveBeenCalled();
+    expect(tc.listTasks()).toMatchObject([{ similarityRunId: 42, status: "completed" }]);
+  });
+
+  it("fences cached terminal delivery across retirement", async () => {
+    tc.trackImportJob("cached", "Private label");
+    listJobs.mockResolvedValue([aJob({ job_id: "cached", state: "completed" })]);
+    await tc.syncImportJobs();
+    const auth = await import("@/lib/auth-store");
+    const waiting = tc.waitForImportJob("cached");
+    const rejected = waiting.catch((error: Error) => error);
+    auth.retirePrivateSessionScope();
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+  });
+
+  it("shares a snapshot between completion waiters", async () => {
+    let deliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const first = tc.waitForImportJob("shared");
+    const second = tc.waitForImportJob("shared");
+    expect(listJobs).toHaveBeenCalledTimes(1);
+    deliver([aJob({ job_id: "shared", state: "completed" })]);
+    await expect(first).resolves.toMatchObject({ job_id: "shared" });
+    await expect(second).resolves.toMatchObject({ job_id: "shared" });
+  });
+
+  it("rejects late Similarity Run publication", async () => {
+    let deliver: (run: SimilarityRun) => void = () => {};
+    tc.trackSimilarityRun(aSimilarityRun({ id: 43, state: "running" }));
+    getSimilarityRun.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        }),
+    );
+    const syncing = tc.syncImportJobs();
+    const rejected = syncing.catch((error: Error) => error);
+    (await import("@/lib/auth-store")).retirePrivateSessionScope();
+    deliver(aSimilarityRun({ id: 43, state: "completed" }));
+    await expect(rejected).resolves.toMatchObject({ name: "AbortError" });
+    expect(tc.listTasks()).toEqual([]);
+  });
+
+  it("suppresses anonymous snapshot admission after logout", async () => {
+    const stop = tc.startImportJobSync();
+    try {
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(listJobs).toHaveBeenCalledTimes(1);
+      (await import("@/lib/auth-store")).clearLogin();
+      listJobs.mockResolvedValue([
+        aJob({ job_id: "old-private", label: "Secret label", state: "running" }),
+      ]);
+      window.dispatchEvent(new Event("online"));
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(5_000);
+      await tc.syncImportJobs();
+      expect(listJobs).toHaveBeenCalledTimes(1);
+      expect(tc.listTasks()).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("preserves a newer poll across old retirement finalization", async () => {
+    let oldDeliver: (jobs: JobStatus[]) => void = () => {};
+    let newDeliver: (jobs: JobStatus[]) => void = () => {};
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          oldDeliver = resolve;
+        }),
+    );
+    listJobs.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          newDeliver = resolve;
+        }),
+    );
+    const stop = tc.startImportJobSync();
+    try {
+      await vi.advanceTimersByTimeAsync(1_000);
+      (await import("@/lib/auth-store")).retirePrivateSessionScope();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listJobs).toHaveBeenCalledTimes(2);
+      oldDeliver([aJob({ job_id: "old-private", state: "running" })]);
+      await vi.advanceTimersByTimeAsync(0);
+      socket.deliver({ type: "resync" });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listJobs).toHaveBeenCalledTimes(2);
+      newDeliver([]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(listJobs).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(listJobs).toHaveBeenCalledTimes(3);
+      expect(tc.listTasks()).toEqual([]);
+    } finally {
+      stop();
+    }
+  });
+
+  it("retirement survives unavailable browser storage", async () => {
+    tc.createTask({ title: "Private label" });
+    const remove = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    try {
+      (await import("@/lib/auth-store")).retirePrivateSessionScope();
+      expect(tc.listTasks()).toEqual([]);
+      expect(localStorage.getItem("printstash:task-owner:v1")).toBe("null");
+    } finally {
+      remove.mockRestore();
+    }
+    vi.resetModules();
+    tc = await loadTaskCenter();
+    expect(tc.listTasks()).toEqual([]);
   });
 });

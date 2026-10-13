@@ -13,8 +13,10 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { invalidateApiCache } from "@/lib/api/request";
+import { getSessionVersion } from "@/lib/session-transport";
+import { getUser, storeLogin } from "@/lib/auth-store";
 import {
+  getSharedModel,
   createModelShare,
   listModelShares,
   revokeShare,
@@ -29,12 +31,53 @@ import { expectRequest, fetchMock, lastCall, respondWith } from "./_wire";
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("getSharedModel", () => {
+  it("omits private credentials from a capability lookup", async () => {
+    storeLogin("fixture-token", { id: 1, username: "admin", email: null, is_superuser: true });
+    respondWith({
+      name: "Public boat",
+      files: [],
+      allow_download: false,
+      description: null,
+      has_thumbnail: false,
+    });
+    const result = await getSharedModel("abc");
+    expect(result.name).toBe("Public boat");
+    expect(lastCall().init).toMatchObject({ cache: "no-store", credentials: "omit" });
+    expect(new Headers(lastCall().init.headers).has("Authorization")).toBe(false);
+  });
+  it("cancels a public lookup when its caller leaves", async () => {
+    let signal: AbortSignal | null | undefined;
+    fetchMock.mockImplementation(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          signal = init?.signal;
+          signal?.addEventListener("abort", () => reject(signal?.reason), { once: true });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = getSharedModel("abc", { signal: controller.signal });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(signal?.aborted).toBe(true);
+  });
+  it("preserves private identity when a capability lookup is unauthorized", async () => {
+    storeLogin("fixture-token", { id: 1, username: "admin", email: null, is_superuser: true });
+    const incarnation = getSessionVersion();
+    respondWith({ detail: "not_found" }, 401);
+    await expect(getSharedModel("abc")).rejects.toMatchObject({ status: 401 });
+    expect(getUser()?.username).toBe("admin");
+    expect(getSessionVersion()).toBe(incarnation);
+  });
 });
 
 describe("createModelShare", () => {
@@ -71,6 +114,14 @@ describe("revokeShare", () => {
 describe("public URL builders", () => {
   // These are handed to an <img>/<a>, which cannot send an Authorization header,
   // so the token has to be in the path.
+  it.each([
+    { label: "thumbnail", build: () => sharedThumbnailUrl("a/b?c"), suffix: "/thumbnail" },
+    { label: "mesh", build: () => sharedStlUrl("a/b?c", 2), suffix: "/files/2/stl" },
+    { label: "download", build: () => sharedDownloadUrl("a/b?c", 2), suffix: "/files/2/download" },
+    { label: "toolpath", build: () => sharedGcodeUrl("a/b?c", 2), suffix: "/files/2/toolpath" },
+  ])("encodes a capability segment for $label", ({ build, suffix }) => {
+    expect(build()).toBe(`/api/v1/share/a%2Fb%3Fc${suffix}`);
+  });
   it("puts the token in the thumbnail path", () => {
     expect(sharedThumbnailUrl("abc")).toBe("/api/v1/share/abc/thumbnail");
   });

@@ -19,6 +19,7 @@ useMockApi();
 
 test.describe("pending imports", () => {
   test("pending imports render as a responsive review queue", async ({ page }) => {
+    const problems = await collectPageProblems(page);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
     await page.getByRole("button", { name: "Upload", exact: true }).click();
@@ -27,8 +28,8 @@ test.describe("pending imports", () => {
       .getByPlaceholder("Model page, collection, or direct .stl/.zip link")
       .fill("https://www.printables.com/model/41-capture-bracket");
     await page.getByRole("button", { name: "Review URL" }).click();
-    await page.goto("/inbox");
-    const problems = await collectPageProblems(page);
+    await expect(page).toHaveURL(/\/inbox\/41$/);
+    await page.getByRole("link", { name: "Back to inbox" }).click();
 
     const queue = page.getByRole("list", { name: "Import queue" });
     await expect(queue.getByRole("heading", { name: "Capture bracket" })).toBeVisible();

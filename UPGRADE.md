@@ -1,6 +1,87 @@
 # PrintStash Upgrade Guide
 
-## Unreleased: background work on a durable engine
+## Unreleased: bounded import windows
+
+Batch imports materialize one disposable entry at a time. The positive settings
+`VAULT_INGESTION_BATCH_MAX_FILES=4` and `VAULT_INGESTION_BATCH_MAX_MB=512` set
+per-import upper bounds; the sequential materializer currently uses one file.
+A selected entry larger than the byte bound is refused before extraction.
+Archive containers and durable upload sources have separate existing limits.
+
+The application migration adds an `ingestion_entries` table and indexes on
+SQLite and PostgreSQL. Existing Models, Artifacts and Jobs remain in place;
+SQLite remains the default. No database-engine conversion is required.
+Stop API and workers together before upgrading, then restart on the same image
+so every writer participates in per-entry confirmation. Back up before upgrading
+as usual. Existing reviewed ZIP validation is retained.
+
+## Unreleased: request command capacity
+
+File acceptance now has a separate per-API-process command limit. The default
+`VAULT_API_COMMAND_CONCURRENCY=8` accepts values from 1 through 128; add it to
+your API environment override to tune concurrent SQL and storage commands. It
+does not change background Job lane limits. A streamed request waiting for its
+next body chunk holds neither a command token nor a SQL Session.
+
+Restart the API on the new image. This change adds no database migration or
+derivative recipe; SQLite remains the default and existing data stays in place.
+
+## Unreleased: Python 3.14
+
+Source installations of the application and shared core require Python 3.14 or
+newer. Recreate the backend virtual environment with Python 3.14 and run
+`uv sync --all-groups` before restarting API and worker processes. Development,
+CI and official images use Python 3.14.8; image installations need no host Python
+upgrade. Earlier Python runtimes are no longer supported.
+
+## Unreleased: derivative scheduling
+
+SQLite remains the default; this upgrade does not move data to PostgreSQL.
+The additive application migrations preserve existing Artifacts, scan positions
+and Job execution facts while adding discovery turns, recent cursor fields,
+timestamp indices and a nullable backfill admission epoch. The new reservation
+is separate from accepted execution epochs and does not spend a retry attempt.
+
+Derivation queues now share bounded interactive/backfill allowances and use FIFO
+engine dispatch. Before upgrading, stop new uploads, viewer requests and bulk
+regeneration. Allow the existing API and workers to drain their derivation Jobs,
+then stop every API and worker process and restart them on the new image
+together. The native resource receipt format also changes; no old application
+process may continue admitting native or prepared-source work during restart.
+Existing previews remain usable; no new recipe is introduced by scheduling.
+
+Startup reports `derivation_queue_requires_drain` before enabling consumers if
+legacy derivation ranks remain, inspection fails, or its bounded inspection
+cannot verify the queue. Keep the old image available to finish draining. Do
+not delete application Jobs, managed files or admission receipts to bypass this
+check. As with the DBOS upgrade below, disposable engine state may be rebuilt
+only with all processes stopped; unfinished application Jobs then replay through
+the reconciler, and engine checkpoints are lost.
+
+## Unreleased: DBOS 3.0
+
+The embedded background engine upgrades from DBOS 2.31.1 to 3.0.0. Its first
+startup automatically migrates the engine database on SQLite and PostgreSQL;
+saved workflow inputs and results remain readable, and queued Jobs can resume.
+The periodic reconciler now uses a persistent schedule, recreated after restore.
+
+- **Stop every API and worker process before upgrading.** Upgrade them together
+  before restarting. DBOS 2 and 3 must not run concurrently with the same
+  application version against the shared engine database. The default Compose
+  deployment should use `docker compose down` followed by the new image's
+  `docker compose up -d`; never use `down -v`.
+- **Keep a pre-upgrade backup for rollback.** DBOS 2 cannot read workflow inputs
+  or results written by DBOS 3. Before starting the previous image, stop every
+  process and discard only the disposable engine state: the SQLite sibling
+  whose filename adds `-dbos` before the application database's suffix (including
+  its `-wal` and `-shm` sidecars), or the PostgreSQL `dbos` schema. Keep the
+  application database and managed files. The reconciler rebuilds active Jobs;
+  engine history and step checkpoints are lost, so unfinished steps may rerun.
+  A backup restore also discards and rebuilds engine state.
+
+See the [DBOS upgrade guide](https://docs.dbos.dev/python/upgrading).
+
+## 0.14.0: background work on a durable engine
 
 Background work now runs as Jobs on an embedded engine (DBOS). Nothing new has
 to be installed or configured for the default single-container deployment.
@@ -34,7 +115,7 @@ to be installed or configured for the default single-container deployment.
   at once are `VAULT_JOBS_INGEST_CONCURRENCY` (default 2), or Settings →
   Background work.
 
-## Unreleased: Model Family removal
+## 0.14.0: Model Family removal
 
 This upgrade removes the Model Families feature and its database tables. Back up
 both the database and managed storage before upgrading if you need to retain
@@ -46,7 +127,7 @@ Family entries and views filtered by Family are skipped.
 Uploaded Family cover blobs may remain in managed storage without a live
 reference after the database tables are removed.
 
-## Unreleased: canonical Artifact downloads
+## 0.14.0: canonical Artifact downloads
 
 Clients using `/api/v1/files/{id}/download-url` or `download-direct` must use
 `/api/v1/files/{id}/download` and follow temporary redirects. Authentication is
@@ -58,7 +139,7 @@ This guide covers supported self-hosted upgrades. SQLite plus local filesystem
 storage remains the default. Always upgrade from a fresh backup and retain the
 previous application image until validation is complete.
 
-## Unreleased: one data volume
+## 0.14.0: one data volume
 
 Both Compose files now mount **one** volume, `printstash`, at `/data` instead of
 five (`printstash_data`, `printstash_thumbs`, `printstash_db`,
@@ -111,7 +192,7 @@ If you set `VAULT_DATA_DIR`, `VAULT_THUMB_DIR`, `VAULT_STAGING_DIR` or
 `VAULT_BACKUP_DIR` yourself, they still work as per-directory overrides. Keep
 staging on the same mount as the library, or imports fall back to copying.
 
-## Unreleased: fewer Compose files
+## 0.14.0: fewer Compose files
 
 The repository root now has two Compose files. `docker-compose.yml` runs
 PrintStash as **one container** (web UI + full API, image
@@ -134,7 +215,7 @@ pulling:
 
 Both files mount the same `printstash` volume, so data is found as long as the
 Compose project name (normally the directory name) stays the same; coming from
-the five older volumes, first follow [one data volume](#unreleased-one-data-volume).
+the five older volumes, first follow [one data volume](#0140-one-data-volume).
 Stop the old stack
 with `docker compose -f <old file> down` (never `down -v`) before starting the
 new one. Moving from two containers to the single container, run
@@ -362,3 +443,19 @@ supported rollback path.
 
 For recovery details, see
 [Disaster recovery](./docs/disaster-recovery.md).
+
+### Native memory profiles
+
+Local model residency now shares a separate file-lock ledger across the API and
+worker. The default `VAULT_EMBEDDING_MEMORY_BUDGET_FRACTION=0.25` leaves
+headroom beside geometry's effective 0.5 allocation. The combined fractions must
+be below 1. Unknown physical memory refuses local model admission. Set
+`VAULT_EMBEDDING_RESIDENT_WORKERS` (default 1, maximum 2) and
+`VAULT_EMBEDDING_WORKER_MEMORY_MB` (default 1024, minimum 512) for the models
+you install; a model whose mappings exceed the ceiling fails with a memory error.
+
+Stop all API and worker processes before changing memory partitions or model
+residency settings, then restart all with the same profile and shared local data
+root. Mixed profiles during a rolling restart do not provide a common physical
+memory bound. An idle cached model may retire under residency pressure and
+reload on its next request.

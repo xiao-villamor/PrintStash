@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   CalendarDays,
   CheckCircle2,
@@ -27,13 +27,13 @@ import {
   listPendingImports,
   retryPendingImport,
 } from "@/lib/api";
-import { createCompletionChainedPoller } from "@/lib/completion-chained-polling";
+import { inboxApi, useInboxSnapshot, useInboxCommands } from "@/lib/queries/inbox";
+import { userMessage } from "@/lib/errors";
 import { Link } from "@/lib/link";
 import { useI18n } from "@/lib/i18n";
+import { getSessionVersion } from "@/lib/session-transport";
 import { toast } from "@/lib/toast";
 import type { InboxItem } from "@/types";
-
-const ACTIVE = new Set(["captured", "resolving", "importing"]);
 
 export interface InboxPageDeps {
   listPendingImports: typeof listPendingImports;
@@ -48,6 +48,8 @@ const inboxPageDeps: InboxPageDeps = {
   dismissPendingImport,
   batchPendingImports,
 };
+
+const EMPTY_INBOX: InboxItem[] = [];
 
 type InboxTab = "queue" | "completed";
 
@@ -123,11 +125,17 @@ function ImportList({
                   <Button
                     size="xs"
                     variant="outline"
-                    onClick={() =>
+                    onClick={() => {
+                      const session = getSessionVersion();
                       void retry(item.id)
-                        .then(() => toast.success(t("inbox.retryQueued")))
-                        .catch(toast.error)
-                    }
+                        .then(() => {
+                          if (getSessionVersion() === session)
+                            toast.success(t("inbox.retryQueued"));
+                        })
+                        .catch((error) => {
+                          if (getSessionVersion() === session) toast.error(error);
+                        });
+                    }}
                   >
                     <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                     {t("inbox.retry")}
@@ -237,39 +245,15 @@ function statusLabel(item: InboxItem, t: ReturnType<typeof useI18n>["t"]): strin
 
 export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDeps }) {
   const { locale, t } = useI18n();
-  const [items, setItems] = useState<InboxItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const snapshot = useInboxSnapshot(deps);
+  const commands = useInboxCommands({ ...inboxApi, ...deps });
+  const items = snapshot.data ?? EMPTY_INBOX;
+  const loading = snapshot.isPending;
   const [activeTab, setActiveTab] = useState<InboxTab>("queue");
   const [deleteTarget, setDeleteTarget] = useState<InboxItem | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [clearCompletedOpen, setClearCompletedOpen] = useState(false);
   const [clearingCompleted, setClearingCompleted] = useState(false);
-  const poller = useMemo(
-    () =>
-      createCompletionChainedPoller<InboxItem[]>({
-        request: () => deps.listPendingImports(true),
-        intervalMs: 1_500,
-        shouldContinue: (next) => next.some((item) => ACTIVE.has(item.state)),
-        onResult: (next) => {
-          setItems(next);
-          setLoading(false);
-        },
-        onError: (error) => {
-          toast.error(error);
-          setLoading(false);
-        },
-      }),
-    [deps],
-  );
-  useEffect(() => {
-    poller.refresh();
-    return () => poller.stop();
-  }, [poller]);
-  useEffect(() => {
-    if (loading) return;
-    if (items.some((item) => ACTIVE.has(item.state))) poller.start();
-    else poller.stop();
-  }, [items, loading, poller]);
   const groups = useMemo(
     () => ({
       queue: items.filter((item) => item.state !== "completed" && item.state !== "dismissed"),
@@ -280,18 +264,17 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
 
   async function deleteImport() {
     if (!deleteTarget) return;
-    poller.stop();
     setDeletingId(deleteTarget.id);
+    const session = getSessionVersion();
     try {
-      await deps.dismissPendingImport(deleteTarget.id);
-      setItems((current) => current.filter((item) => item.id !== deleteTarget.id));
+      await commands.dismiss.mutateAsync({ id: deleteTarget.id, session });
+      if (getSessionVersion() !== session) return;
       setDeleteTarget(null);
       toast.success(t("inbox.deleteSuccess"));
     } catch (error) {
-      toast.error(error);
-      if (items.some((item) => ACTIVE.has(item.state))) poller.start();
+      if (getSessionVersion() === session) toast.error(error);
     } finally {
-      setDeletingId(null);
+      if (getSessionVersion() === session) setDeletingId(null);
     }
   }
 
@@ -301,18 +284,20 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
       setClearCompletedOpen(false);
       return;
     }
-    poller.stop();
     setClearingCompleted(true);
+    const session = getSessionVersion();
     try {
-      await deps.batchPendingImports({ item_ids: itemIds, action: "dismiss" });
-      setItems((current) => current.filter((item) => item.state !== "completed"));
+      await commands.batch.mutateAsync({
+        payload: { item_ids: itemIds, action: "dismiss" },
+        session,
+      });
+      if (getSessionVersion() !== session) return;
       setClearCompletedOpen(false);
       toast.success(t("inbox.clearCompletedSuccess"));
     } catch (error) {
-      toast.error(error);
-      if (items.some((item) => ACTIVE.has(item.state))) poller.start();
+      if (getSessionVersion() === session) toast.error(error);
     } finally {
-      setClearingCompleted(false);
+      if (getSessionVersion() === session) setClearingCompleted(false);
     }
   }
 
@@ -386,7 +371,14 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             </p>
           </div>
         </div>
-        {loading ? (
+        {snapshot.isError ? (
+          <div role="alert" className="p-5 text-sm text-destructive">
+            <p>{userMessage(snapshot.error)}</p>
+            <Button variant="outline" onClick={() => void snapshot.refetch()}>
+              {t("inbox.retry")}
+            </Button>
+          </div>
+        ) : loading ? (
           <div aria-label={t("inbox.loading")} className="space-y-3 p-5">
             <Skeleton className="h-14 w-full" />
             <Skeleton className="h-14 w-full" />
@@ -397,7 +389,7 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
             items={visibleItems}
             locale={locale}
             t={t}
-            retry={deps.retryPendingImport}
+            retry={(id) => commands.retry.mutateAsync({ id, session: getSessionVersion() })}
             deletingId={deletingId}
             onDelete={setDeleteTarget}
           />

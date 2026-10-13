@@ -1,12 +1,11 @@
 """The backup endpoints an operator's disaster recovery depends on.
 
 Two things make this router worth its own tests rather than trusting the service's.
-First, it is the surface that tells an operator what the vault *can* do: on PostgreSQL
-there is no supported database backup, and the endpoint must say so — 501 before
-creating anything and 501 before restoring anything, so nobody is handed an archive
-that cannot be restored. Second, a restore is the most destructive operation in the
-product, so it refuses while ingestion work is in flight rather than replacing the
-database underneath it.
+First, it is the surface that tells an operator what the vault *can* do: supported
+database engines must report create/restore capability, while unsupported engines
+must fail before creating anything or replacing a database. Second, a restore is
+the most destructive operation in the product, so it refuses while ingestion work
+is in flight rather than replacing the database underneath it.
 
 Everything here is superuser-only. The archive format, the round-trip, and what a
 restore actually recovers live in `integration/modules/backups/backup/test_core.py`.
@@ -37,7 +36,13 @@ import app.modules.backups.backup.verification as backup_verification
 import app.modules.storage.storage_backend.local as storage_local
 from app.api.v1 import backup as backup_api
 from app.core.time import utcnow
-from app.db.models import IngestRequestKind, JobKind, OwnedStorageObject, StagingLease
+from app.db.models import (
+    IngestRequestKind,
+    JobKind,
+    JobState,
+    OwnedStorageObject,
+    StagingLease,
+)
 from app.modules.backups import backup_destination
 from app.modules.backups.backup_catalogue import BackupIdentityConflictError
 from app.modules.backups.backup_destination import RemoteBackupDestination
@@ -1109,20 +1114,53 @@ class TestRestoreBackup:
 
         assert response.status_code == 409, response.text
 
+    @pytest.mark.parametrize(
+        ("kind", "state"),
+        [
+            pytest.param(kind, state, id=f"{kind.value}-{state.value}")
+            for kind in (
+                IngestRequestKind.UPLOAD,
+                IngestRequestKind.ARCHIVE_INSPECT,
+                IngestRequestKind.ARCHIVE_SELECTION,
+            )
+            for state in JobState
+            if (kind, state) != (IngestRequestKind.ARCHIVE_INSPECT, JobState.COMPLETED)
+        ],
+    )
     def test_refuses_while_an_import_owns_staged_bytes(
         self,
         client: TestClient,
         backup_env: BackupEnv,
         admin_headers: dict[str, str],
         a_backup,
+        kind,
+        state,
     ) -> None:
         staged = backup_env.root / "staged-import.stl"
         staged.write_bytes(b"solid x\nendsolid x\n")
+        inspected = backup_env.root / "inspected.zip"
+        inspected.write_bytes(b"retained inspection")
         with backup_env.new_session() as session:
             owner = build_user(session, "restore-importer")
-            request = build_ingest_request(
-                session, owner, kind=IngestRequestKind.UPLOAD
+            idle = build_ingest_request(
+                session,
+                owner,
+                kind=IngestRequestKind.ARCHIVE_INSPECT,
+                state=JobState.COMPLETED,
             )
+            session.add(
+                StagingLease(
+                    id="idle-inspection-lease",
+                    path=str(inspected),
+                    owner_user_id=owner.id,
+                    job_id=idle.job_id,
+                    size_bytes=inspected.stat().st_size,
+                    sha256="e" * 64,
+                    expires_at=utcnow() + timedelta(hours=1),
+                )
+            )
+            session.commit()
+            request = build_ingest_request(session, owner, kind=kind, state=state)
             session.add(
                 StagingLease(
                     id="restore-lease",
@@ -1142,6 +1180,8 @@ class TestRestoreBackup:
 
         assert response.status_code == 409, response.text
         assert response.json()["detail"] == "1 staging lease(s) active"
+        assert staged.read_bytes() == b"solid x\nendsolid x\n"
+        assert inspected.read_bytes() == b"retained inspection"
 
     def test_refuses_on_a_database_it_cannot_restore(
         self,

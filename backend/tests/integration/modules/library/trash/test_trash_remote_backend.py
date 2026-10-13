@@ -20,6 +20,7 @@ from sqlmodel import Session
 from app.core.config import _overlay
 from app.db.models import File, FileType, Model
 from app.modules.library import trash
+from app.modules.storage.storage_backend.contracts import StorageCollisionError
 from app.modules.storage.storage_backend.local import LocalStorageBackend
 from app.modules.storage.storage_ownership import UnsafeStorageDeleteError
 from tests.factories import build_file, build_model
@@ -34,6 +35,18 @@ class _RecordingRemoteBackend(LocalStorageBackend):
     def __init__(self) -> None:
         super().__init__()
         self.deleted: list[str] = []
+        self.probed: list[str] = []
+
+    def verify_destructive_access(self, keys: list[str]) -> None:
+        # Model a successful access probe independently of creation ownership.
+        # The recording fake never touches a caller's pre-existing object.
+        self.probed.extend(keys)
+
+    def namespace_for(self, key: str) -> str:
+        # Remote object keys are opaque, not paths under the test's local root.
+        if not key.startswith("vault-data/"):
+            raise StorageCollisionError("storage_key_outside_remote_namespace")
+        return "recording-remote:vault-data"
 
     def direct_path(self, key: str) -> Path | None:
         return None
@@ -97,6 +110,7 @@ class TestHardDeleteModel:
 
         # These hand-built legacy rows have no positive creation receipts, so even
         # the vault-shaped key is preserved. The NAS-linked path is never eligible.
+        assert set(backend.probed) == {vault_key}
         assert vault_key not in backend.deleted
         assert nas_path not in backend.deleted
         assert backend.thumbnail_key(vault_file.id) not in backend.deleted

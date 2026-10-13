@@ -48,6 +48,7 @@ from app.modules.sources import external_library
 from app.modules.work.jobs import jobs
 from tests._env import use_local_storage
 from tests.factories import build_external_library, build_job
+from tests.factories.ops import build_job_context
 from tests.integration.modules.sources.external_library._helpers import (
     FIXTURE_GCODE,
     drop_gcode,
@@ -70,7 +71,7 @@ def _upload(
     """Commit one staged G-code upload the way its ``ingestion.upload`` Job does."""
     job = build_job(session, kind=JobKind.INGESTION_UPLOAD)
     ingest_staged_file(
-        job_id=job.id,
+        job_context=build_job_context(job.id),
         artifact=StagedArtifact(
             staged_path=staged,
             original_filename=filename,

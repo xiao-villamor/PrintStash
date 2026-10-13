@@ -25,6 +25,44 @@ function calibrationCube(offset: number) {
 }
 
 test.describe("Standalone similarity", () => {
+  test("keeps a draft budget while a real analysis refreshes settings", async ({ page }) => {
+    const enabled = await page.request.patch(`${API}/api/v1/similarity/settings`, {
+      data: { enabled: true, embeddings_enabled: false, triangle_cap: 180000 },
+    });
+    expect(enabled.ok()).toBe(true);
+    await page.goto("/library/similar");
+    await page.getByText("Analysis options", { exact: true }).click();
+    const form = page.getByRole("form", { name: "Similar models" });
+    await form.getByText("Advanced settings", { exact: true }).click();
+    const budget = form.getByRole("spinbutton", { name: "Triangle limit per mesh" });
+    await budget.fill("150000");
+    const remote = await page.request.patch(`${API}/api/v1/similarity/settings`, {
+      data: { triangle_cap: 190000 },
+    });
+    expect(remote.ok()).toBe(true);
+    const [runResponse, statusResponse] = await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/similarity/runs") &&
+          response.request().method() === "POST",
+      ),
+      page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/v1/similarity/status") &&
+          response.request().method() === "GET",
+      ),
+      page.getByRole("button", { name: "Start analysis", exact: true }).click(),
+    ]);
+    expect(runResponse.ok()).toBe(true);
+    const run = await runResponse.json();
+    expect((await statusResponse.json()).settings.triangle_cap).toBe(190000);
+    await expect(budget).toHaveValue("150000");
+    await form.getByRole("button", { name: "Save settings" }).click();
+    await expect(page.getByText("Similarity settings saved")).toBeVisible();
+    const saved = await page.request.get(`${API}/api/v1/similarity/status`);
+    expect((await saved.json()).settings.triangle_cap).toBe(150000);
+    await page.request.post(`${API}/api/v1/similarity/runs/${run.id}/cancel`);
+  });
   test("@critical reviews similar Models without grouping or changing Artifacts", async ({
     page,
   }, testInfo) => {
@@ -90,7 +128,7 @@ test.describe("Standalone similarity", () => {
         await expect(card).toBeVisible({ timeout: 60_000 });
         const href = await card.getAttribute("href");
         models.push({
-          id: Number(href!.split("/").at(-1)),
+          id: Number(new URL(href!, page.url()).pathname.split("/").at(-1)),
           name,
           hashes: [mesh, revision]
             .map((bytes) => createHash("sha256").update(bytes).digest("hex"))

@@ -5,7 +5,7 @@ import hashlib
 import pytest
 from printstash_core.mesh.similarity import GeometryError
 
-from app.modules.media.fingerprints import extract
+from app.modules.media.fingerprints import FingerprintResultState, extract
 from app.modules.media.geometry_analysis import _load, verify_paths
 from app.modules.similarity.configuration import SimilaritySettings
 from tests.paths import TESTDATA_DIR, require_fixtures
@@ -23,7 +23,7 @@ class TestExistingModels:
 
         result = extract(prepared)
 
-        assert result.state == "ready"
+        assert result.state is FingerprintResultState.READY
         assert result.records[0].values["face_count"] > 200_000
         assert result.records[0].values["keys"] is not None
         assert result.records[0].values["recipe"]["complete_geometry"] is True
@@ -47,7 +47,7 @@ class TestExistingModels:
 
         result = extract(prepared)
 
-        assert result.state == "ready"
+        assert result.state is FingerprintResultState.READY
         assert result.records[0].values["face_count"] == 6704
         assert result.records[0].values["hull_ratio"] > 0
         assert result.records[0].values["unavailable"] == []
@@ -79,11 +79,14 @@ class TestExistingModels:
         assert prepared.complete is False
         assert prepared.failure_code == "sampled_oversized_source"
         assert len(prepared.whole_mesh.faces) <= 10_000
-        assert result.state == "partial"
+        assert result.state is FingerprintResultState.PARTIAL
         assert result.records[0].values["keys"] is None
         assert result.records[0].values["face_count"] is None
         assert hashlib.sha256(BENCHY.read_bytes()).hexdigest() == before
 
     def test_rejects_spatula_when_triangle_budget_is_too_small(self):
-        with pytest.raises(GeometryError, match="geometry_work_limit"):
+        # 3MF admission comes from the bounded reader's exact face limit rather
+        # than a size estimate or analysis performed on a fully loaded mesh.
+        with pytest.raises(GeometryError) as raised:
             _load(SPATULA, "3mf", triangle_cap=100)
+        assert raised.value.code == "resource_limit"

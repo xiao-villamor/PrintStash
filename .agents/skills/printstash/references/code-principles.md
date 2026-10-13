@@ -49,11 +49,36 @@ a type and know every value it can hold; the code should never have to guess.
   settings, row load) into the precise type; interior code does not re-check
   or defend against values the type already excludes.
 
+## Scale with the library, not with the rows a test has
+
+PrintStash supports 25,000 collections and 100,000 Models
+(`docs/known-limitations.md`). A test library holds a dozen rows, where
+quadratic work and per-row queries are instant; #295 was a sidebar that took a
+minute at 9,000 collections and passed every test. So:
+
+- **No loop over the whole set inside a loop over the whole set.** Comparing
+  every collection with every other is the classic shape. Roll a tree up in one
+  pass (`taxonomy.subtree_totals`), group in SQL, or look up in a dict.
+- **Never bind a materialised id collection into a query.** A visible-set
+  filter is a subquery (`rbac.accessible_collection_ids_stmt`), not
+  `.in_(accessible_collection_ids(...))`: that binds one parameter per visible
+  row into every statement. A set is for membership checks in Python.
+- **A list endpoint is bounded.** It takes `limit: int = Query(..., le=...)`, or
+  it is registered in `tests/repo/test_list_endpoints_bounded.py` with what
+  keeps it small. Returning a whole table is debt, and that list only shrinks.
+- **A read runs a fixed number of statements.** Batch per page, never per row.
+- **Long UI lists do not render every row.** Cap what a first render opens, and
+  never walk a subtree inside a row's render; compute it once per tree.
+
+A collection-scoped listing is registered in `backend/tests/_library_reads.py`,
+which checks its shape on every PR and its time at the supported size nightly.
+
 ## Review checklist
 
 Before calling a change done, grep your own diff for: `or ""`, `or {}`, `or []`,
 `?? `, `|| ""`, `.get(` with a default, `= ""` field defaults, `Optional[` and
 `?:` on fields the producer always sets, bare `except Exception`, slicing to a
 length (`[:N]`), `str` parameters that take one of a known set of values, and
-TypeScript `string` where a union exists. Each hit either gets a type, becomes
+TypeScript `string` where a union exists. For reads, also: nested loops over the
+same set, `.in_(` fed by a Python collection, and a new GET returning a list. Each hit either gets a type, becomes
 an error, or carries a comment saying why absence is a real, handled state.

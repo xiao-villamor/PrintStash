@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlmodel import Session, col, select
 
 from app.core.metrics import record_artifact_upload_event
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.db.models import (
     ArtifactUploadSession,
     ArtifactUploadState,
@@ -45,7 +45,7 @@ def _expire_one(
         return False
     try:
         adapter.abort_owned(upload)
-    except (OSError, RuntimeError, ValueError):
+    except OSError, RuntimeError, ValueError:
         manager.transition(
             upload,
             ArtifactUploadState.FAILED,
@@ -89,13 +89,22 @@ def reconcile_artifact_uploads(
             )
         )
         for upload in verifying:
-            manager.transition(
-                upload,
-                ArtifactUploadState.VERIFYING,
-                error_code="artifact_upload_verification_interrupted",
-                retryable=True,
-            )
-            reconciled += 1
+            with manager.operation(upload.id) as acquired:
+                if not acquired:
+                    continue
+                session.refresh(upload)
+                if (
+                    upload.state != ArtifactUploadState.VERIFYING
+                    or upload.error_code != "artifact_upload_verification_active"
+                ):
+                    continue
+                manager.transition(
+                    upload,
+                    ArtifactUploadState.VERIFYING,
+                    error_code="artifact_upload_verification_interrupted",
+                    retryable=True,
+                )
+                reconciled += 1
         ingesting = list(
             session.exec(
                 select(ArtifactUploadSession).where(
@@ -104,30 +113,35 @@ def reconcile_artifact_uploads(
             )
         )
         for upload in ingesting:
-            job = session.get(Job, upload.job_id) if upload.job_id else None
-            if job is not None and job.state == "completed":
-                manager.transition(
-                    upload,
-                    ArtifactUploadState.COMPLETED,
-                    error_code=None,
-                    retryable=False,
-                )
-                try:
-                    manager.adapter_for(upload).abort_owned(upload)
-                except (OSError, RuntimeError, ValueError):
-                    # The canonical Artifact is already committed. Retain the
-                    # private staging directory for a later exact cleanup pass.
-                    pass
-                reconciled += 1
-            elif job is None or job.state == "failed":
-                manager.transition(
-                    upload,
-                    ArtifactUploadState.FAILED,
-                    error_code="artifact_upload_ingestion_interrupted",
-                    retryable=True if job is None else bool(_job_retryable(job)),
-                )
-                reconciled += 1
-
+            with manager.operation(upload.id) as acquired:
+                if not acquired:
+                    continue
+                session.refresh(upload)
+                if upload.state != ArtifactUploadState.INGESTING:
+                    continue
+                job = session.get(Job, upload.job_id) if upload.job_id else None
+                if job is not None and job.state == "completed":
+                    manager.transition(
+                        upload,
+                        ArtifactUploadState.COMPLETED,
+                        error_code=None,
+                        retryable=False,
+                    )
+                    try:
+                        manager.adapter_for(upload).abort_owned(upload)
+                    except OSError, RuntimeError, ValueError:
+                        # The canonical Artifact is already committed. Retain the
+                        # private staging directory for a later exact cleanup pass.
+                        pass
+                    reconciled += 1
+                elif job is None or job.state == "failed":
+                    manager.transition(
+                        upload,
+                        ArtifactUploadState.FAILED,
+                        error_code="artifact_upload_ingestion_interrupted",
+                        retryable=True if job is None else bool(_job_retryable(job)),
+                    )
+                    reconciled += 1
         expirable = list(
             session.exec(
                 select(ArtifactUploadSession).where(
@@ -144,10 +158,21 @@ def reconcile_artifact_uploads(
             )
         )
         for upload in expirable:
-            if _expire_one(session, manager, upload):
-                expired += 1
-            else:
-                retained += 1
+            with manager.operation(upload.id) as acquired:
+                if not acquired:
+                    continue
+                session.refresh(upload)
+                if upload.state not in {
+                    ArtifactUploadState.CREATED,
+                    ArtifactUploadState.UPLOADING,
+                    ArtifactUploadState.VERIFYING,
+                    ArtifactUploadState.FAILED,
+                } or ensure_utc(upload.expires_at) > ensure_utc(timestamp):
+                    continue
+                if _expire_one(session, manager, upload):
+                    expired += 1
+                else:
+                    retained += 1
     return ArtifactUploadRecoveryResult(
         reconciled=reconciled,
         expired=expired,
@@ -160,6 +185,6 @@ def _job_retryable(job: Job) -> bool:
 
     try:
         payload = json.loads(job.status_json)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return True
     return bool(payload.get("retryable", True))

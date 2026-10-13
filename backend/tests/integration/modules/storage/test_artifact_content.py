@@ -753,3 +753,55 @@ class TestManagedCacheContent:
             if archive is not None:
                 archive.unlink(missing_ok=True)
             bind_backend(previous)
+
+
+class TestCopyCancellation:
+    @pytest.mark.parametrize(
+        "remote", [False, True], ids=["mounted", "remote-verified"]
+    )
+    def test_withdrawal_removes_partial_verified_copy(
+        self, tmp_path, monkeypatch, remote
+    ):
+        from app.core.cancellation import OperationCancelled
+
+        payload = b"abc" * (1024 * 1024)
+        source = tmp_path / "source.stl"
+        source.write_bytes(payload)
+        staging = tmp_path / "staging"
+        staging.mkdir()
+        row = detached_file(
+            model_id=1,
+            path=str(source),
+            original_filename=source.name,
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
+            is_external=True,
+            source_key="source.stl" if remote else None,
+        )
+
+        class Source:
+            @contextmanager
+            def materialize(self, key, *, expected=None, directory=None):
+                assert directory == staging
+                yield SourceContent(source, SourceEntry(key, len(payload)))
+
+        monkeypatch.setattr(
+            artifact_content, "source_for_file", lambda _row: (Source(), "source.stl")
+        )
+        checks = 0
+
+        def withdrawn():
+            nonlocal checks
+            checks += 1
+            if checks == 2:
+                raise OperationCancelled()
+
+        monkeypatch.setattr(artifact_content, "checkpoint", withdrawn, raising=False)
+        with pytest.raises(OperationCancelled):
+            with artifact_content.resolve(row).materialize(
+                capacity_claimed=True, directory=staging
+            ):
+                pytest.fail("cancelled copy completed")
+        assert checks == 2
+        assert list(staging.iterdir()) == []
+        assert source.read_bytes() == payload

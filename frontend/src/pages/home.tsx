@@ -1,8 +1,7 @@
 import { ModelBrowser } from "@/components/model-grid";
 
-// Client SPA: no SSR prefetch. ModelBrowser fetches the first page + facets on
-// mount (with the localStorage token), which is what the old server fallback
-// path did anyway.
+// The library starts with navigation-critical reads; auxiliary catalogs follow
+// its first usable frame (or an explicit interaction with their controls).
 export default function HomePage() {
   return <ModelBrowser initial={undefined} />;
 }

@@ -7,6 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from app.core.config import settings
 from app.core.restart import request_restart
 from app.core.security import require_superuser
+from app.runtime.compute.contracts import ComputeStatus
 
 router = APIRouter(
     prefix="/system",
@@ -29,3 +30,11 @@ def restart(background_tasks: BackgroundTasks) -> dict[str, str]:
         )
     background_tasks.add_task(request_restart)
     return {"status": "restart_requested"}
+
+
+@router.get("/compute", response_model=ComputeStatus)
+def compute_status() -> ComputeStatus:
+    """Expose compute capability and residency without model paths or user inputs."""
+    from app.runtime.compute.client import status
+
+    return status()

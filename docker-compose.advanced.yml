@@ -68,7 +68,7 @@ services:
     # build:
     #   context: ./backend
     #   args:
-    #     PRINTSTASH_VARIANT: full   # or: lite
+    #     PRINTSTASH_VARIANT: full   # or: lite; optional local build: gpu
     container_name: printstash-api
     restart: unless-stopped
     logging: *default-logging
@@ -101,6 +101,7 @@ services:
       # PostgreSQL (with --profile postgres) instead of SQLite:
       #   VAULT_DB_URL: postgresql+psycopg://printstash:<POSTGRES_PASSWORD>@postgres:5432/printstash
       VAULT_SQLITE_SYNCHRONOUS: ${VAULT_SQLITE_SYNCHRONOUS:-NORMAL}
+      VAULT_SQLITE_POOL_SIZE: ${VAULT_SQLITE_POOL_SIZE:-24}
       # S3-compatible primary storage (VAULT_STORAGE_BACKEND=s3). With
       # --profile s3 the endpoint is http://seaweedfs:8333.
       VAULT_S3_BUCKET: ${VAULT_S3_BUCKET:-}
@@ -178,10 +179,22 @@ services:
       # uploads committed at once. Settings → Background work overrides every
       # lane's concurrency at runtime for all processes.
       VAULT_MAX_RENDER_JOBS: ${VAULT_MAX_RENDER_JOBS:-1}
+      # Qualified portable compute (optional gpu image): docs/compute.md
+      VAULT_COMPUTE_MODE: ${VAULT_COMPUTE_MODE:-auto}
+      VAULT_COMPUTE_BACKEND: ${VAULT_COMPUTE_BACKEND:-auto}
+      VAULT_COMPUTE_RENDER_POLICY: ${VAULT_COMPUTE_RENDER_POLICY:-qualified}
+      VAULT_COMPUTE_MEMORY_MB: ${VAULT_COMPUTE_MEMORY_MB:-1024}
+      VAULT_COMPUTE_BATCH_WAIT_MS: ${VAULT_COMPUTE_BATCH_WAIT_MS:-10}
+      # VAULT_COMPUTE_ADAPTER: exact physical adapter name or identity
+      # Derivative defaults; persisted Background work controls win on every process.
+      VAULT_DERIVATIVES_MESH_ENABLED: ${VAULT_DERIVATIVES_MESH_ENABLED:-true}
+      VAULT_DERIVATIVES_GCODE_ENABLED: ${VAULT_DERIVATIVES_GCODE_ENABLED:-true}
+      VAULT_DERIVATIVES_TOOLPATH_ENABLED: ${VAULT_DERIVATIVES_TOOLPATH_ENABLED:-true}
       VAULT_JOBS_INGEST_CONCURRENCY: ${VAULT_JOBS_INGEST_CONCURRENCY:-2}
 
       # --- Runtime ---
       VAULT_LOG_LEVEL: ${VAULT_LOG_LEVEL:-INFO}
+      VAULT_SLOW_REQUEST_MS: ${VAULT_SLOW_REQUEST_MS:-1000}
       # Settings can request a graceful API exit because this service has an
       # unless-stopped restart policy. Disable if you remove that supervisor.
       VAULT_RESTART_ENABLED: ${VAULT_RESTART_ENABLED:-true}

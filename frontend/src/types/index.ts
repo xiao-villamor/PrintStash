@@ -1,3 +1,4 @@
+export type { EditingBase } from "./editing";
 export type { DocumentKind, DocumentListItem, DocumentRead } from "./documents";
 export type {
   MultipartModelReference,
@@ -32,6 +33,7 @@ export type {
   StorageCleanupStatus,
   ModelBatchFailure,
   ModelBatchResult,
+  ModelEditBatchResult,
   RevisionBatchResult,
   StorageUsageRead,
   VaultStatsRead,
@@ -70,11 +72,15 @@ export type {
   ArtifactFileType,
   FacetValueRead,
   ModelFacetsRead,
+  LibraryViewMode,
   SavedViewFilters,
   SavedViewRead,
   ModelStarRead,
   CollectionCreate,
   TagCreate,
+  CollectionLookupRead,
+  CollectionNodeRead,
+  CollectionPage,
   CollectionRead,
   CollectionPermissionRead,
   CollectionPermissionUpdate,
@@ -195,6 +201,7 @@ export type {
   NotificationEvent,
   NotificationChannel,
   NotificationsSettings,
+  NotificationSwitch,
   NotificationChannelCreate,
   NotificationChannelUpdate,
   NotificationTestResult,

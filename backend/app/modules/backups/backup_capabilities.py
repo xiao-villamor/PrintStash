@@ -34,9 +34,7 @@ def backup_operations(meta: BackupMeta) -> dict[str, dict]:
             if meta.location == "local":
                 exact_delete = row.device is not None and row.inode is not None
             elif meta.location == "s3":
-                exact_delete = bool(
-                    (row.version_id and row.version_id != "null") or row.etag
-                )
+                exact_delete = bool(row.version_id and row.version_id != "null")
             elif meta.location.startswith("opendal:"):
                 destination = destination_for_ownership(row)
                 exact_delete = bool(

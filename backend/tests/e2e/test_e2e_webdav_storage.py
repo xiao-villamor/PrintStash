@@ -86,5 +86,12 @@ class TestArtifactUpload:
             f"/api/v1/models/{artifact.model_id}/purge", headers=headers
         )
         assert rejected.status_code == 409, rejected.text
-        assert rejected.json()["detail"]["code"] == "storage_risk_confirmation_required"
+        assert rejected.json()["detail"] == {
+            "code": "storage_risk_confirmation_required",
+            "tier": "guarded",
+            "operation": "purge_model",
+            "required_confirmation": "confirm_storage_risk=true",
+        }, rejected.text
+        e2e_db.expire_all()
+        assert e2e_db.get(File, artifact.id) is not None
         assert backend.exists(artifact.path)

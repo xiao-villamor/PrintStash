@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
+import os
 import shutil
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
 
@@ -72,6 +76,36 @@ class SqlArtifactUploadManager:
             if backend is not None
             else None
         )
+
+    @contextmanager
+    def operation(self, session_id: str) -> Iterator[bool]:
+        """Keep recovery out of a live request without holding a SQL write lock.
+
+        The private staging directory is shared by the API and worker. Lock its
+        inode rather than adding a file that ownership-safe cleanup cannot remove.
+        Process exit releases the lock, so abandoned operations remain recoverable.
+        Callers authorize the upload before opening this operation boundary.
+        """
+        directory = self.api_adapter.session_directory(session_id)
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            # A completed Job cleaned its private directory after our mkdir.
+            yield False
+            return
+        try:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+            else:
+                try:
+                    yield True
+                finally:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
     def create(self, request: UploadRequest, actor: User) -> ArtifactUploadSession:
         if actor.id is None:

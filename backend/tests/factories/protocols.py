@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from printstash_core.mesh.measurements import VolumeMeasurement
 from printstash_core.search.passages import SearchSubject, SubjectType
 
 from app.db.models import (
@@ -29,11 +30,14 @@ from app.db.models import (
     CollectionPermission,
     CollectionRole,
     CollectionTagLink,
+    DerivativeGroupRegeneration,
+    DerivativeKind,
     DerivativeState,
     Document,
     DocumentKind,
     EmbeddingSpace,
     ExternalLibrary,
+    FilamentProfile,
     File,
     FileRevisionStatus,
     FileTagLink,
@@ -44,11 +48,14 @@ from app.db.models import (
     InboxSourceKind,
     IndexGeneration,
     InferenceEndpoint,
+    IngestionScratchWindow,
     IngestRequest,
     IngestRequestKind,
     Job,
     JobKind,
     JobState,
+    MeshFingerprintContinuation,
+    Metadata,
     Model,
     ModelProvenanceSource,
     ModelSourceCover,
@@ -63,6 +70,7 @@ from app.db.models import (
     PassageVector,
     Printer,
     PrinterFile,
+    PrinterProfile,
     PrinterProvider,
     PrinterStatus,
     PrintJob,
@@ -80,6 +88,7 @@ from app.db.models import (
     SimilarityRun,
     StorageConnection,
     StorageConnectionPurpose,
+    StoragePublicationLocator,
     SubjectCaption,
     SystemConfig,
     Tag,
@@ -193,6 +202,16 @@ class MakeMultipartModelStar(Protocol):
     ) -> MultipartModelStar: ...
 
 
+class MakeMetadata(Protocol):
+    def __call__(
+        self,
+        file: File,
+        *,
+        volume: VolumeMeasurement | None = None,
+        **overrides: Any,
+    ) -> Metadata: ...
+
+
 class MakeFile(Protocol):
     def __call__(
         self,
@@ -215,6 +234,7 @@ class MakeCollection(Protocol):
         name: str = "Parts",
         *,
         parent: Collection | None = None,
+        trashed: bool | datetime = False,
         **overrides: Any,
     ) -> Collection: ...
 
@@ -356,6 +376,12 @@ class MakeIngestRequest(Protocol):
     ) -> IngestRequest: ...
 
 
+class MakeDerivativeGroupRegeneration(Protocol):
+    def __call__(
+        self, definition: JobKind, kind: DerivativeKind, **overrides: Any
+    ) -> DerivativeGroupRegeneration: ...
+
+
 class MakeDerivative(Protocol):
     def __call__(
         self,
@@ -367,6 +393,12 @@ class MakeDerivative(Protocol):
         exhausted: bool = False,
         **overrides: Any,
     ) -> ArtifactDerivative: ...
+
+
+class MakeMeshContinuation(Protocol):
+    def __call__(
+        self, file: File, *, job: Job | None = None, **overrides: Any
+    ) -> MeshFingerprintContinuation: ...
 
 
 class MakeWorkFence(Protocol):
@@ -399,6 +431,17 @@ class MakeDocument(Protocol):
         trashed: bool = False,
         **overrides: Any,
     ) -> Document: ...
+
+
+class MakeStoragePublicationLocator(Protocol):
+    def __call__(
+        self,
+        *,
+        backend: str = "local",
+        namespace: str = "local/test",
+        key: str | None = None,
+        **overrides: Any,
+    ) -> StoragePublicationLocator: ...
 
 
 class MakeOwnedStorageObject(Protocol):
@@ -457,11 +500,13 @@ __all__ = [
     "MakeDocument",
     "MakeExternalLibrary",
     "MakeFile",
+    "MakeMetadata",
     "MakeInboxItem",
     "MakeModel",
     "MakeMultipartModel",
     "MakeMultipartModelStar",
     "MakeOwnedStorageObject",
+    "MakeStoragePublicationLocator",
     "MakePrintJob",
     "MakePrinter",
     "MakePrinterFile",
@@ -471,6 +516,7 @@ __all__ = [
     "MakeJob",
     "MakeIngestRequest",
     "MakeDerivative",
+    "MakeDerivativeGroupRegeneration",
     "MakeWorkFence",
     "MakeWorkExecutor",
     "TagCollection",
@@ -678,3 +724,24 @@ class MakeSearchProjectionRequest(Protocol):
     def __call__(
         self, source: ContentSource, **overrides: Any
     ) -> SearchProjectionRequest: ...
+
+
+class MakeIngestionScratchWindow(Protocol):
+    def __call__(
+        self,
+        *,
+        directory: Path | None = None,
+        job: Job | None = None,
+        execution_epoch: str | None = None,
+        **overrides: Any,
+    ) -> IngestionScratchWindow: ...
+
+
+class MakeFilamentProfile(Protocol):
+    def __call__(
+        self, name: str | None = None, *, material: str = "PLA", **overrides: Any
+    ) -> FilamentProfile: ...
+
+
+class MakePrinterProfile(Protocol):
+    def __call__(self, name: str | None = None, **overrides: Any) -> PrinterProfile: ...

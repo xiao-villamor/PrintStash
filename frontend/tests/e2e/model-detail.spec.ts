@@ -24,6 +24,115 @@ import type { ModelRead } from "../../src/types/models";
 useMockApi();
 
 test.describe("model detail route", () => {
+  test("recovers a failed Model read without reloading the route", async ({ page }) => {
+    let available = false;
+    await page.route("**/api/v1/models/1", async (route) => {
+      if (!available)
+        await route.fulfill({ status: 503, json: { detail: "temporarily_unavailable" } });
+      else await route.continue();
+    });
+    await page.goto("/models/1");
+    await expect(page.getByText("Couldn’t load this model")).toBeVisible();
+    available = true;
+
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+
+    await expect(page.getByRole("button", { name: "Model actions" })).toBeVisible();
+    await expect(page.getByText("Couldn’t load this model")).toHaveCount(0);
+    await expect(page).toHaveURL((url) => url.pathname === "/models/1");
+  });
+
+  test("confirms an ambiguous Model save before retry", async ({ page }) => {
+    let responseLost = false;
+    let writes = 0;
+    await page.route("**/api/v1/models/1", async (route) => {
+      if (route.request().method() === "PATCH") {
+        writes += 1;
+        responseLost = true;
+        await route.abort("failed");
+        return;
+      }
+      const response = await route.fetch();
+      // SAFETY: the mock API's Model detail fixture has the complete ModelRead contract.
+      const model = (await response.json()) as ModelRead;
+      await route.fulfill({
+        json: {
+          ...model,
+          name: responseLost ? "Saved draft" : model.name,
+          edit_version: responseLost ? 7 : 1,
+        },
+      });
+    });
+    await page.goto("/models/1");
+    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("menuitem", { name: /Edit details/ }).click();
+    await page.getByPlaceholder("Model name").fill("Saved draft");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(
+      page.getByText("The save was not confirmed. Review the latest version before retrying."),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+
+    await page.getByRole("button", { name: "Review latest version" }).click();
+    await expect(page.getByRole("dialog", { name: "Latest saved version" })).toContainText(
+      "Saved draft",
+    );
+    await page.getByRole("button", { name: "Use latest version" }).click();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+    await expect(page.getByRole("heading", { name: "Saved draft", exact: true })).toBeVisible();
+    expect(writes).toBe(1);
+  });
+
+  test("reviews a conflicting Model before intentional retry", async ({ page }) => {
+    let conflicted = false;
+    let saved = false;
+    const versions: (string | undefined)[] = [];
+    await page.route("**/api/v1/models/1", async (route) => {
+      if (route.request().method() === "PATCH") {
+        versions.push(route.request().headers()["if-match"]);
+        if (!conflicted) {
+          conflicted = true;
+          await route.fulfill({ status: 412, json: { detail: "edit_conflict" } });
+          return;
+        }
+        saved = true;
+      }
+      const response = await route.fetch({ method: "GET" });
+      // SAFETY: this route reads the repository's complete ModelRead mock fixture.
+      const model = (await response.json()) as ModelRead;
+      await route.fulfill({
+        json: {
+          ...model,
+          name: saved ? "My browser draft" : conflicted ? "Other editor" : model.name,
+          edit_version: saved ? 8 : conflicted ? 7 : 1,
+        },
+      });
+    });
+    await page.goto("/models/1");
+    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("menuitem", { name: /Edit details/ }).click();
+    await page.getByPlaceholder("Model name").fill("My browser draft");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+
+    await expect(page.getByPlaceholder("Model name")).toHaveValue("My browser draft");
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await page.getByRole("button", { name: "Review latest version" }).click();
+    await expect(page.getByRole("dialog", { name: "Latest saved version" })).toContainText(
+      "Other editor",
+    );
+    expect(versions).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
+    await page.getByRole("button", { name: "Save my draft against this version" }).click();
+
+    await expect(
+      page.getByRole("heading", { name: "My browser draft", exact: true }),
+    ).toBeVisible();
+    expect(versions).toEqual([
+      '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"',
+      '"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v7"',
+    ]);
+  });
+
   test("restores a trashed source within its original Model", async ({ page }) => {
     let removed = false;
     let original: ModelRead | null = null;
@@ -161,15 +270,17 @@ test.describe("model detail route", () => {
     const loadingPreview = page.getByRole("status", { name: "Loading 3D preview" });
 
     await page.goto("/");
+    await expect(page).toHaveURL(/\/\?type=all&sort=date-desc$/);
+    const libraryUrl = page.url();
     await modelLink.click();
-    await expect(page).toHaveURL(/\/models\/1$/);
+    await expect(page).toHaveURL((url) => url.pathname === "/models/1");
     await expect(preview).toBeVisible();
     await expect(loadingPreview).toHaveCount(0);
 
     await page.goBack();
-    await expect(page).toHaveURL(/\/$/);
+    await expect(page).toHaveURL(libraryUrl);
     await modelLink.click();
-    await expect(page).toHaveURL(/\/models\/1$/);
+    await expect(page).toHaveURL((url) => url.pathname === "/models/1");
     await expect(preview).toBeVisible();
 
     await expect(loadingPreview).toHaveCount(0);

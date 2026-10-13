@@ -24,7 +24,7 @@ from sqlmodel import Session
 import app.modules.library.model_views.listing as models_listing
 import app.modules.library.model_views.pagination as models_pagination
 import app.modules.library.model_views.trash as models_trash
-from app.db.models import FileType, Metadata, Model, PrintJobState, User
+from app.db.models import FileType, Metadata, Model, ModelStar, PrintJobState, User
 from app.schemas.models import ModelFilters, ModelSort
 from tests.factories import (
     build_file,
@@ -422,20 +422,133 @@ class TestListTrashed:
 
 
 class TestReadItemsByIds:
-    def test_bounds_card_work_to_requested_identities(
+    def test_rebinds_favorites_for_the_current_reader(
         self, db_session, make_user, make_model
     ):
+        first = make_user(superuser=True)
+        second = make_user(superuser=True)
+        model = make_model("Shared card")
+        db_session.add(ModelStar(user_id=first.id, model_id=model.id))
+        db_session.commit()
+
+        assert models_listing.read_items_by_ids(db_session, first, [model.id])[
+            0
+        ].starred
+        assert not models_listing.read_items_by_ids(db_session, second, [model.id])[
+            0
+        ].starred
+        db_session.add(ModelStar(user_id=second.id, model_id=model.id))
+        db_session.commit()
+        assert models_listing.read_items_by_ids(db_session, second, [model.id])[
+            0
+        ].starred
+
+    def test_rebinds_artifact_projection_for_each_page(
+        self, db_session, make_user, make_model
+    ):
+        actor = make_user(superuser=True)
+        first = make_model("First card")
+        second = make_model("Second card")
+        first_file = build_file(db_session, first, file_type=FileType.STL)
+        db_session.commit()
+        page = models_listing.read_items_by_ids(db_session, actor, [first.id])
+        assert (page[0].id, page[0].file_count, page[0].mesh_file_id) == (
+            first.id,
+            1,
+            first_file.id,
+        )
+
+        second_file = build_file(db_session, second, file_type=FileType.STL)
+        db_session.commit()
+        page = models_listing.read_items_by_ids(db_session, actor, [second.id])
+        assert (page[0].id, page[0].file_count, page[0].mesh_file_id) == (
+            second.id,
+            1,
+            second_file.id,
+        )
+
+    @pytest.mark.parametrize("statistics", ("none", "empty", "small"))
+    @pytest.mark.parametrize("unrelated_tags", (False, True))
+    def test_bounds_card_work_to_requested_identities(
+        self,
+        db_session,
+        make_user,
+        make_model,
+        make_tag,
+        statistics,
+        unrelated_tags,
+        monkeypatch,
+    ):
+        from app.modules.library.model_views import extensions
+        from app.modules.similarity import projections as similarity_projections
         from tests.fakes.sqlite_work import sqlite_work
 
+        monkeypatch.setattr(extensions, "_annotations", similarity_projections)
+        if statistics == "empty":
+            db_session.connection().exec_driver_sql("ANALYZE")
         actor = make_user(superuser=True)
-        target = make_model("Requested model")
+        target = make_model("Requested model", tags=[make_tag("Requested tag")])
         db_session.commit()
+        target_id = target.id
+        if statistics == "small":
+            db_session.connection().exec_driver_sql("ANALYZE")
+        db_session.expire_all()
         with sqlite_work(db_session) as small:
-            before = models_listing.read_items_by_ids(db_session, actor, [target.id])
+            before = models_listing.read_items_by_ids(db_session, actor, [target_id])
         for index in range(1000):
-            make_model(f"Unrelated model {index}")
+            make_model(
+                f"Unrelated model {index}",
+                tags=[make_tag(f"Unrelated tag {index}")] if unrelated_tags else [],
+            )
         db_session.commit()
-        with sqlite_work(db_session) as large:
-            after = models_listing.read_items_by_ids(db_session, actor, [target.id])
-        assert [row.id for row in before] == [row.id for row in after] == [target.id]
+        db_session.expire_all()
+        statements = []
+        connection = db_session.connection().connection.driver_connection
+        connection.set_trace_callback(statements.append)
+        try:
+            with sqlite_work(db_session) as large:
+                after = models_listing.read_items_by_ids(db_session, actor, [target_id])
+        finally:
+            connection.set_trace_callback(None)
+        # Explain only after removing the progress handler: diagnostics must
+        # never alter the measured instruction count. Catch planner scans even
+        # when a SQLite release shortcuts an empty candidate table at runtime.
+        model_scans = [
+            row[3]
+            for statement in statements
+            if statement.lstrip().upper().startswith(("SELECT", "WITH"))
+            for row in connection.execute("EXPLAIN QUERY PLAN " + statement).fetchall()
+            if "scan models" in row[3].lower()
+        ]
+        assert not model_scans, model_scans
+        assert [row.id for row in before] == [row.id for row in after] == [target_id]
+        assert before[0].tags == after[0].tags == ["Requested tag"]
         assert large.instructions <= max(1000, small.instructions * 2)
+
+
+class TestCardTagProjection:
+    @pytest.mark.parametrize("read_mode", ("identities", "offset", "cursor"))
+    def test_preserves_sorted_tag_labels_on_fresh_session(
+        self, db_session, make_user, make_model, make_tag, read_mode
+    ):
+        actor = make_user(superuser=True)
+        tagged = make_model("Tagged card", tags=[make_tag("Zebra"), make_tag("Alpha")])
+        empty = make_model("Empty card")
+        db_session.commit()
+        ids = [tagged.id, empty.id]
+        db_session.expire_all()
+        if read_mode == "identities":
+            rows = models_listing.read_items_by_ids(db_session, actor, ids)
+        elif read_mode == "offset":
+            rows = models_listing.list_items(db_session, actor, limit=100)
+        else:
+            rows = models_pagination.page_items(
+                db_session,
+                actor,
+                filters=ModelFilters(),
+                sort=ModelSort.NAME_ASC,
+                limit=100,
+            ).items
+        tags_by_id = {row.id: row.tags for row in rows}
+        assert tags_by_id[ids[0]] == ["Alpha", "Zebra"]
+        assert tags_by_id[ids[1]] == []

@@ -7,6 +7,7 @@ or updated. Native repair works in bounded keyset pages in the background.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 from printstash_core.search.lexical import frequencies
 from sqlalchemy import delete, text, update
@@ -250,8 +251,12 @@ def capability(session: Session) -> str:
     return "fts5"
 
 
+@lru_cache(maxsize=1)
 def canonical_passage():
-    """Only the newest supported recipe per authorized segment enters BM25."""
+    """Only the newest supported recipe per authorized segment enters BM25.
+
+    Cache expression construction; every execution reads current recipe rows.
+    """
     newer = aliased(SearchPassage)
     return (
         ~select(newer.id)

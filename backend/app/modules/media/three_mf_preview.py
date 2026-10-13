@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from app.core.config import settings
+from app.core.native_settings import settings
 from app.modules.storage.storage_backend.contracts import StorageBackend
 
 _PLATE_PATH = re.compile(r"^Metadata/plate_[0-9]+\.gcode$")

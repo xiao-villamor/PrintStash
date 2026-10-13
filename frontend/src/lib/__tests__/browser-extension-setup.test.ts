@@ -11,12 +11,14 @@
  * finished.
  */
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { clearLogin } from "@/lib/auth-store";
 
 import {
   BROWSER_EXTENSION_SETUP_STORAGE_KEY,
   BROWSER_EXTENSION_SETUP_TTL_MS,
   prepareBrowserExtensionSetup,
+  discardBrowserExtensionSetup,
 } from "@/lib/browser-extension-setup";
 
 describe("storeExtensionSetupPackage", () => {
@@ -50,5 +52,38 @@ describe("storeExtensionSetupPackage", () => {
       "requires a username and API key",
     );
     expect(window.sessionStorage.getItem(BROWSER_EXTENSION_SETUP_STORAGE_KEY)).toBeNull();
+  });
+});
+
+describe("extension handoff retirement", () => {
+  it("keeps the previous handoff retired when replacement storage fails", () => {
+    prepareBrowserExtensionSetup("http://localhost:3000", "owner", "ps_old_fake_key");
+    const store = vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+      throw new DOMException("Storage unavailable", "QuotaExceededError");
+    });
+    expect(() =>
+      prepareBrowserExtensionSetup("http://localhost:3000", "owner", "ps_next_fake_key"),
+    ).toThrow("Storage unavailable");
+    store.mockRestore();
+    clearLogin();
+    expect(window.sessionStorage.getItem(BROWSER_EXTENSION_SETUP_STORAGE_KEY)).toBeNull();
+  });
+  it("discards an explicitly dismissed owned package", () => {
+    const setup = prepareBrowserExtensionSetup("http://localhost:3000", "owner", "ps_fake_key");
+    discardBrowserExtensionSetup(setup);
+    expect(window.sessionStorage.getItem(BROWSER_EXTENSION_SETUP_STORAGE_KEY)).toBeNull();
+  });
+  it("preserves a newer package when an old receipt is dismissed", () => {
+    const old = prepareBrowserExtensionSetup("http://localhost:3000", "owner", "ps_old_fake_key");
+    const current = prepareBrowserExtensionSetup(
+      "http://localhost:3000",
+      "owner",
+      "ps_current_fake_key",
+    );
+    discardBrowserExtensionSetup(old);
+    expect(window.sessionStorage.getItem(BROWSER_EXTENSION_SETUP_STORAGE_KEY)).toBe(
+      JSON.stringify(current),
+    );
+    discardBrowserExtensionSetup(current);
   });
 });

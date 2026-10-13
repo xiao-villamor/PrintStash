@@ -46,6 +46,7 @@ from app.modules.work.submission import nudge
 from app.runtime.engine.inline import InlineJobEngine
 from app.schemas.inbox import CaptureUploadSlotsCreate, InboxItemUpdate
 from tests.factories import build_collection, build_file, build_model, build_user
+from tests.factories.ops import build_job_context
 
 
 def _make_user(session: Session, username: str, *, admin: bool = True) -> User:
@@ -294,7 +295,7 @@ class TestReconcileInterruptedItems:
             assert fresh.resulting_model_id == imported_model.id
 
     def test_reconcile_finished_capture_runs_normal_terminalization(
-        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+        self, db_session: Session
     ) -> None:
         """A restarted job cleans slots after ownership moves to its origin lease.
 
@@ -303,6 +304,11 @@ class TestReconcileInterruptedItems:
         transferred ``capture_upload_slot_origin_id`` lease, not try to look the
         slot up through its pre-import owner column.
         """
+        from PIL import Image
+
+        from app.db.models import OwnedStorageObject, StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+
         owner = _make_user(db_session, "reconcile-capture-terminalization")
         file_bytes = b"captured-model"
         cover_bytes = base64.b64decode(
@@ -391,14 +397,6 @@ class TestReconcileInterruptedItems:
         )
         db_session.commit()
 
-        attached_sources: list[int] = []
-        monkeypatch.setattr(
-            inbox.source_covers,
-            "put",
-            lambda _session, _backend, **kwargs: attached_sources.append(
-                kwargs["provenance_source_id"]
-            ),
-        )
         job_id = jobs.create(
             definition=JobKind.INGESTION_INBOX_IMPORT,
             subject_key=f"inbox_item/test-{owner.id}",
@@ -449,7 +447,7 @@ class TestReconcileInterruptedItems:
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)
             assert fresh is not None
-            assert fresh.state == InboxItemState.COMPLETED
+            assert fresh.state == InboxItemState.COMPLETED, fresh.error_code
             assert fresh.resulting_model_id == model.id
             assert fresh.retryable is False
             assert fresh.error_code is None
@@ -480,10 +478,28 @@ class TestReconcileInterruptedItems:
             )
             intents = session.exec(select(StorageDeleteIntent)).all()
             assert {intent.resource_id for intent in intents} == slot_ids
-        assert attached_sources == [source.id]
+            cover = inbox.source_covers.get(session, source.id)
+            assert cover is not None
+            assert cover.provenance_source_id == source.id
+            assert cover.content_type == "image/webp"
+            stored = get_backend().read_bytes(cover.storage_key)
+            with Image.open(BytesIO(stored)) as image:
+                image.load()
+                assert image.format == "WEBP"
+                width = int(settings.model_thumbnail_width)
+                assert image.size == (width, round(width * 3 / 4))
+            receipt = session.exec(
+                select(OwnedStorageObject).where(
+                    OwnedStorageObject.key == cover.storage_key,
+                    OwnedStorageObject.object_kind == "model_source_cover",
+                    OwnedStorageObject.state == StorageObjectState.COMMITTED,
+                )
+            ).one()
+            assert receipt.size_bytes == len(stored)
+            assert receipt.sha256 == hashlib.sha256(stored).hexdigest()
 
     def test_reconcile_completed_capture_cleanup_pending_preserves_imported_result(
-        self, db_session: Session, monkeypatch: pytest.MonkeyPatch
+        self, db_session: Session, monkeypatch: pytest.MonkeyPatch, make_job
     ) -> None:
         """Startup cleanup repairs a completed item without re-running ingestion."""
         owner = _make_user(db_session, "reconcile-completed-cleanup")
@@ -565,11 +581,14 @@ class TestReconcileInterruptedItems:
             retryable=False,
         )
         db_session.add_all([link, result])
-        job_id = jobs.create(
-            definition=JobKind.INGESTION_INBOX_IMPORT,
-            subject_key=f"inbox_item/test-{owner.id}",
-            owner_user_id=owner.id,
-        )
+        from app.db.models import JobState
+
+        job_id = make_job(
+            kind=JobKind.INGESTION_INBOX_IMPORT,
+            subject=f"inbox_item/{row.id}",
+            owner=owner,
+            state=JobState.COMPLETED,
+        ).id
         row.state = InboxItemState.COMPLETED
         row.job_id = job_id
         row.resulting_model_id = model.id
@@ -1079,7 +1098,7 @@ class TestResolve:
         staged = tmp_path / "download.bin"
         staged.write_bytes(b"pk-zip-stub")
 
-        async def fake_download(_url: str):
+        async def fake_download(_url: str, **kwargs):
             return staged, "bundle.zip"
 
         monkeypatch.setattr(importer, "download_to_staging", fake_download)
@@ -1136,7 +1155,7 @@ class TestResolve:
         staged = tmp_path / "download.stl"
         staged.write_bytes(b"solid x endsolid")
 
-        async def fake_download(_url: str):
+        async def fake_download(_url: str, **kwargs):
             return staged, "model.stl"
 
         monkeypatch.setattr(importer, "download_to_staging", fake_download)
@@ -1260,47 +1279,54 @@ class TestRunImportJob:
         db_session.add(row)
         db_session.commit()
 
-        inbox.run_import_job(row.id, job_id or "")
+        inbox.run_import_job(row.id, build_job_context(job_id or ""))
 
         status = jobs.get(job_id or "")
         assert status is not None and status.state == "cancelled"
 
     def test_records_the_resulting_model_when_a_direct_import_completes(
-        self,
-        imported_model: Model,
-        db_session: Session,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        work_engine: InlineJobEngine,
-    ) -> None:
-        owner = _make_user(db_session, "run-import-direct")
+        self, db_session, monkeypatch, tmp_path, work_engine
+    ):
+        from tests.factories.content import gcode
+
+        owner = _make_user(db_session, "direct-window")
         row = _make_item(
             db_session,
             owner,
             state=InboxItemState.REVIEW,
             manifest_json=json.dumps({"kind": "direct"}),
         )
+        payload = gcode(marker="direct-window")
 
-        staged = tmp_path / "model.stl"
-        staged.write_bytes(b"solid x endsolid")
+        async def download(_url, *, window_max_bytes=None, window=None):
+            assert window is not None
+            path = window.directory / "download.gcode"
+            assert len(payload) <= window.max_bytes
+            path.write_bytes(payload)
+            # Successful production downloads seal their exact inode before
+            # strict importer cleanup can authorize releasing that output.
+            window.seal(path)
+            return path, "part.gcode"
 
-        async def fake_download_assets(_url: str):
-            return [(staged, "model.stl")]
+        monkeypatch.setattr(importer, "download_to_staging", download)
 
-        monkeypatch.setattr(inbox, "_download_assets", fake_download_assets)
+        async def resolve(_url):
+            return "https://example.com/part.gcode"
 
-        def fake_import_assets(*, job_id: str, **_kwargs) -> None:
-            jobs.finish(job_id, JobOutcome.COMPLETED, model_id=imported_model.id)
-
-        monkeypatch.setattr(importer, "import_assets", fake_import_assets)
-
+        monkeypatch.setattr(import_resolvers, "resolve_page_url", resolve)
         _import_through_job(db_session, work_engine, row.id, [])
-
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)
-            assert fresh.state == InboxItemState.COMPLETED
-            assert fresh.resulting_model_id == imported_model.id
-            assert fresh.completed_at is not None
+            assert fresh.state == InboxItemState.COMPLETED, fresh.error_code
+            assert fresh.resulting_model_id is not None
+            files = session.exec(
+                select(File).where(File.model_id == fresh.resulting_model_id)
+            ).all()
+            assert len(files) == 1
+            from app.modules.storage.storage_backend.runtime import get_backend
+
+            assert get_backend().read_bytes(files[0].path) == payload
+        assert fresh.completed_at is not None
 
     def test_fails_retryably_when_an_archive_item_has_no_staging_key(
         self, db_session: Session, work_engine: InlineJobEngine
@@ -1323,104 +1349,99 @@ class TestRunImportJob:
             assert fresh.state == InboxItemState.FAILED
             assert fresh.retryable is True
 
-    def test_run_import_archive_completes(
-        self,
-        imported_model: Model,
-        db_session: Session,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        work_engine: InlineJobEngine,
-    ) -> None:
-        owner = _make_user(db_session, "run-import-archive-ok")
+    def test_run_import_archive_completes(self, db_session, tmp_path, work_engine):
+        import zipfile
+
+        from tests.factories.content import gcode
+
+        owner = _make_user(db_session, "archive-window")
         _overlay["staging_dir"] = tmp_path / "staging"
         settings.incoming_dir.mkdir(parents=True)
         staged_archive = settings.incoming_dir / "bundle.zip"
-        staged_archive.write_bytes(b"pk-zip-stub")
+        payload = gcode(marker="archive-selected")
+        with zipfile.ZipFile(staged_archive, "w") as archive:
+            archive.writestr("a.gcode", payload)
+            archive.writestr("b.gcode", gcode(marker="archive-unselected"))
         row = _make_item(
             db_session,
             owner,
             state=InboxItemState.REVIEW,
             manifest_json=json.dumps(
-                {"kind": "archive", "entries": [{"id": "a.stl"}, {"id": "b.stl"}]}
+                {"kind": "archive", "entries": [{"id": "a.gcode"}, {"id": "b.gcode"}]}
             ),
             staging_key=str(staged_archive),
         )
-
-        extracted = tmp_path / "a.stl"
-        extracted.write_bytes(b"solid x endsolid")
-        monkeypatch.setattr(
-            importer,
-            "extract_selected",
-            lambda _path, names: [(extracted, "a.stl")] if "a.stl" in names else [],
-        )
-
-        def fake_import_assets(*, job_id: str, **_kwargs) -> None:
-            jobs.finish(job_id, JobOutcome.COMPLETED, model_id=imported_model.id)
-
-        monkeypatch.setattr(importer, "import_assets", fake_import_assets)
-
-        _import_through_job(db_session, work_engine, row.id, ["a.stl"])
-
+        _import_through_job(db_session, work_engine, row.id, ["a.gcode"])
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)
             assert fresh.state == InboxItemState.COMPLETED
-            assert fresh.resulting_model_id == imported_model.id
+            assert fresh.resulting_model_id is not None
+            files = session.exec(
+                select(File).where(File.model_id == fresh.resulting_model_id)
+            ).all()
+            assert len(files) == 1
+            from app.modules.storage.storage_backend.runtime import get_backend
+
+            assert get_backend().read_bytes(files[0].path) == payload
+            assert files[0].original_filename == "a.gcode"
             assert fresh.staging_key is None
         assert not staged_archive.exists()
 
     def test_releases_staging_after_importing_a_browser_file_copy(
-        self,
-        imported_model: Model,
-        db_session: Session,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        work_engine: InlineJobEngine,
-    ) -> None:
-        owner = _make_user(db_session, "run-import-browser-file")
+        self, db_session, monkeypatch, tmp_path, work_engine
+    ):
+        from tests.factories.content import gcode
+
+        owner = _make_user(db_session, "browser-window")
         _overlay["staging_dir"] = tmp_path / "staging"
         settings.incoming_dir.mkdir(parents=True)
-        staged = settings.incoming_dir / "inbox" / "1" / "source.3mf"
+        staged = settings.incoming_dir / "inbox" / "1" / "source.gcode"
         staged.parent.mkdir(parents=True)
-        staged.write_bytes(b"browser-owned-package")
+        payload = gcode(marker="browser-copy")
+        staged.write_bytes(payload)
         row = _make_item(
             db_session,
             owner,
             state=InboxItemState.REVIEW,
-            source_url="https://makerworld.com/en/models/1234-widget",
             manifest_json=json.dumps(
-                {"kind": "browser_file", "filename": "widget.3mf"}
+                {"kind": "browser_file", "filename": "widget.gcode"}
             ),
             staging_key=str(staged),
         )
+        original = importer._ingest_one_file
+        observed = []
 
-        def fake_import_assets(*, job_id: str, staged_files, **_kwargs) -> None:
-            copied, name = staged_files[0]
-            assert copied != staged
-            assert copied.read_bytes() == b"browser-owned-package"
-            assert name == "widget.3mf"
-            copied.unlink()
-            jobs.finish(job_id, JobOutcome.COMPLETED, model_id=imported_model.id)
+        def commit_copy(path, name, **kwargs):
+            assert path != staged
+            assert path.read_bytes() == staged.read_bytes() == payload
+            assert name == "widget.gcode"
+            observed.append(path)
+            return original(path, name, **kwargs)
 
-        monkeypatch.setattr(importer, "import_assets", fake_import_assets)
-
+        monkeypatch.setattr(importer, "_ingest_one_file", commit_copy)
         _import_through_job(db_session, work_engine, row.id, [])
-
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)
             assert fresh.state == InboxItemState.COMPLETED
-            assert fresh.resulting_model_id == imported_model.id
+            assert fresh.resulting_model_id is not None
+            files = session.exec(
+                select(File).where(File.model_id == fresh.resulting_model_id)
+            ).all()
+            assert len(files) == 1
+            from app.modules.storage.storage_backend.runtime import get_backend
+
+            assert get_backend().read_bytes(files[0].path) == payload
             assert fresh.staging_key is None
+        assert len(observed) == 1
+        assert not observed[0].exists()
         assert not staged.exists()
 
     def test_run_import_model_files_completes(
-        self,
-        imported_model: Model,
-        db_session: Session,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        work_engine: InlineJobEngine,
-    ) -> None:
-        owner = _make_user(db_session, "run-import-model-files")
+        self, db_session, monkeypatch, tmp_path, work_engine
+    ):
+        from tests.factories.content import gcode
+
+        owner = _make_user(db_session, "model_files-window")
         row = _make_item(
             db_session,
             owner,
@@ -1431,54 +1452,56 @@ class TestRunImportJob:
                     "files": [
                         {
                             "id": "f1",
-                            "name": "bracket.stl",
-                            "file_type": "stl",
-                            "size": 10,
+                            "name": "part.gcode",
+                            "file_type": "gcode",
+                            "size": 64,
                         }
                     ],
                 }
             ),
         )
+        payload = gcode(marker="model_files-window")
 
-        async def fake_resolve_selected_download(_url, chosen):
-            assert chosen[0].file_id == "f1"
-            return ["https://example.com/download/f1"]
+        async def download(_url, *, window_max_bytes=None, window=None):
+            assert window is not None
+            path = window.directory / "download.gcode"
+            assert len(payload) <= window.max_bytes
+            path.write_bytes(payload)
+            # Successful production downloads seal their exact inode before
+            # strict importer cleanup can authorize releasing that output.
+            window.seal(path)
+            return path, "part.gcode"
 
-        monkeypatch.setattr(
-            import_resolvers,
-            "resolve_selected_download",
-            fake_resolve_selected_download,
-        )
+        monkeypatch.setattr(importer, "download_to_staging", download)
 
-        staged = tmp_path / "bracket.stl"
-        staged.write_bytes(b"solid x endsolid")
+        async def resolve(_url, chosen):
+            assert [file.file_id for file in chosen] == ["f1"]
+            return (
+                import_resolvers.SelectedFileDownload(
+                    chosen[0], "https://example.com/part.gcode"
+                ),
+            )
 
-        async def fake_download_assets(_url: str):
-            return [(staged, "bracket.stl")]
-
-        monkeypatch.setattr(inbox, "_download_assets", fake_download_assets)
-
-        def fake_import_assets(*, job_id: str, **_kwargs) -> None:
-            jobs.finish(job_id, JobOutcome.COMPLETED, model_id=imported_model.id)
-
-        monkeypatch.setattr(importer, "import_assets", fake_import_assets)
-
+        monkeypatch.setattr(import_resolvers, "resolve_selected_sources", resolve)
         _import_through_job(db_session, work_engine, row.id, [])
-
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)
-            assert fresh.state == InboxItemState.COMPLETED
-            assert fresh.resulting_model_id == imported_model.id
+            assert fresh.state == InboxItemState.COMPLETED, fresh.error_code
+            assert fresh.resulting_model_id is not None
+            files = session.exec(
+                select(File).where(File.model_id == fresh.resulting_model_id)
+            ).all()
+            assert len(files) == 1
+            from app.modules.storage.storage_backend.runtime import get_backend
+
+            assert get_backend().read_bytes(files[0].path) == payload
 
     def test_run_import_collection_completes(
-        self,
-        imported_model: Model,
-        db_session: Session,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        work_engine: InlineJobEngine,
-    ) -> None:
-        owner = _make_user(db_session, "run-import-collection")
+        self, db_session, monkeypatch, tmp_path, work_engine
+    ):
+        from tests.factories.content import gcode
+
+        owner = _make_user(db_session, "collection-window")
         row = _make_item(
             db_session,
             owner,
@@ -1492,35 +1515,41 @@ class TestRunImportJob:
                 }
             ),
         )
+        payload = gcode(marker="collection-window")
 
-        staged = tmp_path / "member.stl"
-        staged.write_bytes(b"solid x endsolid")
+        async def download(_url, *, window_max_bytes=None, window=None):
+            assert window is not None
+            path = window.directory / "download.gcode"
+            assert len(payload) <= window.max_bytes
+            path.write_bytes(payload)
+            # Successful production downloads seal their exact inode before
+            # strict importer cleanup can authorize releasing that output.
+            window.seal(path)
+            return path, "part.gcode"
 
-        async def fake_download_assets(_url: str):
-            return [(staged, "member.stl")]
+        monkeypatch.setattr(importer, "download_to_staging", download)
 
-        monkeypatch.setattr(inbox, "_download_assets", fake_download_assets)
+        async def resolve(_url):
+            return "https://example.com/part.gcode"
 
-        def fake_import_assets(*, job_id: str, **_kwargs) -> None:
-            jobs.finish(job_id, JobOutcome.COMPLETED, model_id=imported_model.id)
-
-        monkeypatch.setattr(importer, "import_assets", fake_import_assets)
-
+        monkeypatch.setattr(import_resolvers, "resolve_page_url", resolve)
         _import_through_job(db_session, work_engine, row.id, [])
-
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)
-            assert fresh.state == InboxItemState.COMPLETED
-            assert fresh.resulting_model_id == imported_model.id
+            assert fresh.state == InboxItemState.COMPLETED, fresh.error_code
+            assert fresh.resulting_model_id is not None
+            files = session.exec(
+                select(File).where(File.model_id == fresh.resulting_model_id)
+            ).all()
+            assert len(files) == 1
+            from app.modules.storage.storage_backend.runtime import get_backend
+
+            assert get_backend().read_bytes(files[0].path) == payload
 
     def test_run_import_job_not_completed_marks_failed(
-        self,
-        db_session: Session,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        work_engine: InlineJobEngine,
-    ) -> None:
-        owner = _make_user(db_session, "run-import-job-failed")
+        self, db_session, monkeypatch, work_engine
+    ):
+        owner = _make_user(db_session, "failed-window")
         row = _make_item(
             db_session,
             owner,
@@ -1528,21 +1557,15 @@ class TestRunImportJob:
             manifest_json=json.dumps({"kind": "direct"}),
         )
 
-        staged = tmp_path / "model.stl"
-        staged.write_bytes(b"solid x endsolid")
+        async def resolve(_url):
+            return "https://example.com/part.gcode"
 
-        async def fake_download_assets(_url: str):
-            return [(staged, "model.stl")]
+        async def download(_url, *, window_max_bytes=None, window=None):
+            raise importer.ImportError_("ingest_exploded")
 
-        monkeypatch.setattr(inbox, "_download_assets", fake_download_assets)
-
-        def fake_import_assets(*, job_id: str, **_kwargs) -> None:
-            jobs.finish(job_id, JobOutcome.FAILED, error="ingest_exploded")
-
-        monkeypatch.setattr(importer, "import_assets", fake_import_assets)
-
+        monkeypatch.setattr(import_resolvers, "resolve_page_url", resolve)
+        monkeypatch.setattr(importer, "download_to_staging", download)
         _import_through_job(db_session, work_engine, row.id, [])
-
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)
             assert fresh.state == InboxItemState.FAILED
@@ -1566,7 +1589,7 @@ class TestRunImportJob:
         async def boom(_url: str):
             raise RuntimeError("network exploded")
 
-        monkeypatch.setattr(inbox, "_download_assets", boom)
+        monkeypatch.setattr(import_resolvers, "resolve_page_url", boom)
 
         _import_through_job(db_session, work_engine, row.id, [])
 
@@ -1653,17 +1676,20 @@ class TestRetry:
 
     def test_legacy_browser_file_failure_retry_then_success_returns_lease_to_review(
         self,
-        imported_model: Model,
         db_session: Session,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
         work_engine: InlineJobEngine,
     ) -> None:
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from tests.factories.content import gcode
+
         owner = _make_user(db_session, "legacy-browser-retry")
         _overlay["staging_dir"] = tmp_path / "staging"
-        staged = settings.incoming_dir / "legacy" / "widget.3mf"
+        staged = settings.incoming_dir / "legacy" / "widget.gcode"
         staged.parent.mkdir(parents=True)
-        staged.write_bytes(b"legacy-browser-file")
+        payload = gcode(marker="legacy-browser-file")
+        staged.write_bytes(payload)
         row = _make_item(
             db_session,
             owner,
@@ -1671,7 +1697,7 @@ class TestRetry:
             state=InboxItemState.REVIEW,
             source_url="https://makerworld.com/en/models/1234-widget",
             manifest_json=json.dumps(
-                {"kind": "browser_file", "filename": "widget.3mf"}
+                {"kind": "browser_file", "filename": "widget.gcode"}
             ),
             staging_key=str(staged),
         )
@@ -1680,50 +1706,66 @@ class TestRetry:
             inbox_item_id=row.id,
             owner_user_id=owner.id,
             path=staged,
-            size_bytes=staged.stat().st_size,
-            sha256=hashlib.sha256(staged.read_bytes()).hexdigest(),
+            size_bytes=len(payload),
+            sha256=hashlib.sha256(payload).hexdigest(),
         )
         db_session.commit()
+        baseline = {
+            file.id: file.model_dump() for file in db_session.exec(select(File)).all()
+        }
+        consume = importer._ingest_one_file
+        consumed = []
 
-        monkeypatch.setattr(
-            inbox.importer,
-            "import_assets",
-            lambda **_kwargs: (_ for _ in ()).throw(
-                RuntimeError("first import failed")
-            ),
-        )
+        def fail_first_copy(path, name, **kwargs):
+            assert path != staged
+            assert path.read_bytes() == staged.read_bytes() == payload
+            assert name == "widget.gcode"
+            consumed.append(path)
+            raise RuntimeError("first import failed")
+
+        monkeypatch.setattr(importer, "_ingest_one_file", fail_first_copy)
         _import_through_job(db_session, work_engine, row.id, [])
 
         db_session.expire_all()
         failed = db_session.get(InboxItem, row.id)
-        assert failed is not None
-        assert failed.state == InboxItemState.FAILED
+        assert failed is not None and failed.state == InboxItemState.FAILED
         assert failed.job_id is not None
-        job_id = failed.job_id
+        first_job = failed.job_id
         lease = db_session.exec(
-            select(StagingLease).where(StagingLease.job_id == job_id)
+            select(StagingLease).where(StagingLease.job_id == first_job)
         ).one()
         assert lease.inbox_item_id is None
-
+        assert lease.path == str(staged)
+        assert staged.read_bytes() == payload
+        assert len(consumed) == 1 and not consumed[0].exists()
+        assert {
+            file.id: file.model_dump() for file in db_session.exec(select(File)).all()
+        } == baseline
         retried = inbox.retry(db_session, failed)
         assert retried.state == InboxItemState.REVIEW
         returned = db_session.exec(
             select(StagingLease).where(StagingLease.id == lease.id)
         ).one()
-        assert returned.inbox_item_id == row.id
-        assert returned.job_id is None
+        assert returned.inbox_item_id == row.id and returned.job_id is None
+        assert returned.path == str(staged)
 
-        def complete_import(*, job_id: str, **_kwargs) -> None:
-            jobs.finish(job_id, JobOutcome.COMPLETED, model_id=imported_model.id)
-
-        monkeypatch.setattr(inbox.importer, "import_assets", complete_import)
+        monkeypatch.setattr(importer, "_ingest_one_file", consume)
         _import_through_job(db_session, work_engine, row.id, [])
-
         with get_session_factory().scoped_session() as session:
             fresh = session.get(InboxItem, row.id)
-            assert fresh is not None
-            assert fresh.state == InboxItemState.COMPLETED
-            assert fresh.resulting_model_id == imported_model.id
+            assert fresh is not None and fresh.state == InboxItemState.COMPLETED
+            assert fresh.resulting_model_id is not None
+            assert fresh.job_id != first_job
+            assert fresh.staging_key is None
+            files = session.exec(select(File)).all()
+            assert {
+                file.id: file.model_dump() for file in files if file.id in baseline
+            } == baseline
+            created = [file for file in files if file.id not in baseline]
+            assert len(created) == 1
+            assert created[0].model_id == fresh.resulting_model_id
+            assert get_backend().read_bytes(created[0].path) == payload
+        assert not staged.exists()
 
 
 class TestDismiss:

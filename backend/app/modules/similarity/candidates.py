@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass
+from functools import lru_cache
 
 from printstash_core.mesh.similarity.verification import Verification
 from sqlalchemy import and_, case, true, update
@@ -27,6 +28,7 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
+from app.modules.media.fingerprints import ALGORITHM_VERSION
 from app.modules.similarity.configuration import read_settings
 from app.modules.similarity.fingerprints import (
     current_source,
@@ -44,6 +46,13 @@ class CandidatePage:
 
 def current_evidence(candidate=SimilarityCandidate):
     """Correlated SQL predicate; source lifecycle invalidation needs no sweep."""
+    return _evidence_predicate(candidate, ALGORITHM_VERSION)
+
+
+@lru_cache(maxsize=1)
+def _evidence_predicate(candidate, algorithm_version: str):
+    # Reuse immutable SQL construction, never query results or user permissions.
+    # Every execution still reads current source, lifecycle and evidence rows.
     a, b = aliased(GeometryFingerprint), aliased(GeometryFingerprint)
     fa, fb = aliased(File), aliased(File)
     ma, mb = aliased(Model), aliased(Model)
@@ -54,8 +63,6 @@ def current_evidence(candidate=SimilarityCandidate):
         .join(b, b.id == observation.fingerprint_b_id)
         .join(fa, fa.id == a.file_id)
         .join(fb, fb.id == b.file_id)
-        .join(ma, ma.id == fa.model_id)
-        .join(mb, mb.id == fb.model_id)
         .where(
             observation.candidate_id == candidate.id,
             or_(
@@ -68,33 +75,62 @@ def current_evidence(candidate=SimilarityCandidate):
             fb.sha256 == observation.input_hash_b,
             a.source_sha256 == fa.sha256,
             b.source_sha256 == fb.sha256,
+            candidate.algorithm_version == algorithm_version,
             a.algorithm_version == candidate.algorithm_version,
             b.algorithm_version == candidate.algorithm_version,
             col(a.state).in_(("ready", "partial")),
             col(b.state).in_(("ready", "partial")),
-            *live_source_predicates(fa, ma),
-            *live_source_predicates(fb, mb),
+            select(ma.id)
+            .where(ma.id == fa.model_id, *live_source_predicates(fa, ma))
+            .correlate(fa)
+            .scalar_subquery()
+            .is_not(None),
+            select(mb.id)
+            .where(mb.id == fb.model_id, *live_source_predicates(fb, mb))
+            .correlate(fb)
+            .scalar_subquery()
+            .is_not(None),
         )
         .correlate(candidate)
         .exists()
     )
 
 
-def visible_query(session: Session, actor: User):
+@lru_cache(maxsize=1)
+def _endpoint_queries():
+    # Cache aliases and invariant lifecycle predicates, never permissions or rows.
+    # SQLAlchemy's generative where() leaves these templates unchanged.
     a, b = aliased(Model), aliased(Model)
-    return (
-        select(SimilarityCandidate)
-        .join(a, a.id == SimilarityCandidate.model_a_id)
-        .join(b, b.id == SimilarityCandidate.model_b_id)
-        .where(
-            SimilarityCandidate.confidence > 0,
-            live(a),
-            live(b),
-            col(a.purge_token).is_(None),
-            col(b.purge_token).is_(None),
-            editable_models(session, actor, a),
-            editable_models(session, actor, b),
+    return tuple(
+        (
+            model,
+            select(model.id)
+            .where(
+                model.id == endpoint,
+                live(model),
+                col(model.purge_token).is_(None),
+            )
+            .correlate(SimilarityCandidate),
         )
+        for model, endpoint in (
+            (a, col(SimilarityCandidate.model_a_id)),
+            (b, col(SimilarityCandidate.model_b_id)),
+        )
+    )
+
+
+def visible_query(session: Session, actor: User):
+    # Candidate endpoints are known identities. Correlated point lookups prevent
+    # stale small-catalog statistics from starting with a full Model scan.
+    # Every execution composes the caller's current authorization predicate.
+    visible_endpoints = [
+        statement.where(editable_models(session, actor, model))
+        .scalar_subquery()
+        .is_not(None)
+        for model, statement in _endpoint_queries()
+    ]
+    return select(SimilarityCandidate).where(
+        SimilarityCandidate.confidence > 0, *visible_endpoints
     )
 
 

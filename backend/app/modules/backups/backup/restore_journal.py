@@ -6,15 +6,14 @@ import json
 import os
 import secrets
 from pathlib import Path
+from uuid import uuid4
 
 from sqlalchemy.engine import URL
 from sqlmodel import Session, create_engine, delete, select
 
 import app.modules.backups.backup.contracts as _contracts_module
 from app.core.logging import get_logger
-from app.db.models import (
-    RestoreMarker,
-)
+from app.db.models import LibraryRevision, RestoreMarker
 from app.db.session import get_session_factory
 from app.modules.storage.storage_backend.contracts import CreationReceipt
 from app.modules.storage.storage_backend.runtime import get_backend
@@ -98,6 +97,15 @@ def _stage_restore_marker(
     engine = create_engine(URL.create("sqlite", database=str(database_path)))
     try:
         with Session(engine) as session:
+            authority = session.get(LibraryRevision, 1)
+            if authority is None:
+                raise RuntimeError("restore_library_revision_missing")
+            # A snapshot copies its counters and epoch. Renew the incarnation
+            # in the same private transaction as the publication marker so a
+            # physical restore cannot reuse an earlier browse/access stamp.
+            # Forward recovery of an already-active marker skips this stage.
+            authority.epoch = uuid4().hex
+            session.add(authority)
             # Markers are operation evidence, not a historical restore log.
             # Remove stale rows copied from an older backup before inserting
             # this operation's marker, avoiding a false active result when the

@@ -22,6 +22,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from printstash_core.mesh.measurements import (
+    VolumeLegacyUnassessed,
+    VolumeMeasurement,
+    VolumeNotCalculated,
+    VolumeNotCalculatedCause,
+    volume_value,
+)
 from sqlmodel import Session, select
 
 from app.core.time import utcnow
@@ -41,6 +48,7 @@ from app.db.models import (
     Tag,
     User,
 )
+from app.modules.library.volume_metadata import apply_volume
 from tests.factories._support import nth, reject_aliases, save, unique_hash
 
 
@@ -105,6 +113,7 @@ def build_model(
     has to reach for `.id` on something it just built.
     """
     reject_aliases(overrides, {"deleted_at": "trashed"} if trashed else {})
+    overrides.setdefault("edit_version", 1)
     index = nth("model")
     if collection is not None:
         overrides.setdefault("collection_id", collection.id)
@@ -125,6 +134,7 @@ def build_multipart_model(
     **overrides: Any,
 ) -> MultipartModel:
     """A standalone empty multipart grouping; members are API/service state."""
+    overrides.setdefault("edit_version", 1)
     index = nth("multipart_model")
     if collection is not None:
         overrides.setdefault("collection_id", collection.id)
@@ -200,6 +210,7 @@ def build_file(
     overrides.setdefault("path", f"{model.slug}/v{version}/{name}")
     overrides.setdefault("size_bytes", 1)
     overrides.setdefault("sha256", unique_hash("file_sha"))
+    overrides.setdefault("viewer_requested_at", None)
     row = save(
         session,
         File(
@@ -246,14 +257,43 @@ def _demote_current_recommendation(session: Session, model: Model) -> None:
         session.add(row)
 
 
-def build_metadata(session: Session, file: File, **overrides: Any) -> Metadata:
-    """Slicer/mesh metadata for one artifact.
+def build_metadata(
+    session: Session,
+    file: File,
+    *,
+    volume: VolumeMeasurement | None = None,
+    **overrides: Any,
+) -> Metadata:
+    """One Metadata row with coherent evidence, including legacy scalar fixtures.
 
-    Every field is optional in production: a mesh has no slicer settings, and a
-    G-code file from an unrecognised slicer parses to all-`None`. So this builder
-    defaults to empty and the test names only what it asserts on.
+    A scalar override without evidence describes the old payload shape and is
+    explicitly unassessed; supplying evidence never certifies that legacy value.
     """
-    return save(session, Metadata(file_id=file.id, **overrides))
+    internal_columns = {
+        "volume_state",
+        "volume_method",
+        "volume_unavailable_cause",
+        "volume_not_calculated_cause",
+    }
+    if internal_columns.intersection(overrides):
+        raise ValueError("use an explicit volume variant instead of internal columns")
+    if volume is None:
+        volume = (
+            VolumeLegacyUnassessed(overrides["volume_mm3"])
+            if "volume_mm3" in overrides
+            else VolumeNotCalculated(
+                VolumeNotCalculatedCause.NOT_APPLICABLE
+                if file.file_type in (FileType.GCODE, FileType.DXF)
+                else VolumeNotCalculatedCause.ENRICHMENT_PENDING
+            )
+        )
+    elif "volume_mm3" in overrides:
+        legacy = VolumeLegacyUnassessed(overrides["volume_mm3"])
+        if legacy.value_mm3 != volume_value(volume):
+            raise ValueError("fixture volume scalar disagrees with evidence")
+    row = Metadata(file_id=file.id, **overrides)
+    apply_volume(row, volume)
+    return save(session, row)
 
 
 def build_collection(
@@ -261,6 +301,7 @@ def build_collection(
     name: str = "Parts",
     *,
     parent: Collection | None = None,
+    trashed: bool | datetime = False,
     **overrides: Any,
 ) -> Collection:
     """A collection.
@@ -269,6 +310,8 @@ def build_collection(
     passing `parent` keeps it consistent instead of leaving a child whose path
     claims it is at the root.
     """
+    if trashed:
+        overrides.setdefault("deleted_at", utcnow() if trashed is True else trashed)
     slug = overrides.pop("slug", None) or f"{name.lower().replace(' ', '-')}"
     if parent is not None:
         overrides.setdefault("parent_id", parent.id)

@@ -46,6 +46,118 @@ function renderTaskList(tasks: TaskItem[], user: AuthState["user"] = null) {
 afterEach(() => act(() => setLocale("en")));
 
 describe("TaskList", () => {
+  it.each(["pending", "running"] as const)(
+    "warns that a %s browser upload needs its tab",
+    (status) => {
+      renderTaskList([task({ title: "Upload holder.stl", status })]);
+
+      expect(
+        screen.getByText("Keep this browser tab open until this task finishes."),
+      ).toBeVisible();
+      expect(screen.queryByText("Discovering total… Safe to close this view.")).toBeNull();
+    },
+  );
+
+  it.each([
+    { label: "direct", jobId: "server-job" },
+    { label: "grouped", jobIds: ["server-job"] },
+  ])("keeps the background hint for a $label server job", ({ label: _label, ...link }) => {
+    renderTaskList([task({ status: "running", ...link })]);
+
+    expect(screen.getByText("Discovering total… Safe to close this view.")).toBeVisible();
+    expect(screen.queryByText("Keep this browser tab open until this task finishes.")).toBeNull();
+  });
+
+  it("offers clearing an interrupted local upload", () => {
+    renderTaskList([
+      task({
+        title: "Upload holder.stl",
+        status: "failed",
+        detail: "Task interrupted. Start it again.",
+        detailMessage: uiMessage("Task interrupted. Start it again."),
+        retryable: false,
+      }),
+    ]);
+
+    expect(screen.getByText("Task interrupted. Start it again.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Clear done" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Review and retry" })).toBeNull();
+  });
+
+  it("offers recovery controls for an interrupted upload session", () => {
+    renderTaskList([
+      task({
+        status: "failed",
+        uploadSessionId: "recoverable-upload",
+        uploadPaused: true,
+        retryable: true,
+      }),
+    ]);
+
+    expect(screen.getByText("Resume upload")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cancel upload" })).toBeVisible();
+  });
+
+  it("links a similarity task to its analysis", () => {
+    renderTaskList([
+      task({
+        similarityRunId: 1,
+        title: "Similar model analysis",
+        detail: "2 Artifacts · 1 comparisons",
+        status: "running",
+      }),
+    ]);
+
+    expect(screen.getByRole("link", { name: "View analysis" })).toHaveAttribute(
+      "href",
+      "/library/similar",
+    );
+  });
+
+  it("omits the unknown-total hint from a similarity task", () => {
+    renderTaskList([task({ similarityRunId: 1, status: "running" })]);
+
+    expect(screen.queryByText("Discovering total… Safe to close this view.")).toBeNull();
+  });
+
+  it("omits a misleading percentage for an active similarity run", () => {
+    renderTaskList([task({ similarityRunId: 1, status: "running", progress: 0 })]);
+
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("shows backup stage details instead of the unknown-total hint", () => {
+    renderTaskList([
+      task({
+        title: "Backup",
+        status: "running",
+        jobKind: "backups.create",
+        jobId: "backup-1",
+        stage: "snapshotting",
+      }),
+    ]);
+
+    expect(screen.getByText("Snapshotting database · continues in background")).toBeVisible();
+    expect(screen.queryByText("Discovering total… Safe to close this view.")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("exposes the ZIP import percentage on its progress bar", () => {
+    renderTaskList([
+      task({
+        title: "Import parts.zip",
+        status: "running",
+        jobKind: "ingestion.archive_selection",
+        progress: 50,
+      }),
+    ]);
+
+    expect(screen.getByRole("progressbar", { name: "Progress" })).toHaveAttribute(
+      "aria-valuenow",
+      "50",
+    );
+  });
+
   it("shows ZIP upload metrics", () => {
     renderTaskList([
       task({
@@ -188,7 +300,9 @@ describe("TaskList", () => {
 
   it("localizes indefinite active progress copy", () => {
     setLocale("es");
-    renderTaskList([task({ status: "running", progress: 25, total: null })]);
+    renderTaskList([
+      task({ status: "running", jobId: "indefinite-server-job", progress: 25, total: null }),
+    ]);
 
     expect(screen.getByText("En curso")).toBeVisible();
     expect(
@@ -228,5 +342,23 @@ describe("TaskList", () => {
     fireEvent.change(input, { target: { files: [] } });
 
     expect(input).toHaveValue("");
+  });
+});
+
+describe("policy-cancelled Tasks", () => {
+  it("shows a neutral terminal entry", () => {
+    renderTaskList([
+      task({
+        status: "completed",
+        jobState: "cancelled",
+        jobReason: "derivative_group_disabled",
+        progress: 0,
+        retryable: false,
+      }),
+    ]);
+    expect(screen.getByText("Processing disabled")).toBeVisible();
+    expect(screen.queryByText("Completed")).toBeNull();
+    expect(screen.queryByText("Failed")).toBeNull();
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
 });

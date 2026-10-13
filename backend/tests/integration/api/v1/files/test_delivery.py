@@ -211,6 +211,12 @@ class TestAuthorizedDelivery:
             size_bytes=len(payload),
         )
 
+        from tests.integration.api.v1._ingest_assertions import drain_work
+
+        accepted = client.get(f"/api/v1/files/{artifact.id}/stl", headers=auth_headers)
+        assert accepted.status_code == 202
+        drain_work()
+
         response = client.get(
             f"/api/v1/files/{artifact.id}/stl",
             headers={**auth_headers, "If-None-Match": f'"{artifact.sha256}"'},

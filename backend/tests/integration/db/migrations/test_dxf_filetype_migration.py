@@ -3,18 +3,16 @@
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import MetaData, Table, create_engine, inspect, select, text
 from sqlalchemy.engine import make_url
-from sqlmodel import Session, select
 
 from alembic import command
 from app.db.migrate import _alembic_config
-from app.db.models import File, FileType, Model
 from app.db.url import normalize_database_url
-from tests.factories import build_file, build_model
 from tests.factories.migration_rows import (
     RELEASED_V0121_REVISION,
     create_released_v0121_postgres_schema,
+    seed_schema_row,
 )
 
 PREDECESSOR = "a23d2e57ff0c"
@@ -30,15 +28,22 @@ def _exercise_upgrade(url: str, *, postgres: bool) -> None:
                 create_released_v0121_postgres_schema(connection)
             command.stamp(config, RELEASED_V0121_REVISION)
         command.upgrade(config, PREDECESSOR)
-        with Session(engine) as session:
-            model = build_model(
-                session, "Existing", slug="dxf-migration-existing", hash="a" * 64
+        with engine.begin() as connection:
+            seed_schema_row(
+                connection,
+                "models",
+                id=1,
+                name="Existing",
+                slug="dxf-migration-existing",
+                hash="a" * 64,
             )
-            build_file(
-                session,
-                model,
-                filename="existing.stl",
-                file_type=FileType.STL,
+            seed_schema_row(
+                connection,
+                "files",
+                id=1,
+                model_id=1,
+                original_filename="existing.stl",
+                file_type="STL",
                 path="/library/existing.stl",
                 version=1,
                 size_bytes=3,
@@ -47,28 +52,34 @@ def _exercise_upgrade(url: str, *, postgres: bool) -> None:
 
         command.upgrade(config, REVISION)
 
-        with Session(engine) as session:
-            existing = session.exec(
-                select(File).where(File.original_filename == "existing.stl")
-            ).one()
-            assert existing.file_type == FileType.STL
-            assert existing.sha256 == "b" * 64
-            model = session.get(Model, existing.model_id)
-            assert model is not None
-            build_file(
-                session,
-                model,
-                filename="drawing.dxf",
-                file_type=FileType.DXF,
+        # Reflect this historical revision: current File includes later columns.
+        with engine.begin() as connection:
+            files = Table("files", MetaData(), autoload_with=connection)
+            existing = (
+                connection.execute(
+                    select(files).where(files.c.original_filename == "existing.stl")
+                )
+                .mappings()
+                .one()
+            )
+            assert existing["file_type"] == "STL"
+            assert existing["sha256"] == "b" * 64
+            seed_schema_row(
+                connection,
+                "files",
+                id=2,
+                model_id=existing["model_id"],
+                original_filename="drawing.dxf",
+                file_type="DXF",
                 path="/library/drawing.dxf",
                 version=2,
                 size_bytes=12,
                 sha256="c" * 64,
             )
             assert (
-                session.exec(select(File).where(File.file_type == FileType.DXF))
-                .one()
-                .original_filename
+                connection.execute(
+                    select(files.c.original_filename).where(files.c.file_type == "DXF")
+                ).scalar_one()
                 == "drawing.dxf"
             )
 
@@ -76,14 +87,16 @@ def _exercise_upgrade(url: str, *, postgres: bool) -> None:
         assert "uq_files_live_recommended_gcode_text" in indexes
         with pytest.raises(RuntimeError, match="DXF Artifacts"):
             command.downgrade(config, "-1")
-        with Session(engine) as session:
-            assert {row.original_filename for row in session.exec(select(File))} == {
+        with engine.connect() as connection:
+            assert set(
+                connection.execute(select(files.c.original_filename)).scalars()
+            ) == {
                 "existing.stl",
                 "drawing.dxf",
             }
-            drawing_id = session.exec(
-                select(File).where(File.original_filename == "drawing.dxf")
-            ).one().id
+            drawing_id = connection.execute(
+                select(files.c.id).where(files.c.original_filename == "drawing.dxf")
+            ).scalar_one()
         assert drawing_id is not None
         # This database intentionally stops at the historical DXF revision.
         # Delete revision-local rows without asking the current Metadata mapper
@@ -99,10 +112,10 @@ def _exercise_upgrade(url: str, *, postgres: bool) -> None:
             )
 
         command.downgrade(config, PREDECESSOR)
-        with Session(engine) as session:
-            assert [row.original_filename for row in session.exec(select(File))] == [
-                "existing.stl"
-            ]
+        with engine.connect() as connection:
+            assert list(
+                connection.execute(select(files.c.original_filename)).scalars()
+            ) == ["existing.stl"]
         assert "uq_files_live_recommended_gcode" in {
             row["name"] for row in inspect(engine).get_indexes("files")
         }

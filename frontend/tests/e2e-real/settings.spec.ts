@@ -626,7 +626,7 @@ test.describe("settings", () => {
             backup_id: "2026-09-24T000000Z",
             created_at: "2026-09-24T00:00:00Z",
             location: "local",
-            app_version: "0.13.0",
+            app_version: "0.14.0",
             file_count: 42,
             size_bytes: 1024,
             storage_backend: "local",
@@ -984,13 +984,18 @@ test.describe("settings", () => {
     const connection = await created.json();
 
     try {
+      const seeded = await page.request.patch(`/api/v1/storage-connections/${connection.id}`, {
+        data: { automatic_backup_enabled: false },
+      });
+      expect(seeded.status()).toBe(200);
       await page.goto("/settings?section=backup");
       await expect(page.getByLabel(`Use ${connectionName} for manual backups`)).toBeVisible();
       await page.getByLabel("Enable automatic backups").click();
       await page.getByLabel("Daily time (UTC)").fill("04:30");
       await page.getByLabel("Use local storage for manual backups").click();
+      await page.getByLabel(`Use ${connectionName} for automatic backups`).click();
 
-      await Promise.all([
+      const [policyResponse] = await Promise.all([
         page.waitForResponse(
           (response) =>
             response.url().endsWith("/api/v1/config") && response.request().method() === "PUT",
@@ -1003,6 +1008,13 @@ test.describe("settings", () => {
         page.getByRole("button", { name: "Save backup settings" }).click(),
       ]);
 
+      expect(policyResponse.status()).toBe(200);
+      expect(policyResponse.request().headers()["if-match"]).toMatch(
+        /^"vault-config-e[0-9a-f]{32}-v\d+"$/,
+      );
+      expect(policyResponse.request().headers()["x-printstash-edit-contract"]).toBe(
+        "conditional-v1",
+      );
       const [configResponse, connectionsResponse] = await Promise.all([
         page.request.get("/api/v1/config"),
         page.request.get("/api/v1/storage-connections"),
@@ -1290,7 +1302,7 @@ test.describe("settings", () => {
     await page.getByRole("button", { name: "Design" }).click();
 
     const sw = page.getByRole("switch", { name: "Auto-mark known good on successful print" });
-    await expect(sw).toBeVisible();
+    await expect(sw).toBeEnabled();
     const before = await sw.getAttribute("aria-checked");
 
     await Promise.all([
@@ -1299,14 +1311,14 @@ test.describe("settings", () => {
       ),
       sw.click(),
     ]);
-    const after = await sw.getAttribute("aria-checked");
-    expect(after).not.toBe(before);
+    const after = before === "true" ? "false" : "true";
+    await expect(sw).toHaveAttribute("aria-checked", after);
 
     await page.reload();
     await page.getByRole("button", { name: "Design" }).click();
     await expect(
       page.getByRole("switch", { name: "Auto-mark known good on successful print" }),
-    ).toHaveAttribute("aria-checked", after!);
+    ).toHaveAttribute("aria-checked", after);
 
     // Restore the original so the shared DB doesn't drift for later runs.
     await Promise.all([

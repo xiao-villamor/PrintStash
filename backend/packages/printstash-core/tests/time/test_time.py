@@ -26,7 +26,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from printstash_core.time import ensure_utc, utcnow
+import pytest
+
+from printstash_core.time import ensure_utc, parse_hh_mm_time, utcnow
 
 
 class TestUtcnow:
@@ -71,3 +73,41 @@ class TestEnsureUtc:
         source = datetime(2026, 8, 20, 12, 30, tzinfo=timezone.utc)
 
         assert ensure_utc(source) == source
+
+
+class TestParseHhMmTime:
+    @pytest.mark.parametrize(
+        "value", ["00:00", "23:59"], ids=["first-minute", "last-minute"]
+    )
+    def test_accepts_a_minute_of_the_day(self, value: str) -> None:
+        parsed = parse_hh_mm_time(value)
+
+        assert parsed.isoformat(timespec="minutes") == value
+        assert parsed.tzinfo is None
+
+    @pytest.mark.parametrize(
+        "value",
+        ["24:00", "99:00", "23:60", "00:99"],
+        ids=["next-day", "hour-overflow", "minute-overflow", "minute-maximum"],
+    )
+    def test_rejects_a_minute_outside_the_day(self, value: str) -> None:
+        with pytest.raises(ValueError, match="time_hh_mm_invalid"):
+            parse_hh_mm_time(value)
+
+    @pytest.mark.parametrize(
+        "value",
+        ["", "invalid", "2:00", "00:0", "02:00:00", "02:00Z", "００:００", "00000"],
+        ids=[
+            "empty",
+            "text",
+            "short-hour",
+            "short-minute",
+            "seconds",
+            "timezone",
+            "non-ascii",
+            "no-colon",
+        ],
+    )
+    def test_rejects_non_hh_mm_text(self, value: str) -> None:
+        with pytest.raises(ValueError, match="time_hh_mm_invalid"):
+            parse_hh_mm_time(value)

@@ -1,9 +1,11 @@
 """Printers, materials, print history and multipart manufacturing records."""
 
 from datetime import datetime
-from typing import Optional
+from typing import ClassVar, Optional
+from uuid import uuid4
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -14,12 +16,14 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy import Enum as SAEnum
-from sqlmodel import Field
+from sqlalchemy.orm import Mapped, column_property
+from sqlmodel import Field, select
 
 from app.core.time import utcnow
 from app.db.encrypted import EncryptedText
 
 from .base import SQLModel
+from .library import LibraryRevision
 from .types import (
     CompatibilityPolicy,
     JobPriority,
@@ -39,6 +43,13 @@ class FilamentProfile(SQLModel, table=True):
     __tablename__ = "filament_profiles"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+    # A hard-deleted preset ID may be reused by SQLite. Its editing identity may not.
+    edit_identity: str = Field(default_factory=lambda: uuid4().hex, max_length=32)
+    database_epoch: ClassVar[Mapped[str]]
+
     name: str = Field(max_length=128, unique=True, index=True)
     material_type: Optional[str] = Field(default=None, max_length=64, index=True)
     material_brand: Optional[str] = Field(default=None, max_length=128, index=True)
@@ -65,6 +76,13 @@ class PrinterProfile(SQLModel, table=True):
     __tablename__ = "printer_profiles"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+    # A hard-deleted preset ID may be reused by SQLite. Its editing identity may not.
+    edit_identity: str = Field(default_factory=lambda: uuid4().hex, max_length=32)
+    database_epoch: ClassVar[Mapped[str]]
+
     name: str = Field(max_length=128, unique=True, index=True)
     printer_model: Optional[str] = Field(default=None, max_length=128, index=True)
     slicer_name: Optional[str] = Field(default=None, max_length=64, index=True)
@@ -73,6 +91,12 @@ class PrinterProfile(SQLModel, table=True):
 
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+for _profile in (FilamentProfile, PrinterProfile):
+    _profile.database_epoch = column_property(
+        select(LibraryRevision.epoch).where(LibraryRevision.id == 1).scalar_subquery()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -93,6 +117,10 @@ class Printer(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    edit_version: int = Field(
+        default=1, sa_column=Column(BigInteger, nullable=False, server_default="1")
+    )
+    edit_epoch: ClassVar[Mapped[str]]
     name: str = Field(max_length=128)
     provider: PrinterProvider = Field(
         default=PrinterProvider.MOONRAKER,
@@ -165,6 +193,12 @@ class Printer(SQLModel, table=True):
     updated_by: Optional[int] = Field(default=None, foreign_key="users.id")
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+# Read the settings version and database history together, without per-row queries.
+Printer.edit_epoch = column_property(
+    select(LibraryRevision.epoch).where(LibraryRevision.id == 1).scalar_subquery()
+)
 
 
 class PrinterTool(SQLModel, table=True):

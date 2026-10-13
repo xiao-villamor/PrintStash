@@ -2,12 +2,12 @@
 
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { collectionDisplayPath } from "@/lib/collection-display";
 
 import { ChevronDown, ExternalLink, Plus, Trash2, X } from "lucide-react";
 
-import { CollectionRead, FileRead, FileRevisionUpdate, ModelRead, TagRead } from "@/types";
+import { FileRead, FileRevisionUpdate, ModelRead, TagRead } from "@/types";
 
+import { CollectionPicker } from "@/components/collection-picker";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
 import { safeHttpUrl } from "./source-url";
@@ -18,10 +18,11 @@ import { Localized } from "@/components/ui/localized";
 /** Edit-form state owned by the controller (Save lives in the page header). */
 export type ModelMetaEditor = {
   collection: string;
-  setCollection: (v: string) => void;
+  collectionLabel: string | null;
+  setCollection: (path: string, label: string | null) => void;
   catOpen: boolean;
   setCatOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  collections: CollectionRead[];
+  allowRoot: boolean;
   description: string;
   setDescription: (v: string) => void;
   sourceUrl: string;
@@ -117,57 +118,34 @@ export function OverviewTab({
                 open={editor.catOpen}
                 onOpenChange={editor.setCatOpen}
                 align="start"
-                role="listbox"
-                contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-56 overflow-y-auto"
+                role="dialog"
+                contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg p-2"
                 trigger={
                   <button
                     type="button"
                     data-menu-trigger
                     onClick={() => editor.setCatOpen((v) => !v)}
-                    aria-haspopup="listbox"
+                    aria-haspopup="dialog"
                     aria-expanded={editor.catOpen}
                     className="w-full h-10 flex items-center justify-between bg-surface text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
                   >
                     <span className={editor.collection ? "" : "text-on-surface-variant/60"}>
-                      {collectionDisplayPath(editor.collections, editor.collection) ||
-                        uiText("None")}
+                      {editor.collectionLabel || uiText("None")}
                     </span>
                     <ChevronDown className="h-4 w-4 text-on-surface-variant" />
                   </button>
                 }
               >
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={editor.collection === ""}
-                  onClick={() => {
-                    editor.setCollection("");
+                <CollectionPicker
+                  minRole="edit"
+                  selectedPath={editor.collection}
+                  noneLabel={editor.allowRoot ? uiText("None") : undefined}
+                  emptyLabel={uiText("No editable collections.")}
+                  onSelect={(collection) => {
+                    editor.setCollection(collection?.path ?? "", collection?.display_path ?? null);
                     editor.setCatOpen(false);
                   }}
-                  className="w-full text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant hover:bg-surface-container-low"
-                >
-                  {uiText("None")}
-                </button>
-                {editor.collections.map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    role="option"
-                    aria-selected={editor.collection === c.path}
-                    onClick={() => {
-                      editor.setCollection(c.path);
-                      editor.setCatOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-1.5 font-mono text-xs transition-colors ${
-                      editor.collection === c.path
-                        ? "text-primary bg-secondary-container"
-                        : "text-on-surface-variant hover:bg-surface-container-low"
-                    }`}
-                  >
-                    {collectionDisplayPath(editor.collections, c.path)}{" "}
-                    <span className="opacity-50">({c.model_count})</span>
-                  </button>
-                ))}
+                />
               </DropdownMenu>
             </div>
             {/* Description */}
@@ -311,9 +289,9 @@ export function OverviewTab({
                 {uiText("Source model")}
               </a>
             )}
-            {collectionDisplayPath(editor.collections, model.collection) && (
+            {model.collection_label && (
               <span className="bg-surface-container text-on-surface px-3 py-1 rounded font-mono text-xs tracking-wider">
-                {collectionDisplayPath(editor.collections, model.collection)}
+                {model.collection_label}
               </span>
             )}
             {model.tags.map((t) => (

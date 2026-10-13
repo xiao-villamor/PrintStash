@@ -14,12 +14,13 @@ import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Annotated, List, Literal, Optional
 
 from fastapi import (
     APIRouter,
     Depends,
     Form,
+    Header,
     HTTPException,
     Query,
     Request,
@@ -37,7 +38,6 @@ from pydantic import ValidationError
 from sqlalchemy import func
 from sqlmodel import Session, select
 from starlette.background import BackgroundTask
-from starlette.concurrency import run_in_threadpool
 
 import app.modules.library.model_views.detail as models_detail
 import app.modules.library.model_views.exports as models_exports
@@ -47,6 +47,14 @@ import app.modules.library.model_views.pagination as models_pagination
 import app.modules.library.model_views.statistics as models_statistics
 import app.modules.library.model_views.trash as models_trash
 import app.modules.printing.costing as models_costing
+from app.api.command_actor import (
+    CommandActor,
+    command_session,
+    require_command_user,
+    require_command_writer,
+)
+from app.api.command_execution import bounded_command
+from app.api.edit_preconditions import edit_precondition
 from app.core.config import settings
 from app.core.security import require_auth, require_superuser, require_user
 from app.db.models import (
@@ -77,6 +85,13 @@ from app.modules.library import (
     revisions,
     source_covers,
 )
+from app.modules.library.edit_preconditions import (
+    EditKind,
+    etag,
+    expected_base,
+)
+from app.modules.library.edit_preconditions import claim as claim_edit
+from app.modules.library.model_views import browse as models_browse
 from app.modules.library.trash import (
     PurgeConflictError,
     SourceFileLifecycleError,
@@ -97,13 +112,23 @@ from app.modules.storage import storage
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_deletion import (
     cleanup_status,
-    enqueue_owned_key,
     process_storage_delete_intents,
 )
-from app.modules.storage.storage_ownership import UnsafeStorageDeleteError
+from app.modules.storage.storage_ownership import (
+    UnsafeStorageDeleteError,
+    abandon_publication,
+)
 from app.modules.work import nudge
 from app.modules.work import service as work_service
+from app.schemas.editing import EditPrecondition
 from app.schemas.jobs import JobAccepted
+from app.schemas.library_browse import (
+    BrowsePage,
+    BrowseQuery,
+    BrowseRevisionRead,
+    BrowseThumbnailQuery,
+    BrowseThumbnailsRead,
+)
 from app.schemas.models import (
     ArtifactOutcomeRead,
     FileRevisionUpdate,
@@ -113,6 +138,7 @@ from app.schemas.models import (
     ModelBatchMove,
     ModelBatchResult,
     ModelBatchTags,
+    ModelEditBatchResult,
     ModelFacetsRead,
     ModelFilters,
     ModelListItem,
@@ -150,7 +176,9 @@ def _reject_retired_group_queries(request: Request) -> None:
 
 
 router = APIRouter(
-    prefix="/models", tags=["models"], dependencies=[Depends(_reject_retired_group_queries)]
+    prefix="/models",
+    tags=["models"],
+    dependencies=[Depends(_reject_retired_group_queries)],
 )
 
 
@@ -320,6 +348,42 @@ def list_models(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get(
+    "/browse/revision",
+    response_model=BrowseRevisionRead,
+    summary="Check library catalog and authorization revisions",
+)
+def browse_revision(
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> BrowseRevisionRead:
+    return models_browse.revision(session)
+
+
+@router.get(
+    "/browse/thumbnails",
+    response_model=BrowseThumbnailsRead,
+    summary="Read bounded authorized thumbnail arrivals without rebuilding cards",
+)
+def browse_thumbnails(
+    query: Annotated[BrowseThumbnailQuery, Query()],
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> BrowseThumbnailsRead:
+    return models_browse.thumbnail_items(session, current_user, query.model_id)
+
+
+@router.get(
+    "/browse", response_model=BrowsePage, summary="Revision-checked mixed library cards"
+)
+def browse_models(
+    query: Annotated[BrowseQuery, Query()],
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> BrowsePage:
+    return models_browse.page_items(session, current_user, query)
 
 
 @router.get(
@@ -633,88 +697,90 @@ def export_library_archive(
     "/library-import",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_superuser)],
     summary="Import a portable full-library archive",
 )
+@bounded_command
 def import_library_archive(
     file: UploadFile = UploadFileParam(...),
-    current_user: User = Depends(require_superuser),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_user),
 ) -> JobAccepted:
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix != ".zip":
-        raise HTTPException(status_code=400, detail="archive_zip_required")
-    settings.incoming_dir.mkdir(parents=True, exist_ok=True)
-    lease_count, staged_bytes = session.exec(
-        select(
-            func.count(StagingLease.id),
-            func.coalesce(func.sum(StagingLease.size_bytes), 0),
+    with command_session(actor) as (session, current_user):
+        if not current_user.is_superuser:
+            raise HTTPException(status_code=403, detail="admin_required")
+        suffix = Path(file.filename or "").suffix.lower()
+        if suffix != ".zip":
+            raise HTTPException(status_code=400, detail="archive_zip_required")
+        settings.incoming_dir.mkdir(parents=True, exist_ok=True)
+        lease_count, staged_bytes = session.exec(
+            select(
+                func.count(StagingLease.id),
+                func.coalesce(func.sum(StagingLease.size_bytes), 0),
+            )
+        ).one()
+        if int(lease_count) >= settings.staging_max_pending:
+            raise HTTPException(status_code=503, detail="staging_capacity_exceeded")
+        assert current_user.id is not None
+        user_leases = session.exec(
+            select(func.count(StagingLease.id)).where(
+                StagingLease.owner_user_id == current_user.id
+            )
+        ).one()
+        if int(user_leases) >= settings.staging_max_active_per_user:
+            raise HTTPException(status_code=429, detail="staging_capacity_exceeded")
+        quota_remaining = max(
+            0,
+            settings.staging_max_gb * 1024**3 - int(staged_bytes),
         )
-    ).one()
-    if int(lease_count) >= settings.staging_max_pending:
-        raise HTTPException(status_code=503, detail="staging_capacity_exceeded")
-    assert current_user.id is not None
-    user_leases = session.exec(
-        select(func.count(StagingLease.id)).where(
-            StagingLease.owner_user_id == current_user.id
+        disk_free = shutil.disk_usage(settings.incoming_dir).free
+        writable_bytes = min(
+            quota_remaining,
+            max(0, disk_free - settings.staging_min_free_gb * 1024**3),
         )
-    ).one()
-    if int(user_leases) >= settings.staging_max_active_per_user:
-        raise HTTPException(status_code=429, detail="staging_capacity_exceeded")
-    quota_remaining = max(
-        0,
-        settings.staging_max_gb * 1024**3 - int(staged_bytes),
-    )
-    disk_free = shutil.disk_usage(settings.incoming_dir).free
-    writable_bytes = min(
-        quota_remaining,
-        max(0, disk_free - settings.staging_min_free_gb * 1024**3),
-    )
-    if writable_bytes <= 0:
-        raise HTTPException(status_code=507, detail="staging_capacity_exceeded")
-    fd, name = tempfile.mkstemp(suffix=".zip", dir=settings.incoming_dir)
-    try:
-        digest = hashlib.sha256()
-        written = 0
-        with open(fd, "wb", closefd=True) as target:
-            while chunk := file.file.read(1024 * 1024):
-                written += len(chunk)
-                if written > writable_bytes:
-                    raise ValueError("staging_capacity_exceeded")
-                target.write(chunk)
-                digest.update(chunk)
-            target.flush()
-            os.fsync(target.fileno())
-        job_id = uuid.uuid4().hex
-        work_service.request(
-            session,
-            definition=JobKind.INGESTION_LIBRARY_IMPORT,
-            subject_key=f"job/{job_id}",
-            owner_user_id=current_user.id,
-            job_id=job_id,
-        )
-        staging_leases.create_job_lease(
-            session,
-            job_id=job_id,
-            owner_user_id=current_user.id,
-            path=Path(name),
-            size_bytes=written,
-            sha256=digest.hexdigest(),
-            check_capacity=False,
-        )
-        session.commit()
-    except (ValueError, zipfile.BadZipFile) as exc:
-        session.rollback()
-        Path(name).unlink(missing_ok=True)
-        code = str(exc)
-        status_code = 507 if code == "staging_capacity_exceeded" else 400
-        raise HTTPException(status_code=status_code, detail=code) from exc
-    except Exception:
-        session.rollback()
-        Path(name).unlink(missing_ok=True)
-        raise
-    nudge(JobKind.INGESTION_LIBRARY_IMPORT)
-    return JobAccepted(job_id=job_id)
+        if writable_bytes <= 0:
+            raise HTTPException(status_code=507, detail="staging_capacity_exceeded")
+        fd, name = tempfile.mkstemp(suffix=".zip", dir=settings.incoming_dir)
+        try:
+            digest = hashlib.sha256()
+            written = 0
+            with open(fd, "wb", closefd=True) as target:
+                while chunk := file.file.read(1024 * 1024):
+                    written += len(chunk)
+                    if written > writable_bytes:
+                        raise ValueError("staging_capacity_exceeded")
+                    target.write(chunk)
+                    digest.update(chunk)
+                target.flush()
+                os.fsync(target.fileno())
+            job_id = uuid.uuid4().hex
+            work_service.request(
+                session,
+                definition=JobKind.INGESTION_LIBRARY_IMPORT,
+                subject_key=f"job/{job_id}",
+                owner_user_id=current_user.id,
+                job_id=job_id,
+            )
+            staging_leases.create_job_lease(
+                session,
+                job_id=job_id,
+                owner_user_id=current_user.id,
+                path=Path(name),
+                size_bytes=written,
+                sha256=digest.hexdigest(),
+                check_capacity=False,
+            )
+            session.commit()
+        except (ValueError, zipfile.BadZipFile) as exc:
+            session.rollback()
+            Path(name).unlink(missing_ok=True)
+            code = str(exc)
+            status_code = 507 if code == "staging_capacity_exceeded" else 400
+            raise HTTPException(status_code=status_code, detail=code) from exc
+        except Exception:
+            session.rollback()
+            Path(name).unlink(missing_ok=True)
+            raise
+        nudge(JobKind.INGESTION_LIBRARY_IMPORT)
+        return JobAccepted(job_id=job_id)
 
 
 @router.get(
@@ -822,10 +888,15 @@ def purge_expired_trash(
 )
 def get_model(
     model_id: int,
+    response: Response,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelRead:
-    return _detail_or_404(session, model_id, current_user)
+    result = _detail_or_404(session, model_id, current_user)
+    response.headers["ETag"] = etag(
+        EditKind.MODEL, result.id, result.edit_version, result.edit_epoch
+    )
+    return result
 
 
 @router.get(
@@ -835,11 +906,16 @@ def get_model(
 )
 def get_model_provenance(
     model_id: int,
+    response: Response,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> ModelProvenanceRead:
     _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
-    return models_detail.provenance_detail(session, model_id)
+    result = models_detail.provenance_detail(session, model_id)
+    response.headers["ETag"] = etag(
+        EditKind.MODEL, model_id, result.edit_version, result.edit_epoch
+    )
+    return result
 
 
 @router.patch(
@@ -851,11 +927,13 @@ def get_model_provenance(
 def patch_model_provenance(
     model_id: int,
     source_id: int,
+    response: Response,
     payload: ModelProvenancePatch,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> ModelProvenanceRead:
-    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     source = session.exec(
         select(ModelProvenanceSource).where(
             ModelProvenanceSource.id == source_id,
@@ -866,6 +944,7 @@ def patch_model_provenance(
         raise HTTPException(status_code=404, detail="provenance_source_not_found")
     if set(payload.overrides) & set(payload.clear_overrides):
         raise HTTPException(status_code=422, detail="provenance_override_conflict")
+    claim_edit(session, current_user, model, precondition)
     for field_name, value in payload.overrides.items():
         provenance.set_user_override(
             session,
@@ -882,7 +961,11 @@ def patch_model_provenance(
             actor_id=current_user.id,
         )
     session.commit()
-    return models_detail.provenance_detail(session, model_id)
+    result = models_detail.provenance_detail(session, model_id)
+    response.headers["ETag"] = etag(
+        EditKind.MODEL, model_id, result.edit_version, result.edit_epoch
+    )
+    return result
 
 
 def _provenance_source_or_404(
@@ -941,37 +1024,53 @@ def stream_model_source_cover(
 @router.put(
     "/{model_id}/provenance/{source_id}/cover",
     response_model=ModelSourceCoverRead,
-    dependencies=[Depends(require_auth)],
 )
-async def put_model_source_cover(
+@bounded_command
+def put_model_source_cover(
     model_id: int,
     source_id: int,
+    response: Response,
     file: UploadFile = UploadFileParam(...),
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> ModelSourceCoverRead:
-    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
-    _provenance_source_or_404(session, model_id, source_id)
-    data = await file.read(15 * 1024 * 1024 + 1)
-    try:
-        result = source_covers.put(
-            session,
-            get_backend(),
-            provenance_source_id=source_id,
-            actor_id=current_user.id,
-            data=data,
-            content_type=file.content_type,
+    with command_session(actor) as (session, current_user):
+        model = _require_model_role(
+            session, current_user, model_id, CollectionRole.EDIT
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="source_cover_invalid") from exc
-    try:
-        session.commit()
-    except Exception:
-        session.rollback()
-        source_covers.rollback_after_commit_failure(session, get_backend(), result)
-        raise
-    session.refresh(result.cover)
-    return ModelSourceCoverRead.model_validate(result.cover)
+        expected_base(EditKind.MODEL, model_id, precondition)
+        _provenance_source_or_404(session, model_id, source_id)
+        data = file.file.read(15 * 1024 * 1024 + 1)
+        try:
+            candidate = source_covers.prepare_candidate(
+                session,
+                get_backend(),
+                provenance_source_id=source_id,
+                actor_id=current_user.id,
+                data=data,
+                content_type=file.content_type,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="source_cover_invalid") from exc
+        try:
+            claim_edit(session, current_user, model, precondition)
+            cover = source_covers.attach_candidate(session, candidate)
+            source_covers.adopt_candidate(session, candidate)
+            session.commit()
+        except source_covers.SourceCoverChangedError as exc:
+            session.rollback()
+            abandon_publication(session, candidate.publication)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception:
+            session.rollback()
+            abandon_publication(session, candidate.publication)
+            raise
+        session.refresh(cover)
+        session.refresh(model)
+        response.headers["ETag"] = etag(
+            EditKind.MODEL, model_id, model.edit_version, model.edit_epoch
+        )
+        return ModelSourceCoverRead.model_validate(cover)
 
 
 @router.delete(
@@ -984,73 +1083,77 @@ def delete_model_source_cover(
     source_id: int,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> Response:
-    _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
+    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     _provenance_source_or_404(session, model_id, source_id)
-    cover = source_covers.get(session, source_id)
-    if cover is None:
+    claim_edit(session, current_user, model, precondition)
+    try:
+        removed = source_covers.delete(session, get_backend(), source_id)
+    except source_covers.SourceCoverChangedError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if not removed:
         raise HTTPException(status_code=404, detail="source_cover_not_found")
-    enqueue_owned_key(
-        session,
-        get_backend(),
-        cover.storage_key,
-        required_proof=True,
-        resource_kind="model_source_cover",
-        resource_id=cover.id,
-    )
-    session.delete(cover)
     session.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    session.refresh(model)
+    return Response(
+        status_code=status.HTTP_204_NO_CONTENT,
+        headers={
+            "ETag": etag(EditKind.MODEL, model_id, model.edit_version, model.edit_epoch)
+        },
+    )
 
 
 @router.post(
     "/{model_id}/gcode-revisions",
     response_model=ModelRead,
-    dependencies=[Depends(require_auth)],
     summary="Add a G-code revision to an existing model",
     description=(
         "Uploads a new sliced G-code artifact directly onto the target model. "
         "Manual revisions default to needs_test unless another status is provided."
     ),
 )
-async def add_gcode_revision(
+@bounded_command
+def add_gcode_revision(
     model_id: int,
     file: UploadFile = UploadFileParam(..., description="The .gcode revision file"),
     revision_label: Optional[str] = Form(None, max_length=128),
     revision_status: Optional[FileRevisionStatus] = Form(FileRevisionStatus.NEEDS_TEST),
     revision_notes: Optional[str] = Form(None, max_length=4096),
     is_recommended: bool = Form(False),
-    current_user: User = Depends(require_user),
-    session: Session = Depends(get_session),
+    actor: CommandActor = Depends(require_command_writer),
 ) -> ModelRead:
-    model = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="filename_required")
-
-    original_filename = Path(file.filename).name
-    suffix = Path(original_filename).suffix.lower() or ".gcode"
-    if suffix not in _GCODE_SUFFIXES:
-        raise HTTPException(status_code=400, detail="unsupported_file_type")
-
-    staged = await run_in_threadpool(_stage_gcode_upload, file, suffix)
-    try:
-        # Hashing and publishing the bytes are blocking file I/O; parsing and
-        # the thumbnail are derivatives and happen in their own Jobs.
-        await run_in_threadpool(
-            add_gcode_revision_to_model,
-            session=session,
-            model=model,
-            staged_path=staged,
-            original_filename=original_filename,
-            revision_label=revision_label,
-            revision_status=revision_status,
-            revision_notes=revision_notes,
-            is_recommended=is_recommended,
+    with command_session(actor) as (session, current_user):
+        model = _require_model_role(
+            session, current_user, model_id, CollectionRole.EDIT
         )
-    except Exception:
-        staged.unlink(missing_ok=True)
-        raise
-    return _detail_or_404(session, model_id, current_user)
+        if not file.filename:
+            raise HTTPException(status_code=400, detail="filename_required")
+
+        original_filename = Path(file.filename).name
+        suffix = Path(original_filename).suffix.lower() or ".gcode"
+        if suffix not in _GCODE_SUFFIXES:
+            raise HTTPException(status_code=400, detail="unsupported_file_type")
+
+        staged = _stage_gcode_upload(file, suffix)
+        try:
+            # Hashing and publishing the bytes are blocking file I/O; parsing and
+            # the thumbnail are derivatives and happen in their own Jobs.
+            add_gcode_revision_to_model(
+                session=session,
+                model=model,
+                staged_path=staged,
+                original_filename=original_filename,
+                revision_label=revision_label,
+                revision_status=revision_status,
+                revision_notes=revision_notes,
+                is_recommended=is_recommended,
+            )
+        except Exception:
+            staged.unlink(missing_ok=True)
+            raise
+        return _detail_or_404(session, model_id, current_user)
 
 
 @router.get(
@@ -1320,49 +1423,65 @@ async def import_print_jobs_from_printer(
 
 @router.post(
     "/batch/move",
-    response_model=ModelBatchResult,
+    response_model=ModelEditBatchResult,
     dependencies=[Depends(require_auth)],
     summary="Move several models to a collection",
     description=(
         "Moves the given models into one destination collection. The destination "
         "is resolved once: an empty path means root (superuser only) and a missing "
         "path is created (superuser only). Every model is preflighted for existence "
-        "and edit access; any failure rejects the whole request without writes."
+        "and edit access; preflight failure rejects the whole request without writes. "
+        "Conditional version conflicts skip only stale Models; succeeded_versions "
+        "records the exact versions acknowledged by this transaction."
     ),
 )
 def batch_move_models(
     payload: ModelBatchMove,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
-) -> ModelBatchResult:
+    edit_contract: str | None = Header(
+        default=None, alias="X-PrintStash-Edit-Contract"
+    ),
+) -> ModelEditBatchResult:
     # Validate the shared destination up front — these are whole-request errors,
     # not per-item, because the destination is the same for everyone. Creating a
     # *missing* collection is deferred until we know at least one model will move
     # (below), so a fully-failed batch never leaves an orphan empty collection.
     return model_commands.batch_move_models(
-        payload=payload, current_user=current_user, session=session
+        payload=payload,
+        current_user=current_user,
+        session=session,
+        edit_contract=edit_contract,
     )
 
 
 @router.post(
     "/batch/tags",
-    response_model=ModelBatchResult,
+    response_model=ModelEditBatchResult,
     dependencies=[Depends(require_auth)],
     summary="Add and/or remove tags on several models",
     description=(
         "Additive tag editing across a selection: tags in `add` are created if "
         "missing and appended (idempotent); tags in `remove` are detached if "
         "present. Each model keeps its other tags. Every model is preflighted; any "
-        "missing or non-editable model rejects the whole request without writes."
+        "missing or non-editable model rejects the whole request without writes. "
+        "Conditional version conflicts skip only stale Models; succeeded_versions "
+        "records the exact versions acknowledged by this transaction."
     ),
 )
 def batch_tag_models(
     payload: ModelBatchTags,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
-) -> ModelBatchResult:
+    edit_contract: str | None = Header(
+        default=None, alias="X-PrintStash-Edit-Contract"
+    ),
+) -> ModelEditBatchResult:
     return model_commands.batch_tag_models(
-        payload=payload, current_user=current_user, session=session
+        payload=payload,
+        current_user=current_user,
+        session=session,
+        edit_contract=edit_contract,
     )
 
 
@@ -1410,14 +1529,24 @@ def batch_delete_models(
 )
 def update_model(
     model_id: int,
+    response: Response,
     payload: ModelUpdate,
     current_user: User = Depends(require_user),
     session: Session = Depends(get_session),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> ModelRead:
     model_commands.update_model(
-        model_id=model_id, payload=payload, current_user=current_user, session=session
+        model_id=model_id,
+        payload=payload,
+        current_user=current_user,
+        session=session,
+        precondition=precondition,
     )
-    return _detail_or_404(session, model_id, current_user)
+    result = _detail_or_404(session, model_id, current_user)
+    response.headers["ETag"] = etag(
+        EditKind.MODEL, result.id, result.edit_version, result.edit_epoch
+    )
+    return result
 
 
 @router.patch(

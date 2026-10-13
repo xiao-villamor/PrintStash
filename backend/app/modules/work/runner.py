@@ -14,8 +14,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from sqlalchemy import bindparam
+from sqlmodel import select
+
+from app.core.cancellation import OperationCancelled, cancellation_scope
 from app.core.logging import get_logger
 from app.core.time import utcnow
+from app.core.work_priority import priority_scope
 from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, WorkPriority
 from app.db.session import get_session_factory
 
@@ -26,6 +31,11 @@ from .jobs import failure_of, jobs
 logger = get_logger(__name__)
 
 _ADMISSION_WAIT_MAX_S = 30.0
+# Cache only the query shape. Every cancellation checkpoint reads fresh state;
+# progress payloads, timestamps, and ORM objects are unnecessary for authority.
+_WITHDRAWAL_QUERY = select(Job.state, Job.attempts, Job.execution_epoch).where(
+    Job.id == bindparam("withdrawal_job_id")
+)
 
 
 class StepOutcome(StrEnum):
@@ -47,15 +57,29 @@ class ExecutionContext:
     priority: WorkPriority
     execution_id: str
     attempt: int
+    execution_epoch: str
 
     def update(self, **fields: Any) -> None:
-        jobs.update(self.job_id, **fields)
+        jobs.update(
+            self.job_id,
+            expected_attempt=self.attempt,
+            expected_epoch=self.execution_epoch,
+            **fields,
+        )
 
     def finish(self, outcome: JobOutcome, **fields: Any) -> None:
-        jobs.finish(self.job_id, outcome, **fields)
+        definition = catalog_module.get_catalog().definition(self.definition)
+        jobs.settle_attempt(
+            self.job_id,
+            self.attempt,
+            outcome,
+            execution_epoch=self.execution_epoch,
+            on_failure=definition.on_failure,
+            **fields,
+        )
 
     def cancelled(self) -> bool:
-        return _withdrawn(self.job_id)
+        return _withdrawn(self.job_id, self.attempt, self.execution_epoch)
 
     def nudge(self, source: JobKind) -> None:
         from .submission import nudge
@@ -63,27 +87,49 @@ class ExecutionContext:
         nudge(source)
 
 
-def _withdrawn(job_id: str) -> bool:
-    """Whether the Job's intent is gone: cancelled, or its row pruned."""
+def _withdrawn(
+    job_id: str, attempt: int | None = None, execution_epoch: str | None = None
+) -> bool:
+    """Whether this execution is cancelled, missing or superseded."""
     with get_session_factory().scoped_session() as session:
-        row = session.get(Job, job_id)
-        return row is None or row.state is JobState.CANCELLED
+        # A typed scalar read needs no ORM execution/identity-map machinery.
+        # Keep the factory and the fresh, short transaction for every probe.
+        row = (
+            session.connection()
+            .execute(_WITHDRAWAL_QUERY, {"withdrawal_job_id": job_id})
+            .first()
+        )
+        if row is None:
+            return True
+        state, current_attempt, current_epoch = row
+        return (
+            state is JobState.CANCELLED
+            or attempt is not None
+            and (
+                current_attempt != attempt
+                or state is JobState.QUEUED
+                or current_epoch != execution_epoch
+            )
+        )
 
 
-def _begin(job_id: str, attempt: int) -> dict[str, str] | None:
+def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | None:
     """Claim the attempt: ``None`` when it is superseded or the Job is settled.
 
     The claim is the checkpoint a durable engine replays, so it returns plain
     strings; ``execute_job`` parses them back into the Job's typed identity.
     """
     with get_session_factory().scoped_session() as session:
-        row = session.get(Job, job_id)
-        if row is None or row.state not in ACTIVE_JOB_STATES:
+        row = jobs.lock_execution(
+            session, job_id, epoch=execution_epoch, states=ACTIVE_JOB_STATES
+        )
+        if row is None:
             return None
         if row.attempts > attempt:
             return None
         now = utcnow()
         row.attempts = max(row.attempts, attempt)
+        row.submitted_epoch = execution_epoch
         row.state = JobState.RUNNING
         row.started_at = row.started_at or now
         row.updated_at = now
@@ -108,13 +154,43 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
     from app.core.metrics import record_step
     from app.runtime.maintenance import begin_mutating_operation, end_mutating_operation
 
-    if _withdrawn(context.job_id):
+    if _withdrawn(context.job_id, context.attempt, context.execution_epoch):
         return StepOutcome.CANCELLED.value
     if mutating and not begin_mutating_operation():
         return StepOutcome.DEFERRED.value
     started = time.monotonic()
     try:
-        step.fn(context)
+        definition = catalog_module.get_catalog().definition(context.definition)
+        with get_session_factory().scoped_session() as session:
+            # A read is the whole check: the session ends before the step
+            # runs, so a row lock taken here protected nothing and only made
+            # every step queue behind the database's single writer.
+            if not jobs.owns_execution(
+                session,
+                context.job_id,
+                epoch=context.execution_epoch,
+                attempt=context.attempt,
+                state=JobState.RUNNING,
+            ):
+                return StepOutcome.CANCELLED.value
+            refused = definition.admission(session)
+        if refused is not None:
+            context.finish(JobOutcome.CANCELLED, error=refused, retryable=False)
+            return StepOutcome.CANCELLED.value
+        with (
+            cancellation_scope(
+                lambda: _withdrawn(
+                    context.job_id, context.attempt, context.execution_epoch
+                )
+            ),
+            priority_scope(context.priority),
+        ):
+            step.fn(context)
+    except OperationCancelled:
+        record_step(
+            context.definition, step.name, "cancelled", time.monotonic() - started
+        )
+        return StepOutcome.CANCELLED.value
     except BaseException:
         record_step(context.definition, step.name, "error", time.monotonic() - started)
         raise
@@ -126,41 +202,48 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
 
 
 def _settle(
-    job_id: str, definition: JobDefinition, subject_key: str, error: str | None
+    job_id: str,
+    attempt: int,
+    execution_epoch: str,
+    definition: JobDefinition,
+    subject_key: str,
+    error: str | None,
 ) -> None:
     """Record the attempt's outcome and nudge whoever waits on completion.
 
     A step may already have finished the Job (a recorded failure, a partial
     completion); the first terminal write wins, so these are no-ops then.
     """
-    if error is None:
-        jobs.finish(job_id, JobOutcome.COMPLETED)
-    else:
-        jobs.finish(job_id, JobOutcome.FAILED, error=error, retryable=True)
-    status = jobs.get(job_id)
-    if status is not None and status.state is JobState.FAILED:
-        if status.error is None:
-            raise RuntimeError(f"failed_job_without_error:{job_id}")
-        with get_session_factory().scoped_session() as session:
-            try:
-                definition.on_failure(session, subject_key, status.error)
-                session.commit()
-            except Exception:  # noqa: BLE001 - the Job already records the failure
-                session.rollback()
-                logger.exception(
-                    "job failure hook failed",
-                    extra={"job_id": job_id, "kind": definition.name.value},
-                )
+    status = jobs.settle_attempt(
+        job_id,
+        attempt,
+        JobOutcome.COMPLETED if error is None else JobOutcome.FAILED,
+        error=error,
+        execution_epoch=execution_epoch,
+        on_failure=definition.on_failure,
+    )
+    if status is None:
+        return
+    if status.terminal:
+        jobs.reconcile_settled_attempt(
+            job_id, attempt, definition.on_settled, execution_epoch=execution_epoch
+        )
     from .submission import nudge
 
     for source in dict.fromkeys((definition.name, *definition.completion_nudges)):
         nudge(source)
 
 
-def execute_job(job_id: str, attempt: int, runner: StepRunner) -> None:
+def execute_job(
+    job_id: str, attempt: int, runner: StepRunner, *, execution_epoch: str | None = None
+) -> None:
     """Run one attempt of ``job_id`` to its recorded outcome."""
+    if execution_epoch is None:
+        return
     begun = runner.run(
-        f"work.begin#{attempt}", lambda: _begin(job_id, attempt), NO_RETRY
+        f"work.begin#{attempt}",
+        lambda: _begin(job_id, attempt, execution_epoch),
+        NO_RETRY,
     )
     if begun is None:
         return
@@ -171,8 +254,9 @@ def execute_job(job_id: str, attempt: int, runner: StepRunner) -> None:
         definition=definition.name,
         subject_key=subject_key,
         priority=WorkPriority(begun["priority"]),
-        execution_id=f"{job_id}:{attempt}",
+        execution_id=f"{job_id}:{execution_epoch}:{attempt}",
         attempt=attempt,
+        execution_epoch=execution_epoch,
     )
     error: str | None = None
     try:
@@ -206,6 +290,8 @@ def execute_job(job_id: str, attempt: int, runner: StepRunner) -> None:
         error = failure_of(exc)
     runner.run(
         "work.settle",
-        lambda: _settle(job_id, definition, subject_key, error),
+        lambda: _settle(
+            job_id, attempt, execution_epoch, definition, subject_key, error
+        ),
         NO_RETRY,
     )

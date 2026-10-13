@@ -15,7 +15,15 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import get_session_factory
 from app.modules.storage.storage_backend.local import LocalStorageBackend
+from app.modules.storage.storage_deletion import (
+    PreparedOwnedDeletion,
+    enqueue_prepared_owned_deletion,
+    enqueue_prevalidated_receipt,
+    process_storage_delete_intents,
+)
 from app.modules.storage.storage_ownership import delete_owned_key, require_owned_key
+from app.modules.storage.storage_publication import PublicationReservation
+from app.modules.storage.storage_receipts import owned_receipt
 
 logger = get_logger(__name__)
 
@@ -23,6 +31,32 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Delete
 # ---------------------------------------------------------------------------
+
+
+def _retire_backup_receipt(session, owned) -> bool:
+    receipt = owned_receipt(owned)
+    prepared = PreparedOwnedDeletion(
+        PublicationReservation.of(owned),
+        receipt,
+        owned.object_kind,
+        owned.sha256,
+        "verified",
+        "backup",
+        owned.id,
+    )
+    enqueue_prepared_owned_deletion(session, prepared, required_proof=True)
+    intent = enqueue_prevalidated_receipt(
+        session,
+        receipt,
+        object_kind=owned.object_kind,
+        sha256=owned.sha256,
+        resource_kind="backup",
+        resource_id=owned.id,
+    )
+    assert intent.id is not None
+    identifier = intent.id
+    session.commit()
+    return process_storage_delete_intents(intent_ids=(identifier,)).completed == 1
 
 
 def delete_backup(
@@ -54,10 +88,9 @@ def delete_backup(
                 raise _contracts_module.BackupOwnershipError(
                     "backup_storage_ownership_unverified"
                 )
-            if not destination.delete_owned(owned):
+            if not destination.can_delete_receipt(owned_receipt(owned)):
                 raise _contracts_module.BackupDeleteUnsupportedError()
-            session.delete(owned)
-            deleted = True
+            deleted = _retire_backup_receipt(session, owned)
         else:
             target = _targets_module._get_backup_s3_target()
             if target is None:
@@ -67,16 +100,10 @@ def delete_backup(
             owned = _downloads_module._require_backup_archive_owned(meta, target=target)
             if not target.bucket:
                 target = replace(target, bucket=owned.namespace.split("/", 1)[0])
-            try:
-                target.client.delete_object(
-                    **_targets_module._s3_object_kwargs(
-                        bucket=target.bucket, key=meta.path, row=owned, delete=True
-                    )
-                )
-            except Exception:
-                logger.exception("backup: failed to delete S3 backup object")
-            else:
-                session.delete(owned)
+            if not owned.version_id or owned.version_id == "null":
+                raise _contracts_module.BackupDeleteUnsupportedError()
+            deleted = _retire_backup_receipt(session, owned)
+            if deleted:
                 # A cloud download is a rebuildable derivative.  Remove only
                 # the cache derived from this exact source locator and only
                 # when its own local receipt still proves the bytes; sibling
@@ -99,7 +126,6 @@ def delete_backup(
                 )
                 if cache_path.exists():
                     delete_owned_key(session, local_backend, str(cache_path))
-                deleted = True
         session.commit()
 
     if deleted:

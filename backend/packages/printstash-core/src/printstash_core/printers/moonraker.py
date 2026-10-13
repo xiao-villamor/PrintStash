@@ -161,7 +161,7 @@ class MoonrakerClient:
             normalized = (
                 int(spool_id) if isinstance(spool_id, (str, int, float)) else None
             )
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             normalized = None
         return [
             {

@@ -487,6 +487,60 @@ class TestEffectiveRolesForCollections:
         assert roles[sibling.id] is None
 
 
+class TestEffectiveRolesForPaths:
+    """The resolver a listing uses once it already holds each row's path."""
+
+    def test_gives_a_superuser_admin_on_every_row(self, db_session: Session) -> None:
+        admin = build_user(db_session, "paths-admin", superuser=True)
+        collection = taxonomy.resolve_or_create_collection(db_session, "Shelf")
+        assert collection is not None
+
+        roles = rbac.effective_roles_for_paths(
+            db_session, admin, [(collection.id, collection.path)]
+        )
+
+        assert roles == {collection.id: CollectionRole.ADMIN}
+
+    def test_returns_none_for_a_user_with_no_grants(self, db_session: Session) -> None:
+        user = build_user(db_session, "paths-nobody")
+        collection = taxonomy.resolve_or_create_collection(db_session, "Shelf")
+        assert collection is not None
+
+        roles = rbac.effective_roles_for_paths(
+            db_session, user, [(collection.id, collection.path)]
+        )
+
+        assert roles == {collection.id: None}
+
+    def test_inherits_a_grant_down_the_tree(self, db_session: Session) -> None:
+        user = build_user(db_session, "paths-inheritor")
+        parent = taxonomy.resolve_or_create_collection(db_session, "Functional")
+        child = taxonomy.resolve_or_create_collection(db_session, "Functional/Brackets")
+        assert parent is not None and child is not None
+        _grant(db_session, user, parent.id, CollectionRole.EDIT)
+
+        roles = rbac.effective_roles_for_paths(
+            db_session, user, [(child.id, child.path)]
+        )
+
+        assert roles == {child.id: CollectionRole.EDIT}
+
+    def test_does_not_leak_a_grant_to_a_prefix_sibling(
+        self, db_session: Session
+    ) -> None:
+        user = build_user(db_session, "paths-sibling")
+        granted = taxonomy.resolve_or_create_collection(db_session, "Art")
+        sibling = taxonomy.resolve_or_create_collection(db_session, "Artillery")
+        assert granted is not None and sibling is not None
+        _grant(db_session, user, granted.id, CollectionRole.EDIT)
+
+        roles = rbac.effective_roles_for_paths(
+            db_session, user, [(sibling.id, sibling.path)]
+        )
+
+        assert roles == {sibling.id: None}
+
+
 class TestEffectiveRolesForUserCollectionPairs:
     """Resolves many users against many collections in one pass, for the admin views."""
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 from printstash_core.inference import EmbeddingError, EmbeddingSpace
+from printstash_core.mesh.preview_profile import RASTERIZER_RECIPE
 from printstash_core.search.point_inputs import PointRecipe
 from printstash_core.search.text_inputs import TextRecipe
 from printstash_core.search.visual_inputs import VisualRecipe
@@ -81,9 +82,9 @@ class LocalModelManifest(FrozenContract):
             raise ValueError("canary_dimension_mismatch")
         return self
 
-    def space(self) -> EmbeddingSpace:
-        # Asset hashes, tensor names, preprocessing and canaries all participate.
-        # A changed preplaced export never joins an existing native vector space.
+    def encoder_space(self) -> EmbeddingSpace:
+        # Preserve the published native alignment identity, including its legacy
+        # recipe label. Renderer revisions do not alter paired encoder assets.
         return EmbeddingSpace(
             model_key=self.model_key,
             model_revision=self.model_revision,
@@ -102,6 +103,13 @@ class LocalModelManifest(FrozenContract):
             query_prefix=self.query_prefix,
             document_prefix=self.document_prefix,
         )
+
+    def space(self) -> EmbeddingSpace:
+        """Legacy mesh-view vectors include the renderer that produced their pixels."""
+        encoder = self.encoder_space()
+        recipe = json.loads(encoder.render_recipe)
+        recipe["rasterizer"] = RASTERIZER_RECIPE
+        return replace(encoder, render_recipe=json.dumps(recipe, sort_keys=True))
 
     def assets(self) -> tuple[ModelAsset, ...]:
         return (
@@ -193,7 +201,7 @@ class PointModelManifest(FrozenContract):
         if (
             self.paired.family != "clip"
             or self.paired.text is None
-            or self.paired_space_hash != self.paired.space().config_hash
+            or self.paired_space_hash != self.paired.encoder_space().config_hash
             or len(self.point.canary) != self.paired.native_dimension
         ):
             raise ValueError("embedding_point_alignment_mismatch")
@@ -308,7 +316,7 @@ def validate_space(manifest: ModelManifest, space: EmbeddingSpace) -> None:
     }:
         recipe = VisualRecipe.for_space(space)
         expected = VisualRecipe.space(
-            expected,
+            manifest.encoder_space(),
             image_size=manifest.image.image_size,
             profile=recipe.profile,
             aggregation=recipe.aggregation,

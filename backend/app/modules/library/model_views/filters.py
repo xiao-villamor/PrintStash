@@ -134,9 +134,11 @@ def print_job_predicates(filters: ModelFilters):
     return predicates
 
 
-def filtered_with_rank(session: Session, user: User, filters: ModelFilters):
+def filtered_with_rank(
+    session: Session, user: User, filters: ModelFilters, *, visible=None
+):
     stmt = select(Model).where(live(Model), Model.hash != SENTINEL_MODEL_HASH)
-    stmt = _apply_model_access(stmt, session, user)
+    stmt = _apply_model_access(stmt, session, user, visible=visible)
     if filters.has_similar_candidates is not None:
         from .extensions import has_open_candidates
 
@@ -210,5 +212,7 @@ def filtered_with_rank(session: Session, user: User, filters: ModelFilters):
     return stmt, rank
 
 
-def _filtered_stmt(session: Session, user: User, filters: ModelFilters):
-    return filtered_with_rank(session, user, filters)[0]
+def _filtered_stmt(
+    session: Session, user: User, filters: ModelFilters, *, visible=None
+):
+    return filtered_with_rank(session, user, filters, visible=visible)[0]

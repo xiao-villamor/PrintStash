@@ -15,13 +15,16 @@ from app.db.models import (
     ExternalLibrary,
     ExternalLibraryTombstone,
     File,
+    JobKind,
+    JobState,
     LibrarySourceKind,
 )
 from app.modules.library import trash
 from app.modules.sources import external_library
 from app.modules.sources.library_source import SourceContent, SourceEntry, SourcePage
-from app.modules.work.contracts import JobOutcome
+from app.modules.work.jobs import jobs
 from tests.factories import build_file, build_model
+from tests.factories.ops import build_job, build_job_context
 from tests.paths import FIXTURES_DIR
 
 
@@ -332,19 +335,19 @@ class TestRemoteScanSafety:
             def list_page(self, *_args, **_kwargs):
                 raise RuntimeError("provider unavailable")
 
-        updates: list[tuple[str, dict[str, object]]] = []
         monkeypatch.setattr(
             external_library, "source_for_library", lambda _lib: FailingSource()
         )
-        monkeypatch.setattr(
-            external_library.registry,
-            "finish",
-            lambda job_id, outcome, **values: updates.append(
-                (job_id, {"outcome": outcome, **values})
-            ),
-        )
 
-        result = external_library.scan_remote_library(library.id, job_id="scan-job")
+        build_job(
+            db_session,
+            kind=JobKind.SOURCES_SCAN,
+            id="scan-job",
+            subject=f"library/{library.id}",
+        )
+        result = external_library.scan_remote_library(
+            library.id, job_context=build_job_context("scan-job")
+        )
 
         checkpoint = db_session.exec(
             select(external_library.ExternalLibraryCheckpoint).where(
@@ -353,10 +356,9 @@ class TestRemoteScanSafety:
         ).one()
         assert result["error"] == "provider unavailable"
         assert checkpoint.backoff_until is not None
-        assert updates[-1] == (
-            "scan-job",
-            {"outcome": JobOutcome.FAILED, "error": "provider unavailable"},
-        )
+        status = jobs.get("scan-job")
+        assert status.state is JobState.FAILED
+        assert status.error == "provider unavailable"
 
         blocked = external_library.scan_remote_library(library.id)
         assert blocked["backoff_until"] == checkpoint.backoff_until.isoformat()
@@ -418,23 +420,20 @@ class TestRemoteScanSafety:
     ) -> None:
         library = _remote_library(db_session, "remote-completed-job")
         source = _Source(SourcePage((), None, True, metadata_ops=2))
-        updates: list[tuple[str, dict[str, object]]] = []
         monkeypatch.setattr(external_library, "source_for_library", lambda _lib: source)
-        monkeypatch.setattr(
-            external_library.registry,
-            "finish",
-            lambda job_id, outcome, **values: updates.append(
-                (job_id, {"outcome": outcome, **values})
-            ),
-        )
 
+        build_job(
+            db_session,
+            kind=JobKind.SOURCES_SCAN,
+            id="completed-job",
+            subject=f"library/{library.id}",
+        )
         result = external_library.scan_remote_library(
-            library.id, job_id="completed-job"
+            library.id, job_context=build_job_context("completed-job")
         )
 
         assert result["complete"] is True
-        assert updates[-1][0] == "completed-job"
-        assert updates[-1][1]["outcome"] is JobOutcome.COMPLETED
+        assert jobs.get("completed-job").state is JobState.COMPLETED
 
     def test_incomplete_epoch_never_marks_unseen_catalog_rows_absent(
         self,

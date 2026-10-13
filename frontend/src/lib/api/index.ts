@@ -6,7 +6,6 @@ export {
   getDerivedText,
   getUrl,
   getWsUrl,
-  invalidateApiCache,
 } from "@/lib/api/request";
 export * from "@/lib/api/auth";
 export * from "@/lib/api/artifact-uploads";

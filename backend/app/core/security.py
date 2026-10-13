@@ -59,7 +59,7 @@ def get_current_user(
         return None
     try:
         user_id = int(user_id_str)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return None
     user = get_user_by_id(session, user_id)
     if user and user.is_active and payload.get("auth_version") == user.auth_version:

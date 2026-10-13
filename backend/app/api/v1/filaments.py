@@ -8,11 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlmodel import Session, select
 
 import app.modules.printing.costing as models_costing
+from app.api.edit_preconditions import edit_precondition
 from app.core.http import get_or_404
 from app.core.security import require_superuser, require_user
 from app.core.time import utcnow
-from app.db.models import FilamentProfile
+from app.db.models import FilamentProfile, User
 from app.db.session import get_session
+from app.modules.printing import profile_edits
+from app.schemas.editing import EditPrecondition
 from app.schemas.models import (
     FilamentProfileCreate,
     FilamentProfileRead,
@@ -30,7 +33,11 @@ def _clean(value: str | None) -> str | None:
 
 
 def _read(profile: FilamentProfile, usage_count: int = 0) -> FilamentProfileRead:
-    return FilamentProfileRead(**profile.model_dump(), usage_count=usage_count)
+    return FilamentProfileRead(
+        **profile.model_dump(),
+        edit_epoch=profile_edits.editing_base(profile).edit_epoch,
+        usage_count=usage_count,
+    )
 
 
 @router.get(
@@ -90,10 +97,13 @@ def update_filament_profile(
     profile_id: int,
     payload: FilamentProfileUpdate,
     session: Session = Depends(get_session),
+    actor: User = Depends(require_superuser),
+    precondition: EditPrecondition = Depends(edit_precondition),
 ) -> FilamentProfileRead:
     profile = get_or_404(
         session, FilamentProfile, profile_id, "filament_profile_not_found"
     )
+    profile_edits.claim(session, actor, profile, precondition)
     if profile.spoolman_filament_id is not None:
         # Synced presets mirror Spoolman (the source of truth) — edit them there.
         raise HTTPException(status_code=409, detail="filament_profile_linked")
@@ -124,9 +134,11 @@ def update_filament_profile(
 
     profile.updated_at = utcnow()
     session.add(profile)
-    session.commit()
+    session.flush()
     session.refresh(profile)
-    return _read(profile)
+    receipt = _read(profile)
+    session.commit()
+    return receipt
 
 
 @router.delete(

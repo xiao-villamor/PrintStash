@@ -138,6 +138,7 @@ class TestOpenDalBackupReplication:
         from sqlmodel import select
 
         from app.db.models import OwnedStorageObject, StorageObjectState
+        from app.modules.backups.backup_replication import publish_replica
 
         class Offline(_PublishingBackend):
             def publish_replica(self, source, key):
@@ -155,7 +156,7 @@ class TestOpenDalBackupReplication:
         digest = hashlib.sha256(b"archive").hexdigest()
         key = destination.key("archive.tar.gz")
         with pytest.raises(OSError):
-            destination.publish_file(db_session, key, path, sha256=digest)
+            publish_replica(destination, db_session, key, path, sha256=digest)
         db_session.rollback()
         row = db_session.exec(
             select(OwnedStorageObject).where(OwnedStorageObject.key == key)

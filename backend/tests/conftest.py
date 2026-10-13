@@ -55,6 +55,7 @@ from app.db.session import (  # noqa: E402
 )
 from app.modules.printing.printer_hub import PrinterHub  # noqa: E402
 from tests import containers  # noqa: E402
+from tests._statements import StatementLog  # noqa: E402
 
 _TIER_MARKERS = {"contract": "contract", "e2e": "e2e"}
 _RESOURCE_DIRS = {"postgres": "postgres"}
@@ -342,14 +343,42 @@ def _rate_limiters_in(target: object) -> Iterator[object]:
 
 
 @pytest.fixture(autouse=True)
-def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+def _patch_engine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> None:
     """Override the session factory ContextVar to use the in-memory test engine.
 
     Single override point — replaces the previous double-monkeypatch of
     ``app.db.session.engine`` and ``app.modules.printing.printer_hub.engine``.
     See ADR-0001.
     """
+    from app.runtime.compute.discovery import _process_identity
+
+    _process_identity.cache_clear()
+    monkeypatch.delenv("PRINTSTASH_COMPUTE_ROOT", raising=False)
     override_session_factory(_test_factory)
+    # Query templates contain no rows, but keep their construction lifetime
+    # inside each case when a test changes mapper or database configuration.
+    from app.modules.library.collection_tree import (
+        _label_ancestry,
+        _subtree_counts_template,
+    )
+    from app.modules.library.model_views.projections import _list_related_queries
+    from app.modules.library.outliner import (
+        _administrator_restore_counts,
+        _page_descendants,
+    )
+    from app.modules.search.lexical_index import canonical_passage
+    from app.modules.similarity.candidates import _endpoint_queries, _evidence_predicate
+
+    canonical_passage.cache_clear()
+    _administrator_restore_counts.cache_clear()
+    _page_descendants.cache_clear()
+    _subtree_counts_template.cache_clear()
+    _list_related_queries.cache_clear()
+    _label_ancestry.cache_clear()
+    _endpoint_queries.cache_clear()
+    _evidence_predicate.cache_clear()
     _overlay.clear()
     _overlay["db_url"] = TEST_DB_URL
     _overlay["secrets_key"] = "printstash-test-secrets-key"
@@ -369,6 +398,21 @@ def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     bind_backend(LocalStorageBackend())
+    from app.runtime.native_admission import LocalResourcePool
+    from app.runtime.native_runtime import bind_pool
+
+    bind_pool(LocalResourcePool(tmp_path_factory.mktemp("native-admission")))
+    from app.runtime.inference_resources import bind_pool as bind_inference_pool
+
+    bind_inference_pool(LocalResourcePool(tmp_path_factory.mktemp("inference-models")))
+    from app.runtime.preparation_runtime import bind_pools, make_pools
+
+    bind_pools(
+        make_pools(
+            tmp_path_factory.mktemp("source-preparation"),
+            tmp_path_factory.mktemp("source-io"),
+        )
+    )
     # Drop the process-wide httpx client so a test that drives async egress in
     # its own asyncio.run() loop doesn't inherit one bound to a prior (closed)
     # loop — the cache only rebinds on is_closed, which a closed loop doesn't
@@ -376,6 +420,14 @@ def _patch_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     import app.core.http_client as _http_client_mod
 
     _http_client_mod.reset_for_tests()
+
+    # Provider clients and host semaphores are process-wide too. A test owns
+    # fresh caches; it must not close a previous test's client after that
+    # client's event loop has ended. Production shutdown stays unchanged.
+    from app.modules.ingestion import capture_provider_transport
+
+    monkeypatch.setattr(capture_provider_transport, "_pooled_clients", {})
+    monkeypatch.setattr(capture_provider_transport, "_host_limiters", {})
 
     from app.runtime import maintenance
 
@@ -608,6 +660,16 @@ def auth_headers(db_session: Session) -> dict[str, str]:
     db_session.refresh(user)
     token = create_access_token(user.id, user.username, scope="admin")
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def sql_statements() -> StatementLog:
+    """What SQL a block executes: ``with sql_statements.recording(): ...``.
+
+    For scaling assertions that hold on any machine: the statement count and
+    the largest bound-parameter count must not grow with the data.
+    """
+    return StatementLog()
 
 
 @pytest.fixture(scope="session")

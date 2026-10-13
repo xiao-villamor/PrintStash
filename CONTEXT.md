@@ -11,8 +11,8 @@ retention. This file pins the project's domain language.
 **Model**:
 A printable logical asset deduplicated by source-mesh sha256; owns versioned
 Files and remains independently addressable and reusable even when referenced
-by Multipart Models. The Organized library view may group a referenced Model
-under its Multipart Model instead of duplicating both cards at the same level.
+by Multipart Models. Everything shows each eligible Model independently of
+its references, alongside eligible Multipart Models.
 _Avoid_: asset, item, part
 
 **Artifact** (File):
@@ -48,14 +48,13 @@ _Avoid_: Model file, Artifact, attachment
 
 Multipart Models and ordinary Models share one library. Everything is the
 default presentation: it shows Multipart Models and ordinary Models together.
-Organized shows each Multipart Model once and suppresses duplicate top-level
-cards for the Models it references. Multipart sets only shows groupings, and
-Parts only shows referenced Models.
-Search always reveals a matching Model, including in Organized. This is a
+Multipart Sets shows only groupings. Retired Organized and Parts only UI
+preferences resolve to Everything while retaining folder, filters and sort.
+Search reveals matching Models independently of their references. This is a
 presentation rule, not ownership: adding a piece or alternative never transfers
 or duplicates that Model's Files, and removing a piece or deleting the grouping
 only removes the reference. The Model and all of its Artifacts and Revisions
-remain addressable from search, Everything, Parts only and any other Multipart
+remain addressable from search, Everything and any other Multipart
 Model that reuses it. Multipart Parts have an explicit order; every part is
 required, while its Model Choices are alternatives where exactly one is
 selected for a build.

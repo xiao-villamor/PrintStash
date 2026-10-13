@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import Iterator
@@ -11,7 +12,14 @@ from typing import Iterator
 from sqlmodel import Session, select
 
 from app.core.time import utcnow
-from app.db.models import ModelSourceCover, OwnedStorageObject, StagingLease
+from app.db.models import (
+    ModelProvenanceSource,
+    ModelSourceCover,
+    OwnedStorageObject,
+    StagingLease,
+    StorageObjectState,
+)
+from app.db.transactions import begin_write
 from app.modules.ingestion import staging_leases
 from app.modules.media.source_cover_processing import process_source_cover_upload
 from app.modules.storage.storage_backend.contracts import (
@@ -20,11 +28,27 @@ from app.modules.storage.storage_backend.contracts import (
     StorageCollisionError,
     StorageObjectInfo,
 )
+from app.modules.storage.storage_deletion import (
+    PreparedOwnedDeletion,
+    enqueue_prepared_owned_deletion,
+    enqueue_prevalidated_receipt,
+    prepare_owned_key_deletion,
+)
 from app.modules.storage.storage_ownership import (
+    abandon_publication,
+    abandon_verified_publication,
+    adopt_publication,
+    prepare_bytes,
+    prepare_owned_replacement,
     provider_ref_for_backend,
-    publish_bytes,
     record_creation,
-    replace_owned_bytes,
+)
+from app.modules.storage.storage_publication import (
+    PendingPublication,
+    PublicationReservation,
+    VerifiedPublication,
+    lock_publication_locator,
+    same_creation,
 )
 
 
@@ -32,9 +56,139 @@ from app.modules.storage.storage_ownership import (
 class SourceCoverWrite:
     cover: ModelSourceCover
     created: bool
+    publication: PendingPublication | VerifiedPublication
     creation_receipt: CreationReceipt | None = None
     replacement_receipt: CreationReceipt | None = None
     replaced_bytes: bytes | None = None
+
+
+@dataclass(frozen=True)
+class SourceCoverCandidate:
+    """Immutable bytes awaiting the caller's source and completion authority."""
+
+    provenance_source_id: int
+    actor_id: int | None
+    content_type: str
+    publication: PendingPublication
+    previous: PreparedOwnedDeletion | None
+
+
+class SourceCoverChangedError(RuntimeError):
+    """The observed cover no longer belongs to the preparation generation."""
+
+
+def prepare_candidate(
+    session: Session,
+    backend: StorageBackend,
+    *,
+    provenance_source_id: int,
+    actor_id: int | None,
+    data: bytes,
+    content_type: str | None,
+) -> SourceCoverCandidate:
+    """Publish private bytes without inserting a cover or changing visible bytes.
+
+    The shared publication reservation owns process-kill recovery. A candidate
+    can become visible only through attach_candidate followed by adoption in
+    the caller's fenced transaction. Storage probes happen entirely here.
+    """
+    processed = process_source_cover_upload(data, content_type)
+    with session.no_autoflush:
+        existing = get(session, provenance_source_id)
+        previous = (
+            prepare_owned_key_deletion(
+                session,
+                backend,
+                existing.storage_key,
+                resource_kind="model_source_cover",
+                resource_id=existing.id,
+                required_proof=True,
+            )
+            if existing is not None
+            else None
+        )
+    canonical = backend.source_cover_key(provenance_source_id)
+    stem, separator, extension = canonical.rpartition(".")
+    key = (
+        f"{stem}.{uuid.uuid4().hex}.{extension}"
+        if separator
+        else f"{canonical}.{uuid.uuid4().hex}"
+    )
+    publication = prepare_bytes(
+        session,
+        backend,
+        key,
+        processed.data,
+        object_kind="model_source_cover",
+        sha256=hashlib.sha256(processed.data).hexdigest(),
+    )
+    return SourceCoverCandidate(
+        provenance_source_id,
+        actor_id,
+        processed.content_type,
+        publication,
+        previous,
+    )
+
+
+def attach_candidate(
+    session: Session, candidate: SourceCoverCandidate
+) -> ModelSourceCover:
+    """Lock source then cover and switch its pointer; do not acquire anchors yet."""
+    begin_write(session, immediate=True)
+    source = session.exec(
+        select(ModelProvenanceSource)
+        .where(ModelProvenanceSource.id == candidate.provenance_source_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).first()
+    if source is None:
+        raise SourceCoverChangedError("source_cover_source_removed")
+    cover = session.exec(
+        select(ModelSourceCover)
+        .where(ModelSourceCover.provenance_source_id == candidate.provenance_source_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).first()
+    expected_key = candidate.previous.receipt.key if candidate.previous else None
+    if (cover.storage_key if cover else None) != expected_key:
+        raise SourceCoverChangedError("source_cover_changed")
+    receipt = candidate.publication.receipt
+    if cover is None:
+        cover = ModelSourceCover(
+            provenance_source_id=candidate.provenance_source_id,
+            storage_key=receipt.key,
+            created_by=candidate.actor_id,
+            size_bytes=receipt.size,
+            content_type=candidate.content_type,
+        )
+    else:
+        cover.storage_key = receipt.key
+        cover.size_bytes = receipt.size
+        cover.content_type = candidate.content_type
+        cover.updated_at = utcnow()
+    session.add(cover)
+    if cover.id is not None:
+        for lease in session.exec(
+            select(StagingLease)
+            .where(StagingLease.model_source_cover_id == cover.id)
+            .with_for_update()
+        ).all():
+            session.delete(lease)
+    session.flush()
+    return cover
+
+
+def adopt_candidate(session: Session, candidate: SourceCoverCandidate) -> None:
+    """Attach and retire exact receipts after every caller domain lock/mutation."""
+    operations = [(candidate.publication.receipt.key, candidate.publication)]
+    if candidate.previous is not None:
+        operations.append((candidate.previous.receipt.key, candidate.previous))
+    for _key, operation in sorted(operations, key=lambda item: item[0]):
+        if isinstance(operation, PreparedOwnedDeletion):
+            enqueue_prepared_owned_deletion(session, operation, required_proof=True)
+        else:
+            adopt_publication(session, operation)
 
 
 class _ReceiptBindingError(RuntimeError):
@@ -57,7 +211,7 @@ def _backend_scope(backend: StorageBackend, key: str) -> tuple[str, str, str]:
         name = "unknown"
     try:
         namespace = str(backend.namespace_for(key))
-    except (AttributeError, NotImplementedError, TypeError, ValueError):
+    except AttributeError, NotImplementedError, TypeError, ValueError:
         try:
             namespace = str(backend.namespace)
         except AttributeError:
@@ -105,28 +259,55 @@ def _delete_durable_cover_intent(
         ):
             caller.expunge(instance)
     with _intent_session(caller) as intent:
-        cover = intent.get(ModelSourceCover, cover_id)
+        observed_cover = intent.get(ModelSourceCover, cover_id)
+        if observed_cover is not None:
+            intent.exec(
+                select(ModelProvenanceSource)
+                .where(ModelProvenanceSource.id == observed_cover.provenance_source_id)
+                .with_for_update()
+            ).all()
+        cover = intent.exec(
+            select(ModelSourceCover)
+            .where(ModelSourceCover.id == cover_id)
+            .with_for_update()
+        ).first()
+        if cover is not None and cover.storage_key != storage_key:
+            return
+        leases = intent.exec(
+            select(StagingLease)
+            .where(StagingLease.model_source_cover_id == cover_id)
+            .with_for_update()
+        ).all()
+        lock_publication_locator(
+            intent, backend=backend_name, namespace=namespace, key=storage_key
+        )
+        proofs = intent.exec(
+            select(OwnedStorageObject).where(
+                OwnedStorageObject.backend == backend_name,
+                OwnedStorageObject.namespace == namespace,
+                OwnedStorageObject.provider_ref == provider_ref,
+                OwnedStorageObject.key == storage_key,
+            )
+        ).all()
+        if any(proof.state is StorageObjectState.COMMITTED for proof in proofs):
+            return
+        if not preserve_ownership_intent:
+            for proof in proofs:
+                proof.state = StorageObjectState.RETIRING
+                proof.next_recovery_at = None
+                intent.add(proof)
+                if proof.token is not None and proof.size_bytes is not None:
+                    enqueue_prevalidated_receipt(
+                        intent,
+                        _owned_receipt(proof),
+                        object_kind=proof.object_kind,
+                        sha256=proof.sha256,
+                    )
+        for lease in leases:
+            intent.delete(lease)
+        intent.flush()
         if cover is not None:
             intent.delete(cover)
-        # The FK cascade normally removes this row with the cover.  Deleting
-        # it explicitly also handles databases where a crash left the child
-        # row visible before FK enforcement was enabled.
-        for lease in intent.exec(
-            select(StagingLease).where(StagingLease.model_source_cover_id == cover_id)
-        ).all():
-            intent.delete(lease)
-        if not preserve_ownership_intent:
-            statement = select(OwnedStorageObject).where(
-                OwnedStorageObject.key == storage_key
-            )
-            if backend_name != "unknown":
-                statement = statement.where(
-                    OwnedStorageObject.backend == backend_name,
-                    OwnedStorageObject.namespace == namespace,
-                    OwnedStorageObject.provider_ref == provider_ref,
-                )
-            for proof in intent.exec(statement).all():
-                intent.delete(proof)
         intent.commit()
 
 
@@ -138,13 +319,52 @@ def _finish_replacement_rollback(
     replaced_bytes: bytes,
     replacement_receipt: CreationReceipt,
 ) -> None:
-    """Restore old bytes and persist their proof without caller commit."""
+    """Restore bytes, then revalidate their domain pointer before adoption."""
+    with _intent_session(caller) as reader:
+        observed = reader.get(ModelSourceCover, cover_id)
+        source_id = observed.provenance_source_id if observed is not None else None
     try:
         restored = backend.replace_bytes(replaced_bytes, replacement_receipt)
     except Exception:
         # The durable lease remains available for restart reconciliation.
         return
+    restored = _bind_receipt(backend, restored)
     with _intent_session(caller) as intent:
+        begin_write(intent, immediate=True)
+        if source_id is not None:
+            intent.exec(
+                select(ModelProvenanceSource)
+                .where(ModelProvenanceSource.id == source_id)
+                .with_for_update()
+            ).all()
+        cover = intent.exec(
+            select(ModelSourceCover)
+            .where(ModelSourceCover.id == cover_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        if (
+            cover is None
+            or cover.provenance_source_id != source_id
+            or cover.storage_key != restored.key
+        ):
+            # A deletion or a newer pointer wins over stale compensation.
+            # Retain exact cleanup authority without recreating ownership.
+            enqueue_prevalidated_receipt(
+                intent,
+                restored,
+                object_kind="model_source_cover",
+                sha256=hashlib.sha256(replaced_bytes).hexdigest(),
+            )
+            intent.commit()
+            return
+        for lease in intent.exec(
+            select(StagingLease)
+            .where(StagingLease.model_source_cover_id == cover_id)
+            .with_for_update()
+        ).all():
+            intent.delete(lease)
+        intent.flush()
         record_creation(
             intent,
             restored,
@@ -153,10 +373,6 @@ def _finish_replacement_rollback(
                 backend, namespace=restored.namespace
             ),
         )
-        for lease in intent.exec(
-            select(StagingLease).where(StagingLease.model_source_cover_id == cover_id)
-        ).all():
-            intent.delete(lease)
         intent.commit()
 
 
@@ -190,7 +406,7 @@ def _receipt_from_json(value: str | None) -> CreationReceipt | None:
         if not isinstance(raw, dict):
             return None
         return CreationReceipt(**raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -232,6 +448,7 @@ def _durable_pending_cover_intent(
         persisted = intent.get(ModelSourceCover, cover.id)
         if persisted is None:
             raise RuntimeError("cover_pending_intent_missing")
+        recovered_publication: VerifiedPublication | None = None
         lease = _cover_lease(intent, cover.id)
         if lease is not None and (
             lease.size_bytes != size_bytes or lease.sha256 != sha256
@@ -247,13 +464,8 @@ def _durable_pending_cover_intent(
             if recovered is not None:
                 persisted.size_bytes = lease.size_bytes
                 persisted.updated_at = utcnow()
-                record_creation(
-                    intent,
-                    recovered,
-                    object_kind="model_source_cover",
-                    provider_ref=provider_ref_for_backend(
-                        backend, namespace=recovered.namespace
-                    ),
+                recovered_publication = VerifiedPublication(
+                    recovered, "model_source_cover", lease.sha256
                 )
                 intent.delete(lease)
             else:
@@ -286,8 +498,10 @@ def _durable_pending_cover_intent(
                 size_bytes=size_bytes,
                 sha256=sha256,
             )
-        # This is the only commit in the pre-publication phase.  It commits
-        # the cover intent, never the caller's Inbox/model transaction.
+        # Finish every lease/domain mutation before locator adoption.
+        intent.flush()
+        if recovered_publication is not None:
+            adopt_publication(intent, recovered_publication)
         intent.commit()
     session.expire(cover)
     session.refresh(cover)
@@ -370,7 +584,7 @@ def _recover_pending_cover(
             expected_size=lease.size_bytes,
             expected_sha256=lease.sha256,
         )
-    except (FileNotFoundError, OSError, RuntimeError, ValueError, NotImplementedError):
+    except FileNotFoundError, OSError, RuntimeError, ValueError, NotImplementedError:
         return None
     if not isinstance(receipt, CreationReceipt):
         return None
@@ -382,147 +596,253 @@ def _recover_pending_cover(
     return _bind_receipt(backend, receipt)
 
 
-def _discard_cover_if_absent(
-    session: Session,
-    backend: StorageBackend,
-    *,
-    cover: ModelSourceCover,
-    lease: StagingLease,
-) -> bool:
-    """Discard an expired intent only after proving its destination is absent.
+@dataclass(frozen=True)
+class _CoverRecoveryIdentity:
+    cover_id: int
+    source_id: int
+    lease_id: str
+    key: str
+    backend: str
+    namespace: str
+    provider_ref: str
+    receipt_json: str | None
+    size_bytes: int
+    sha256: str
 
-    ``object_info`` is deliberately the sole existence probe here.  An object
-    that exists but cannot be matched to the declared bytes/receipt is not ours
-    to delete; an unavailable probe is equally uncertain and remains retryable.
-    """
-    try:
-        info = backend.object_info(lease.destination_key or cover.storage_key)
-    except Exception:
-        return False
-    if info is not None:
-        return False
-    # A missing destination means a new-cover row is definitely broken.  Any
-    # ledger proof for the same key is stale at this point and must not survive
-    # as an ownership claim for a later object.
-    for proof in session.exec(
-        select(OwnedStorageObject).where(
-            OwnedStorageObject.backend
-            == _backend_scope(backend, lease.destination_key or cover.storage_key)[0],
-            OwnedStorageObject.namespace
-            == _backend_scope(backend, lease.destination_key or cover.storage_key)[1],
-            OwnedStorageObject.provider_ref
-            == _backend_scope(backend, lease.destination_key or cover.storage_key)[2],
-            OwnedStorageObject.key == (lease.destination_key or cover.storage_key),
+
+@dataclass(frozen=True)
+class _ObservedCoverProof:
+    reservation: PublicationReservation
+    state: StorageObjectState
+    receipt: CreationReceipt | None
+
+
+@dataclass(frozen=True)
+class _AbsentCoverRecovery:
+    identity: _CoverRecoveryIdentity
+    proofs: tuple[_ObservedCoverProof, ...]
+
+
+@dataclass(frozen=True)
+class _PublishedCoverRecovery:
+    identity: _CoverRecoveryIdentity
+    publication: VerifiedPublication
+
+
+_CoverRecovery = _AbsentCoverRecovery | _PublishedCoverRecovery
+
+
+def _cover_recovery_identity(backend, cover, lease) -> _CoverRecoveryIdentity:
+    if cover.id is None:
+        raise RuntimeError("cover_pending_intent_missing")
+    key = lease.destination_key or cover.storage_key
+    name, namespace, provider_ref = _backend_scope(backend, key)
+    return _CoverRecoveryIdentity(
+        cover.id,
+        cover.provenance_source_id,
+        lease.id,
+        key,
+        name,
+        namespace,
+        provider_ref,
+        lease.receipt_json,
+        lease.size_bytes,
+        lease.sha256,
+    )
+
+
+def _cover_proofs(session: Session, identity: _CoverRecoveryIdentity):
+    return session.exec(
+        select(OwnedStorageObject)
+        .where(
+            OwnedStorageObject.backend == identity.backend,
+            OwnedStorageObject.namespace == identity.namespace,
+            OwnedStorageObject.provider_ref == identity.provider_ref,
+            OwnedStorageObject.key == identity.key,
+            OwnedStorageObject.state != StorageObjectState.RETIRING,
         )
-    ).all():
-        session.delete(proof)
-    # Two flushes, lease first. `staging_leases.model_source_cover_id` is
-    # `ON DELETE CASCADE` on both schemas, so deleting the cover would take the lease
-    # with it — but only in the database. The ORM would not know, and a caller
-    # holding this session would keep reading a lease that no longer exists. Letting
-    # the ORM delete the row itself keeps the identity map honest, and doing it
-    # before the cover means the cascade never has a row left to race for (which is
-    # what produced "expected to delete 1 row(s); 0 were matched").
-    session.delete(lease)
-    session.flush()
-    session.delete(cover)
-    session.flush()
-    return True
-
-
-def expire_pending(
-    session: Session,
-    backend: StorageBackend,
-    *,
-    lease: StagingLease,
-) -> bool:
-    """Reconcile one expired cover lease and remove a broken cover safely.
-
-    Returns ``True`` only when the lease/cover were terminalized.  A published
-    exact object is recovered into the ownership ledger; mismatched or
-    uncertain storage leaves both rows intact for a later retry.
-    """
-    if lease.model_source_cover_id is None:
-        return False
-    cover = session.get(ModelSourceCover, lease.model_source_cover_id)
-    if cover is None:
-        # Unreachable: the cover cascade removes this lease with its cover, on both
-        # schemas. Kept as a guard rather than a code path, because the alternative
-        # is an AttributeError on `cover.storage_key` two lines down.
-        return False
-    try:
-        recovered = _recover_pending_cover(session, backend, cover=cover, lease=lease)
-    except Exception:
-        # Backend uncertainty is a retryable state, never an expiry delete.
-        return False
-    if recovered is not None:
-        lease.destination_key = recovered.key
-        lease.receipt_json = _receipt_json(recovered, backend)
-        cover.size_bytes = lease.size_bytes
-        cover.updated_at = utcnow()
-        record_creation(
-            session,
-            recovered,
-            object_kind="model_source_cover",
-            provider_ref=provider_ref_for_backend(
-                backend, namespace=recovered.namespace
-            ),
-        )
-        session.delete(lease)
-        session.flush()
-        return True
-    return _discard_cover_if_absent(session, backend, cover=cover, lease=lease)
-
-
-def reconcile_pending(session: Session, backend: StorageBackend) -> int:
-    """Recover all cover leases left by a publication/DB crash."""
-    recovered = 0
-    leases = session.exec(
-        select(StagingLease).where(StagingLease.model_source_cover_id != None)  # noqa: E711
+        .execution_options(populate_existing=True)
     ).all()
-    for lease in leases:
-        if lease.model_source_cover_id is None:
-            continue
-        cover = session.get(ModelSourceCover, lease.model_source_cover_id)
-        if cover is None:
-            # Unreachable, same cascade as in `expire_pending`.
-            continue
-        try:
-            receipt = _recover_pending_cover(session, backend, cover=cover, lease=lease)
-        except Exception:
-            # Keep the intent until a backend can prove either publication or
-            # absence. One unavailable object probe must not block recovery of
-            # unrelated cover intents.
-            continue
-        if receipt is None:
-            # Startup reconciliation also cleans up a pre-publication crash.
-            # Never infer absence from a failed read: only an explicit empty
-            # object_info result is destructive.  An unexpired intent with no
-            # object cannot be published by this process anymore, so it is
-            # safe to discard immediately and let the Inbox retry recreate it.
-            if _discard_cover_if_absent(session, backend, cover=cover, lease=lease):
-                recovered += 1
-            continue
-        lease.destination_key = receipt.key
-        lease.receipt_json = _receipt_json(receipt, backend)
-        # Replacement metadata may have rolled back with the crashed process;
-        # the durable pending lease is the source of truth for the intended
-        # bytes until the next request can complete the write.
-        cover.size_bytes = lease.size_bytes
-        cover.updated_at = utcnow()
-        session.add(cover)
-        record_creation(
-            session,
-            receipt,
-            object_kind="model_source_cover",
-            provider_ref=provider_ref_for_backend(backend, namespace=receipt.namespace),
+
+
+def _prepare_absent_cover(session, backend, *, cover, lease):
+    identity = _cover_recovery_identity(backend, cover, lease)
+    proofs = tuple(
+        _ObservedCoverProof(
+            PublicationReservation.of(proof),
+            proof.state,
+            _owned_receipt(proof)
+            if proof.token is not None and proof.size_bytes is not None
+            else None,
         )
-        # A cover row is already durable for new covers; replacement metadata
-        # is updated by the original transaction when it can be resumed.
-        session.delete(lease)
+        for proof in _cover_proofs(session, identity)
+    )
+    try:
+        info = backend.object_info(identity.key)
+    except Exception:
+        return None
+    return _AbsentCoverRecovery(identity, proofs) if info is None else None
+
+
+def _apply_cover_recoveries(session: Session, recoveries: list[_CoverRecovery]) -> int:
+    """All domain locks first, then all locator anchors, followed by SQL only."""
+    if not recoveries:
+        return 0
+    begin_write(session, immediate=True)
+    identities = [recovery.identity for recovery in recoveries]
+    for source_id in sorted({identity.source_id for identity in identities}):
+        session.exec(
+            select(ModelProvenanceSource)
+            .where(ModelProvenanceSource.id == source_id)
+            .with_for_update()
+        ).all()
+    for cover_id in sorted({identity.cover_id for identity in identities}):
+        session.exec(
+            select(ModelSourceCover)
+            .where(ModelSourceCover.id == cover_id)
+            .with_for_update()
+        ).all()
+    for lease_id in sorted({identity.lease_id for identity in identities}):
+        session.exec(
+            select(StagingLease).where(StagingLease.id == lease_id).with_for_update()
+        ).all()
+    for identity in sorted(
+        identities, key=lambda item: (item.backend, item.namespace, item.key)
+    ):
+        lock_publication_locator(
+            session,
+            backend=identity.backend,
+            namespace=identity.namespace,
+            key=identity.key,
+        )
+    recovered = 0
+    for recovery in recoveries:
+        identity = recovery.identity
+        cover = session.get(ModelSourceCover, identity.cover_id, populate_existing=True)
+        lease = session.get(StagingLease, identity.lease_id, populate_existing=True)
+        if (
+            cover is None
+            or lease is None
+            or cover.storage_key != identity.key
+            or lease.model_source_cover_id != cover.id
+            or lease.receipt_json != identity.receipt_json
+            or lease.size_bytes != identity.size_bytes
+            or lease.sha256 != identity.sha256
+        ):
+            continue
+        if isinstance(recovery, _AbsentCoverRecovery):
+            current = _cover_proofs(session, identity)
+            observed = {proof.reservation: proof for proof in recovery.proofs}
+            if len(current) != len(observed):
+                continue
+            unchanged = True
+            for proof in current:
+                previous = observed.get(PublicationReservation.of(proof))
+                receipt = (
+                    _owned_receipt(proof)
+                    if proof.token is not None and proof.size_bytes is not None
+                    else None
+                )
+                if (
+                    previous is None
+                    or previous.state is not proof.state
+                    or (
+                        (previous.receipt is None) != (receipt is None)
+                        or (
+                            receipt is not None
+                            and (
+                                previous.receipt is None
+                                or not same_creation(previous.receipt, receipt)
+                            )
+                        )
+                    )
+                ):
+                    unchanged = False
+                    break
+            if not unchanged:
+                continue
+            for proof in current:
+                proof.state = StorageObjectState.RETIRING
+                proof.next_recovery_at = None
+                session.add(proof)
+                if proof.token is not None and proof.size_bytes is not None:
+                    enqueue_prevalidated_receipt(
+                        session,
+                        _owned_receipt(proof),
+                        object_kind=proof.object_kind,
+                        sha256=proof.sha256,
+                    )
+            session.delete(lease)
+            session.flush()
+            session.delete(cover)
+        else:
+            cover.size_bytes = identity.size_bytes
+            cover.updated_at = utcnow()
+            session.add(cover)
+            session.delete(lease)
+            session.flush()
+            adopt_publication(session, recovery.publication)
         recovered += 1
     session.flush()
     return recovered
+
+
+def _discard_cover_if_absent(session, backend, *, cover, lease) -> bool:
+    prepared = _prepare_absent_cover(session, backend, cover=cover, lease=lease)
+    return bool(prepared is not None and _apply_cover_recoveries(session, [prepared]))
+
+
+def expire_pending_many(
+    session: Session, backend: StorageBackend, *, leases: list[StagingLease]
+) -> int:
+    """Probe the complete batch before locking domain rows or storage anchors."""
+    recoveries: list[_CoverRecovery] = []
+    with session.no_autoflush:
+        for lease in leases:
+            if lease.model_source_cover_id is None:
+                continue
+            cover = session.get(ModelSourceCover, lease.model_source_cover_id)
+            if cover is None:
+                continue
+            identity = _cover_recovery_identity(backend, cover, lease)
+            try:
+                receipt = _recover_pending_cover(
+                    session, backend, cover=cover, lease=lease
+                )
+            except Exception:
+                continue
+            if receipt is None:
+                prepared = _prepare_absent_cover(
+                    session, backend, cover=cover, lease=lease
+                )
+                if prepared is not None:
+                    recoveries.append(prepared)
+            else:
+                recoveries.append(
+                    _PublishedCoverRecovery(
+                        identity,
+                        VerifiedPublication(
+                            receipt, "model_source_cover", lease.sha256
+                        ),
+                    )
+                )
+    return _apply_cover_recoveries(session, recoveries)
+
+
+def expire_pending(
+    session: Session, backend: StorageBackend, *, lease: StagingLease
+) -> bool:
+    return bool(expire_pending_many(session, backend, leases=[lease]))
+
+
+def reconcile_pending(session: Session, backend: StorageBackend) -> int:
+    """Recover legacy cover leases; immutable candidates remain private orphans."""
+    leases = list(
+        session.exec(
+            select(StagingLease).where(StagingLease.model_source_cover_id.is_not(None))
+        ).all()
+    )
+    return expire_pending_many(session, backend, leases=leases)
 
 
 def get(session: Session, provenance_source_id: int) -> ModelSourceCover | None:
@@ -533,7 +853,47 @@ def get(session: Session, provenance_source_id: int) -> ModelSourceCover | None:
     ).first()
 
 
-def put(
+def delete(
+    session: Session, backend: StorageBackend, provenance_source_id: int
+) -> bool:
+    """Prepare storage evidence, then delete under source/cover authority locks."""
+    observed = get(session, provenance_source_id)
+    if observed is None:
+        return False
+    prepared = prepare_owned_key_deletion(
+        session,
+        backend,
+        observed.storage_key,
+        required_proof=True,
+        resource_kind="model_source_cover",
+        resource_id=observed.id,
+    )
+    assert prepared is not None
+    begin_write(session, immediate=True)
+    session.exec(
+        select(ModelProvenanceSource)
+        .where(ModelProvenanceSource.id == provenance_source_id)
+        .with_for_update()
+    ).all()
+    cover = session.exec(
+        select(ModelSourceCover)
+        .where(ModelSourceCover.provenance_source_id == provenance_source_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).first()
+    if (
+        cover is None
+        or cover.id != prepared.resource_id
+        or cover.storage_key != prepared.receipt.key
+    ):
+        raise SourceCoverChangedError("source_cover_changed")
+    session.delete(cover)
+    session.flush()
+    enqueue_prepared_owned_deletion(session, prepared, required_proof=True)
+    return True
+
+
+def prepare_put(
     session: Session,
     backend: StorageBackend,
     *,
@@ -569,14 +929,6 @@ def put(
             existing.size_bytes = len(processed.data)
             existing.updated_at = utcnow()
             lease.receipt_json = _receipt_json(recovered, backend)
-            record_creation(
-                session,
-                recovered,
-                object_kind="model_source_cover",
-                provider_ref=provider_ref_for_backend(
-                    backend, namespace=recovered.namespace
-                ),
-            )
             session.delete(lease)
             session.add(existing)
             return SourceCoverWrite(
@@ -584,16 +936,19 @@ def put(
                 created=False,
                 replacement_receipt=recovered,
                 replaced_bytes=None,
+                publication=VerifiedPublication(
+                    recovered, "model_source_cover", lease.sha256
+                ),
             )
         try:
-            replacement = replace_owned_bytes(
+            publication = prepare_owned_replacement(
                 session,
                 backend,
                 existing.storage_key,
                 processed.data,
                 object_kind="model_source_cover",
             )
-            replacement = _bind_receipt(backend, replacement)
+            replacement = _bind_receipt(backend, publication.receipt)
         except _ReceiptBindingError:
             raise
         except Exception:
@@ -629,6 +984,7 @@ def put(
             created=False,
             replacement_receipt=replacement,
             replaced_bytes=old_bytes,
+            publication=publication,
         )
 
     # Cover-owned leases bind the in-flight publication without interpreting
@@ -648,13 +1004,17 @@ def put(
     if lease is None:
         raise RuntimeError("cover_pending_intent_missing")
     receipt: CreationReceipt | None = None
+    publication: PendingPublication | VerifiedPublication
     try:
         recovered = _recover_pending_cover(session, backend, cover=cover, lease=lease)
         if recovered is not None:
             receipt = recovered
+            publication = VerifiedPublication(
+                receipt, "model_source_cover", lease.sha256
+            )
         else:
             try:
-                receipt = publish_bytes(
+                publication = prepare_bytes(
                     session,
                     backend,
                     key,
@@ -662,6 +1022,7 @@ def put(
                     object_kind="model_source_cover",
                     sha256=lease.sha256,
                 )
+                receipt = publication.receipt
             except StorageCollisionError:
                 # A create-only collision may be the object's own publication
                 # after a crash, but only exact key/size/content adoption is
@@ -671,13 +1032,10 @@ def put(
                 )
                 if receipt is None:
                     raise
+                publication = VerifiedPublication(
+                    receipt, "model_source_cover", lease.sha256
+                )
         staging_leases.record_cover_receipt(session, lease=lease, receipt=receipt)
-        record_creation(
-            session,
-            receipt,
-            object_kind="model_source_cover",
-            provider_ref=provider_ref_for_backend(backend, namespace=receipt.namespace),
-        )
         staging_leases.release_cover_lease(session, model_source_cover_id=cover.id)
     except _ReceiptBindingError:
         # A mismatched or legacy remote receipt is not evidence of absence.
@@ -688,7 +1046,12 @@ def put(
             # Roll back only an object positively matched by its receipt. If
             # that proof cannot be established, keep the durable intent for
             # restart reconciliation instead of risking another owner's bytes.
-            removed = backend.rollback_create(receipt)
+            retired = (
+                abandon_publication(session, publication)
+                if isinstance(publication, PendingPublication)
+                else abandon_verified_publication(session, publication)
+            )
+            removed = retired and backend.rollback_create(receipt)
             if removed:
                 _delete_durable_cover_intent(
                     session,
@@ -714,7 +1077,36 @@ def put(
                     preserve_ownership_intent=True,
                 )
         raise
-    return SourceCoverWrite(cover=cover, created=True, creation_receipt=receipt)
+    return SourceCoverWrite(
+        cover=cover, created=True, creation_receipt=receipt, publication=publication
+    )
+
+
+def adopt_write(session: Session, result: SourceCoverWrite) -> None:
+    """Attach already-prepared cover evidence after all caller domain mutations."""
+    adopt_publication(session, result.publication)
+
+
+def put(
+    session: Session,
+    backend: StorageBackend,
+    *,
+    provenance_source_id: int,
+    actor_id: int | None,
+    data: bytes,
+    content_type: str | None,
+) -> SourceCoverWrite:
+    result = prepare_put(
+        session,
+        backend,
+        provenance_source_id=provenance_source_id,
+        actor_id=actor_id,
+        data=data,
+        content_type=content_type,
+    )
+    session.flush()
+    adopt_write(session, result)
+    return result
 
 
 def rollback_after_commit_failure(
@@ -722,6 +1114,12 @@ def rollback_after_commit_failure(
 ) -> None:
     """Undo publish after a rolled-back caller transaction, proof-first."""
     if result.creation_receipt is not None:
+        if isinstance(result.publication, PendingPublication):
+            retired = abandon_publication(session, result.publication)
+        else:
+            retired = abandon_verified_publication(session, result.publication)
+        if not retired:
+            return
         removed = backend.rollback_create(result.creation_receipt)
         if removed:
             cover = result.cover
@@ -736,6 +1134,10 @@ def rollback_after_commit_failure(
     if result.replacement_receipt is None or result.replaced_bytes is None:
         return
     if result.cover.id is None:
+        return
+    if not isinstance(result.publication, VerifiedPublication):
+        raise RuntimeError("source_cover_replacement_requires_verified_receipt")
+    if not abandon_verified_publication(session, result.publication):
         return
     _finish_replacement_rollback(
         session,

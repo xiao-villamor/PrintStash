@@ -21,14 +21,15 @@ import {
   testNotificationChannel,
   updateNotificationChannel,
 } from "@/lib/api/notifications";
-import { invalidateApiCache } from "@/lib/api/request";
 
 import { expectRequest, fetchMock, lastBody, respondWith } from "./_wire";
+
+const BASE = { edit_epoch: "a".repeat(32), edit_version: 1 };
 
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 
@@ -37,6 +38,16 @@ afterEach(() => {
 });
 
 describe("getNotificationsSettings", () => {
+  it("reads current settings on every transport call", async () => {
+    respondWith({ enabled: false, channels: [] });
+    await getNotificationsSettings();
+    respondWith({ enabled: true, channels: [] });
+
+    const current = await getNotificationsSettings();
+
+    expect(current).toEqual({ enabled: true, channels: [] });
+  });
+
   it("reads the settings", async () => {
     respondWith({ enabled: false, channels: [] });
 
@@ -47,10 +58,21 @@ describe("getNotificationsSettings", () => {
 });
 
 describe("setNotificationsEnabled", () => {
-  it("PUTs the enabled flag", async () => {
-    respondWith({ enabled: true });
+  it("sends the captured switch precondition", async () => {
+    respondWith({ ...BASE, edit_version: 2, enabled: true });
 
-    await setNotificationsEnabled(true);
+    await setNotificationsEnabled(true, { base: BASE });
+
+    expect(fetchMock.mock.calls.at(-1)?.[1]?.headers).toMatchObject({
+      "If-Match": `"notification-settings-e${BASE.edit_epoch}-v1"`,
+      "X-PrintStash-Edit-Contract": "conditional-v1",
+    });
+  });
+
+  it("PUTs the enabled flag", async () => {
+    respondWith({ ...BASE, edit_version: 2, enabled: true });
+
+    await setNotificationsEnabled(true, { base: BASE });
 
     expectRequest("/api/v1/notifications", "PUT");
     expect(lastBody()).toEqual({ enabled: true });
@@ -73,10 +95,45 @@ describe("createNotificationChannel", () => {
 });
 
 describe("updateNotificationChannel", () => {
-  it("PATCHes only what changed", async () => {
-    respondWith({ id: 1, target: "webhook" });
+  it("sends the captured channel precondition", async () => {
+    respondWith({ ...BASE, edit_version: 2, id: 1 });
 
-    await updateNotificationChannel(1, { enabled: false });
+    await updateNotificationChannel(1, { enabled: false }, { base: BASE });
+
+    expect(fetchMock.mock.calls.at(-1)?.[1]?.headers).toMatchObject({
+      "If-Match": `"notification-channel-1-e${BASE.edit_epoch}-v1"`,
+      "X-PrintStash-Edit-Contract": "conditional-v1",
+    });
+  });
+
+  it.each([
+    {
+      label: "wrong history",
+      receipt: { ...BASE, edit_epoch: "b".repeat(32), edit_version: 2, id: 1 },
+      error: "Invalid editing acknowledgement",
+    },
+    {
+      label: "unadvanced version",
+      receipt: { ...BASE, id: 1 },
+      error: "Invalid editing acknowledgement",
+    },
+    {
+      label: "wrong identity",
+      receipt: { ...BASE, edit_version: 2, id: 2 },
+      error: "notification_identity_mismatch",
+    },
+  ])("rejects invalid notification acknowledgements: $label", async ({ receipt, error }) => {
+    respondWith(receipt);
+
+    await expect(updateNotificationChannel(1, { enabled: false }, { base: BASE })).rejects.toThrow(
+      error,
+    );
+  });
+
+  it("PATCHes only what changed", async () => {
+    respondWith({ ...BASE, edit_version: 2, id: 1, target: "webhook" });
+
+    await updateNotificationChannel(1, { enabled: false }, { base: BASE });
 
     expectRequest("/api/v1/notifications/channels/1", "PATCH");
   });
@@ -103,6 +160,16 @@ describe("testNotificationChannel", () => {
 });
 
 describe("listNotificationDeliveries", () => {
+  it("reads current deliveries on every transport call", async () => {
+    respondWith([{ id: 3 }]);
+    await listNotificationDeliveries();
+    respondWith([]);
+
+    const current = await listNotificationDeliveries();
+
+    expect(current).toEqual([]);
+  });
+
   it("asks for a default page", async () => {
     respondWith([]);
 

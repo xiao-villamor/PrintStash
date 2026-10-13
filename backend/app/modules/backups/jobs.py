@@ -66,11 +66,29 @@ def _meta(meta: backup_contracts.BackupMeta) -> dict[str, Any]:
 def _archive(ctx: JobContext, trigger: BackupTrigger) -> None:
     from app.modules.backups.backup_runs import settle_job_runs
 
+    def report(
+        stage: backup_contracts.BackupStage,
+        *,
+        processed: int | None = None,
+        total: int | None = None,
+        destination: str | None = None,
+    ) -> None:
+        fields: dict[str, Any] = {"stage": stage.value}
+        if processed is not None:
+            fields["processed"] = processed
+        if total is not None:
+            fields["total"] = total
+        if destination is not None:
+            fields["current_item"] = destination
+        ctx.update(**fields)
+
     # A run an earlier attempt of this Job left running was never finished:
     # the engine runs one attempt at a time, so nothing is still writing it.
     settle_job_runs(ctx.job_id)
     try:
-        meta = backup_creation.create_backup(trigger=trigger, job_id=ctx.job_id)
+        meta = backup_creation.create_backup(
+            trigger=trigger, job_id=ctx.job_id, progress=report
+        )
     except backup_contracts.DatabaseBackupNotSupportedError:
         ctx.finish(JobOutcome.FAILED, error="database_backup_not_supported")
         return
@@ -85,8 +103,19 @@ def _archive(ctx: JobContext, trigger: BackupTrigger) -> None:
             )
             return
         raise
+    if meta.outcome == "completed":
+        completion = "complete"
+    elif meta.outcome == "partial":
+        completion = "partial"
+    else:
+        raise ValueError("unexpected_backup_outcome")
+    report(backup_contracts.BackupStage.FINALIZING)
     backup_deletion.purge_old_backups()
-    ctx.update(result=_meta(meta), processed=1, total=1, succeeded=1)
+    ctx.update(
+        result=_meta(meta),
+        completion=completion,
+        succeeded=1,
+    )
 
 
 def _create(ctx: JobContext) -> None:

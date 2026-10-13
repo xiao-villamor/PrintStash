@@ -1,4 +1,13 @@
-import { getJson, GetJsonOptions, sendAction, sendJson } from "@/lib/api/request";
+import { editHeaders, requireEditingReceipt } from "./editing";
+import type { EditingBase } from "@/types/editing";
+import {
+  getJson,
+  GetJsonOptions,
+  sendAction,
+  sendJson,
+  requestApi,
+  jsonHeaders,
+} from "@/lib/api/request";
 import { FilamentProfileCreate, FilamentProfileRead, FilamentProfileUpdate } from "@/types";
 
 export function listFilamentProfiles(options?: GetJsonOptions): Promise<FilamentProfileRead[]> {
@@ -11,11 +20,20 @@ export function createFilamentProfile(
   return sendJson<FilamentProfileRead>("/api/v1/filament-profiles", "POST", payload);
 }
 
-export function updateFilamentProfile(
+export async function updateFilamentProfile(
   id: number,
   payload: FilamentProfileUpdate,
+  options: { base: EditingBase; signal?: AbortSignal },
 ): Promise<FilamentProfileRead> {
-  return sendJson<FilamentProfileRead>(`/api/v1/filament-profiles/${id}`, "PATCH", payload);
+  const saved = await requestApi<FilamentProfileRead>(`/api/v1/filament-profiles/${id}`, {
+    method: "PATCH",
+    headers: { ...jsonHeaders(), ...editHeaders("filament-profile", id, options.base) },
+    body: JSON.stringify(payload),
+    signal: options.signal,
+  });
+  requireEditingReceipt(saved, options.base);
+  if (saved.id !== id) throw new Error("profile_identity_mismatch");
+  return saved;
 }
 
 export function deleteFilamentProfile(id: number): Promise<void> {

@@ -12,6 +12,8 @@ export interface DocumentListItem {
   filename: string | null;
   effective_role: CollectionRole | null;
   updated_at: string;
+  edit_epoch: string;
+  edit_version: number;
 }
 
 export interface DocumentRead extends DocumentListItem {

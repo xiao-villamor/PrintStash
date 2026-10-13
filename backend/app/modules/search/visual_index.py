@@ -58,7 +58,7 @@ class VisualSource:
     input_hash: str
 
 
-def pending(session: Session, generation: IndexGeneration) -> VisualSource | None:
+def pending_candidates(session: Session, generation: IndexGeneration, limit: int = 1):
     space = generations.contract(session, generation)
     deferred = (
         select(SearchIndexFailure.id)
@@ -80,12 +80,50 @@ def pending(session: Session, generation: IndexGeneration) -> VisualSource | Non
             ~deferred,
         )
         .order_by(File.id)
-        .limit(1)
+        .limit(limit)
     )
-    row = session.exec(statement.where(File.id > generation.passage_after_id)).first()
-    if row is None and generation.passage_after_id:
-        row = session.exec(statement).first()
-    return VisualSource(row.id, row.model_id, row.sha256) if row is not None else None
+    rows = session.exec(statement.where(File.id > generation.passage_after_id)).all()
+    if not rows and generation.passage_after_id:
+        rows = session.exec(statement).all()
+    return [VisualSource(row.id, row.model_id, row.sha256) for row in rows]
+
+
+def pending(session: Session, generation: IndexGeneration) -> VisualSource | None:
+    rows = pending_candidates(session, generation)
+    return rows[0] if rows else None
+
+
+def embed_ready_thumbnails(
+    sessions, generation_id, token, first, inputs, recipe, provider, space, context
+):
+    """Gather cached derivatives only; never parse another mesh to fill a batch."""
+    from app.modules.inference.batches import embed_units
+
+    ready = [(first, inputs)]
+    with sessions.scoped_session() as session:
+        if not generations.lock_owned(session, generation_id, token):
+            return
+        generation = session.get(IndexGeneration, generation_id)
+        for candidate in pending_candidates(session, generation, limit=8):
+            if candidate.file_id == first.file_id:
+                continue
+            file = session.get(File, candidate.file_id)
+            if file is None:
+                continue
+            image = cached_thumbnail(session, file, recipe, context)
+            if image is None:
+                break
+            ready.append((candidate, (image,)))
+    results = embed_units(
+        provider, tuple(unit for _, unit in ready), space, context=context
+    )
+    for (item, _), result in zip(ready, results, strict=True):
+        context.remaining()
+        with sessions.scoped_session() as session:
+            if isinstance(result, EmbeddingError):
+                record_failure(session, generation_id, token, item, result.code)
+            else:
+                publish(session, generation_id, token, item, result, result[0])
 
 
 def copied_views(
@@ -127,7 +165,7 @@ def copied_views(
     for prior, row in candidates:
         try:
             previous = VisualRecipe(**json.loads(row.recipe_json))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         thumbnail_reuse = (
             recipe.profile == "thumbnail"
@@ -260,7 +298,7 @@ def cached_thumbnail(session, file, recipe, context):
         ):
             return None
         return thumbnail_input(bytes(payload), recipe.image_size)
-    except (OSError, ValueError, EmbeddingError):
+    except OSError, ValueError, EmbeddingError:
         return None
 
 
@@ -495,6 +533,19 @@ def process(
             inputs = rendered.views + (
                 (rendered.thumbnail,) if recipe.profile == "multiview" else ()
             )
+            if recipe.profile == "thumbnail":
+                embed_ready_thumbnails(
+                    sessions,
+                    generation_id,
+                    token,
+                    item,
+                    inputs,
+                    recipe,
+                    provider,
+                    space,
+                    context,
+                )
+                return
             vectors = provider.embed(inputs, space, context=context)
             views = vectors[
                 : 1 if isinstance(recipe, PointRecipe) else recipe.view_count

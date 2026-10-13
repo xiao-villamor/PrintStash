@@ -17,10 +17,13 @@ question for the source: is this kind satisfied for now, or does it need work?
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
-from sqlalchemy import delete
+from sqlalchemy import delete, func, update
 from sqlmodel import Session, col, select
 
 from app.core.config import settings
@@ -28,24 +31,46 @@ from app.core.time import ensure_utc, utcnow
 from app.db.affected import affected
 from app.db.models import (
     ArtifactDerivative,
+    DerivativeGroupRegeneration,
     DerivativeKind,
     DerivativeRegeneration,
     DerivativeState,
     File,
+    FileType,
+    JobKind,
+    JobState,
+    Model,
 )
+from app.db.scopes import live
+from app.db.transactions import begin_write
+from app.modules.work.contracts import JobExecution
 from app.schemas.jobs import DerivativeRead, DerivativeStatus
 
-from .kinds import recipes_for
+from . import policy
+from .kinds import groups_for, recipes_for
 
 STALE_IN_FLIGHT = timedelta(hours=1)
 _SATISFIED = {DerivativeState.READY, DerivativeState.SKIPPED}
 
 
-def regenerations(session: Session) -> dict[DerivativeKind, datetime]:
-    return {
+def regenerations(
+    session: Session, *, definitions: Sequence[JobKind] = ()
+) -> dict[DerivativeKind, datetime]:
+    result = {
         row.kind: ensure_utc(row.requested_at)
         for row in session.exec(select(DerivativeRegeneration)).all()
     }
+    if definitions:
+        rows = session.exec(
+            select(DerivativeGroupRegeneration).where(
+                col(DerivativeGroupRegeneration.definition).in_(definitions)
+            )
+        ).all()
+        for row in rows:
+            requested = ensure_utc(row.requested_at)
+            if row.kind not in result or requested > result[row.kind]:
+                result[row.kind] = requested
+    return result
 
 
 def satisfied(
@@ -67,7 +92,29 @@ def satisfied(
         if row.attempts >= settings.derivative_max_attempts:
             return True
         return row.next_attempt_at is not None and ensure_utc(row.next_attempt_at) > now
-    return now - updated < STALE_IN_FLIGHT
+    return (
+        regenerated_at is None or updated >= regenerated_at
+    ) and now - updated < STALE_IN_FLIGHT
+
+
+def model_revision(session: Session, model_id: int) -> str:
+    """An opaque value that differs whenever a derivative of the Model changed.
+
+    A reader that holds a Model snapshot and a later observer of the same Model
+    compare their revisions: equal means no derivative of its live Artifacts was
+    created, removed or moved to another state in between. It orders nothing.
+    """
+    count, latest = session.exec(
+        select(
+            func.count(col(ArtifactDerivative.id)),
+            func.max(col(ArtifactDerivative.updated_at)),
+        )
+        .join(File, col(File.id) == col(ArtifactDerivative.file_id))
+        .where(col(File.model_id) == model_id, live(File))
+    ).one()
+    if latest is None:
+        return "0"
+    return f"{count}:{ensure_utc(latest).timestamp():.6f}"
 
 
 def rows_for(session: Session, file: File) -> dict[DerivativeKind, ArtifactDerivative]:
@@ -89,7 +136,7 @@ def needed(
 ) -> set[DerivativeKind]:
     """Which of ``kinds`` still need deriving for ``file`` right now."""
     current = rows_for(session, file)
-    regen = regenerations(session)
+    regen = regenerations(session, definitions=[g.definition for g in groups_for(file)])
     return {
         kind
         for kind in kinds
@@ -111,6 +158,7 @@ def begin(
     if row is None:
         row = ArtifactDerivative(file_id=file.id, kind=kind, recipe_version=recipe)
     row.state = DerivativeState.RUNNING
+    row.attempt_token = str(uuid4())
     row.attempts += 1
     row.next_attempt_at = None
     row.failure_reason = None
@@ -120,16 +168,179 @@ def begin(
     return row
 
 
+@dataclass(frozen=True)
+class ArtifactSource:
+    sha256: str
+    file_type: FileType
+    original_filename: str
+    is_external: bool
+    path: str
+    size_bytes: int
+    model_id: int
+    external_library_id: int | None
+    source_key: str | None
+    source_mtime: float | None
+    source_etag: str | None
+    source_version_id: str | None
+
+    @classmethod
+    def of(cls, file: File) -> ArtifactSource:
+        return cls(
+            sha256=file.sha256,
+            file_type=file.file_type,
+            original_filename=file.original_filename,
+            is_external=file.is_external,
+            path=file.path,
+            size_bytes=file.size_bytes,
+            model_id=file.model_id,
+            external_library_id=file.external_library_id,
+            source_key=file.source_key,
+            source_mtime=file.source_mtime,
+            source_etag=file.source_etag,
+            source_version_id=file.source_version_id,
+        )
+
+
+def require_execution(session: Session, execution: JobExecution) -> None:
+    from app.modules.work.jobs import jobs
+
+    if (
+        jobs.lock_execution(
+            session,
+            execution.job_id,
+            epoch=execution.execution_epoch,
+            attempt=execution.attempt,
+            states=(JobState.RUNNING,),
+        )
+        is None
+    ):
+        raise AttemptSuperseded()
+
+
+@dataclass(frozen=True)
+class DerivativeAttempt:
+    file_id: int
+    kind: DerivativeKind
+    recipe: int
+    token: str
+    source: ArtifactSource
+    regenerated_at: datetime | None
+    execution: JobExecution | None
+
+
+class AttemptSuperseded(Exception):
+    """The execution no longer owns this Artifact's derivative output."""
+
+
+def attempt(
+    session: Session,
+    file: File,
+    row: ArtifactDerivative,
+    *,
+    execution: JobExecution | None = None,
+) -> DerivativeAttempt:
+    """Capture immutable publication authority immediately after ``begin``."""
+    if (
+        file.id is None
+        or row.attempt_token is None
+        or row.state is not DerivativeState.RUNNING
+    ):
+        raise ValueError("derivative_attempt_not_running")
+    regen = regenerations(session, definitions=[g.definition for g in groups_for(file)])
+    return DerivativeAttempt(
+        file.id,
+        row.kind,
+        row.recipe_version,
+        row.attempt_token,
+        ArtifactSource.of(file),
+        regen.get(row.kind),
+        execution,
+    )
+
+
+def require_context(session: Session, attempt: DerivativeAttempt) -> File:
+    """Fence current execution and source independently of a completed basic output.
+
+    Lock order is Job -> generation -> Model -> File -> derivative. PostgreSQL shares
+    the generation lock across publishers; regenerate-all takes it exclusively.
+    SQLite reserves its writer before reading. Locks last until caller commit.
+    A rejected publication leaves its durable PENDING storage receipt for the
+    ownership sweep; it must never delete bytes by pathname.
+    """
+    begin_write(session, immediate=True)
+    with session.no_autoflush:
+        if attempt.execution is not None:
+            require_execution(session, attempt.execution)
+        policy.lock_generation(session)
+        model = session.exec(
+            select(Model)
+            .where(Model.id == attempt.source.model_id, live(Model))
+            .with_for_update()
+        ).first()
+        file = session.exec(
+            select(File)
+            .where(File.id == attempt.file_id, live(File))
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        if model is None or file is None or ArtifactSource.of(file) != attempt.source:
+            raise AttemptSuperseded()
+        regen = regenerations(
+            session, definitions=[g.definition for g in groups_for(file)]
+        )
+        if (
+            regen.get(attempt.kind) != attempt.regenerated_at
+            or recipes_for(file).get(attempt.kind) != attempt.recipe
+        ):
+            raise AttemptSuperseded()
+    return file
+
+
+def claim_running(
+    session: Session, attempt: DerivativeAttempt
+) -> tuple[File, ArtifactDerivative]:
+    """Require current input authority and the exact RUNNING derivative token."""
+    file = require_context(session, attempt)
+    with session.no_autoflush:
+        changed = affected(
+            session,
+            update(ArtifactDerivative)
+            .where(
+                col(ArtifactDerivative.file_id) == attempt.file_id,
+                col(ArtifactDerivative.kind) == attempt.kind,
+                col(ArtifactDerivative.recipe_version) == attempt.recipe,
+                col(ArtifactDerivative.state) == DerivativeState.RUNNING,
+                col(ArtifactDerivative.attempt_token) == attempt.token,
+            )
+            .values(attempt_token=attempt.token)
+            .execution_options(synchronize_session=False),
+        )
+        if changed != 1:
+            raise AttemptSuperseded()
+        row = session.exec(
+            select(ArtifactDerivative)
+            .where(
+                ArtifactDerivative.file_id == attempt.file_id,
+                ArtifactDerivative.kind == attempt.kind,
+                ArtifactDerivative.recipe_version == attempt.recipe,
+            )
+            .execution_options(populate_existing=True)
+        ).one()
+    return file, row
+
+
 def mark_ready(
     session: Session,
-    row: ArtifactDerivative,
+    attempt: DerivativeAttempt,
     *,
     now: datetime,
     storage_key: str | None = None,
     output: dict[str, Any] | None = None,
     duration_ms: int | None = None,
     peak_rss_bytes: int | None = None,
-) -> None:
+) -> File:
+    file, row = claim_running(session, attempt)
+    row.attempt_token = None
     row.state = DerivativeState.READY
     row.storage_key = storage_key if storage_key is not None else row.storage_key
     row.output_json = json.dumps(output or {}, separators=(",", ":"), default=str)
@@ -139,12 +350,15 @@ def mark_ready(
     row.peak_rss_bytes = peak_rss_bytes
     row.updated_at = now
     session.add(row)
+    return file
 
 
 def mark_skipped(
-    session: Session, row: ArtifactDerivative, reason: str, *, now: datetime
+    session: Session, attempt: DerivativeAttempt, reason: str, *, now: datetime
 ) -> None:
     """Nothing to produce for these bytes (G-code without an embedded image)."""
+    _, row = claim_running(session, attempt)
+    row.attempt_token = None
     row.state = DerivativeState.SKIPPED
     row.failure_reason = reason
     row.next_attempt_at = None
@@ -154,15 +368,42 @@ def mark_skipped(
 
 def mark_failed(
     session: Session,
+    attempt: DerivativeAttempt,
+    reason: str,
+    *,
+    now: datetime,
+    deterministic: bool,
+    duration_ms: int | None = None,
+    peak_rss_bytes: int | None = None,
+) -> None:
+    _, row = claim_running(session, attempt)
+    _mark_failed(
+        session,
+        row,
+        reason,
+        now=now,
+        deterministic=deterministic,
+        duration_ms=duration_ms,
+        peak_rss_bytes=peak_rss_bytes,
+    )
+
+
+def _mark_failed(
+    session: Session,
     row: ArtifactDerivative,
     reason: str,
     *,
     now: datetime,
     deterministic: bool,
+    duration_ms: int | None = None,
+    peak_rss_bytes: int | None = None,
 ) -> None:
     """Record a failure; a deterministic one exhausts the attempts at once."""
+    row.attempt_token = None
     row.state = DerivativeState.FAILED
     row.failure_reason = reason
+    row.duration_ms = duration_ms
+    row.peak_rss_bytes = peak_rss_bytes
     if deterministic:
         row.attempts = max(row.attempts, settings.derivative_max_attempts)
     if row.attempts >= settings.derivative_max_attempts:
@@ -175,34 +416,59 @@ def mark_failed(
 
 
 def fail_in_flight(
-    session: Session, file_id: int, reason: str, *, now: datetime
+    session: Session,
+    file_id: int,
+    reason: str,
+    *,
+    now: datetime,
+    kinds: dict[DerivativeKind, int] | None = None,
 ) -> int:
     """The job's failure hook: in-flight rows of ``file_id`` become failures."""
     rows = session.exec(
-        select(ArtifactDerivative).where(
+        select(ArtifactDerivative)
+        .where(
             ArtifactDerivative.file_id == file_id,
             col(ArtifactDerivative.state).in_(
                 [DerivativeState.QUEUED, DerivativeState.RUNNING]
             ),
         )
+        .with_for_update()
+        .execution_options(populate_existing=True)
     ).all()
+    changed = 0
     for row in rows:
-        mark_failed(session, row, reason, now=now, deterministic=False)
-    return len(rows)
+        if kinds is not None and (
+            row.kind not in kinds or row.recipe_version != kinds[row.kind]
+        ):
+            continue
+        _mark_failed(session, row, reason, now=now, deterministic=False)
+        changed += 1
+    return changed
 
 
 def cancel(
     session: Session, file: File, kinds: dict[DerivativeKind, int], *, now: datetime
 ) -> None:
     """Withdraw intent: every kind of the group is cancelled at its recipe."""
-    current = rows_for(session, file)
+    begin_write(session, immediate=True)
     assert file.id is not None
+    current = {
+        row.kind: row
+        for row in session.exec(
+            select(ArtifactDerivative)
+            .where(ArtifactDerivative.file_id == file.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        if row.kind in kinds and row.recipe_version == kinds[row.kind]
+    }
     for kind, recipe in kinds.items():
         row = current.get(kind) or ArtifactDerivative(
             file_id=file.id, kind=kind, recipe_version=recipe
         )
         if row.state in {DerivativeState.READY, DerivativeState.SKIPPED}:
             continue
+        row.attempt_token = None
         row.state = DerivativeState.CANCELLED
         row.failure_reason = None
         row.next_attempt_at = None
@@ -263,10 +529,31 @@ def read(
     """Every applicable kind of ``file`` at its current recipe, pending included."""
     now = now or utcnow()
     current = rows_for(session, file)
-    regen = regenerations(session)
+    regen = regenerations(session, definitions=[g.definition for g in groups_for(file)])
+    controls = policy.resolve(session)
+    enabled = {
+        kind: controls[g.definition].enabled
+        for g in groups_for(file)
+        for kind in g.kinds
+    }
     reads: list[DerivativeRead] = []
     for kind, recipe in sorted(recipes_for(file).items()):
         row = current.get(kind)
+        if not enabled[kind] and (
+            row is None
+            or row.state
+            not in {
+                DerivativeState.READY,
+                DerivativeState.SKIPPED,
+                DerivativeState.RUNNING,
+            }
+        ):
+            reads.append(
+                DerivativeRead(
+                    kind=kind, recipe_version=recipe, state=DerivativeStatus.DISABLED
+                )
+            )
+            continue
         if row is None:
             reads.append(
                 DerivativeRead(
@@ -276,7 +563,8 @@ def read(
             continue
         state = DerivativeStatus(row.state.value)
         stale = (
-            row.state in _SATISFIED
+            enabled[kind]
+            and row.state in _SATISFIED
             and kind in regen
             and ensure_utc(row.updated_at) < regen[kind]
         )
@@ -288,8 +576,8 @@ def read(
                 attempts=row.attempts,
                 failure_reason=row.failure_reason,
                 updated_at=row.updated_at,
-                retryable=row.state
-                in {DerivativeState.FAILED, DerivativeState.CANCELLED},
+                retryable=enabled[kind]
+                and row.state in {DerivativeState.FAILED, DerivativeState.CANCELLED},
             )
         )
     return reads

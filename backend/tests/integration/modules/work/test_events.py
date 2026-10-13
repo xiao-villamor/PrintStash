@@ -16,6 +16,7 @@ import pytest
 from app.core.time import utcnow
 from app.db.models import JobKind, JobState, WorkPriority
 from app.modules.work import events
+from app.modules.work.jobs import jobs
 from app.schemas.jobs import JobStatus
 
 
@@ -40,6 +41,7 @@ def publisher() -> Iterator[Recorder]:
 def _status(**fields) -> JobStatus:
     now = utcnow()
     return JobStatus(
+        staging=None,
         job_id="j1",
         kind=JobKind.INGESTION_UPLOAD,
         state=JobState.RUNNING,
@@ -63,7 +65,31 @@ class TestJobChanged:
             "kind": JobKind.INGESTION_UPLOAD,
             "state": "running",
             "progress": 40.0,
+            "task_visible": True,
         }
+
+    @pytest.mark.parametrize(
+        ("kind", "owned"),
+        [
+            (JobKind.DERIVATIVES_MESH, False),
+            (JobKind.DERIVATIVES_MESH, True),
+            (JobKind.BACKUPS_AUTOMATIC, False),
+            (JobKind.INGESTION_UPLOAD, True),
+        ],
+    )
+    def test_classifies_notices_like_the_task_center_listing(
+        self, publisher, make_user, make_job, kind, owned
+    ):
+        owner = make_user()
+        row = make_job(kind=kind, owner=owner if owned else None)
+        status = jobs.get(row.id)
+        assert status is not None
+        events.job_changed(status)
+        listed = jobs.list_for_user(owner.id, is_superuser=True)
+        assert all(
+            payload["task_visible"] == (row.id in {job.job_id for job in listed})
+            for _, payload in publisher.sent
+        )
 
     def test_a_system_job_tells_only_the_administrators(
         self, publisher: Recorder
@@ -78,7 +104,8 @@ class TestJobChanged:
         )
 
         assert all(
-            set(payload) == {"type", "job_id", "kind", "state", "progress"}
+            set(payload)
+            == {"type", "job_id", "kind", "state", "progress", "task_visible"}
             for _, payload in publisher.sent
         )
 
@@ -119,3 +146,11 @@ class TestPublication:
             events.job_changed(_status(owner_user_id=7))
         finally:
             events.bind(None)
+
+
+class TestPolicyChanged:
+    def test_sends_a_payload_free_refetch_notice(self, publisher):
+        events.derivative_policy_changed()
+        assert publisher.sent == [
+            (events.POLICY_CHANNEL, {"type": "derivative_policy"})
+        ]

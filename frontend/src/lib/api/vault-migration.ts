@@ -1,4 +1,4 @@
-import { getJson, sendJson } from "./request";
+import { getJson, requestApi, jsonHeaders, type GetJsonOptions } from "./request";
 import type { StorageProviderConfigValues } from "@/types";
 
 export type VaultMigrationState =
@@ -81,48 +81,109 @@ export interface VaultMigrationPreflight {
 }
 const base = "/api/v1/storage/migrations";
 const path = (id: string) => `${base}/${encodeURIComponent(id)}`;
-export const listVaultMigrations = () => getJson<VaultMigrationRun[]>(base, { fresh: true });
-export const getVaultMigration = (id: string) =>
-  getJson<VaultMigrationRun>(path(id), { fresh: true });
-export const preflightVaultMigration = (body: VaultMigrationPreflight) =>
-  sendJson<VaultMigrationRun>(`${base}/preflight`, "POST", body);
-export const startVaultMigration = (id: string, planDigest: string) =>
-  sendJson<VaultMigrationRun>(`${path(id)}/start`, "POST", { plan_digest: planDigest });
-export const cutoverVaultMigration = (id: string) =>
-  sendJson<VaultMigrationRun>(`${path(id)}/cutover`, "POST", {});
-export const recoverVaultMigration = (id: string) =>
-  sendJson<VaultMigrationRun>(`${path(id)}/recover`, "POST", {});
+type MigrationRequestOptions = Pick<GetJsonOptions, "signal">;
+export const listVaultMigrations = (options: MigrationRequestOptions = {}) =>
+  getJson<VaultMigrationRun[]>(base, { ...options });
+export const getVaultMigration = (id: string, options: MigrationRequestOptions = {}) =>
+  getJson<VaultMigrationRun>(path(id), { ...options });
+export const preflightVaultMigration = (
+  body: VaultMigrationPreflight,
+  options: MigrationRequestOptions = {},
+) =>
+  requestApi<VaultMigrationRun>(`${base}/preflight`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify(body),
+    signal: options.signal,
+  });
+export const startVaultMigration = (
+  id: string,
+  planDigest: string,
+  options: MigrationRequestOptions = {},
+) =>
+  requestApi<VaultMigrationRun>(`${path(id)}/start`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ plan_digest: planDigest }),
+    signal: options.signal,
+  });
+export const cutoverVaultMigration = (id: string, options: MigrationRequestOptions = {}) =>
+  requestApi<VaultMigrationRun>(`${path(id)}/cutover`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
+export const recoverVaultMigration = (id: string, options: MigrationRequestOptions = {}) =>
+  requestApi<VaultMigrationRun>(`${path(id)}/recover`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
+export const pauseVaultMigration = (id: string, options: MigrationRequestOptions = {}) =>
+  requestApi<VaultMigrationRun>(`${path(id)}/pause`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
+export const resumeVaultMigration = (id: string, options: MigrationRequestOptions = {}) =>
+  requestApi<VaultMigrationRun>(`${path(id)}/resume`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
+export const retryVaultMigration = (id: string, options: MigrationRequestOptions = {}) =>
+  requestApi<VaultMigrationRun>(`${path(id)}/retry`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
+export const auditVaultMigration = (id: string, options: MigrationRequestOptions = {}) =>
+  requestApi<VaultMigrationRun>(`${path(id)}/full-audit`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: "{}",
+    signal: options.signal,
+  });
 export const cleanupVaultMigration = (
   id: string,
   source: boolean,
   backup?: Pick<VaultMigrationPreflight, "backup_id" | "backup_source_ref">,
+  options: MigrationRequestOptions = {},
 ) =>
-  sendJson<VaultMigrationRun>(`${path(id)}/cleanup`, "POST", {
-    confirmation: id,
-    source,
-    ...backup,
+  requestApi<VaultMigrationRun>(`${path(id)}/cleanup`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ confirmation: id, source, ...backup }),
+    signal: options.signal,
   });
-
-export const pauseVaultMigration = (id: string) =>
-  sendJson<VaultMigrationRun>(`${path(id)}/pause`, "POST", {});
-export const resumeVaultMigration = (id: string) =>
-  sendJson<VaultMigrationRun>(`${path(id)}/resume`, "POST", {});
-export const retryVaultMigration = (id: string) =>
-  sendJson<VaultMigrationRun>(`${path(id)}/retry`, "POST", {});
-export const auditVaultMigration = (id: string) =>
-  sendJson<VaultMigrationRun>(`${path(id)}/full-audit`, "POST", {});
-export const retainVaultMigration = (id: string, removeCredentials = false) =>
-  sendJson<VaultMigrationRun>(`${path(id)}/retain`, "POST", {
-    remove_credentials: removeCredentials,
+export const retainVaultMigration = (
+  id: string,
+  removeCredentials = false,
+  options: MigrationRequestOptions = {},
+) =>
+  requestApi<VaultMigrationRun>(`${path(id)}/retain`, {
+    method: "POST",
+    headers: jsonHeaders(),
+    body: JSON.stringify({ remove_credentials: removeCredentials }),
+    signal: options.signal,
   });
 export interface VaultMigrationReport extends VaultMigrationRun {
   resource_kind_totals: { resource_type: string; objects: number; bytes: number }[];
   recent_failures: VaultMigrationFailure[];
 }
-export const getVaultMigrationReport = (id: string) =>
-  getJson<VaultMigrationReport>(`${path(id)}/report`, { fresh: true });
-export async function downloadVaultMigrationReport(id: string): Promise<void> {
-  const report = await getVaultMigrationReport(id);
+export const getVaultMigrationReport = (id: string, options: MigrationRequestOptions = {}) =>
+  getJson<VaultMigrationReport>(`${path(id)}/report`, { ...options });
+export async function downloadVaultMigrationReport(
+  id: string,
+  options: MigrationRequestOptions = {},
+): Promise<void> {
+  const report = await getVaultMigrationReport(id, options);
+  options.signal?.throwIfAborted();
   const url = URL.createObjectURL(
     new Blob([JSON.stringify(report, null, 2)], { type: "application/json" }),
   );

@@ -15,7 +15,7 @@ from app.db.migrate import _alembic_config
 from app.db.url import normalize_database_url
 from app.modules.administration.database_transfer import DatabaseTransferError, transfer
 from tests.containers import postgres_url
-from tests.factories import build_file, build_model
+from tests.factories import build_file, build_model, build_multipart_model, build_tag
 from tests.factories.migration_rows import seed_schema_row
 
 pytestmark = pytest.mark.postgres
@@ -287,3 +287,171 @@ class TestDatabaseTransfer:
         with pytest.raises(DatabaseTransferError, match="verification_failed"):
             transfer(source, target, dry_run=False)
         assert inspect(target).get_table_names() == []
+
+
+class TestLibraryContractTransfer:
+    @pytest.mark.parametrize(
+        "provisioned", [False, True], ids=["empty-schema", "fresh-bootstrap"]
+    )
+    def test_preserves_versioned_library_through_database_transfer(
+        self, databases, provisioned
+    ):
+        from app.db.models import Model, ModelTagLink, MultipartModel, MultipartPart
+        from app.modules.administration.database_transfer import snapshot_postgres
+        from app.modules.library.model_views.browse import revision
+
+        source, target, _blob, model_id, _file_id = databases
+        with Session(source) as session:
+            tag = build_tag(session)
+            group = build_multipart_model(session)
+            session.add(ModelTagLink(model_id=model_id, tag_id=tag.id))
+            session.add(
+                MultipartPart(multipart_model_id=group.id, name="Body", name_key="body")
+            )
+            session.commit()
+            source_authority = revision(session)
+            model_version = session.get_one(Model, model_id).edit_version
+            editing_epoch = session.get_one(Model, model_id).edit_epoch
+            assert session.get_one(MultipartModel, group.id).edit_epoch == editing_epoch
+            group_id, group_version = (
+                group.id,
+                session.get_one(MultipartModel, group.id).edit_version,
+            )
+        if provisioned:
+            SQLModel.metadata.create_all(target)
+        transfer(source, target, dry_run=False)
+        with Session(target) as session:
+            # Normal transfer retains the copied incarnation. Search rematerialization
+            # can legitimately advance browse counters after row-proof verification.
+            assert (
+                revision(session).browse_revision.split(":")[0]
+                == source_authority.browse_revision.split(":")[0]
+            )
+            assert session.get_one(Model, model_id).edit_epoch == editing_epoch
+            assert session.get_one(MultipartModel, group_id).edit_epoch == editing_epoch
+            assert session.get_one(Model, model_id).edit_version == model_version
+            assert (
+                session.get_one(MultipartModel, group_id).edit_version == group_version
+            )
+            target_authority = revision(session)
+
+        snapshot = create_engine(f"sqlite:///{source.url.database}.portable")
+        try:
+            snapshot_postgres(target, snapshot)
+            with Session(snapshot) as session:
+                assert revision(session) == target_authority
+                assert session.get_one(Model, model_id).edit_epoch == editing_epoch
+                assert (
+                    session.get_one(MultipartModel, group_id).edit_epoch
+                    == editing_epoch
+                )
+                assert session.get_one(Model, model_id).edit_version == model_version
+                assert (
+                    session.get_one(MultipartModel, group_id).edit_version
+                    == group_version
+                )
+                before = revision(session)
+                session.execute(
+                    text(
+                        "UPDATE multipart_parts SET name='Changed' WHERE multipart_model_id=:id"
+                    ),
+                    {"id": group_id},
+                )
+                session.commit()
+                assert revision(session) != before
+                assert (
+                    session.get_one(MultipartModel, group_id).edit_version
+                    > group_version
+                )
+            with Session(target) as session:
+                session.execute(
+                    text("UPDATE models SET name='Changed' WHERE id=:id"),
+                    {"id": model_id},
+                )
+                session.commit()
+                assert revision(session) != target_authority
+                assert session.get_one(Model, model_id).edit_version > model_version
+        finally:
+            snapshot.dispose()
+
+    def test_refuses_previously_used_empty_target(self, databases):
+        source, target, *_ = databases
+        SQLModel.metadata.create_all(target)
+        with target.begin() as connection:
+            connection.execute(
+                text("UPDATE library_revision SET revision=1 WHERE id=1")
+            )
+        with pytest.raises(
+            DatabaseTransferError, match="database_transfer_target_not_empty"
+        ):
+            transfer(source, target, dry_run=False)
+        with target.connect() as connection:
+            assert (
+                connection.execute(
+                    text("SELECT revision FROM library_revision WHERE id=1")
+                ).scalar_one()
+                == 1
+            )
+
+    def test_rolls_back_failed_transfer_to_guarded_bootstrap(
+        self, databases, monkeypatch
+    ):
+        from app.modules.administration import database_transfer
+        from app.modules.library.model_views.browse import revision
+
+        source, target, *_ = databases
+        SQLModel.metadata.create_all(target)
+        with Session(target) as session:
+            before = revision(session)
+        original = database_transfer._proof
+
+        def fail_destination(connection, table, **kwargs):
+            if connection.dialect.name == "postgresql":
+                raise DatabaseTransferError("database_transfer_verification_failed")
+            return original(connection, table, **kwargs)
+
+        monkeypatch.setattr(database_transfer, "_proof", fail_destination)
+        with pytest.raises(
+            DatabaseTransferError, match="database_transfer_verification_failed"
+        ):
+            transfer(source, target, dry_run=False)
+        with Session(target) as session:
+            assert revision(session) == before
+            assert (
+                session.execute(text("SELECT count(*) FROM models")).scalar_one() == 0
+            )
+            build_model(session, "Writer still guarded")
+            assert revision(session) != before
+
+
+class TestMissingLibraryAuthority:
+    @pytest.mark.parametrize("operation", ["transfer", "preview", "snapshot"])
+    def test_refuses_missing_source_authority_without_reseeding(
+        self, databases, operation
+    ):
+        from app.modules.administration.database_transfer import snapshot_postgres
+
+        source, target, *_ = databases
+        destination = target
+        owned_snapshot = None
+        if operation == "snapshot":
+            transfer(source, target, dry_run=False)
+            owned_snapshot = create_engine(
+                f"sqlite:///{source.url.database}.missing-authority"
+            )
+            source, destination = target, owned_snapshot
+        try:
+            with source.begin() as connection:
+                connection.execute(text("DELETE FROM library_revision"))
+            with pytest.raises(
+                DatabaseTransferError,
+                match="database_transfer_source_authority_missing",
+            ):
+                if operation == "snapshot":
+                    snapshot_postgres(source, destination)
+                else:
+                    transfer(source, destination, dry_run=operation == "preview")
+            assert inspect(destination).get_table_names() == []
+        finally:
+            if owned_snapshot is not None:
+                owned_snapshot.dispose()

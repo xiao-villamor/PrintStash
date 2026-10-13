@@ -2,6 +2,596 @@
 
 ## Unreleased
 
+- G-code exported by BambuStudio 2.x now shows its slicer, estimated print time,
+  filament weight and filament length. Its header block writes
+  `; BambuStudio 02.08.02.61`, `; total estimated time: 17m 21s` and
+  `; total filament weight [g] : 6.15`, none of which the parser recognised.
+  Files already in the library are re-read in the background.
+
+- Start with only the selected language. Each translation catalog is now its
+  own asset, loaded when its language is shown, which removes about a fifth of
+  the JavaScript downloaded at startup.
+
+- Read a Model's details once when opening it. The page no longer repeats the
+  read just to confirm that nothing changed while it was connecting to live
+  updates.
+
+- Keep one events connection and one setup admission while moving between
+  application pages. Opening a Model and returning no longer hides the app
+  behind a setup probe, reopens the events socket or refetches every view.
+
+- Compress 3D preview meshes between the server and the browser. Binary STL
+  previews transfer at about half their size and ASCII STL at about an eighth,
+  and a slow connection no longer makes the proxy spool a large mesh to disk.
+
+- Keep folder descriptions and model cards together when navigating, clamp long descriptions before the first paint, and avoid fading cached library thumbnails on every visit.
+
+- Open large Models on their thumbnail. A 3D preview whose source file is over
+  16 MB is no longer downloaded just by opening the Model; the page shows its
+  size and a "Load 3D preview" action instead. Shared links and the similar
+  Models comparison follow the same rule.
+
+### Performance
+
+- A file in a bulk upload now waits when the server is busy instead of failing. Session creation was limited to 30 per minute, which held a 200-file drop to one file every two seconds and failed files that arrived faster; that limit now bounds a runaway client (600 per minute) and staging admission paces real uploads.
+
+- Halve the CPU an idle installation spends polling its job queues: lanes nobody waits on (search, maintenance, notifications, similarity, captions, expansion) are looked at every two seconds (`VAULT_JOBS_RELAXED_QUEUE_POLL_INTERVAL_SECONDS`) instead of four times a second.
+
+- Do less database work per uploaded file on SQLite: keep connections pooled instead of reopening them under load (`VAULT_SQLITE_POOL_SIZE`), open the job engine's own SQLite file in write-ahead mode, stop writing a row-level audit entry for every job, reconciler-cursor and capacity-claim heartbeat, check a step's ownership without taking the write lock, and report commit stages only for files slow enough to watch. Cancellation is noticed within half a second and worker memory is sampled ten times a second.
+
+- Release prepared thumbnail parsers before GPU eligibility/dispatch instead of repeating broker status inside each disposable process. Keep model publication ahead of background DBOS captures, preserve guarded recovery from the same geometry packet, use compact exact OBJ corner keys, and skip STL preflight scans that cannot change the minimum memory claim.
+
+- Simplify source geometry preparation and native supervision: load qualified OBJ directly, bound text admission without parsing coordinates twice, avoid redundant vertex/edge sorting, and reuse a narrow cancellation query with fresh results. Keep native settings minimal and sample each staged worker's RAM once. A fixed 250-source WSL GPU comparison improves from 497.090 to 358.937 seconds (27.79%, using the longer of the two recorded clocks in the final repeat; first candidate: 357.279 seconds), preserving all metadata, 238 byte-identical images and the same 12 invalid-source outcomes; CPU-only geometry uses the same preparation path.
+
+- Decode ASCII STL geometry once for both CPU-only and GPU-enabled ingestion, retaining bounded source blocks instead of reparsing for allocation. Preserve exact source measurements, validation and output images. The fresh 250-source GPU comparison reduces elapsed time by 2.77%; a repeated three-source CPU-only probe improves by 29.02%.
+
+- Share a single bounded source-worker execution between measurements and previews. Basic STL measurements use source-precision arrays without importing Trimesh, preserving topology and signed-volume evidence; OBJ/CAD and optional fingerprints retain their specialized analysis. Eligible small previews now prepare normals on GPU while analytic views keep their canonical policy. Preserve identical metadata and original-file integrity.
+
+- Reduce repeated compute fingerprinting and admission-ticket decoding, give cold GPU ownership its bounded startup allowance, retain canonical STL bounds without gathering another vertex array, and compile worker application bytecode during image builds. Count bounded OBJ sources under separate CPU/wall budgets so scheduling contention does not unnecessarily serialize the RAM pool.
+
+- Render compact indexed triangles with GPU bounds/framing and visual position welding, grouping model uploads and drawing into one bounded submission per batch. Retain multiple geometries in VRAM and repair degenerate normal neighborhoods locally. Release an eligible disposable parser after clean reap, then render prepared geometry and encode final pixels in the owning Job without another encoder process. Retain explicit host/CPU credit through completion; GPU refusal uses a guarded renderer without reparsing. Unready devices, unmatched qualification, insufficient headroom and optional fingerprint work retain the combined worker. Preserve publication fences and reject empty GPU frames through the existing CPU recovery path. Assemble immutable geometry packets without repeated full-buffer copies. Avoid repeated framing/encoding of validated renderer output and use quality-85/method-2 lossy WebP with exact alpha and a codec completion slot independent of parser admission; thumbnail/visual recipes track the changed rendering semantics.
+
+- Prepare large render meshes with portable GPU normal accumulation and indexed packing, using guarded per-model CPU fallback and shared RAM/VRAM accounting. Keep canonical analytic preparation separate, reuse resident GPU state, and encode accelerated WebP through the same canonical preview encoder. Version changed thumbnail and visual recipes while preserving authoritative measurements and source bytes.
+
+- Coalesce independently admitted thumbnail work across Models, preserve per-item cancellation and deadlines, and report actual model/frame batch sizes. Keep disposable worker priorities across process startup, bound OBJ/ASCII STL admission preflight, avoid redundant mesh copies, topology work and unused worker imports, and reduce durable queue dispatch latency without changing concurrency or backfill ownership.
+
+- Drive native OpenDAL source reads through its asynchronous API so slow remote storage does not retain the Python GIL. Preserve bounded streaming and conditional reads, and interrupt waits at the existing cancellation and scan deadlines.
+
+- Keep GPU thumbnail resampling, alpha conversion and vignette on the device after an exact canonical canary. Download only final pixels, avoid timeout-mode socket polling delays, and reuse validated geometry through bounded binary references instead of repeated base64 transfers. Retire completed broker references so evicted geometry can release host RAM while the owner remains idle.
+
+- GPU thumbnail evaluation can use Mesa OpenGL/D3D12 entirely inside Docker/WSL, with hardware verification independent of GPU brand. A persistent render owner reuses geometry and shaders, batches up to eight ready frames per readback, and caches repeated shaded views. Evaluation remains distinct from automatic performance qualification and operator visual acceptance; CPU fallback stays available.
+
+- Correct shared-edge opacity in portable GPU rendering; document physical RTX 5060 probes and the remaining WSL Dozen/ONNX compatibility blocker.
+
+- Optional portable compute broker for qualified WebGPU rendering and ONNX inference, resident geometry/model reuse, bounded tensor batching and administrator diagnostics. CPU-only installations retain normal ingestion. Physical GPU combinations remain unqualified pending quality, end-to-end performance and recovery gates.
+
+- Enable mesh preview readiness after its first rendered frame; verify overlay alignment, display-mode pixels, and repeated resource cleanup on WebGL/WebGPU.
+
+- Extend native mesh preview checks for camera movement, screenshot scales, capture failures, and disposal; retain WebGPU as experimental after baseline comparison.
+
+- Open Models faster from the Library: resting the pointer or keyboard focus on
+  a Model card reads its details ahead of the click.
+
+- Release the mesh preview GPU device when renderer construction or initialization cleanup fails.
+
+- Parse mesh previews in a cancellable worker and add an experimental WebGPU
+  preference with camera-preserving WebGL recovery and asynchronous screenshots.
+  WebGL remains the default; GPU performance qualification is still pending.
+
+- Request the platform-preferred GPU before enumerating other graphics backends in the optional research adapter. Preserve capability fallback, software exclusion and explicit adapter selection.
+
+- Retain expanded NVIDIA quality rejection, real-model browser comparisons and fresh-worker failure evidence; document an isolated experimental WSL/Docker diagnostic without changing production eligibility.
+
+- Automate fresh-worker GPU benchmark campaigns with retained failures and immutable output directories; add ASCII/binary STL and overlapping geometry controls.
+
+- Report native GPU readback separately from CPU face resolution and canonical shading in qualification measurements.
+
+- Record revised RTX 5060 control evidence: exact CPU/GPU images across 60 observations after precision and native cleanup fixes; production qualification remains gated.
+
+- PRI-16: preserve canonical interpolation precision in the optional WebGPU
+  adapter, bound retained geometry, and reject invalid face readback before publication.
+
+- Add an optional Python 3.14 WebGPU raster qualification adapter, adapter diagnostics,
+  frozen benchmark manifests and statistical reports. Production rendering remains CPU.
+
+- Avoid deep-cloning lexical search queries for each page; keep rank materialization
+  local to each query and reuse immutable current-recipe predicates. Measure tab
+  indicators after native layout instead of forcing layout during React commit.
+
+- Reuse bounded subtree count query structure with current roots and permissions.
+  Decode admitted thumbnails without a second native visibility wait.
+
+- Start selected collection reads before rendering their destination, cancel abandoned
+  reads, and keep pointer prefetch scheduling outside the grid's rendering path.
+- Optimize the restored tree's rendering with explicit locale dependencies, preserving
+  live language changes, drag-and-drop and pagination. Reuse immutable card projection
+  statements with fresh page/user parameters; avoid constructing unused tree ancestry.
+
+- Reuse immutable ancestry and similarity query structure while reading current
+  permissions on every request. Avoid rerendering an unselected departing grid
+  before starting a collection navigation.
+
+- Reuse HTTP-cached content-hashed assets during reload without weakening HTML
+  or bootstrap revalidation, offline fallback, or private-response isolation.
+
+- Keep scheduled upload recovery outside an active verification or Job handoff,
+  avoiding spurious upload conflicts while retaining recovery after interruption.
+- Reuse the current locale's card-date formatters without caching timestamps.
+
+- Preserve visible nesting at every collection-tree depth and align Model leaves
+  beneath their parent, keeping deep rows selectable on narrow screens.
+- Ignore system-only maintenance notices in Task Center instead of repeatedly
+  downloading an unchanged Jobs list.
+
+- Serialize search-preference writes before reading SQLite state, avoiding failures
+  when background processing commits concurrently.
+- Reduce thumbnail transfer size with quality-85 WebP color and lossless transparency,
+  preserving resolution and regenerating existing mesh/G-code previews through Jobs.
+- Restore remembered Library branches in bounded batches, prioritize visible thumbnails,
+  and keep deeply nested folders selectable on narrow screens. Load the multipart
+  editor separately from Library cards, reuse restoration counts and permission scopes,
+  and avoid repeated thumbnail access lookups and image decoding. Reuse immutable
+  similarity SQL construction while checking current permissions on every read.
+  Reuse authorized empty child levels and defer the initial event connection until
+  critical content is ready, retaining immediate permission checks. Opening the mobile
+  tree no longer competes with filter catalogs below the visible area.
+- Keep the first visit intact when the service worker installs, while still refreshing
+  an existing installation after a worker update.
+- Measure each Library destination through restored tree rows and decoded viewport
+  images, with a reproducible reference-host acceptance command and explicit failures.
+  Tie timings to committed history entries and actual input events.
+
+- Keep the collection tree visible when selecting folders, preserving open branches
+  and downloaded sibling pages without reloading them on every click.
+
+- Finish Settings cache and audit ownership: preserve pending edits during refresh,
+  reject obsolete cache-policy changes, share audit reads, and retire commands
+  when leaving a view or changing session.
+
+- Keep manual printer-material drafts after rejected saves and offer explicit review
+  before adoption; cancel obsolete reads when switching printers.
+
+- Preserve first-run storage drafts across locale changes, retire setup requests
+  on navigation, and recover one initial Library read conflict without mixing snapshots.
+
+- Keep Library view metadata out of AI Search filter requests, so filtered and saved searches remain usable.
+
+- Offer Everything and Multipart Sets as the two Library views. Filter and order
+  mixed results on the server before pagination so later matching results remain
+  reachable. Reject stale continuation pages instead of mixing catalog revisions.
+
+- Preserve each Library history entry's filters and reading position through
+  detail navigation. Bound restoration after cache eviction, explain missing
+  anchors, keep rapid folder transitions coherent and retire private snapshots
+  when the session or access changes.
+
+- Detect competing edits to Models, Multipart Sets, Documents, printer settings,
+  Profiles, Search, Vault settings, browser names, notifications, storage connections,
+  Library sources and Spoolman. Preserve drafts for explicit review after conflicts
+  or uncertain responses. Bind edits to database history so restored backups cannot
+  authorize obsolete drafts. Legacy clients retain unversioned compatibility.
+
+- Keep confirmed changes authoritative during refetch and pagination races. Remove
+  the duplicate transport GET cache and transport-owned invalidation. Feature owners
+  coordinate reads, receipts and recovery; session changes retire private requests,
+  cached results, local secrets and pending confirmations.
+
+- Retain protected thumbnail URLs while displayed, admit nearby images under a
+  four-download limit and cancel abandoned work. Bound idle encoded image data
+  without evicting mounted consumers. Preserve Shift selection after page append
+  and the reading position after removing a confirmed favorite.
+
+- Share Inbox and durable Job state across consumers. Preserve accepted uploads
+  and scans after their forms close, recover missed events and prevent disposed
+  printer subscriptions from reconnecting. Retire bulk transfers with their session.
+
+- Give settings, storage migration, backup, source management, manufacturing and
+  ZIP review explicit loading, error and recovery states. Preserve unsaved input,
+  require the reviewed destination for destructive actions and avoid replaying
+  commands after an uncertain acknowledgement. Save compound Vault configuration
+  in one transaction; retain omitted credentials and independent edit counters.
+
+- Bind browser-extension captures to the selected connection throughout download
+  and upload. Retire revoked credentials, cancelled pairing and obsolete callbacks;
+  clean up malformed upload receipts and unnecessary host permissions.
+
+- Keep route-chunk recovery bounded and localized, restrict the offline cache to
+  public static resources and recover online navigation when Cache Storage fails.
+  Retain React Router and the static Vite deployment; enforce app/package dependency
+  directions and remove obsolete navigation and invalidation compatibility APIs.
+
+- Load the Library route immediately and defer upload, tag, multipart creation
+  and ZIP review forms until opened. Prioritize cards and the bounded tree,
+  release auxiliary reads after paint or explicit interaction, and share the
+  initial Jobs snapshot with the event handshake and a one-second fallback.
+  Deliver bootstrap and hashed assets without waiting for Cache Storage, keep
+  an offline shell fallback, and bound Model pages to 24 cards. Add production
+  startup measurements against a disposable real SQLite library in Deep CI.
+  Discard reads from previous sessions, prevent late GET/blob results from
+  refilling invalidated caches, and recognize session changes across tabs.
+
+- Add storage publication authority boundary tests for incompatible receipts and stale reconciliation.
+
+- Add import download contracts for staging names, redirect and window ceilings, stream cleanup and ZIP CRC refusal.
+
+- Add thumbnail engine contracts for unavailable allocation, source files and RSS telemetry, preserving publication errors.
+
+- Add real database contracts for mesh continuation recovery, cache lease deferral and current Job withdrawal authority.
+
+- Add authenticated HTTP contracts for outliner printer-filter authority and contradictory query scopes.
+
+- Add real ZIP preview contracts for embedded 3MF budgets, unsafe member names, CRC recovery and strict PNG validation.
+
+- Add real database contracts for similarity ingestion continuation authority, durable analysis eligibility and caller write rollback.
+
+- Verify fingerprint publication preserves active caller transactions and leases,
+  rejecting detached authority, changed recipes and invalid descriptor metadata.
+
+- Verify STL publication readers preserve buffered byte semantics and cancellation,
+  refusing nonregular output and unavailable or mismatched source storage.
+
+- Verify local inference rejects missing capabilities, model assets and oversized
+  input while preserving admission recovery and read-only cached model support.
+
+- Verify viewer STL conversion refuses nonfinite facets, excess streamed output
+  and changed or missing source identities before reporting success.
+
+- Verify prepared mesh resource identity and immutable detached buffers refuse
+  incoherent evidence before native analysis.
+
+- Verify import resolver selection identities reject malformed provider responses
+  while preserving stable errors and redacting private transport data.
+
+- Verify durable ingestion receipt writer authority, result pagination and canonical
+  File confirmation through real SQLite contracts.
+
+- Verify batch session lifecycle, frozen snapshots and result context against
+  real durable receipts, including refusal of incomplete artifact commit results.
+
+- Verify retained scene measurements preserve finite dimensions when closed
+  resources collapse or numeric volume aggregation exceeds its representable range.
+
+- Verify mesh output frame boundaries reject malformed flags, incoherent evidence,
+  oversized payloads and invalid fingerprint records before publication.
+
+- Verify preparation resource lifecycle rejects malformed recovery identities,
+  preserves failed cleanup ownership and enforces source-before-native ordering.
+
+- Verify durable volume evidence reads preserve closed variants and refuse
+  incompatible scalar, method, cause or state combinations.
+
+- Verify search generation proposal provider, visual profile and aggregation
+  rejection contracts directly at the public schema boundary.
+
+- Measure whole-host native fairness in the mandatory serial resource phase,
+  retaining real workers, branch coverage and the existing timing budgets.
+
+- Isolate provider HTTP pools and host capacity between tests so a previous
+  test's ended event loop cannot affect transport shutdown.
+
+- Keep fairness qualification reads bounded to pending foreground uploads while
+  preserving exact progress totals, native budgets and its existing deadline.
+
+- Qualify backup recovery and exact deletion against versioned S3 generations;
+  verify that missing receipts on unversioned targets are refused without
+  changing the published archive.
+
+- Reset PostgreSQL work-engine state by removing only its DBOS schema, preserving
+  application tables in the shared database and rebuilding the reconciler schedule.
+
+- Run Python compatibility tests and external service contracts in independent
+  Deep CI jobs, preserving both required results and their execution limits.
+
+- Distinguish repeated uploads from same-Job retries in sustained ingestion
+  qualification, verify versioned Artifact identities, and stop after the first
+  failed mandatory control while preserving failure evidence. Configure E2E
+  SQLite connections before concurrent work starts, matching production WAL
+  initialization and native-extension startup; prepare backup recovery through
+  permanent purge with foreign-key enforcement intact.
+
+- Keep Model card tag and similarity badge reads bounded as the SQLite catalog grows, including
+  installations with stale query-planner statistics.
+
+- Defer parent-only metrics and database URL parsing in disposable mesh workers,
+  reducing measured small-model startup costs while preserving CPU outputs,
+  parent telemetry and guarded process cleanup.
+
+- Add isolated GLB/LOD qualification tools with supervised native exports, real
+  browser memory/draw/quality measurements and protected-feature checks. Retain
+  STL after measured candidate correctness, resource and performance limits.
+
+- Publish batch Artifacts before materializing later entries. Bound disposable
+  staging by files and bytes, record each entry with its Artifact transaction,
+  and resume confirmed entries without reopening their sources. Keep partial
+  failures retryable and report unknown totals until discovery finishes.
+
+- Stop withdrawn batch imports between entries and source blocks, preserving
+  committed Artifacts and durable upload sources while cleaning owned staging.
+  Copy and hash browser upload bytes in one pass, and preserve cancellation when
+  receipt cleanup fails.
+
+- Add an isolated prepared-geometry cache benchmark with bounded, checksummed
+  arrays, current-loader STL equivalence checks and supervised worker timings.
+  Keep production preparation unchanged pending demonstrated reuse and recovery
+  guarantees.
+
+- Publish viewer STL conversions from verified staged streams without buffering
+  whole outputs in the API/worker parent. Reserve expanded output space before
+  conversion, reject changed or incomplete publications, and release request
+  database connections before work hints so concurrent viewer misses share one
+  durable conversion without pool timeouts. Release native compute credits before
+  storage publication; viewer recipe 3 rejects malformed STL and float32 overflow
+  or collapsed faces, rebuilding older viewer outputs on demand.
+
+- Bound file acceptance commands independently of ordinary API workers. Keep SQL
+  sessions on their creating thread, release them while streamed bodies wait,
+  revalidate credentials before publication, and finish admitted writes before
+  returning cancellation. Slow storage or engine hints leave lightweight API
+  requests responsive; accepted imports remain durable background Jobs.
+
+- Reserve interactive discovery slots beside one active backfill Job per
+  derivation lane. Keep bounded indexed scans and durable backfill progress
+  during uploads, dispatch admitted derivatives in FIFO order, and carry Job
+  priority through shared native and source-preparation admission with aging.
+  Preserve backfill reservations across public retries and engine-acceptance
+  crashes without spending another attempt while waiting. Verify legacy queue state before starting consumers; upgrades drain and
+  restart API and workers together.
+
+- Local ONNX models reserve a shared, bounded memory partition across API and worker processes, retain warm reuse, retire idle residents under pressure, and release their credits after guarded process-tree termination.
+
+**Source installs require Python 3.14 or newer.** See [the upgrade guide](UPGRADE.md#unreleased-python-314).
+
+- Coordinate mesh CPU/RAM credits across local API and worker processes. Bound
+  source preparation separately by bytes and I/O slots, retain native credits
+  through descendant cleanup, and recover abandoned source copies before reuse.
+  Reserve memory for the requested geometry, raster dimensions and optional
+  analysis, preserving WebP output and complete fingerprints for admitted work.
+  Reduce temporary raster buffers while keeping complete frames and output pixels.
+  Report queue time independently of native execution.
+- Remove the sidebar tree’s global 500-model limit with folder-scoped pages, complete branch counts, and global paginated name search with “Open location”. Keep permissions and library views in the server query; retry failed pages without losing loaded rows (#335).
+
+- Keep backup and vault audit clock inputs within valid minutes on Python 3.14; reject `24:00` rather than treating it as midnight.
+- Preserve traceable printer display names for extension-only and genuinely named inputs on Python 3.14.
+- Require Python 3.14 for the application and shared core, pin development and container runtimes to 3.14.8, and update the mesh stack to NumPy 2.5.3, SciPy 1.18.1 and Trimesh 5.1.1.
+- Publish mesh metadata and thumbnails before optional fingerprints finish, with durable bounded recovery that preserves completed outputs after native failures.
+- Reuse immutable mesh positions and smooth normals across each visual pass.
+  Embedding views and similarity view hashes consume pixels directly without
+  repeated PNG encoding and decoding, while preserving existing preview bytes
+  and descriptor identities.
+- Retain unique 3MF resources and explicit placements through measurement and
+  preview rendering. Measure repeated instances without first allocating a whole
+  placed mesh, materialize only for admitted fingerprints or global topology,
+  and release that mesh before rendering. Keep exact dimensions and counts when
+  optional volume or fingerprint analysis fails, with explicit volume evidence.
+  Preserve finite volume when source and placement scales compensate, and clear
+  measurement topology caches before rendering even without fingerprints.
+  Refresh mesh outputs under the new eligibility and budget policy.
+- Share bounded STL source validation across measurements, full loading, fallback
+  samples and streamed previews. Validate complete source facets and stable EOF
+  before reporting coverage, retain exact full-source bounds and counts for
+  partial samples, and refuse malformed or changed sources consistently.
+- Interpret reachable Core 3MF geometry and Production external model references
+  through an explicit bounded scene reader. Refuse unsupported required
+  capabilities with typed metadata, similarity and viewer reasons while retaining
+  original downloads and independently usable embedded previews. Refresh mesh
+  derivative recipes without introducing a Lib3MF dependency.
+- Keep mesh measurements and previews available when optional fingerprint analysis
+  exceeds its triangle budget, and release analysis buffers before STL rendering fallbacks.
+  Re-derive earlier terminal refusals at updated mesh recipes.
+- Independent mesh, G-code metadata/thumbnail and binary toolpath processing controls, with deployment defaults and live administrator settings. Disabling retains published previews and lets admitted processing finish; re-enabling resumes eligible missing work (#263).
+- Harden mesh workers with pre-import address-space limits, one admission controller
+  across concurrency changes, process-tree memory accounting, and shared budgets
+  for nested CAD/streaming work (#259).
+- Report refused mesh geometry separately from usable thumbnails, retain terminal
+  failures for unchanged input, and backfill accurate metadata with recipe 3 (#259).
+
+
+**Upgrade note:** The background engine now uses DBOS 3.0. Stop all API and
+worker processes before upgrading together. Engine state migrates on startup;
+rolling back requires discarding the upgraded, disposable engine state first.
+See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
+
+### Added
+
+- Measure mesh rendering, supervised native workers and upload-to-visible
+  production DBOS ingestion through separate reproducible benchmark paths.
+  Preserve phase costs, resource observations and failed samples, with an expanded
+  versioned corpus and opt-in large inputs and hash-pinned real slicer projects.
+- Publish explicit mesh volume state, method and cause independently of similarity
+  fingerprints. Preserve historical scalar provenance, keep small measurements
+  unrounded and evaluate signed volume accurately across large translations.
+  Reject nonphysical dimensions before publication and repair unusable historical
+  measurements during the additive upgrade.
+
+- Add a frozen synthetic mesh contract corpus and record benchmark environment, limits, versions and target expectations separately from observed render results.
+
+- Mesh workers retain bounded phase costs and parent-observed resource usage in structured process logs and local Prometheus counters, including metadata-only work and failed or cancelled native processes.
+
+- Deep CI exercises the production mesh pipeline under 1 GiB and 4 GiB
+  limits on amd64 and arm64, publishing memory, failure and cleanup evidence.
+- Job details show retained ingest capacity and provide a confirmed, identity-checked
+  discard action serialized against retry. Completed staging is reconciled at
+  startup; failed input retains its existing expiry (#259).
+
+- API responses include `Server-Timing` for total request time, SQL time and
+  statement count. Requests exceeding `VAULT_SLOW_REQUEST_MS` (1,000 ms by
+  default) emit a warning with those timings and the request ID to help diagnose
+  slow library pages without logging query values.
+- The API serves the collection tree a page at a time:
+  `GET /api/v1/collections/children` lists one level (or a user's top level),
+  `GET /api/v1/collections/lookup` resolves a path with its ancestors, and
+  `GET /api/v1/collections/search` finds collections by name at a minimum role.
+  Each result carries its subtree Model count, child count and display path.
+  `GET /api/v1/collections`, which returns the whole tree, is deprecated and
+  will be removed in 0.16.
+
+### Fixed
+
+- Preserve remote scan deadlines when native metadata or streaming reads time out, so bounded imports continue instead of entering provider-error backoff.
+
+- Continue manual remote-library scans across bounded pages and time slices using durable requests committed with the saved cursor. Cancellation and provider backoff remain distinct from normal continuation.
+
+- Normalize S3 library listing timestamps to HTTP HEAD precision so unchanged Cloudflare R2 models can be indexed; retain size, ETag, version and post-download change checks.
+
+- Keep admitted editor state while setup navigation is checked, retire it on rejection, and show legacy local/S3 storage details.
+
+- Preserve confirmed Model batch results when a later request loses its response, with explicit review and conditional undo of acknowledged changes.
+
+- Bounded STL previews report whether all source triangles are represented independently from a complete source scan. Mesh processing now uses separate admission, loading, measurement and preview owners with validated geometry and fingerprint contracts.
+- Mesh workers reject unknown or malformed fingerprint result states before publication.
+- Capture and similarity commands keep the API event loop responsive through database writes, background-engine notification and response projection.
+- Preserve existing paired Point model manifests and native encoder alignment when mesh rendering recipes change. Visual vector caches still track their rendering recipe.
+- Mesh metadata preserves measurement precision, including submillimeter dimensions and small positive volumes; existing rounded measurements are recalculated.
+- Small meshes placed far from the coordinate origin retain their thumbnail
+  geometry and shading. Visual recipes now refresh previews, view fingerprints,
+  and derived image vectors while preserving original files and encoder assets.
+- Geometric verification reuses an exact point index and preserves nearest-point
+  distances for models placed far from the origin. Previous pair proofs are
+  rechecked under the new verifier recipe while retaining review decisions.
+- Ingest acceptance keeps the API event loop responsive while staging files,
+  recording work and notifying the background engine.
+
+- Keep mesh-worker memory limits and cancellation active after the child closes its reply stream.
+- Active mesh workers can release their render admission while a queued worker checks durable cancellation state.
+
+
+- The thumbnail benchmark now runs the real engine, measures persisted local thumbnail reads, and preserves failed attempts with their costs instead of reporting misleading cache timings.
+- Large STL files now retain complete bounding dimensions and facet counts when only metadata is requested; measurements no longer depend on producing a thumbnail.
+- Mesh previews and image embeddings ignore vertices unused by any face when
+  framing the surface. Existing visual derivatives are regenerated.
+- Meshes with repeated identical faces no longer expand the same thumbnail pixels
+  repeatedly, avoiding unnecessary rasterization work during ingestion.
+- Meshes with inconsistent triangle winding now report unknown volume while
+  retaining dimensions and triangle counts. Existing metadata is recalculated
+  automatically.
+- Browser-local upload queues recover as interrupted after a reload, so stale
+  tasks can be cleared. Resumable uploads retain their recovery controls, and
+  queued browser work now asks users to keep the tab open (#336).
+- 3D viewer conversions run as durable, on-demand Jobs. Requests share preparation
+  and retain failure reasons; memory refusals show a clear message while original
+  downloads and slicer handoff stay available. Hovering a model card no longer
+  starts a mesh conversion (#259).
+- Containers start with read-only Library source mounts beneath `/data`. Startup
+  ownership repair is limited to app-owned directories and preserves external
+  sources, including bind mounts on the same filesystem (#330).
+- Cancelling active mesh work now stops its native worker tree, releases capacity,
+  and preserves the original. Immediate retry cannot resume the cancelled attempt (#259).
+- Keep native STEP/STP conversion within small worker memory budgets by using serial tessellation, and classify B-rep allocation failures as resource refusals.
+
+- Background work starts on DBOS 3.0, with a persistent reconciler schedule
+  that survives process restarts and is recreated after restore.
+- Late derivative results can no longer overwrite cancellation, retries, regeneration, trashed Artifacts or replaced source bytes. Stale Job executions also cannot settle a newer attempt or reclaim its staging files.
+
+
+- Removed the duplicate Wiki entry from the profile dropdown.
+- Rendering model views for learned similarity embeddings no longer happens in
+  the API process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
+  With embeddings enabled, the similarity run rendered six views of every model
+  in the library inside the API; it now uses the same disposable worker as the
+  other mesh work. A model that exhausts memory or never finishes fails that one
+  embedding and the run continues with the rest.
+- Collection search, breadcrumbs and subtree counts now follow indexed parent
+  links, keeping these reads responsive in libraries with tens of thousands of
+  collections ([#295](https://github.com/xiao-villamor/PrintStash/issues/295)).
+- Opening the 3D viewer on a 3MF or OBJ no longer converts it inside the API
+  process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
+  The conversion runs in the same disposable worker as mesh derivatives, so a
+  model that exhausts memory or never finishes fails that one request with
+  `stl_conversion_failed` instead of taking the API down. A model that cannot
+  be converted still answers the same error; the viewer's behaviour is
+  otherwise unchanged.
+- Comparing two models during a similarity run no longer happens in the API
+  process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
+  Verification now runs in the same disposable worker as mesh derivatives, so a
+  pair whose comparison exhausts memory or never finishes is counted as a failed
+  verification and the run moves on to the next pair.
+- Analysing the whole library for similar models no longer runs in the API
+  process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
+  The fingerprint pass now uses the same disposable worker as mesh derivatives,
+  so a file that exhausts memory or never finishes is recorded as a failed
+  fingerprint for that file alone. The run carries on with the rest of the
+  library instead of taking the API down or stopping.
+- The Settings Maintenance heading now uses the same framed section treatment as neighboring tabs.
+- Opening the 3D viewer, converting to STL, and geometry comparison no longer
+  expand a 3MF's repeated parts before checking their size. These paths still
+  used a loader that composed every placed instance first, so a small project
+  file that places one part many times could exhaust the API's memory
+  ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)). They now
+  share the bounded 3MF resource loader and the same face budget as thumbnail
+  generation; an over-budget project is refused instead.
+- Manual and scheduled backup tasks now show database snapshot, file archiving,
+  archive verification, destination publication and finalization progress in
+  Tasks and Background work, including the number of files archived. Scheduled
+  backups now appear in administrators' Tasks while they run, and the latest
+  completed scheduled backup remains visible if it finished before reconnect.
+- A model file that needs more memory than expected can no longer take the API
+  down or crash-loop the container
+  ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)). Mesh
+  geometry, thumbnails and similarity fingerprints now run in a disposable
+  worker process. When a file passes its memory budget or the worker deadline,
+  the worker is killed and that one file is recorded as failed: a file over the
+  memory budget is not retried, while a timeout keeps its bounded retries. Every
+  other request keeps working. The deadline is `VAULT_MESH_WORKER_TIMEOUT_SECONDS`
+  (default 300 s).
+- Backup history disables replica retries when a run has no completed archive
+  record. Its guidance now refers to that run instead of implying that existing
+  backup archives have been lost.
+- Storage migration no longer clears destination fields when an obsolete
+  startup request finishes after the form becomes editable.
+- Storage migration deadlines now include their UTC timezone, so a fresh plan
+  remains usable and source-retention deadlines display correctly outside UTC.
+- Restoring a backup no longer fails because a completed ZIP inspection is
+  waiting for file selection. Its staged archive remains available; unfinished
+  uploads and imports still block restore until they are settled.
+- Large STL previews frame every source component and preserve ASCII geometry after large translations.
+
+- Streamed STL previews preserve valid oblique facets that the degeneracy filter could discard.
+
+- Serialize storage adoption and retirement by immutable reservation generation;
+  retain exact cleanup revocations and preserve newer objects at reused keys.
+  S3 backup deletion now requires an immutable object version. Failed commit
+  acknowledgements preserve already adopted covers, documents and embedded images.
+- Import completion prepares private source-cover candidates and switches their
+  visible pointer only under the current Job and Inbox authority.
+- Interrupted downloads, archive extraction and local copies retain exact cleanup
+  receipts and disk reservations; restart or retry reclaims their private workspaces
+  before the next input is admitted.
+- Recover maintenance capacity when a process dies after committing a Job result
+  but before its engine execution finishes, preserving the completed outcome.
+
+### Performance
+
+- Convex hull descriptors use normalized SciPy/Qhull geometry, preserving dense convex surfaces and finite extreme scales while rejecting invalid coordinates. Existing fingerprints are recalculated.
+
+- Tag counts now follow collection links when inheriting tags, so listing tags
+  stays responsive in libraries with tens of thousands of collections and
+  100,000 Models, including for users with collection-specific access.
+- **3MF geometry loads about 1.6 times faster.** The bounded 3MF loader read
+  every vertex and triangle attribute with a Python call per value; it now
+  hands each column to NumPy in one pass. A 320,000-face project went from
+  3.1 s to 1.9 s. Memory use is unchanged, and malformed attributes are still
+  refused as an invalid package.
+- **Splitting a mesh into its separate parts is about three times faster.**
+  Similarity fingerprints of STL, OBJ and other non-3MF meshes joined connected
+  faces one edge at a time in Python; a 500,000-face surface spent 4.3 s there
+  and now spends 1.4 s. The parts found are unchanged.
+- **Large libraries load their collection tree in about a second.** A library
+  with 9,000 collections and 40,000 Models took over a minute to show its
+  sidebar, because each collection's model count was checked against every
+  other collection. Non-administrators' library, tag, collection, document,
+  Multipart Model, build, search and similar-model reads no longer send their
+  whole list of visible collections with every query. The library sidebar now
+  loads one folder level at a time and starts collapsed on a first visit,
+  except along the path to the current folder. Move, upload, ZIP review and
+  new Multipart Model destinations use search instead of loading every folder.
+  Model cards and detail pages receive their folder names from the server.
+  Multipart Model browsing loads one folder page at a time; Pending Import and
+  Similar Models collection scopes use search. Settings loads grants only for
+  the collection an administrator selects, avoiding a permissions request for
+  every collection when the page opens.
+
+## 0.14.0
+
 **Running from a git checkout? The old `docker-compose.yml` is now
 `docker-compose.advanced.yml`; `docker-compose.yml` now runs the single-container
 image. See UPGRADE.md before pulling.**
@@ -10,7 +600,180 @@ image. See UPGRADE.md before pulling.**
 `/data` instead of five. Copy your data into it before starting the new file
 (one command, in UPGRADE.md), or the app starts empty at first-run setup.**
 
+### Added
+
+- ZIP uploads now prepare and validate their contents as a visible background
+  Job. When ready, a notification and Tasks open a folder-based file picker;
+  only selected 3D files are imported, through a second Job. The upload itself
+  appears in Tasks immediately, leaves the form free, and can be cancelled;
+  transfer failures remain visible there. During transfer, Tasks shows bytes,
+  percentage, upload speed and estimated time remaining. Large ZIPs stream
+  through the web proxy without an extra buffered copy; Tasks distinguishes
+  browser transfer, server receipt and ZIP preparation. The ZIP picker has
+  consistent folder and file cards, and can select whole folders or every
+  importable file in one action.
+
+- OrcaSlicer uploads now carry one versioned native metadata context. Exact
+  single-object source matches become idempotent `needs_test` G-code Revisions;
+  named-but-unknown or ambiguous sources fail without orphan rows,
+  multi-object plates never attach to their first object, and `.gcode.3mf`
+  context is supported.
+  The standard-library hook also has a non-secret diagnostic mode and keeps
+  exiting successfully when PrintStash is unavailable.
+
+- Settings → **Background work** shows every lane with a runtime concurrency
+  override, each kind of Job with its queue and schedule, the processes running
+  work, and recent failures to retry; administrators can derive missing or
+  regenerate every thumbnail or metadata output. Each source Artifact shows what
+  is still being prepared and offers a retry for a failure.
+- Optional workers: `docker-compose.advanced.yml --profile workers` adds
+  `python -m app.worker` containers beside the API, on PostgreSQL with the
+  API's volumes, declared with `VAULT_SHARED_STORAGE=true`; with
+  `VAULT_API_RUNS_JOBS=false` the API leaves every Job to them. Realtime notices
+  cross processes over PostgreSQL `NOTIFY`. Both Compose files keep running
+  everything in one process by default. `.env.example` documents the
+  background-work settings, and the advanced file forwards
+  `VAULT_MAX_RENDER_JOBS` and `VAULT_JOBS_INGEST_CONCURRENCY`;
+  `VAULT_INGEST_WORKER_COUNT`, which nothing read, is gone.
+- Similar candidates are available from the Model detail Similar tab. The
+  library-wide Similar Models page is linked from Library tools on desktop and
+  remains in mobile navigation.
+- The search bar now uses an icon-only AI control to switch between AI and
+  keyword results. Search results use the full browsing surface with visible
+  filters and simpler result cards instead of a nested results panel. Print
+  duration filters show readable time in the results toolbar.
+- **First administrator from the deployment.** `VAULT_SETUP_MODE=environment`
+  with `VAULT_SETUP_ADMIN_USERNAME` and `VAULT_SETUP_ADMIN_PASSWORD` (plus
+  optional `VAULT_SETUP_ADMIN_EMAIL`) creates the first administrator at
+  startup, for app-store install forms and unattended deployments that cannot
+  use browser registration. The administrator signs in and chooses storage in
+  the browser. The variables are used once and never change an existing
+  account. The mode and variables are checked together: a contradicting
+  combination keeps setup closed instead of silently falling back to browser
+  registration.
+- App-store manifests for Runtipi, Umbrel and CasaOS/ZimaOS live in
+  `catalogues/` and are published with each release. The Unraid template now
+  shows optional administrator username, password and email fields, and the
+  `PUID`/`PGID` fields, without opening Advanced.
+- When the browser cannot create the first administrator, the setup page now
+  says why and lists what to change: the address PrintStash saw, or the
+  first-run variables that don't fit together. It previously showed a single
+  "registration is disabled" message.
+- DXF files can be imported as source Artifacts, downloaded with their original
+  bytes, and included in backups. Drawing previews are not yet available.
+- Managed source Artifacts can be moved to trash and restored individually from
+  Model detail. The Model, sibling Artifacts, Revisions and print history remain.
+  Linked Library-source originals stay protected.
+- A PNG version of the PrintStash icon for Unraid and other container dashboards
+  that cannot use SVG icons.
+
+- AI Search adds transactional text indexing for Models, Collections, Multipart
+  Models and Documents, authorized lexical suggestions, hybrid results with match
+  evidence, and local image/geometry search. Image queries support file selection,
+  drag-and-drop and device camera capture. Pinned BGE, CLIP and OpenShape models
+  use one bounded CPU runtime; acquisition and activation require explicit action.
+  AI inference is optional and off by default; library features and ordinary
+  keyword search require no model, inference server or OpenAI account.
+- AI Search settings manage encrypted compatible endpoints, model provenance,
+  capacity estimates and resumable index rebuilds. Serving generations remain
+  available during replacement; float, int8/binary and approved MRL transforms
+  preserve native vectors. SQLite/PostgreSQL derivatives can fall back to portable
+  retrieval and rebuild after restore. Local models warm after restart while
+  lexical search remains available.
+- Separate captions preserve human descriptions and require explicit render
+  consent. Editable print-history filters use actual duration and timezone-aware
+  calendar bounds; optional personal natural-language consent enables parsing and
+  Saved Views. Optional local SPLADE expansion stores bounded weighted terms
+  separately from original text. The AI master disables these inference consumers;
+  query text and images stay out of durable search data and request/error logs.
+- PostgreSQL supports the existing backup API through verified portable snapshots.
+  A dry-run-first SQLite-to-PostgreSQL command preserves encrypted fields, IDs,
+  cyclic library references and native vector bytes without re-embedding.
+- **Similar Models** offers opt-in local geometry analysis, resumable library scans,
+  a filtered review queue and synchronized comparisons at shared physical scale.
+  Evidence confirmation keeps each Model, Artifact and Revision separate; verified
+  part/plate matches can create or extend an existing Multipart Model.
+- Full installations can analyze STEP assemblies and use operator-supplied CPU
+  ONNX models for local text-to-shape or Model queries. Learned neighbors remain
+  separate from verified geometry, and analysis never downloads model weights.
+
+- Verified, resumable Vault migration with create-only destination copies,
+  online ingestion deltas, journal-backed cutover recovery, generation-pinned
+  reads, and explicit receipt-scoped source retention and cleanup (#104).
+
+- Multipart model selection now browses thumbnail cards and nested collections,
+  pages through large libraries, and keeps multiple selections across searches
+  and pages. Add selected Models as separate parts or as variants of one part.
+
+- Optional scheduled Quick and Full Vault audits with maintenance windows, safe regression and recovery alerts, history, and verified opt-in derived-data repair.
+
+- **Storage presets:** Synology, TrueNAS, QNAP and Unraid mounted-folder guidance; explicit Synology/QNAP WebDAV, MinIO, Garage, SeaweedFS, Hetzner Object Storage, Storage Box SFTP/WebDAV, and Koofr connections. Presets reuse existing transports and encrypted credentials, with endpoint validation and separate delivery/safety facts.
+
+- Capacity admission supports percentage headroom and retains durable upload, migration and restore budgets across process failure.
+
+- Storage insights with logical and unique-object inventory, shared-volume capacity reservations, dated growth evidence, and explicit audited cleanup for expired staging and receipt-verified derived STL cache. Heavy operations now preserve configurable disk headroom before allocation.
+
+- Download strategy and proxied-byte diagnostics use bounded labels; signed query credentials are redacted from application and access logs.
+
+- Authorized Artifact downloads can offload managed S3 bodies through short-lived
+  HTTPS redirects when browser CORS is supported. Local files retain range
+  delivery; originals, previews and thumbnails now revalidate privately, and
+  shares/slicer downloads remain noncacheable.
+
+- The unified Docker image runs the full API and web UI in one container,
+  with the default single-service Compose file and tested AMD64/ARM64 publishing
+  to GHCR.
+
+- Optional verified remote Artifact cache with bounded disk usage, active-reader leases, administrator controls, and authoritative audit bypass.
+
+- Successful browser-extension CI jobs provide the validated Chrome Web Store
+  ZIP as a direct download, retained for 30 days.
+
+- The browser importer includes offline help and privacy information, with a
+  validated Chrome Web Store ZIP command and a publishing guide.
+
+- Vault, Library and backup connection forms use one typed provider catalogue.
+  S3 and Nextcloud presets resolve consistently across uses. Connection editing
+  preserves omitted credentials, supports explicit replacement and prevents
+  changing a target while linked sources or owned backups depend on it.
+
+- BGCODE v1 toolpath previews use the pinned official libbgcode converter in full
+  and lite API images on amd64/arm64. Conversion and browser parsing have explicit
+  resource limits; G92 coordinate resets and G2/G3 arcs are rendered. Travel lifts
+  no longer create empty layers. Originals
+  remain unchanged for downloads and PrusaLink.
+
+- Backup run history records every selected destination, including invalid
+  connections and partial failures. Administrators can retry an exact failed
+  replica from a verified surviving archive; successful copies remain available.
+  Publication, verification and retry history are reported separately in Settings
+  and operational health.
+
+- Multipart builds snapshot part quantities and selected Revisions for a concrete
+  manufacturing run. Linked print jobs reserve units; explicit usable-output
+  confirmations track missing pieces and retain previous physical attempts.
+  Builds can be duplicated with fresh results or archived with their history.
+
+- Remote Library discovery streams large directories into a durable inventory.
+  Completed pages resume without rereading the directory, interrupted discovery
+  cannot remove linked Artifacts, and transport deadlines bound stalled requests.
+  Setup probes inspect only their own prefix. S3, WebDAV and SFTP directory
+  benchmarks cover 1,000, 10,000 and 100,000 entries.
+
+- Browser-based first-owner registration on explicitly enabled trusted networks,
+  with a guided account, storage-check and first-model flow. Local Compose no
+  longer requires a setup credential from API logs. Database serialization
+  prevents competing API processes from creating multiple initial administrators;
+  authenticated recovery preserves an account when storage preparation is pending.
+
+- A minimal, standalone Compose file for local deployment, with optional settings
+  and customization examples in a separate deployment guide.
+
 ### Changed
+
+- The library filter panel names its file-format group **File type**, matching the
+  active-filter chip ("file type: STL") and the Spanish panel ("Tipo de archivo"),
+  instead of "Artifact".
 
 - Background work settings now lead with running, waiting, and failed work and
   show each active Job's state, progress and cancel action. They also show where
@@ -88,124 +851,78 @@ image. See UPGRADE.md before pulling.**
   tuning has its own view; server editing and custom model choices no longer
   depend on nested dropdown sections.
 
+- Storage and Maintenance settings now lead with plain-language tasks, usage, and
+  library checks. Technical cache, migration, and audit controls open on demand;
+  Maintenance actions and backup verification align across narrow screens;
+  Similar Models has its own analysis and paired candidate review flow. An empty
+  audit history no longer generates a failed latest-audit request, and schedules
+  remain available if history fails to load. Collection usage now compares sizes
+  in a compact view with readable B, KB, MB, or GB units and direct Model drilldown.
+  Storage insights now highlights stored files and free space, groups usage by
+  purpose, and shows a dated history chart. File types and provider evidence remain
+  available in Measurement details with readable file-type labels. Collection
+  storage now shows recorded sizes with model counts instead of bars scaled to
+  the largest item on each page. Opening a collection now shows its models in
+  the same fixed-size Collection storage area, preserving the two-column
+  collection layout and links to Model details. Model pages fit fully above the
+  pager even for large collections. Pagination
+  shows the visible range, and recent storage activity appears directly when
+  there is something to report. Cleanup actions appear only for measured
+  candidates and lead with the reclaimable size.
+
+- The getting-started reminder can be dismissed with Don't show again. The choice
+  is remembered per user in the current browser across Settings and the empty library.
+
+- First-run setup uses a centered, responsive form with inline password visibility
+  controls. Storage choices and server folders are visible immediately, with a
+  clear access-check step before account creation and guidance in English and Spanish.
+  A compact branded frame, slim progress steps, and a prominent server-storage
+  choice bring the guide closer to the app's forms and reduce mobile scrolling.
+  The first-model guide now offers a focused file upload or a two-field folder
+  connection that starts scanning immediately. Upload progress, recoverable scan
+  errors, and verified Model links stay visible in the guide; backup and printer
+  shortcuts follow the first Model.
+
+- Artifact downloads use the canonical `/files/{id}/download` endpoint. The
+  separate `download-url` and `download-direct` endpoints have been removed.
+
+- Interface text, accessible labels, errors, plural counts and offline screens
+  use shared language catalogs. Dates and numbers follow the selected language;
+  the language menu supports adding further locales without a two-language toggle.
+  Catalogs are static, typo-friendly sources with guarded imperative feedback and
+  a safe scaffold command for adding complete language drafts.
+
+- Backend code is organized by capability, with separate startup, storage,
+  backup recovery and library query modules. G-code Revision deletion uses a
+  shared business operation with product-specific authorization and persistence.
+
+- The simple Docker Compose deployment now uses the light API image.
+
+- The browser extension is now named PrintStash in the browser, help and store
+  listing. Its connection settings and extension identity are unchanged.
+
 ### Performance
 
-- **Imports no longer copy files into local storage.** A staged upload, URL
-  import, library-transfer archive entry or Bambu print capture
-  becomes its library file by hard link when staging shares the library's
-  mount, which the single `/data` volume guarantees: instant, whatever the file
-  size, with no second copy on disk. Local backups publish their archive the
-  same way when no remote replica needs it. Where a link is impossible (another
-  mount, or a filesystem without hard links) the file is copied as before, and
-  Settings warns "Imports are copied, not hard-linked" with a link to the
-  storage layout guide, which lists the layouts that keep hard links.
-
-### Added
-
-- ZIP uploads now prepare and validate their contents as a visible background
-  Job. When ready, a notification and Tasks open a folder-based file picker;
-  only selected 3D files are imported, through a second Job. The upload itself
-  appears in Tasks immediately, leaves the form free, and can be cancelled;
-  transfer failures remain visible there. During transfer, Tasks shows bytes,
-  percentage, upload speed and estimated time remaining. Large ZIPs stream
-  through the web proxy without an extra buffered copy; Tasks distinguishes
-  browser transfer, server receipt and ZIP preparation. The ZIP picker has
-  consistent folder and file cards, and can select whole folders or every
-  importable file in one action.
-
-- OrcaSlicer uploads now carry one versioned native metadata context. Exact
-  single-object source matches become idempotent `needs_test` G-code Revisions;
-  named-but-unknown or ambiguous sources fail without orphan rows,
-  multi-object plates never attach to their first object, and `.gcode.3mf`
-  context is supported.
-  The standard-library hook also has a non-secret diagnostic mode and keeps
-  exiting successfully when PrintStash is unavailable.
-
-- Settings → **Background work** shows every lane with a runtime concurrency
-  override, each kind of Job with its queue and schedule, the processes running
-  work, and recent failures to retry; administrators can derive missing or
-  regenerate every thumbnail or metadata output. Each source Artifact shows what
-  is still being prepared and offers a retry for a failure.
-- Optional workers: `docker-compose.advanced.yml --profile workers` adds
-  `python -m app.worker` containers beside the API, on PostgreSQL with the
-  API's volumes, declared with `VAULT_SHARED_STORAGE=true`; with
-  `VAULT_API_RUNS_JOBS=false` the API leaves every Job to them. Realtime notices
-  cross processes over PostgreSQL `NOTIFY`. Both Compose files keep running
-  everything in one process by default. `.env.example` documents the
-  background-work settings, and the advanced file forwards
-  `VAULT_MAX_RENDER_JOBS` and `VAULT_JOBS_INGEST_CONCURRENCY`;
-  `VAULT_INGEST_WORKER_COUNT`, which nothing read, is gone.
-- Similar candidates are available from the Model detail Similar tab. Mobile
-  navigation retains library-wide Similar Models discovery.
-- The search bar now uses an icon-only AI control to switch between AI and
-  keyword results. Search results use the full browsing surface with visible
-  filters and simpler result cards instead of a nested results panel. Print
-  duration filters show readable time in the results toolbar.
-- **First administrator from the deployment.** `VAULT_SETUP_MODE=environment`
-  with `VAULT_SETUP_ADMIN_USERNAME` and `VAULT_SETUP_ADMIN_PASSWORD` (plus
-  optional `VAULT_SETUP_ADMIN_EMAIL`) creates the first administrator at
-  startup, for app-store install forms and unattended deployments that cannot
-  use browser registration. The administrator signs in and chooses storage in
-  the browser. The variables are used once and never change an existing
-  account. The mode and variables are checked together: a contradicting
-  combination keeps setup closed instead of silently falling back to browser
-  registration.
-- App-store manifests for Runtipi, Umbrel and CasaOS/ZimaOS live in
-  `catalogues/` and are published with each release. The Unraid template now
-  shows optional administrator username, password and email fields, and the
-  `PUID`/`PGID` fields, without opening Advanced.
-- When the browser cannot create the first administrator, the setup page now
-  says why and lists what to change: the address PrintStash saw, or the
-  first-run variables that don't fit together. It previously showed a single
-  "registration is disabled" message.
-- DXF files can be imported as source Artifacts, downloaded with their original
-  bytes, and included in backups. Drawing previews are not yet available.
-- Managed source Artifacts can be moved to trash and restored individually from
-  Model detail. The Model, sibling Artifacts, Revisions and print history remain.
-  Linked Library-source originals stay protected.
-- A PNG version of the PrintStash icon for Unraid and other container dashboards
-  that cannot use SVG icons.
-
-- AI Search adds transactional text indexing for Models, Collections, Multipart
-  Models and Documents, authorized lexical suggestions, hybrid results with match
-  evidence, and local image/geometry search. Image queries support file selection,
-  drag-and-drop and device camera capture. Pinned BGE, CLIP and OpenShape models
-  use one bounded CPU runtime; acquisition and activation require explicit action.
-  AI inference is optional and off by default; library features and ordinary
-  keyword search require no model, inference server or OpenAI account.
-- AI Search settings manage encrypted compatible endpoints, model provenance,
-  capacity estimates and resumable index rebuilds. Serving generations remain
-  available during replacement; float, int8/binary and approved MRL transforms
-  preserve native vectors. SQLite/PostgreSQL derivatives can fall back to portable
-  retrieval and rebuild after restore. Local models warm after restart while
-  lexical search remains available.
-- Separate captions preserve human descriptions and require explicit render
-  consent. Editable print-history filters use actual duration and timezone-aware
-  calendar bounds; optional personal natural-language consent enables parsing and
-  Saved Views. Optional local SPLADE expansion stores bounded weighted terms
-  separately from original text. The AI master disables these inference consumers;
-  query text and images stay out of durable search data and request/error logs.
-- PostgreSQL supports the existing backup API through verified portable snapshots.
-  A dry-run-first SQLite-to-PostgreSQL command preserves encrypted fields, IDs,
-  cyclic library references and native vector bytes without re-embedding.
-- **Similar Models** offers opt-in local geometry analysis, resumable library scans,
-  a filtered review queue and synchronized comparisons at shared physical scale.
-  Evidence confirmation keeps each Model, Artifact and Revision separate; verified
-  part/plate matches can create or extend an existing Multipart Model.
-- Full installations can analyze STEP assemblies and use operator-supplied CPU
-  ONNX models for local text-to-shape or Model queries. Learned neighbors remain
-  separate from verified geometry, and analysis never downloads model weights.
+- Direct browser uploads to S3-compatible storage are published by copying the
+  finished upload inside the bucket instead of uploading it again from
+  PrintStash. The copy is create-only and pinned to the verified object, and is
+  used only when the startup probe proves the endpoint refuses a changed source
+  and an overwrite (`server_side_copy` in the storage diagnostics); other
+  endpoints keep uploading the verified copy.
+- S3 uploads of staged files send their parts in parallel straight from the
+  file, without first copying it into a temporary spool. Adopting an existing
+  S3 object hashes it as a stream with bounded memory.
 
 ### Fixed
 
+- Similar model analysis now appears in Tasks with live run status and a link back
+  to the analysis page. Starting a second scan for the same scope shows a clear
+  explanation instead of a connection error.
+
+- ZIP imports now show how many selected Models have been imported while work is running. The task progress bar advances for each file attempted, including files that fail or are skipped.
+
 - Completing first-run setup now clears task history left in the browser by a
   previous installation, so old Jobs no longer appear as failed in a new vault.
-- G-code exported by BambuStudio 2.x now shows its slicer, estimated print time,
-  filament weight and filament length. Its header block writes
-  `; BambuStudio 02.08.02.61`, `; total estimated time: 17m 21s` and
-  `; total filament weight [g] : 6.15`, none of which the parser recognised.
-  The G-code metadata recipe moves to version 2, so files already in the
-  library are re-read in the background.
 
 - **3MF imports no longer exhaust container memory on repeated project parts.** Mesh metadata and previews now use a bounded 3MF resource loader that checks placed instances before composing geometry. Over-budget projects keep their original Artifact and embedded preview without crashing the API; existing mesh derivatives are refreshed at the new recipe version. ([#259](https://github.com/xiao-villamor/PrintStash/issues/259))
 
@@ -380,138 +1097,6 @@ image. See UPGRADE.md before pulling.**
 
 - Pending Imports remain readable when an older or damaged capture manifest is incomplete, without overwriting the stored capture data.
 
-### Changed
-
-- Storage and Maintenance settings now lead with plain-language tasks, usage, and
-  library checks. Technical cache, migration, and audit controls open on demand;
-  Maintenance actions and backup verification align across narrow screens;
-  Similar Models has its own analysis and paired candidate review flow. An empty
-  audit history no longer generates a failed latest-audit request, and schedules
-  remain available if history fails to load. Collection usage now compares sizes
-  in a compact view with readable B, KB, MB, or GB units and direct Model drilldown.
-  Storage insights now highlights stored files and free space, groups usage by
-  purpose, and shows a dated history chart. File types and provider evidence remain
-  available in Measurement details with readable file-type labels. Collection
-  storage now shows recorded sizes with model counts instead of bars scaled to
-  the largest item on each page. Opening a collection now shows its models in
-  the same fixed-size Collection storage area, preserving the two-column
-  collection layout and links to Model details. Model pages fit fully above the
-  pager even for large collections. Pagination
-  shows the visible range, and recent storage activity appears directly when
-  there is something to report. Cleanup actions appear only for measured
-  candidates and lead with the reclaimable size.
-
-- The getting-started reminder can be dismissed with Don't show again. The choice
-  is remembered per user in the current browser across Settings and the empty library.
-
-- First-run setup uses a centered, responsive form with inline password visibility
-  controls. Storage choices and server folders are visible immediately, with a
-  clear access-check step before account creation and guidance in English and Spanish.
-  A compact branded frame, slim progress steps, and a prominent server-storage
-  choice bring the guide closer to the app's forms and reduce mobile scrolling.
-  The first-model guide now offers a focused file upload or a two-field folder
-  connection that starts scanning immediately. Upload progress, recoverable scan
-  errors, and verified Model links stay visible in the guide; backup and printer
-  shortcuts follow the first Model.
-
-- Artifact downloads use the canonical `/files/{id}/download` endpoint. The
-  separate `download-url` and `download-direct` endpoints have been removed.
-
-- Interface text, accessible labels, errors, plural counts and offline screens
-  use shared language catalogs. Dates and numbers follow the selected language;
-  the language menu supports adding further locales without a two-language toggle.
-  Catalogs are static, typo-friendly sources with guarded imperative feedback and
-  a safe scaffold command for adding complete language drafts.
-
-- Backend code is organized by capability, with separate startup, storage,
-  backup recovery and library query modules. G-code Revision deletion uses a
-  shared business operation with product-specific authorization and persistence.
-
-- The simple Docker Compose deployment now uses the light API image.
-
-- The browser extension is now named PrintStash in the browser, help and store
-  listing. Its connection settings and extension identity are unchanged.
-
-### Added
-
-- Verified, resumable Vault migration with create-only destination copies,
-  online ingestion deltas, journal-backed cutover recovery, generation-pinned
-  reads, and explicit receipt-scoped source retention and cleanup (#104).
-
-- Multipart model selection now browses thumbnail cards and nested collections,
-  pages through large libraries, and keeps multiple selections across searches
-  and pages. Add selected Models as separate parts or as variants of one part.
-
-- Optional scheduled Quick and Full Vault audits with maintenance windows, safe regression and recovery alerts, history, and verified opt-in derived-data repair.
-
-- **Storage presets:** Synology, TrueNAS, QNAP and Unraid mounted-folder guidance; explicit Synology/QNAP WebDAV, MinIO, Garage, SeaweedFS, Hetzner Object Storage, Storage Box SFTP/WebDAV, and Koofr connections. Presets reuse existing transports and encrypted credentials, with endpoint validation and separate delivery/safety facts.
-
-- Capacity admission supports percentage headroom and retains durable upload, migration and restore budgets across process failure.
-
-- Storage insights with logical and unique-object inventory, shared-volume capacity reservations, dated growth evidence, and explicit audited cleanup for expired staging and receipt-verified derived STL cache. Heavy operations now preserve configurable disk headroom before allocation.
-
-- Download strategy and proxied-byte diagnostics use bounded labels; signed query credentials are redacted from application and access logs.
-
-- Authorized Artifact downloads can offload managed S3 bodies through short-lived
-  HTTPS redirects when browser CORS is supported. Local files retain range
-  delivery; originals, previews and thumbnails now revalidate privately, and
-  shares/slicer downloads remain noncacheable.
-
-- Grype scans every AMD64 and ARM64 container image in CI and scans immutable
-  publishing digests before promotion. Each run retains readable, JSON and SARIF
-  vulnerability reports for 90 days and sends trusted-run results to GitHub code
-  scanning when it is available.
-
-- An optional unified Docker image runs the full API and web UI in one container,
-  with a single-service Compose file and tested AMD64/ARM64 publishing to GHCR.
-
-- Optional verified remote Artifact cache with bounded disk usage, active-reader leases, administrator controls, and authoritative audit bypass.
-
-- Successful browser-extension CI jobs provide the validated Chrome Web Store
-  ZIP as a direct download, retained for 30 days.
-
-- The browser importer includes offline help and privacy information, with a
-  validated Chrome Web Store ZIP command and a publishing guide.
-
-- Vault, Library and backup connection forms use one typed provider catalogue.
-  S3 and Nextcloud presets resolve consistently across uses. Connection editing
-  preserves omitted credentials, supports explicit replacement and prevents
-  changing a target while linked sources or owned backups depend on it.
-
-- BGCODE v1 toolpath previews use the pinned official libbgcode converter in full
-  and lite API images on amd64/arm64. Conversion and browser parsing have explicit
-  resource limits; G92 coordinate resets and G2/G3 arcs are rendered. Travel lifts
-  no longer create empty layers. Originals
-  remain unchanged for downloads and PrusaLink.
-
-- Backup run history records every selected destination, including invalid
-  connections and partial failures. Administrators can retry an exact failed
-  replica from a verified surviving archive; successful copies remain available.
-  Publication, verification and retry history are reported separately in Settings
-  and operational health.
-
-- Multipart builds snapshot part quantities and selected Revisions for a concrete
-  manufacturing run. Linked print jobs reserve units; explicit usable-output
-  confirmations track missing pieces and retain previous physical attempts.
-  Builds can be duplicated with fresh results or archived with their history.
-
-- Remote Library discovery streams large directories into a durable inventory.
-  Completed pages resume without rereading the directory, interrupted discovery
-  cannot remove linked Artifacts, and transport deadlines bound stalled requests.
-  Setup probes inspect only their own prefix. S3, WebDAV and SFTP directory
-  benchmarks cover 1,000, 10,000 and 100,000 entries.
-
-- Browser-based first-owner registration on explicitly enabled trusted networks,
-  with a guided account, storage-check and first-model flow. Local Compose no
-  longer requires a setup credential from API logs. Database serialization
-  prevents competing API processes from creating multiple initial administrators;
-  authenticated recovery preserves an account when storage preparation is pending.
-
-- A minimal, standalone Compose file for local deployment, with optional settings
-  and customization examples in a separate deployment guide.
-
-### Fixed
-
 - Browser pairing accepts local addresses without a scheme and explains invalid
   setup input. First-run setup keeps pairing controls visible in the popup;
   transfers remind users to keep it open until completion. Chrome and Edge
@@ -554,6 +1139,25 @@ image. See UPGRADE.md before pulling.**
   administrator declaration; changes invalidate an approved plan.
 - Remote Library sources reject incomplete or oversized downloads before
   indexing, so a truncated first read cannot create an Artifact from partial bytes.
+
+### Performance
+
+- Bound each geometric similarity comparison to three minutes so a pathological
+  mesh pair cannot occupy the scan worker for hours; exhausted pairs are counted
+  as failed verifications and the scan continues.
+- Similar Model analysis now reuses triangle measurements during surface
+  comparisons and avoids Trimesh array tracking inside geometry calculations,
+  reducing CPU time without changing comparison evidence.
+
+- **Imports no longer copy files into local storage.** A staged upload, URL
+  import, library-transfer archive entry or Bambu print capture
+  becomes its library file by hard link when staging shares the library's
+  mount, which the single `/data` volume guarantees: instant, whatever the file
+  size, with no second copy on disk. Local backups publish their archive the
+  same way when no remote replica needs it. Where a link is impossible (another
+  mount, or a filesystem without hard links) the file is copied as before, and
+  Settings warns "Imports are copied, not hard-linked" with a link to the
+  storage layout guide, which lists the layouts that keep hard links.
 
 ## 0.13.0
 

@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from app.core.config import settings as environment
 from app.core.timezones import timezone_name
 from app.modules.inference.endpoint import EndpointParameters
+from app.schemas.editing import EditingBase
 
 
 class EndpointProposal(EndpointParameters):
@@ -112,7 +113,7 @@ class SearchSettings(BaseModel):
     ] = Field(default_factory=dict, max_length=64)
 
 
-class SearchSettingsRead(BaseModel):
+class SearchSettingsRead(EditingBase):
     settings: SearchSettings
     endpoints: list[EndpointRead]
     environment_endpoints: list[Literal["embedding", "chat"]] = Field(

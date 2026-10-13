@@ -19,10 +19,11 @@ import type { ModelRead } from "@/types";
 
 const editor: ModelMetaEditor = {
   collection: "",
+  collectionLabel: null,
   setCollection: () => {},
   catOpen: false,
   setCatOpen: () => {},
-  collections: [],
+  allowRoot: true,
   description: "",
   setDescription: () => {},
   sourceUrl: "",
@@ -39,12 +40,15 @@ const editor: ModelMetaEditor = {
 };
 
 const model: ModelRead = {
+  edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  edit_version: 1,
   id: 1,
   name: "Calibration cube",
   slug: "calibration-cube",
   hash: "hash",
   collection: null,
   collection_id: null,
+  collection_label: null,
   description: null,
   source_url: null,
   effective_role: "admin",
@@ -54,6 +58,7 @@ const model: ModelRead = {
   updated_at: "2026-08-24T00:00:00Z",
   files: [],
   starred: false,
+  derivatives_revision: "0",
 };
 
 function renderOverview(sourceUrl: string) {

@@ -1,9 +1,7 @@
 # Similar Models fingerprints retrieve evidence without defining identity
 
 Status: Accepted; the standalone geometry, review, composition, STEP and local
-inference workflows are implemented. Remaining acceptance work is
-tracked in the [coverage matrix](0005-similar-models-coverage.md) and the
-[implementation plan for #154](https://github.com/xiao-villamor/PrintStash/issues/154#issuecomment-5622781316).
+inference workflows are implemented.
 
 Source-byte SHA-256 remains Model identity. Similar Models computes disposable,
 versioned evidence from analysis copies; it never rewrites an Artifact or

@@ -82,7 +82,7 @@ async def _call_supported_kwargs(action: AsyncAction, *args: Any, **kwargs: Any)
 
     try:
         parameters = inspect.signature(action).parameters.values()
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return await action(*args, **kwargs)
     if not any(
         parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
@@ -235,7 +235,7 @@ class ElegooCentauriClient:
         raw_progress = getattr(status, "progress", 0)
         try:
             progress = float(raw_progress or 0) / 100.0
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             progress = 0.0
         print_info = getattr(status, "print_info", None)
         raw = getattr(status, "raw", {})

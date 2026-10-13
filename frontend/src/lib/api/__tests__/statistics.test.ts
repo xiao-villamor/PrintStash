@@ -8,7 +8,6 @@
  */
 import { afterEach, beforeEach, describe, it, vi } from "vitest";
 
-import { invalidateApiCache } from "@/lib/api/request";
 import { getPrintStatistics } from "@/lib/api/statistics";
 
 import { expectRequest, fetchMock, respondWith } from "./_wire";
@@ -16,7 +15,7 @@ import { expectRequest, fetchMock, respondWith } from "./_wire";
 beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
-  invalidateApiCache();
+
   window.localStorage.clear();
 });
 

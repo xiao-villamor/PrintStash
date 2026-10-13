@@ -8,8 +8,9 @@
  * merely started, or a different kind, is not an arrival.
  */
 import { renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { clearLogin, storeLogin } from "@/lib/auth-store";
 import { setEventSocketFactory, type EventSocket } from "@/lib/events";
 import {
   ARRIVAL_COALESCE_MS,
@@ -52,9 +53,12 @@ function deliver(frame: { type: string; model_id?: number; kind?: string; state?
 }
 
 beforeEach(() => {
+  storeLogin("", { id: 7, username: "maker", email: null, is_superuser: false });
   socket = new FakeSocket();
   setEventSocketFactory(async () => socket);
 });
+
+afterEach(() => clearLogin());
 
 describe("useThumbnailArrivals", () => {
   it("follows only the Models still waiting for a thumbnail", async () => {

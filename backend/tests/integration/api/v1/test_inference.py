@@ -271,6 +271,8 @@ class TestReadSettings:
 
         assert response.status_code == 200, response.text
         assert response.json() == {
+            "edit_epoch": response.json()["edit_epoch"],
+            "edit_version": 1,
             "settings": {
                 "enabled": False,
                 "lexical_backend": "auto",
@@ -325,6 +327,159 @@ class TestReadSettings:
         response = client.get("/api/v1/config/ai-search", headers=user_headers())
 
         assert response.status_code == 403, response.text
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        pytest.param("PUT", "/api/v1/config/ai-search", id="put"),
+        pytest.param("PATCH", "/api/v1/search/settings", id="patch"),
+    ],
+)
+class TestConditionalSearchSettings:
+    def test_requires_the_opted_in_editing_precondition(
+        self, client, auth_headers, method, path
+    ):
+        before = client.get(path, headers=auth_headers)
+        assert before.status_code == 200, before.text
+
+        response = client.request(
+            method,
+            path,
+            headers=auth_headers | {"X-PrintStash-Edit-Contract": "conditional-v1"},
+            json={"enabled": True},
+        )
+
+        assert response.status_code == 428, response.text
+        assert response.json()["detail"] == "edit_precondition_required"
+        after = client.get(path, headers=auth_headers)
+        assert after.json() == before.json()
+
+    def test_rejects_a_stale_settings_write(self, client, auth_headers, method, path):
+        original = client.get(path, headers=auth_headers)
+        assert original.status_code == 200, original.text
+        assert "etag" in original.headers, original.text
+        headers = auth_headers | {
+            "X-PrintStash-Edit-Contract": "conditional-v1",
+            "If-Match": original.headers["etag"],
+        }
+        accepted = client.request(method, path, headers=headers, json={"enabled": True})
+        assert accepted.status_code == 200, accepted.text
+
+        stale = client.request(method, path, headers=headers, json={"enabled": False})
+
+        assert stale.status_code == 412, stale.text
+        assert stale.json()["detail"] == "edit_conflict"
+        after = client.get(path, headers=auth_headers)
+        assert after.json()["settings"]["enabled"] is True
+        assert after.headers["etag"] == accepted.headers["etag"]
+
+    def test_accepts_a_conditional_settings_write(
+        self, client, auth_headers, method, path
+    ):
+        before = client.get(path, headers=auth_headers)
+        saved = client.request(
+            method,
+            path,
+            headers=auth_headers
+            | {
+                "X-PrintStash-Edit-Contract": "conditional-v1",
+                "If-Match": before.headers["etag"],
+            },
+            json={"timezone": "Europe/Madrid"},
+        )
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["settings"]["timezone"] == "Europe/Madrid"
+        assert saved.json()["edit_epoch"] == before.json()["edit_epoch"]
+        assert saved.json()["edit_version"] > before.json()["edit_version"]
+        after = client.get(path, headers=auth_headers)
+        assert saved.json() == after.json()
+        assert saved.headers["etag"] == after.headers["etag"]
+
+    @pytest.mark.parametrize(
+        ("precondition", "status"),
+        [
+            pytest.param(
+                {"If-Match": '"vault-config-e' + "a" * 32 + '-v1"'},
+                412,
+                id="wrong-resource",
+            ),
+            pytest.param(
+                {"If-Match": '"search-settings-e' + "a" * 32 + '-v1"'},
+                412,
+                id="wrong-history",
+            ),
+            pytest.param({"If-Match": "*"}, 412, id="wildcard"),
+            pytest.param(
+                {"If-Match": '"search-settings-e' + "a" * 32 + '-v0"'}, 412, id="zero"
+            ),
+            pytest.param(
+                {
+                    "If-Match": '"search-settings-e'
+                    + "a" * 32
+                    + '-v9223372036854775808"'
+                },
+                412,
+                id="overflow",
+            ),
+            pytest.param(
+                {"X-PrintStash-Edit-Contract": "unsupported"},
+                400,
+                id="unknown-contract",
+            ),
+        ],
+    )
+    def test_rejects_malformed_editing_preconditions(
+        self, client, auth_headers, method, path, precondition, status
+    ):
+        before = client.get(path, headers=auth_headers)
+        rejected = client.request(
+            method, path, headers=auth_headers | precondition, json={"enabled": True}
+        )
+        assert rejected.status_code == status, rejected.text
+        assert client.get(path, headers=auth_headers).json() == before.json()
+
+    def test_legacy_writes_invalidate_an_open_editor(
+        self, client, auth_headers, method, path
+    ):
+        before = client.get(path, headers=auth_headers)
+        legacy = client.request(
+            method, path, headers=auth_headers, json={"enabled": True}
+        )
+        assert legacy.status_code == 200, legacy.text
+        rejected = client.request(
+            method,
+            path,
+            headers=auth_headers | {"If-Match": before.headers["etag"]},
+            json={"enabled": False},
+        )
+        assert rejected.status_code == 412, rejected.text
+        assert client.get(path, headers=auth_headers).json() == legacy.json()
+
+    def test_rolls_back_a_rejected_configuration(
+        self, client, auth_headers, method, path
+    ):
+        before = client.get(path, headers=auth_headers)
+        headers = auth_headers | {"If-Match": before.headers["etag"]}
+        rejected = client.request(
+            method, path, headers=headers, json={"captions_enabled": True}
+        )
+        assert rejected.status_code == 400, rejected.text
+        assert client.get(path, headers=auth_headers).json() == before.json()
+        accepted = client.request(method, path, headers=headers, json={"enabled": True})
+        assert accepted.status_code == 200, accepted.text
+
+    def test_exposes_one_editing_snapshot_through_both_settings_routes(
+        self, client, auth_headers, method, path
+    ):
+        saved = client.request(
+            method, path, headers=auth_headers, json={"enabled": True}
+        )
+        assert saved.status_code == 200, saved.text
+        for alias in ("/api/v1/config/ai-search", "/api/v1/search/settings"):
+            read = client.get(alias, headers=auth_headers)
+            assert read.json() == saved.json()
+            assert read.headers["etag"] == saved.headers["etag"]
 
 
 class TestUpdateSettings:

@@ -18,6 +18,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 import { lastVaultHref } from "@/lib/last-collection";
 import { LibrarySearch } from "@/components/library-search";
 import { BrandMark } from "@/components/brand-mark";
@@ -52,6 +53,8 @@ export function TopBar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading, logout } = useAuth();
+  const startup = useLibraryStartup();
+  const activityEnabled = startup.canLoad("activity");
   const [tasks, setTasks] = useState<TaskItem[]>(() => listTasks());
   const [tasksOpen, setTasksOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -62,12 +65,12 @@ export function TopBar() {
 
   useEffect(() => {
     const unsubscribe = subscribeTasks(() => setTasks(listTasks()));
-    const stopSync = startImportJobSync();
+    const stopSync = activityEnabled ? startImportJobSync() : () => {};
     return () => {
       unsubscribe();
       stopSync();
     };
-  }, []);
+  }, [activityEnabled]);
 
   useEffect(() => subscribeArchiveReviewRequests(() => setTasksOpen(false)), []);
 
@@ -110,7 +113,10 @@ export function TopBar() {
         <LocaleToggle />
         <DropdownMenu
           open={tasksOpen}
-          onOpenChange={setTasksOpen}
+          onOpenChange={(open) => {
+            if (open) startup.request("activity");
+            setTasksOpen(open);
+          }}
           align="end"
           role="dialog"
           className="hidden sm:flex"
@@ -118,7 +124,10 @@ export function TopBar() {
             <button
               type="button"
               data-menu-trigger
-              onClick={() => setTasksOpen((v) => !v)}
+              onClick={() => {
+                startup.request("activity");
+                setTasksOpen((v) => !v);
+              }}
               className="relative text-muted-foreground hover:text-foreground p-1 rounded-full hover:bg-muted transition-colors"
               aria-label={t("nav.notifications")}
               title={t("nav.notifications")}
@@ -214,7 +223,6 @@ function ProfileMenu({
     { href: "/printers", label: t("nav.printers"), icon: Printer, adminOnly: true },
     { href: "/statistics", label: t("nav.statistics"), icon: BarChart3, adminOnly: true },
     { href: "/profiles", label: t("nav.profiles"), icon: SlidersHorizontal },
-    { href: WIKI_URL, label: t("nav.wiki"), icon: BookOpen, external: true },
     { href: "/settings", label: t("nav.settings"), icon: Settings },
   ].filter((item) => !item.adminOnly || isAdmin);
 
@@ -226,21 +234,7 @@ function ProfileMenu({
           active
             ? "bg-accent text-accent-foreground"
             : "text-foreground hover:bg-popover-hover hover:text-foreground"
-        } focus-visible:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset ${item.href === WIKI_URL ? "border-t border-border" : ""}`;
-        if (item.external) {
-          return (
-            <a
-              key={item.href}
-              href={item.href}
-              role="menuitem"
-              onClick={onNavigate}
-              className={className}
-            >
-              <item.icon className="h-4 w-4" />
-              <span>{item.label}</span>
-            </a>
-          );
-        }
+        } focus-visible:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset`;
         return (
           <Link
             key={item.href}

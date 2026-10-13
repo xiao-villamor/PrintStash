@@ -4,7 +4,7 @@ Lanes become DBOS queues; a Job attempt becomes one workflow whose inputs are
 ``(job_id, attempt)`` and whose steps are the definition's steps, run through
 ``DBOS.run_step`` so each is checkpointed and retried by DBOS; a reconcile pass
 is one more workflow on the ``reconcile`` queue; the reconciler tick is the
-only ``@DBOS.scheduled`` workflow. ``execution_id`` is the DBOS workflow id and
+only persistently scheduled workflow. ``execution_id`` is the DBOS workflow id and
 ``dedupe_key`` its deduplication id.
 
 System state lives outside the application's tables: a sibling SQLite file of
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import sqlite3
 import threading
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -26,17 +27,20 @@ from typing import Any, Callable
 
 from dbos import (
     DBOS,
+    DBOSClient,
     DBOSConfig,
     Queue,
     SetEnqueueOptions,
     SetWorkflowID,
 )
 from dbos import error as dbos_error
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.engine import make_url
+from sqlalchemy.schema import DropSchema
 
 from app.core.config import settings
 from app.core.logging import get_logger
-from app.db.models import JobKind, LaneName
+from app.db.models import JobKind, LaneName, WorkPriority
 from app.modules.work.catalog import WorkCatalog
 from app.modules.work.contracts import (
     ActiveExecution,
@@ -48,6 +52,8 @@ from app.modules.work.contracts import (
     JobSubmission,
     Lane,
     LaneDepth,
+    LaneOrder,
+    LanePace,
     PassSubmission,
     RetryPolicy,
     Submission,
@@ -74,6 +80,12 @@ _STATUS = {
 _ACTIVE = ["ENQUEUED", "DELAYED", "PENDING"]
 _SETTLED = ["SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"]
 _PRUNE_BATCH = 500
+_FIFO_INSPECTION_PAGE = 100
+_FIFO_INSPECTION_LIMIT = 500
+_FIFO_DRAIN_REQUIRED = (
+    "derivation_queue_requires_drain: stop all work processes, drain legacy "
+    "derivation queues and restart together before enabling FIFO scheduling"
+)
 
 
 _client_pool: ThreadPoolExecutor | None = None
@@ -134,6 +146,37 @@ def system_database_url(db_url: str) -> tuple[str, str | None]:
     ), "dbos"
 
 
+_SQLITE_BUSY_SECONDS = 30
+
+
+def _sqlite_system_connection(url: str) -> Callable[[], sqlite3.Connection]:
+    """Open the engine's SQLite file the way the application opens its own.
+
+    DBOS leaves its file in rollback-journal mode with full synchronisation and
+    begins every transaction IMMEDIATE, so each queue poll and checkpoint
+    excluded every other one and forced the journal to disk. Write-ahead
+    logging lets its polls read while a checkpoint commits. The engine's copy
+    is disposable: the reconciler rebuilds lost executions from Job rows.
+    """
+    database = make_url(url).database
+    if database is None:
+        raise ValueError("engine_requires_file_backed_sqlite")
+    synchronous = settings.sqlite_synchronous.upper()
+    if synchronous not in {"NORMAL", "FULL"}:
+        raise ValueError("sqlite_synchronous must be NORMAL or FULL")
+
+    def connect() -> sqlite3.Connection:
+        # The timeout waits out a locked file instead of failing the checkpoint.
+        connection = sqlite3.connect(
+            database, timeout=_SQLITE_BUSY_SECONDS, check_same_thread=False
+        )
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute(f"PRAGMA synchronous={synchronous}")
+        return connection
+
+    return connect
+
+
 class _DbosRunner:
     def run(self, name: str, fn: Callable[[], Any], retry: RetryPolicy) -> Any:
         options: dict[str, Any] = {"name": name}
@@ -173,7 +216,7 @@ class DbosJobEngine(JobEngine):
         schema: str | None,
         executor_id: str,
         app_version: str | None = None,
-        polling_interval_seconds: float = 1.0,
+        polling_interval_seconds: float | None = None,
         tick_seconds: int | None = None,
     ) -> None:
         self.catalog = catalog
@@ -181,7 +224,11 @@ class DbosJobEngine(JobEngine):
         self.schema = schema
         self._executor_id = executor_id
         self.app_version = app_version or settings.app_version
-        self.polling = polling_interval_seconds
+        self.polling = (
+            settings.jobs_queue_poll_interval_seconds
+            if polling_interval_seconds is None
+            else polling_interval_seconds
+        )
         self.tick_seconds = tick_seconds or settings.jobs_reconcile_interval_seconds
         self._queues: dict[LaneName, Queue] = {}
         self._launched = False
@@ -199,7 +246,6 @@ class DbosJobEngine(JobEngine):
             "system_database_url": self.url,
             "application_version": self.app_version,
             "executor_id": self._executor_id,
-            "run_admin_server": False,
             "notification_listener_polling_interval_sec": min(self.polling, 1.0),
             "scheduler_polling_interval_sec": min(self.polling * 10, 30.0),
             "log_level": "WARNING",
@@ -207,17 +253,21 @@ class DbosJobEngine(JobEngine):
         if self.schema is not None:
             config["dbos_system_schema"] = self.schema
         else:
-            config["db_engine_kwargs"] = {"connect_args": {"timeout": 30}}
+            config["db_engine_kwargs"] = {
+                "creator": _sqlite_system_connection(self.url)
+            }
         return config
 
     def _register_workflows(self) -> None:
         runner = _DbosRunner()
 
         @DBOS.workflow(name=JOB_WORKFLOW)
-        def job_workflow(job_id: str, attempt: int) -> None:
+        def job_workflow(
+            job_id: str, attempt: int, execution_epoch: str | None = None
+        ) -> None:
             from app.modules.work.runner import execute_job
 
-            execute_job(job_id, attempt, runner)
+            execute_job(job_id, attempt, runner, execution_epoch=execution_epoch)
 
         @DBOS.workflow(name=RECONCILE_WORKFLOW)
         def reconcile_workflow(source: str) -> None:
@@ -225,21 +275,22 @@ class DbosJobEngine(JobEngine):
 
             execute_pass(JobKind(source), runner)
 
-        @DBOS.scheduled(_tick_cron(self.tick_seconds))
         @DBOS.workflow(name=TICK_WORKFLOW)
-        def tick_workflow(scheduled: datetime, actual: datetime) -> None:
-            del scheduled, actual
+        def tick_workflow(scheduled: datetime, context: Any) -> None:
+            del scheduled, context
             from app.modules.work.reconciler import tick
 
             DBOS.run_step({"name": "work.tick"}, tick)
 
         self._job_workflow = job_workflow
         self._reconcile_workflow = reconcile_workflow
+        self._tick_workflow = tick_workflow
 
     def launch(self, *, listen_lanes: Sequence[LaneName] | None) -> None:
         with self._lock:
             if self._launched:
                 return
+            self._require_fifo_queues_drained()
             DBOS.destroy(destroy_registry=True)
             DBOS(config=self._config())
             self._register_workflows()
@@ -248,16 +299,97 @@ class DbosJobEngine(JobEngine):
             DBOS.launch()
             for lane in self.catalog.lanes.values():
                 self._queues[lane.name] = self._register_queue(lane)
+            # Upsert one durable schedule shared by API and worker processes.
+            # Reapplying updates its cadence; restore recreates it after reset.
+            DBOS.apply_schedules(
+                [
+                    {
+                        "schedule_name": TICK_WORKFLOW,
+                        "workflow_fn": self._tick_workflow,
+                        "schedule": _tick_cron(self.tick_seconds),
+                        "automatic_backfill": False,
+                    }
+                ]
+            )
             self._launched = True
+
+    def _fresh_system_database(self) -> bool:
+        url = make_url(self.url)
+        if url.get_backend_name() == "sqlite":
+            if url.database is None:
+                raise ValueError("engine_requires_file_backed_sqlite")
+            try:
+                return Path(url.database).stat().st_size == 0
+            except FileNotFoundError:
+                return True
+        if self.schema is None:
+            raise ValueError("engine_requires_system_schema")
+        database = create_engine(self.url, connect_args={"connect_timeout": 5})
+        try:
+            return not inspect(database).has_schema(self.schema)
+        finally:
+            database.dispose()
+
+    def _require_fifo_queues_drained(self) -> None:
+        """Refuse a mixed scheduling rollout before registering consumers.
+
+        Operators must stop every old producer before this bounded snapshot;
+        it cannot fence a process still submitting work under the old policy.
+        Only the public client reads persisted queue state, without payloads.
+        """
+        lanes = [
+            lane.name.value
+            for lane in self.catalog.lanes.values()
+            if lane.queue_order is LaneOrder.FIFO
+        ]
+        if not lanes:
+            return
+        try:
+            if self._fresh_system_database():
+                return
+            client = DBOSClient(
+                system_database_url=self.url,
+                dbos_system_schema=self.schema,
+                lazy=True,
+                retry_connection_errors=False,
+                observability_query_timeout_sec=5,
+            )
+            try:
+                inspected = 0
+                neutral_rank = PRIORITY_RANK[WorkPriority.INTERACTIVE]
+                for lane in lanes:
+                    offset = 0
+                    while True:
+                        limit = min(
+                            _FIFO_INSPECTION_PAGE, _FIFO_INSPECTION_LIMIT - inspected
+                        )
+                        if limit == 0:
+                            raise RuntimeError("fifo_queue_inspection_limit")
+                        rows = client.list_workflows(
+                            queue_name=lane,
+                            status=_ACTIVE,
+                            limit=limit,
+                            offset=offset,
+                            load_input=False,
+                            load_output=False,
+                        )
+                        if any(row.priority != neutral_rank for row in rows):
+                            raise RuntimeError("fifo_queue_legacy_rank")
+                        inspected += len(rows)
+                        if len(rows) < limit:
+                            break
+                        offset += len(rows)
+            finally:
+                client.destroy()
+        except Exception as exc:
+            raise RuntimeError(_FIFO_DRAIN_REQUIRED) from exc
 
     def _register_queue(self, lane: Lane) -> Queue:
         options: dict[str, Any] = {
-            "polling_interval_sec": self.polling,
+            "polling_interval_sec": self.polling
+            if lane.pace is LanePace.PROMPT
+            else max(self.polling, settings.jobs_relaxed_queue_poll_interval_seconds),
             "on_conflict": "always_update",
-            # Without it DBOS ignores every submission's priority, and a
-            # backfill (a startup reconcile, a regenerate-all) runs ahead of
-            # the upload a user is waiting on.
-            "priority_enabled": True,
         }
         if lane.partitioned:
             options["partition_concurrency"] = lane.concurrency
@@ -292,7 +424,13 @@ class DbosJobEngine(JobEngine):
         queue = self._queues[submission.lane]
         if DBOS.get_workflow_status(submission.execution_id) is not None:
             return SubmitOutcome.EXISTING
-        options: dict[str, Any] = {"priority": PRIORITY_RANK[submission.priority]}
+        # Equal engine ranks preserve FIFO without changing the Job's logical priority.
+        rank = (
+            PRIORITY_RANK[WorkPriority.INTERACTIVE]
+            if self.catalog.lanes[submission.lane].queue_order is LaneOrder.FIFO
+            else PRIORITY_RANK[submission.priority]
+        )
+        options: dict[str, Any] = {"priority": rank}
         if isinstance(submission, JobSubmission):
             if isinstance(submission.routing, Deduplicated):
                 options["deduplication_id"] = submission.routing.key
@@ -306,7 +444,10 @@ class DbosJobEngine(JobEngine):
                     queue.enqueue(self._reconcile_workflow, submission.source.value)
                 else:
                     queue.enqueue(
-                        self._job_workflow, submission.job_id, submission.attempt
+                        self._job_workflow,
+                        submission.job_id,
+                        submission.attempt,
+                        submission.execution_epoch,
                     )
         except dbos_error.DBOSQueueDeduplicatedError:
             return SubmitOutcome.DEDUPLICATED
@@ -416,7 +557,22 @@ class DbosJobEngine(JobEngine):
         """Discard the system database. The engine must be relaunched after."""
         was_launched = self._launched
         self.shutdown()
-        DBOS.reset_system_database(system_database_url=self.url, schema=self.schema)
+        if make_url(self.url).get_backend_name() == "sqlite":
+            DBOS.reset_system_database(system_database_url=self.url)
+        else:
+            if self.schema is None:
+                raise ValueError("engine_requires_system_schema")
+            # DBOS's destructive reset drops the entire PostgreSQL database,
+            # including authoritative application tables. Only our system
+            # schema is disposable. Transactional DDL propagates any failure.
+            database = create_engine(self.url, connect_args={"connect_timeout": 5})
+            try:
+                with database.begin() as connection:
+                    connection.execute(
+                        DropSchema(self.schema, cascade=True, if_exists=True)
+                    )
+            finally:
+                database.dispose()
         if was_launched:
             logger.warning("engine state discarded; relaunch required")
 

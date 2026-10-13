@@ -170,3 +170,41 @@ class TestApiChunkUploadAdapter:
         adapter.abort_owned(session)
 
         assert not directory.exists()
+
+
+class TestOwnedQuarantineCleanup:
+    def test_abort_removes_empty_owned_quarantine(self, tmp_path):
+        session = _session(b"owned")
+        adapter = ApiChunkUploadAdapter(tmp_path)
+        directory = adapter.session_directory(session.id, create=True)
+        (directory / ".printstash-staging-quarantine").mkdir(mode=0o700)
+        adapter.abort_owned(session)
+        assert not directory.exists()
+
+    def test_abort_preserves_retained_quarantine(self, tmp_path):
+        session = _session(b"owned")
+        adapter = ApiChunkUploadAdapter(tmp_path)
+        directory = adapter.session_directory(session.id, create=True)
+        quarantine = directory / ".printstash-staging-quarantine"
+        quarantine.mkdir(mode=0o700)
+        retained = quarantine / "receipt.entry"
+        retained.write_bytes(b"retain ownership evidence")
+        with pytest.raises(OSError):
+            adapter.abort_owned(session)
+        assert retained.read_bytes() == b"retain ownership evidence"
+
+    def test_abort_preserves_quarantine_symlink_target(self, tmp_path):
+        session = _session(b"owned")
+        adapter = ApiChunkUploadAdapter(tmp_path / "uploads")
+        directory = adapter.session_directory(session.id, create=True)
+        outside = tmp_path / "foreign"
+        outside.mkdir()
+        foreign = outside / "retained"
+        foreign.write_bytes(b"foreign")
+        (directory / ".printstash-staging-quarantine").symlink_to(
+            outside, target_is_directory=True
+        )
+        with pytest.raises(OSError):
+            adapter.abort_owned(session)
+        assert foreign.read_bytes() == b"foreign"
+        assert (directory / ".printstash-staging-quarantine").is_symlink()

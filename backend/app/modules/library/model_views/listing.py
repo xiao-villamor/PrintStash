@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import List, Literal, Optional
 
 from sqlalchemy import func
+from sqlalchemy.orm import lazyload
 from sqlmodel import Session, select
 
 from app.db.models import (
     Model,
     User,
 )
+from app.modules.library import collection_tree
 from app.schemas.models import (
     ModelFilters,
     ModelListItem,
@@ -31,7 +33,9 @@ def read_items_by_ids(
     if not model_ids or not user.is_active:
         return []
     rows = session.exec(
-        select(Model).where(
+        select(Model)
+        .options(lazyload(Model.tags))
+        .where(
             Model.id.in_(model_ids),
             Model.id.in_(
                 accessible_live_model_ids_stmt(session, user).where(
@@ -80,7 +84,8 @@ def list_items(
     # updated_at (e.g. a batch ZIP import) sort non-deterministically, so
     # pagination can repeat or skip rows across page boundaries.
     stmt = (
-        stmt.order_by(Model.updated_at.desc(), Model.id.desc())  # type: ignore[attr-defined]
+        stmt.options(lazyload(Model.tags))
+        .order_by(Model.updated_at.desc(), Model.id.desc())  # type: ignore[attr-defined]
         .offset(offset)
         .limit(limit)
     )
@@ -101,12 +106,18 @@ def outliner_items(
         .order_by(func.lower(Model.name).asc(), Model.id.asc())  # type: ignore[attr-defined]
         .limit(limit)
     ).all()
+    labels = collection_tree.collection_labels(
+        session, user, (collection_name_for(model) for model in rows)
+    )
     return [
         OutlinerModelRead(
             id=model.id,
+            edit_epoch=model.edit_epoch,
+            edit_version=model.edit_version,
             name=model.name,
             collection=collection_name_for(model),
             collection_id=model.collection_id,
+            collection_label=labels.get(collection_name_for(model) or ""),
         )
         for model in rows
     ]

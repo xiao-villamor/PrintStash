@@ -7,6 +7,6 @@ The 32 fictional printable designs include opaque names, related distractors, or
 Vectors must be generated offline using the exact registry model and passage recipe; ordinary CI never downloads weights. Do not change labels after measuring a result. Permission coverage uses the separate actual authorization integration suite.
 
 SPLADE continuous term weights in `splade-pp-en-v1-terms.json` are measured with
-the pinned Apache-2.0 export documented in `docs/ai-search-sparse-study.md`. They
+the pinned Apache-2.0 export declared in the inference model registry. They
 bind the same original CC0 corpus and query hashes. They are neither generated
 user text nor an independent human relevance study.
