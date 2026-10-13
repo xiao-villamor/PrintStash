@@ -173,13 +173,26 @@ class ProjectionSource:
         return ensure_utc(later) if later is not None else None
 
 
-def _project_unit() -> bool:
-    from app.modules.search.projection import process_pending
+_PROJECT_RETRIES = 3
 
-    with get_session_factory().scoped_session() as session:
-        changed = process_pending(session)
-        session.commit()
-    return bool(changed)
+
+def _project_unit() -> bool:
+    """Project one page: read it on a snapshot, then write it briefly."""
+    from app.modules.search.projection import apply_prepared, prepare_pending
+
+    for _ in range(_PROJECT_RETRIES):
+        with get_session_factory().scoped_session() as session:
+            page = prepare_pending(session)
+        if page is None:
+            return False
+        with get_session_factory().scoped_session() as session:
+            changed = apply_prepared(session, page)
+            session.commit()
+        if changed is not None:
+            return bool(changed)
+    # The request kept changing under the page; it is still due, so the drain
+    # has work left even though this unit wrote none of it.
+    return True
 
 
 def _project(ctx: JobContext) -> None:
@@ -471,7 +484,7 @@ def _repair() -> dict[str, int]:
     with sessions.scoped_session() as session:
         try:
             ensure_caption_recipe(session)
-        except (OperationError, EmbeddingError):
+        except OperationError, EmbeddingError:
             session.rollback()
             logger.debug("caption recipe proposal deferred")
     return {"reconciled": reconciled}

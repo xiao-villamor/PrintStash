@@ -29,7 +29,7 @@ from app.modules.search import lexical_index
 from app.modules.search.configuration import settings
 from app.modules.search.dependencies import extraction_dependencies
 from app.modules.search.invalidation import invalidate_passage
-from app.modules.search.sources import project_subject
+from app.modules.search.sources import SubjectProjection, project_subject
 
 
 @dataclass(frozen=True)
@@ -39,15 +39,49 @@ class PassageChanges:
     removed: int = 0
 
 
-def sync_subject(session: Session, subject: SearchSubject) -> PassageChanges:
+@dataclass(frozen=True)
+class PreparedSubject:
+    """What a Subject's content projects to, read before the writer is taken.
+
+    Reading a Subject's content and its dependencies is most of the reading a
+    replacement does and none of its writing. A stale preparation is safe only
+    for a caller whose later work re-projects the Subject: the projection Job,
+    where the change that made it stale left its own request behind.
+    """
+
+    projection: SubjectProjection | None
+    dependencies: frozenset[ContentSource]
+
+
+def prepare_subject(session: Session, subject: SearchSubject) -> PreparedSubject:
+    """Read ``subject``'s content projection; writes nothing."""
+    projection = project_subject(session, subject)
+    return PreparedSubject(
+        projection,
+        frozenset(extraction_dependencies(session, subject))
+        if projection
+        else frozenset(),
+    )
+
+
+def sync_subject(
+    session: Session,
+    subject: SearchSubject,
+    *,
+    prepared: PreparedSubject | None = None,
+) -> PassageChanges:
     """Replace this recipe only; missing/trashed Subjects lose every recipe.
 
     The caller serializes writes to a Subject and owns commit/rollback. Stable
     passage IDs and hashes let later backfill workers distinguish an indexed
     content edit from unrelated bookkeeping without relying on timestamps.
+    ``prepared`` is that Subject's content read earlier by ``prepare_subject``;
+    without it the content is read here, inside the caller's transaction.
     """
-    projection = project_subject(session, subject)
-    dependencies = extraction_dependencies(session, subject) if projection else set()
+    if prepared is None:
+        prepared = prepare_subject(session, subject)
+    projection = prepared.projection
+    dependencies = set(prepared.dependencies)
     previous = session.exec(
         select(SearchDependency).where(
             SearchDependency.subject_type == subject.subject_type.value,
@@ -130,7 +164,7 @@ def sync_subject(session: Session, subject: SearchSubject) -> PassageChanges:
     for recipe in recipes:
         try:
             versions.add(TextRecipe(**json.loads(recipe)).passage_version)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
     existing = {
         (row.recipe_version, row.visibility_segment_key, row.chunk_index): row

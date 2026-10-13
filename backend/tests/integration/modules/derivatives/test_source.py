@@ -480,6 +480,32 @@ class TestBoundedScan:
         # One query per stage, whatever the library holds: nothing per Artifact.
         assert statements_for_one_pass() == small
 
+    def test_reads_the_whole_pass_before_it_writes_the_cursor(
+        self, db_session: Session, mesh
+    ) -> None:
+        # The first write is what takes the database's writer. A cursor flushed
+        # while the scan was still reading held it for every query after.
+        from app.db.session import get_session_factory
+
+        mesh()
+        mesh()
+        engine = db_session.get_bind()
+        with get_session_factory().scoped_session() as session:
+            MESH.pending(session, now=utcnow(), limit=10)
+        seen: list[str] = []
+
+        def record(_conn, _cursor, statement, *_args):
+            seen.append(statement.split()[0].upper())
+
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            with get_session_factory().scoped_session() as session:
+                MESH.pending(session, now=utcnow(), limit=1)
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+
+        assert (seen.count("UPDATE"), seen[-1]) == (1, "UPDATE")
+
 
 class TestNextDue:
     def test_is_the_earliest_failure_backoff_that_expires(

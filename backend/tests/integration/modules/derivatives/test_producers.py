@@ -1370,6 +1370,44 @@ class TestMeshCancellation:
         )
 
 
+class TestBegin:
+    def test_commits_what_the_caller_adds_with_the_claims(self, db_session, stored):
+        artifact = stored("claimed.gcode", content.gcode())
+
+        def rename(session, file):
+            file.revision_notes = "claimed"
+            session.add(file)
+
+        producers._begin(artifact.id, JobKind.DERIVATIVES_GCODE, claimed=rename)
+
+        db_session.refresh(artifact)
+        assert artifact.revision_notes == "claimed"
+
+    def test_a_caller_that_fails_leaves_nothing_claimed(self, db_session, stored):
+        from app.db.models import ArtifactDerivative
+
+        artifact = stored("refused.gcode", content.gcode())
+
+        def refuse(_session, _file):
+            raise RuntimeError("continuation unavailable")
+
+        with pytest.raises(RuntimeError, match="continuation unavailable"):
+            producers._begin(artifact.id, JobKind.DERIVATIVES_GCODE, claimed=refuse)
+
+        assert db_session.exec(select(ArtifactDerivative)).all() == []
+
+    def test_an_artifact_that_is_gone_claims_nothing(self, db_session):
+        called: list[int] = []
+
+        begun = producers._begin(
+            404,
+            JobKind.DERIVATIVES_GCODE,
+            claimed=lambda _session, file: called.append(file.id),
+        )
+
+        assert (begun, called) == (None, [])
+
+
 class TestAttemptPublication:
     def test_cancelled_thumbnail_keeps_unpublished_bytes_receipted(
         self, db_session, stored

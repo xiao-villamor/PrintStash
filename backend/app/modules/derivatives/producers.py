@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -124,8 +125,18 @@ def _live_file(session: Session, file_id: int) -> File:
 
 
 def _begin(
-    file_id: int, definition: JobKind, *, execution: JobExecution | None = None
+    file_id: int,
+    definition: JobKind,
+    *,
+    execution: JobExecution | None = None,
+    claimed: Callable[[Session, File], None] | None = None,
 ) -> tuple[File, dict[DerivativeKind, records.DerivativeAttempt]] | None:
+    """Claim the kinds this Artifact still needs, in one transaction.
+
+    ``claimed`` runs in that transaction once the claims are made, for work
+    that needs the same locks: it shares the commit instead of taking the
+    writer a second time.
+    """
     from . import policy
 
     now = utcnow()
@@ -146,6 +157,8 @@ def _begin(
             attempts[kind] = records.attempt(
                 session, file_row, row, execution=execution
             )
+        if claimed is not None:
+            claimed(session, file_row)
         session.commit()
         session.refresh(file_row)
         session.expunge(file_row)
@@ -302,11 +315,6 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
     from . import mesh_continuations
     from .mesh_continuation_values import FingerprintPlan
 
-    begun = _begin(file_id, JobKind.DERIVATIVES_MESH, execution=execution)
-    if begun is None:
-        return Outcome({})
-    file_row, attempts = begun
-    outcome: dict[DerivativeKind, DerivativeState] = {}
     options = extraction_options(get_session_factory())
     plan = (
         FingerprintPlan(
@@ -315,11 +323,23 @@ def _derive_mesh(file_id: int, *, execution: JobExecution | None = None) -> Outc
         if options.get("include_fingerprint", False)
         else None
     )
-    with get_session_factory().scoped_session() as session:
+    pending: mesh_continuations.MeshContinuation | None = None
+
+    def resume(session: Session, claimed_file: File) -> None:
+        # The claim already holds the Job, the generation and this Artifact:
+        # durable fingerprint intent is resumed under those same locks.
+        nonlocal pending
         pending = mesh_continuations.resume(
-            session, file_row, plan, execution=execution
+            session, claimed_file, plan, execution=execution
         )
-        session.commit()
+
+    begun = _begin(
+        file_id, JobKind.DERIVATIVES_MESH, execution=execution, claimed=resume
+    )
+    if begun is None:
+        return Outcome({})
+    file_row, attempts = begun
+    outcome: dict[DerivativeKind, DerivativeState] = {}
     if not attempts and pending is None:
         return Outcome(outcome)
 

@@ -82,6 +82,33 @@ class TestProjectJob:
         db_session.expire_all()
         assert db_session.exec(select(SearchProjectionRequest)).all() == []
 
+    def test_a_request_that_keeps_changing_leaves_the_drain_with_work(
+        self,
+        db_session: Session,
+        make_search_projection_request,
+        make_model,
+        monkeypatch,
+    ) -> None:
+        # Every page it reads is overtaken before it can be written: the unit
+        # wrote nothing, and the request it could not write is still due.
+        from app.modules.search import projection
+
+        make_search_projection_request(ContentSource("model", make_model().id))
+        monkeypatch.setattr(projection, "apply_prepared", lambda _session, _page: None)
+
+        worked = jobs._project_unit()
+
+        assert (
+            worked,
+            len(db_session.exec(select(SearchProjectionRequest)).all()),
+        ) == (
+            True,
+            1,
+        )
+
+    def test_an_idle_projection_reports_no_work(self, db_session: Session) -> None:
+        assert jobs._project_unit() is False
+
     def test_a_library_change_nudges_it(
         self, db_session: Session, make_model, work_engine
     ) -> None:

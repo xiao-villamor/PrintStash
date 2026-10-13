@@ -1,12 +1,25 @@
-"""Content commits record durable work; bounded workers project the latest state."""
+"""Content commits record durable work; bounded workers project the latest state.
+
+A page is read on a snapshot (``prepare_pending``) and written in a short
+transaction (``apply_prepared``) that only goes ahead while its request is
+still as it was read. When this goes red, either the projection holds the
+database's writer while it reads the library, or a page read before a change
+can overwrite what that change asked for.
+"""
 
 import pytest
+from sqlalchemy import event
 from sqlmodel import delete, select
 
 from app.db.models import ModelTagLink, SearchPassage, SearchProjectionRequest
 from app.db.projections import bind_content_projection, content_changed
 from app.modules.library.commands import update_model
-from app.modules.search.projection import LibraryProjection, process_pending
+from app.modules.search.projection import (
+    LibraryProjection,
+    apply_prepared,
+    prepare_pending,
+    process_pending,
+)
 from app.schemas.models import ModelUpdate
 
 
@@ -206,6 +219,218 @@ class TestContentProjection:
         bind_content_projection(previous)
 
 
+@pytest.fixture
+def statements(db_session) -> list[str]:
+    """Every statement the application database is sent."""
+    seen: list[str] = []
+
+    def record(_conn, _cursor, statement, *_rest) -> None:
+        seen.append(statement.split()[0].upper())
+
+    target = db_session.get_bind()
+    event.listen(target, "before_cursor_execute", record)
+    yield seen
+    event.remove(target, "before_cursor_execute", record)
+
+
+class TestPreparePending:
+    def test_reads_the_page_without_writing(
+        self, db_session, make_model, make_search_projection_request, statements
+    ):
+        from app.db.projections import ContentSource
+
+        model = make_model("Bracket")
+        make_search_projection_request(ContentSource("model", model.id))
+        statements.clear()
+
+        page = prepare_pending(db_session)
+
+        assert (
+            [subject.subject_id for subject, _ in page.subjects],
+            set(statements),
+        ) == (
+            [model.id],
+            {"SELECT", "WITH"},
+        )
+
+    def test_carries_what_each_subject_projects_to(
+        self, db_session, make_model, make_search_projection_request
+    ):
+        from app.db.projections import ContentSource
+
+        model = make_model("Bracket")
+        make_search_projection_request(ContentSource("model", model.id))
+
+        page = prepare_pending(db_session)
+
+        ((_subject, prepared),) = page.subjects
+        assert prepared.projection.segments[0].content.title == "Bracket"
+
+    def test_a_trashed_subject_projects_to_nothing(
+        self, db_session, make_model, make_search_projection_request
+    ):
+        from app.db.projections import ContentSource
+
+        model = make_model("Bracket", trashed=True)
+        make_search_projection_request(ContentSource("model", model.id))
+
+        page = prepare_pending(db_session)
+
+        ((_subject, prepared),) = page.subjects
+        assert (prepared.projection, prepared.dependencies) == (None, frozenset())
+
+    def test_nothing_due_is_no_page(self, db_session):
+        assert prepare_pending(db_session) is None
+
+    def test_a_delayed_request_is_not_due(
+        self, db_session, make_model, make_search_projection_request
+    ):
+        from datetime import timedelta
+
+        from app.core.time import utcnow
+        from app.db.projections import ContentSource
+
+        request = make_search_projection_request(
+            ContentSource("model", make_model().id)
+        )
+        request.next_attempt_at = utcnow() + timedelta(minutes=5)
+        db_session.add(request)
+        db_session.commit()
+
+        assert prepare_pending(db_session) is None
+
+    @pytest.mark.parametrize("limit", [0, 129], ids=["zero", "over-page"])
+    def test_rejects_an_unbounded_page(self, db_session, limit):
+        with pytest.raises(ValueError, match="search_projection_limit"):
+            prepare_pending(db_session, limit=limit)
+
+
+class TestApplyPrepared:
+    def test_writes_the_prepared_page(
+        self, db_session, make_model, make_search_projection_request
+    ):
+        from app.db.projections import ContentSource
+
+        make_search_projection_request(ContentSource("model", make_model("Bracket").id))
+        page = prepare_pending(db_session)
+        db_session.commit()
+
+        written = apply_prepared(db_session, page)
+        db_session.commit()
+
+        assert (written, db_session.exec(select(SearchPassage.text)).all()) == (
+            1,
+            ["Title: Bracket"],
+        )
+
+    def test_finishes_a_request_whose_last_page_it_wrote(
+        self, db_session, make_model, make_search_projection_request
+    ):
+        from app.db.projections import ContentSource
+
+        make_search_projection_request(ContentSource("model", make_model().id))
+        page = prepare_pending(db_session)
+        db_session.commit()
+
+        apply_prepared(db_session, page)
+        db_session.commit()
+
+        assert db_session.exec(select(SearchProjectionRequest)).all() == []
+
+    def test_reads_no_library_content_under_the_writer(
+        self, db_session, make_model, make_search_projection_request, statements
+    ):
+        from app.db.projections import ContentSource
+
+        make_search_projection_request(ContentSource("model", make_model().id))
+        page = prepare_pending(db_session)
+        db_session.commit()
+        statements.clear()
+
+        apply_prepared(db_session, page)
+
+        # The recursive tag read is the content projection's signature.
+        assert "WITH" not in statements
+
+    def test_a_request_changed_since_the_page_was_read_is_left_due(
+        self, projection, db_session, make_model, make_search_projection_request
+    ):
+        from app.db.projections import ContentSource
+
+        model = make_model("Before")
+        make_search_projection_request(ContentSource("model", model.id))
+        page = prepare_pending(db_session)
+        db_session.commit()
+        model.name = "After"
+        db_session.add(model)
+        content_changed(db_session, "model", [model.id])
+        db_session.commit()
+
+        written = apply_prepared(db_session, page)
+        db_session.commit()
+
+        assert (
+            written,
+            db_session.exec(select(SearchPassage)).all(),
+            db_session.exec(select(SearchProjectionRequest.source_id)).all(),
+        ) == (None, [], [model.id])
+
+    def test_a_page_another_worker_already_wrote_is_not_written_twice(
+        self, db_session, make_collection, make_model, make_search_projection_request
+    ):
+        from app.db.projections import ContentSource
+
+        collection = make_collection("Collection")
+        make_model("Bracket", collection=collection)
+        make_search_projection_request(ContentSource("collection", collection.id))
+        page = prepare_pending(db_session, limit=1)
+        db_session.commit()
+        process_pending(db_session, limit=1)
+        db_session.commit()
+
+        written = apply_prepared(db_session, page)
+
+        assert written is None
+
+    def test_a_request_that_is_gone_is_not_written(
+        self, db_session, make_model, make_search_projection_request
+    ):
+        from app.db.projections import ContentSource
+
+        make_search_projection_request(ContentSource("model", make_model().id))
+        page = prepare_pending(db_session)
+        db_session.exec(delete(SearchProjectionRequest))
+        db_session.commit()
+
+        written = apply_prepared(db_session, page)
+        db_session.commit()
+
+        assert (written, db_session.exec(select(SearchPassage)).all()) == (None, [])
+
+    def test_a_change_made_after_the_read_is_projected_by_its_own_request(
+        self, projection, db_session, make_model, make_search_projection_request
+    ):
+        from app.db.projections import ContentSource
+
+        collection_model = make_model("Before")
+        other = make_model("Unrelated")
+        make_search_projection_request(ContentSource("model", other.id))
+        page = prepare_pending(db_session)
+        db_session.commit()
+        collection_model.name = "After"
+        db_session.add(collection_model)
+        content_changed(db_session, "model", [collection_model.id])
+        db_session.commit()
+        apply_prepared(db_session, page)
+
+        _drain(db_session)
+
+        assert sorted(db_session.exec(select(SearchPassage.text)).all()) == [
+            "Title: After",
+            "Title: Unrelated",
+        ]
+
+
 class TestProcessPending:
     def test_retries_a_failed_page_atomically(
         self, db_session, make_model, make_search_projection_request, monkeypatch
@@ -220,8 +445,8 @@ class TestProcessPending:
         make_search_projection_request(ContentSource("model", model.id))
         original = projection.sync_subject
 
-        def fail_after_write(session, subject):
-            original(session, subject)
+        def fail_after_write(session, subject, **prepared):
+            original(session, subject, **prepared)
             session.flush()
             raise RuntimeError("projection unavailable")
 
