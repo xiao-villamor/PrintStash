@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Compress 3D preview meshes between the server and the browser. Binary STL
+  previews transfer at about half their size and ASCII STL at about an eighth,
+  and a slow connection no longer makes the proxy spool a large mesh to disk.
+
 - Keep folder descriptions and model cards together when navigating, clamp long descriptions before the first paint, and avoid fading cached library thumbnails on every visit.
 
 - Enable mesh preview readiness after its first rendered frame; verify overlay alignment, display-mode pixels, and repeated resource cleanup on WebGL/WebGPU.
