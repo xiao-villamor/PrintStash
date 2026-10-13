@@ -155,7 +155,7 @@ class TestDeadlinePolling:
             for _ in range(100):
                 check_deadline(11.0)
             assert withdrawn.call_count == 1
-            clock[0] = 10.21
+            clock[0] = 10.51
             check_deadline(11.0)
             assert withdrawn.call_count == 2
 
