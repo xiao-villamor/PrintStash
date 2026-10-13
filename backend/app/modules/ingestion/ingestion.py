@@ -16,7 +16,15 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional, ParamSpec, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Concatenate,
+    Optional,
+    ParamSpec,
+    TypeVar,
+)
 
 from sqlalchemy import case, func, update
 from sqlalchemy.exc import IntegrityError
@@ -50,7 +58,9 @@ from app.modules.library.volume_metadata import apply_volume, incoming_volume
 from app.modules.storage import storage
 from app.modules.storage.hashing import sha256_file
 from app.modules.storage.storage_backend.contracts import (
+    CreationReceipt,
     StagedRemoteObject,
+    StorageBackend,
     StorageCollisionError,
 )
 from app.modules.storage.storage_backend.local import LocalStorageBackend
@@ -61,12 +71,16 @@ from app.modules.storage.storage_ownership import (
     prepare_file,
     provider_ref_for_backend,
 )
+from app.modules.storage.storage_publication import PendingPublication
 from app.modules.work.contracts import JobContext, JobOutcome
 from app.modules.work.jobs import failure_of
 
 if TYPE_CHECKING:
+    from printstash_core.mesh.measurements import VolumeMeasurement
+
     from app.modules.ingestion.batch_contracts import BatchCommitReference
     from app.modules.library.provenance import ProvenanceContext
+    from app.modules.storage.capacity import CapacityReservationHandle
 
 logger = get_logger(__name__)
 
@@ -243,19 +257,6 @@ def _reserve_version_before_publication(session: Session, model: Model) -> int:
     return version
 
 
-def _serialize_artifact_persistence(func: Callable[_P, _R]) -> Callable[_P, _R]:
-    @wraps(func)
-    def serialized(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-        model = kwargs.get("model")
-        if not isinstance(model, Model) or model.id is None:
-            raise RuntimeError("artifact_model_not_persisted")
-        lock = _ARTIFACT_LOCKS[model.id % len(_ARTIFACT_LOCKS)]
-        with lock:
-            return func(*args, **kwargs)
-
-    return serialized
-
-
 def _available_vault_key(backend, *, slug: str, version: int, filename: str) -> str:
     """Create an opaque backend-owned key for a new Artifact.
 
@@ -362,285 +363,427 @@ def resolve_or_create_model(
     return existing, False
 
 
+@dataclass(frozen=True)
+class VaultDestination:
+    """The vault's own store, at a key the backend chooses."""
+
+
+@dataclass(frozen=True)
+class ExternalWriteback:
+    """A new file moved onto a mounted external library's root.
+
+    ``path`` is the caller's collision-safe destination under that root.
+    """
+
+    path: str
+    library_id: int
+    source_mtime: float | None = None
+
+
+@dataclass(frozen=True)
+class ExternalIndexed:
+    """A file already in an external library, indexed where it lies.
+
+    Nothing is moved: ``path`` is where the library keeps it (a NAS path or a
+    remote source's URI), and the staged path is only read for its size.
+    """
+
+    path: str
+    library_id: int
+    source_mtime: float | None = None
+
+
+Destination = VaultDestination | ExternalWriteback | ExternalIndexed
+
+
+@dataclass(frozen=True)
+class Revision:
+    """What the user said about a G-code revision when adding it."""
+
+    label: str | None = None
+    status: FileRevisionStatus | None = None
+    notes: str | None = None
+    is_recommended: bool = False
+    # A Model's first live G-code claims the recommendation marker unless the
+    # caller manages recommendation itself.
+    auto_recommend_first_gcode: bool = True
+
+
+@dataclass(frozen=True)
+class ArtifactCommand:
+    """One Artifact to persist onto ``model``: everything the caller decided.
+
+    ``meta`` carries facts the caller already has (a portable library import);
+    otherwise the Metadata row starts empty, every value unknown, and the
+    derivative Jobs fill it. ``staged_origin`` identifies the verified bytes
+    already in the vault's store, allowing publication by server-side copy
+    instead of re-upload.
+    """
+
+    model: Model
+    staged_path: Path
+    original_filename: str
+    file_type: FileType
+    blob_hash: str
+    destination: Destination = VaultDestination()
+    revision: Revision = Revision()
+    meta: dict[str, Any] | None = None
+    ingestion_key: str | None = None
+    provenance_context: ProvenanceContext | None = None
+    staged_origin: StagedRemoteObject | None = None
+    batch_commit: BatchCommitReference | None = None
+
+
+@dataclass(frozen=True)
+class _Reserved:
+    """What is claimed before any byte moves: a version, a key, the space."""
+
+    version: int
+    key: str
+    capacity: CapacityReservationHandle | None
+
+
+@dataclass(frozen=True)
+class _Published:
+    """Where the bytes ended up, and the evidence the row commit adopts."""
+
+    size_bytes: int
+    source_mtime: float | None
+    receipt: CreationReceipt | None
+    # Vault bytes carry a pending ownership publication; linked NAS bytes stay
+    # user-owned and carry none.
+    publication: PendingPublication | None
+
+
+def _serialize_artifact_persistence(
+    func: Callable[Concatenate[Session, ArtifactCommand, _P], _R],
+) -> Callable[Concatenate[Session, ArtifactCommand, _P], _R]:
+    @wraps(func)
+    def serialized(
+        session: Session, command: ArtifactCommand, *args: _P.args, **kwargs: _P.kwargs
+    ) -> _R:
+        if command.model.id is None:
+            raise RuntimeError("artifact_model_not_persisted")
+        lock = _ARTIFACT_LOCKS[command.model.id % len(_ARTIFACT_LOCKS)]
+        with lock:
+            return func(session, command, *args, **kwargs)
+
+    return serialized
+
+
+def _bound_library(
+    session: Session, destination: Destination
+) -> ExternalLibrary | None:
+    """The external library a destination writes into, proven still bound.
+
+    External roots are independently owned from the active vault backend.
+    Revalidate the durable marker before reserving a version or publishing
+    bytes so a remount/replacement cannot receive a write.
+    """
+    if isinstance(destination, VaultDestination):
+        return None
+    from app.modules.sources.root_binding import (
+        ExternalRootBindingError,
+        assert_root_binding,
+    )
+
+    library = session.get(ExternalLibrary, destination.library_id)
+    if library is None:
+        raise ExternalRootBindingError("unbound", "external_library_missing")
+    if library.source_kind.value == "mounted":
+        assert_root_binding(library)
+    elif isinstance(destination, ExternalWriteback) or library.writeback_enabled:
+        # Remote sources are intentionally read-only. A future writeback
+        # capability must prove atomic create/replace per protocol before
+        # it can cross this boundary.
+        raise ExternalRootBindingError("read_only", "remote_writeback_disabled")
+    return library
+
+
+def _mtime(path: str) -> float | None:
+    """The modification time of an external file, when its path can be read."""
+    try:
+        return Path(path).stat().st_mtime
+    except OSError:
+        return None
+
+
+def _reserve(
+    session: Session,
+    command: ArtifactCommand,
+    backend: StorageBackend,
+    session_factory: SessionFactory | None,
+) -> _Reserved:
+    """Claim the version, the storage key and the space; no byte moves yet."""
+    from app.modules.storage.capacity import CapacityManager, CapacityResource
+    from app.modules.storage.capacity_estimates import vault_allocation
+
+    model = command.model
+    assert model.id is not None
+    destination = command.destination
+    version = _reserve_version_before_publication(session, model)
+    key = (
+        _available_vault_key(
+            backend,
+            slug=model.slug,
+            version=version,
+            filename=command.original_filename,
+        )
+        if isinstance(destination, VaultDestination)
+        else destination.path
+    )
+    capacity = None
+    if not isinstance(destination, ExternalIndexed):
+        size = command.staged_path.stat().st_size
+        allocation = (
+            CapacityResource.for_path(Path(key), size, role="external writeback")
+            if isinstance(destination, ExternalWriteback)
+            else vault_allocation(size)
+        )
+        capacity = CapacityManager(session_factory or get_session_factory()).reserve(
+            f"artifact:{model.id}:{version}", [allocation], transient=True
+        )
+    return _Reserved(version, key, capacity)
+
+
+def _publish(
+    session: Session,
+    command: ArtifactCommand,
+    reserved: _Reserved,
+    backend: StorageBackend,
+    library: ExternalLibrary | None,
+) -> _Published:
+    """Put the bytes where the Artifact will point; no row is written yet.
+
+    No transaction of the caller's is open while bytes move: the ownership
+    ledger records its reservation and receipt in short transactions of its
+    own, and the row commit that follows only adopts them.
+    """
+    destination = command.destination
+    if isinstance(destination, ExternalIndexed):
+        # An external Artifact is indexed in place. Its opaque ``path`` is a
+        # NAS path, not a key in the active vault backend (which may be
+        # S3/WebDAV), so never ask that backend to stat it.
+        return _Published(
+            command.staged_path.stat().st_size,
+            destination.source_mtime
+            if destination.source_mtime is not None
+            else _mtime(reserved.key),
+            None,
+            None,
+        )
+    if isinstance(destination, ExternalWriteback):
+        # A NAS path is independent of the active vault backend. Bind a local
+        # adapter to this library root so its ownership proof cannot be
+        # interpreted as an S3/WebDAV key.
+        from app.modules.sources.root_binding import expected_root_marker
+
+        if library is None:
+            raise RuntimeError("external_library_missing")
+        library_root = Path(library.root_path).expanduser().resolve(strict=False)
+        external_backend = LocalStorageBackend(
+            external_roots=(library_root,),
+            external_root_bindings={library_root: expected_root_marker(library)},
+        )
+        # ``move_in`` performs the only authoritative collision check using
+        # the backend's atomic create-only primitive. Linked NAS bytes remain
+        # user-owned: publish add-only and do not create a vault
+        # ownership-ledger row or delete intent.
+        receipt = external_backend.move_in(command.staged_path, reserved.key)
+        # Capture the on-disk mtime of the file just written so the next scan
+        # recognises it as unchanged (no re-import).
+        return _Published(
+            receipt.size,
+            destination.source_mtime
+            if destination.source_mtime is not None
+            else _mtime(reserved.key),
+            receipt,
+            None,
+        )
+    publication = prepare_file(
+        session,
+        backend,
+        reserved.key,
+        command.staged_path,
+        object_kind="artifact",
+        sha256=command.blob_hash,
+        move=True,
+        remote_source=command.staged_origin,
+    )
+    return _Published(publication.receipt.size, None, publication.receipt, publication)
+
+
+def _record(
+    session: Session,
+    command: ArtifactCommand,
+    reserved: _Reserved,
+    published: _Published,
+    volume: VolumeMeasurement,
+) -> File:
+    """Stage the File, its Metadata and what adopts the bytes; caller commits.
+
+    One transaction for the whole Artifact: a File row committed without its
+    Metadata row would have no row for the derivatives to fill.
+    """
+    from app.modules.derivatives.jobs import nudge_with_commit
+
+    model_id = command.model.id
+    assert model_id is not None
+    destination = command.destination
+    external = not isinstance(destination, VaultDestination)
+    revision = command.revision
+    is_recommended = revision.is_recommended
+    if command.file_type == FileType.GCODE:
+        recommended_rows = session.exec(
+            select(File).where(
+                File.model_id == model_id,
+                File.file_type == FileType.GCODE,
+                File.is_recommended == True,  # noqa: E712
+                live(File),
+            )
+        ).all()
+        if is_recommended:
+            # Clear first and flush before inserting the replacement so the
+            # partial unique index is never transiently violated.
+            for recommended in recommended_rows:
+                recommended.is_recommended = False
+                session.add(recommended)
+            if recommended_rows:
+                session.flush()
+        else:
+            # A Model's first live G-code claims the recommendation marker.
+            is_recommended = (
+                revision.auto_recommend_first_gcode and not recommended_rows
+            )
+
+    file_row = File(
+        model_id=model_id,
+        path=reserved.key,
+        original_filename=command.original_filename,
+        file_type=command.file_type,
+        version=reserved.version,
+        size_bytes=published.size_bytes,
+        sha256=command.blob_hash,
+        revision_label=revision.label,
+        revision_status=revision.status,
+        revision_notes=revision.notes,
+        is_recommended=is_recommended,
+        is_external=external,
+        external_library_id=None
+        if isinstance(destination, VaultDestination)
+        else destination.library_id,
+        source_mtime=published.source_mtime,
+        ingestion_key=command.ingestion_key,
+    )
+    # flush() allocates the id provenance needs without ending the transaction.
+    session.add(file_row)
+    session.flush()
+    assert file_row.id is not None
+    retirements: tuple[Any, ...] = ()
+    if command.provenance_context is not None:
+        # The File id exists, but the Artifact has not yet become visible.
+        # A provenance failure therefore follows the established rollback
+        # path for both its link and the bytes/row it describes.
+        retirements = _attach_ingested_artifact(
+            session, file_row, command.provenance_context
+        )
+    # A caller's facts may carry detection-only keys (e.g.
+    # printer_preset_name) that have no Metadata column.
+    meta = command.meta or {}
+    md_fields = {
+        k: v
+        for k, v in meta.items()
+        if k in Metadata.model_fields and k not in {"id", "file_id", "created_at"}
+    }
+    metadata = Metadata(file_id=file_row.id, **md_fields)
+    apply_volume(metadata, volume)
+    session.add(metadata)
+    requirements = meta.get("material_requirements")
+    if isinstance(requirements, list):
+        for requirement in requirements:
+            if not isinstance(requirement, dict):
+                continue
+            material_type = requirement.get("material_type")
+            if not isinstance(material_type, str) or not material_type.strip():
+                continue
+            session.add(
+                ArtifactMaterialRequirement(
+                    file_id=file_row.id,
+                    tool_index=int(requirement.get("tool_index") or 0),
+                    material_type=material_type.strip(),
+                    color_hex=requirement.get("color_hex"),
+                )
+            )
+    content_changed(session, "model", [model_id])
+    if command.batch_commit is not None:
+        from .batch_store import record_committed
+
+        record_committed(session, command.batch_commit, file_row, deduplicated=False)
+    session.flush()
+    finish_publication_batch(
+        session,
+        publications=(published.publication,)
+        if published.publication is not None
+        else (),
+        retirements=retirements,
+    )
+    # Derivatives are not part of the File+Metadata integrity boundary. The
+    # sources find this Artifact by themselves; the nudge only makes that
+    # happen now rather than at the next tick, and its dirty marks ride on
+    # this commit instead of taking the writer again after it.
+    nudge_with_commit(session, file_row)
+    return file_row
+
+
 @_serialize_artifact_persistence
 def persist_artifact(
     session: Session,
+    command: ArtifactCommand,
     *,
-    model: Model,
-    staged_path: Path,
-    original_filename: str,
-    file_type: FileType,
-    blob_hash: str,
-    meta: dict[str, Any] | None = None,
-    revision_label: str | None = None,
-    revision_status: FileRevisionStatus | None = None,
-    revision_notes: str | None = None,
-    is_recommended: bool = False,
-    move_blob: bool = True,
-    dest_key_override: str | None = None,
-    is_external: bool = False,
-    external_library_id: int | None = None,
-    source_mtime: float | None = None,
-    ingestion_key: str | None = None,
-    provenance_context: ProvenanceContext | None = None,
     session_factory: SessionFactory | None = None,
-    staged_origin: StagedRemoteObject | None = None,
-    auto_recommend_first_gcode: bool = True,
-    batch_commit: BatchCommitReference | None = None,
 ) -> File:
-    """Persist a staged artifact onto *model*: the only Artifact-persistence path.
+    """Persist a staged Artifact onto its Model: the only Artifact-persistence path.
 
-    Owns: version allocation, the canonical blob move, the File row and its
-    Metadata row. ``meta`` carries facts the caller already has (a portable
-    library import); otherwise the Metadata row starts empty, every value
-    unknown, and the derivative jobs fill it. After the commit it nudges the
-    derivative sources, which find this Artifact by themselves.
+    Three steps, each with one job. ``_reserve`` claims the version, the key
+    and the space. ``_publish`` puts the bytes there with no transaction of
+    this session open. ``_record`` writes the File and its Metadata and adopts
+    the bytes, in the one transaction this function commits. After the commit
+    the derivative sources find the Artifact by themselves.
 
-    ``staged_origin`` identifies the verified bytes already in the vault's
-    store, allowing publication by server-side copy instead of re-upload.
-
-    Destination modes:
-    - **Vault** (default): write into vault storage at ``blob_key(...)`` via
-      ``move_in``.
-    - **External index-in-place** (scan): ``move_blob=False`` with
-      ``dest_key_override`` set to the file's existing on-disk path — nothing is
-      moved; ``is_external``/``external_library_id``/``source_mtime`` are recorded.
-    - **External write-back** (web upload/revision into a NAS library): pass the
-      computed NAS destination as ``dest_key_override`` (caller makes it
-      collision-safe) with ``move_blob=True`` and the external markers; the staged
-      upload is moved onto the library root.
+    The destination decides what moves: the vault's store, a file written back
+    into a mounted external library, or a file indexed where it already lies.
     """
-    assert model.id is not None
-    volume = incoming_volume(meta, file_type)
+    from app.modules.derivatives.jobs import nudge_for
+
+    model_id = command.model.id
+    assert model_id is not None
+    # A caller's volume evidence is refused before anything is reserved or moved.
+    volume = incoming_volume(command.meta, command.file_type)
     backend = get_backend()
+    library = _bound_library(session, command.destination)
 
-    if is_external:
-        # External roots are independently owned from the active vault
-        # backend. Revalidate the durable marker before reserving a version or
-        # publishing bytes so a remount/replacement cannot receive a write.
-        from app.modules.sources.root_binding import (
-            ExternalRootBindingError,
-            assert_root_binding,
-        )
-
-        library = (
-            session.get(ExternalLibrary, external_library_id)
-            if external_library_id is not None
-            else None
-        )
-        if library is None:
-            raise ExternalRootBindingError("unbound", "external_library_missing")
-        if library.source_kind.value == "mounted":
-            assert_root_binding(library)
-        elif move_blob or library.writeback_enabled:
-            # Remote sources are intentionally read-only. A future writeback
-            # capability must prove atomic create/replace per protocol before
-            # it can cross this boundary.
-            raise ExternalRootBindingError("read_only", "remote_writeback_disabled")
-
-    if ingestion_key is not None:
+    if command.ingestion_key is not None:
         existing_ingestion = session.exec(
-            select(File).where(File.ingestion_key == ingestion_key)
+            select(File).where(File.ingestion_key == command.ingestion_key)
         ).first()
         if existing_ingestion is not None:
             return existing_ingestion
 
-    model_id = model.id
     # Callers hand this service transaction ownership and it commits on
     # success. End any read-only transaction used to load the Model before the
     # counter UPDATE so SQLite never has to upgrade a stale read transaction
     # while another process owns the write lock.
     session.commit()
-    version = _reserve_version_before_publication(session, model)
-    dest_key = (
-        dest_key_override
-        if dest_key_override is not None
-        else _available_vault_key(
-            backend,
-            slug=model.slug,
-            version=version,
-            filename=original_filename,
-        )
-    )
-    from app.modules.derivatives.jobs import nudge_for, nudge_with_commit
-    from app.modules.storage.capacity import CapacityManager, CapacityResource
-    from app.modules.storage.capacity_estimates import vault_allocation
-
-    reservation = None
-    if move_blob:
-        allocation = (
-            CapacityResource.for_path(
-                Path(dest_key), staged_path.stat().st_size, role="external writeback"
-            )
-            if is_external
-            else vault_allocation(staged_path.stat().st_size)
-        )
-        reservation = CapacityManager(session_factory or get_session_factory()).reserve(
-            f"artifact:{model_id}:{version}", [allocation], transient=True
-        )
-    blob_receipt = None
-    blob_publication = None
-    provenance_retirements = ()
+    reserved = _reserve(session, command, backend, session_factory)
+    published: _Published | None = None
     commit_started = False
     commit_resolved = False
     try:
-        if move_blob:
-            # ``move_in`` performs the only authoritative collision check using
-            # the backend's atomic create-only primitive. An earlier exists()
-            # check would be a TOCTOU race.
-            if is_external:
-                # A NAS path is independent of the active vault backend. Bind
-                # a local adapter to this library root so its ownership proof
-                # cannot be interpreted as an S3/WebDAV key.
-                library = (
-                    session.get(ExternalLibrary, external_library_id)
-                    if external_library_id is not None
-                    else None
-                )
-                library_root = (
-                    Path(library.root_path).expanduser().resolve(strict=False)
-                    if library is not None
-                    else Path(dest_key).parent
-                )
-                from app.modules.sources.root_binding import expected_root_marker
-
-                external_backend = LocalStorageBackend(
-                    external_roots=(library_root,),
-                    external_root_bindings={library_root: expected_root_marker(library)}
-                    if library is not None
-                    else None,
-                )
-                # Linked NAS bytes remain user-owned: publish add-only and do
-                # not create a vault ownership-ledger row or delete intent.
-                blob_receipt = external_backend.move_in(staged_path, dest_key)
-            else:
-                blob_publication = prepare_file(
-                    session,
-                    backend,
-                    dest_key,
-                    staged_path,
-                    object_kind="artifact",
-                    sha256=blob_hash,
-                    move=True,
-                    remote_source=staged_origin,
-                )
-                blob_receipt = blob_publication.receipt
-        if blob_receipt is not None:
-            size_bytes = blob_receipt.size
-        elif is_external and not move_blob:
-            # An external Artifact is indexed in place.  Its opaque ``path``
-            # is a NAS path, not a key in the active vault backend (which may
-            # be S3/WebDAV), so never ask that backend to stat it.
-            size_bytes = staged_path.stat().st_size
-        else:
-            size_bytes = backend.stat_size(dest_key)
-
-        # For write-back into a NAS library, capture the on-disk mtime of the file we
-        # just wrote so the next scan recognises it as unchanged (no re-import).
-        if is_external and source_mtime is None:
-            try:
-                source_mtime = Path(dest_key).stat().st_mtime
-            except OSError:
-                source_mtime = None
-
-        if file_type == FileType.GCODE:
-            recommended_rows = session.exec(
-                select(File).where(
-                    File.model_id == model_id,
-                    File.file_type == FileType.GCODE,
-                    File.is_recommended == True,  # noqa: E712
-                    live(File),
-                )
-            ).all()
-            if is_recommended:
-                # Clear first and flush before inserting the replacement so the
-                # partial unique index is never transiently violated.
-                for recommended in recommended_rows:
-                    recommended.is_recommended = False
-                    session.add(recommended)
-                if recommended_rows:
-                    session.flush()
-            else:
-                # A Model's first live G-code claims the recommendation marker.
-                is_recommended = auto_recommend_first_gcode and not recommended_rows
-
-        file_row = File(
-            model_id=model_id,
-            path=dest_key,
-            original_filename=original_filename,
-            file_type=file_type,
-            version=version,
-            size_bytes=size_bytes,
-            sha256=blob_hash,
-            revision_label=revision_label,
-            revision_status=revision_status,
-            revision_notes=revision_notes,
-            is_recommended=is_recommended,
-            is_external=is_external,
-            external_library_id=external_library_id,
-            source_mtime=source_mtime,
-            ingestion_key=ingestion_key,
-        )
-        # One transaction for the whole artifact: a File row committed without
-        # its Metadata row would have no row for the derivatives to fill.
-        # flush() allocates the id provenance needs without ending the
-        # transaction.
-        session.add(file_row)
-        session.flush()
-        assert file_row.id is not None
-        if provenance_context is not None:
-            # The File id exists, but the Artifact has not yet become visible.
-            # A provenance failure therefore follows the established rollback
-            # path for both its link and the bytes/row it describes.
-            provenance_retirements = _attach_ingested_artifact(
-                session, file_row, provenance_context
-            )
-        # A caller's facts may carry detection-only keys (e.g.
-        # printer_preset_name) that have no Metadata column.
-        meta = meta or {}
-        md_fields = {
-            k: v
-            for k, v in meta.items()
-            if k in Metadata.model_fields and k not in {"id", "file_id", "created_at"}
-        }
-        metadata = Metadata(file_id=file_row.id, **md_fields)
-        apply_volume(metadata, volume)
-        session.add(metadata)
-        requirements = meta.get("material_requirements")
-        if isinstance(requirements, list):
-            for requirement in requirements:
-                if not isinstance(requirement, dict):
-                    continue
-                material_type = requirement.get("material_type")
-                if not isinstance(material_type, str) or not material_type.strip():
-                    continue
-                session.add(
-                    ArtifactMaterialRequirement(
-                        file_id=file_row.id,
-                        tool_index=int(requirement.get("tool_index") or 0),
-                        material_type=material_type.strip(),
-                        color_hex=requirement.get("color_hex"),
-                    )
-                )
-        content_changed(session, "model", [model_id])
-        if batch_commit is not None:
-            from .batch_store import record_committed
-
-            record_committed(session, batch_commit, file_row, deduplicated=False)
+        published = _publish(session, command, reserved, backend, library)
+        file_row = _record(session, command, reserved, published, volume)
         # A driver may acknowledge a committed transaction as an exception
         # (for example, a connection loss after COMMIT). From here onward the
         # blob must be preserved until a fresh session resolves the outcome.
-        session.flush()
-        finish_publication_batch(
-            session,
-            publications=(blob_publication,) if blob_publication is not None else (),
-            retirements=provenance_retirements,
-        )
-        # Derivatives are not part of the File+Metadata integrity boundary. The
-        # sources find this Artifact by themselves; the nudge only makes that
-        # happen now rather than at the next tick, and its dirty marks ride on
-        # this commit instead of taking the writer again after it.
-        nudge_with_commit(session, file_row)
         commit_started = True
         session.commit()
     except BaseException as exc:
@@ -649,48 +792,48 @@ def persist_artifact(
             # A cooperative stop cannot determine whether COMMIT was acknowledged.
             # Keep authoritative bytes and ownership; retry finds any committed File.
             raise
-        if commit_started and blob_receipt is not None and not is_external:
+        publication = published.publication if published is not None else None
+        if commit_started and publication is not None:
+            key = publication.receipt.key
             try:
                 resolved = _resolve_committed_artifact(
                     backend=backend,
-                    key=blob_receipt.key,
+                    key=key,
                     model_id=model_id,
-                    blob_hash=blob_hash,
-                    ingestion_key=ingestion_key,
+                    blob_hash=command.blob_hash,
+                    ingestion_key=command.ingestion_key,
                 )
             except Exception as resolution_exc:
                 # The acknowledgement and the verification query are separate
                 # failure domains. If the latter is unavailable, the outcome is
                 # still unknown and the committed bytes must remain retryable.
                 raise ArtifactCommitUncertain(
-                    f"artifact commit outcome unknown for {blob_receipt.key}"
+                    f"artifact commit outcome unknown for {key}"
                 ) from resolution_exc
-            if resolved is not None:
-                file_row = resolved
-                commit_resolved = True
-            else:
+            if resolved is None:
                 # Unknown commit state is retryable and reconciled by the
                 # ownership worker. Deleting here could destroy a committed
                 # artifact when only the acknowledgement was lost.
                 raise ArtifactCommitUncertain(
-                    f"artifact commit outcome unknown for {blob_receipt.key}"
+                    f"artifact commit outcome unknown for {key}"
                 ) from exc
+            file_row = resolved
+            commit_resolved = True
         else:
             # Before the domain commit boundary, exact receipt rollback is safe.
             # External-library bytes remain user-owned for the next scan.
-            if blob_publication is not None and not is_external:
+            if publication is not None:
                 try:
-                    if abandon_publication(session, blob_publication):
-                        backend.rollback_create(blob_publication.receipt)
+                    if abandon_publication(session, publication):
+                        backend.rollback_create(publication.receipt)
                 except Exception as cleanup_exc:
                     # SQL retirement and physical rollback are both best effort;
                     # retain the durable receipt if either cannot prove cleanup.
                     exc.add_note(f"receipt cleanup failed: {cleanup_exc}")
             raise
-
     finally:
-        if reservation is not None:
-            reservation.release()
+        if reserved.capacity is not None:
+            reserved.capacity.release()
 
     if commit_resolved:
         # The acknowledgement was lost, and with it the nudge that commit
@@ -714,6 +857,16 @@ class WriteTarget:
     is_external: bool
     external_library_id: int | None
     source_mtime: float | None
+
+    def destination(self) -> Destination:
+        """Where ``persist_artifact`` writes for this target."""
+        if not self.is_external:
+            return VaultDestination()
+        if self.dest_key is None or self.external_library_id is None:
+            raise RuntimeError("external_write_target_incomplete")
+        return ExternalWriteback(
+            self.dest_key, self.external_library_id, self.source_mtime
+        )
 
 
 def _collision_safe_path(directory: Path, filename: str) -> Path:
@@ -982,34 +1135,35 @@ def commit_staged_artifact(
         _fault_injection_checkpoint("before_commit", ingestion_key)
         file_row = persist_artifact(
             session,
-            model=model,
-            staged_path=artifact.staged_path,
-            original_filename=artifact.original_filename,
-            file_type=artifact.file_type,
-            blob_hash=blob_hash,
-            dest_key_override=dest.dest_key,
-            is_external=dest.is_external,
-            external_library_id=dest.external_library_id,
-            source_mtime=dest.source_mtime,
-            ingestion_key=ingestion_key,
-            meta={
-                "native_context_json": json.dumps(
-                    artifact.native_context,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-            }
-            if artifact.native_context is not None
-            else None,
-            revision_label=artifact.revision_label,
-            revision_status=artifact.revision_status,
-            revision_notes=artifact.revision_notes,
-            is_recommended=artifact.is_recommended,
-            auto_recommend_first_gcode=artifact.auto_recommend_first_gcode,
-            provenance_context=provenance_context,
+            ArtifactCommand(
+                model=model,
+                staged_path=artifact.staged_path,
+                original_filename=artifact.original_filename,
+                file_type=artifact.file_type,
+                blob_hash=blob_hash,
+                destination=dest.destination(),
+                revision=Revision(
+                    label=artifact.revision_label,
+                    status=artifact.revision_status,
+                    notes=artifact.revision_notes,
+                    is_recommended=artifact.is_recommended,
+                    auto_recommend_first_gcode=artifact.auto_recommend_first_gcode,
+                ),
+                meta={
+                    "native_context_json": json.dumps(
+                        artifact.native_context,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                }
+                if artifact.native_context is not None
+                else None,
+                ingestion_key=ingestion_key,
+                provenance_context=provenance_context,
+                staged_origin=artifact.staged_origin,
+                batch_commit=batch_commit,
+            ),
             session_factory=session_factory,
-            staged_origin=artifact.staged_origin,
-            batch_commit=batch_commit,
         )
         assert file_row.id is not None
         model_id, file_id = model.id, file_row.id
@@ -1162,24 +1316,25 @@ def add_gcode_revision_to_model(
 
     file_row = persist_artifact(
         session,
-        model=model,
-        staged_path=staged_path,
-        original_filename=original_filename,
-        file_type=FileType.GCODE,
-        blob_hash=blob_hash,
-        revision_label=revision_label.strip()
-        if revision_label and revision_label.strip()
-        else None,
-        revision_status=revision_status,
-        revision_notes=revision_notes.strip()
-        if revision_notes and revision_notes.strip()
-        else None,
-        is_recommended=is_recommended,
-        dest_key_override=dest.dest_key,
-        is_external=dest.is_external,
-        external_library_id=dest.external_library_id,
-        source_mtime=dest.source_mtime,
-        staged_origin=staged_origin,
+        ArtifactCommand(
+            model=model,
+            staged_path=staged_path,
+            original_filename=original_filename,
+            file_type=FileType.GCODE,
+            blob_hash=blob_hash,
+            destination=dest.destination(),
+            revision=Revision(
+                label=revision_label.strip()
+                if revision_label and revision_label.strip()
+                else None,
+                status=revision_status,
+                notes=revision_notes.strip()
+                if revision_notes and revision_notes.strip()
+                else None,
+                is_recommended=is_recommended,
+            ),
+            staged_origin=staged_origin,
+        ),
     )
     assert file_row.id is not None
 

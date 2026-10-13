@@ -8,7 +8,7 @@ from sqlmodel import select
 from app.db.models import AuditLog, FileType, SearchDependency, SearchPassage
 from app.db.projections import bind_content_projection, content_changed
 from app.modules.administration.audit import install_audit_listeners
-from app.modules.ingestion.ingestion import persist_artifact
+from app.modules.ingestion.ingestion import ArtifactCommand, persist_artifact
 from app.modules.library import commands, provenance, revisions, trash
 from app.modules.search.projection import LibraryProjection
 from app.schemas.models import (
@@ -336,12 +336,14 @@ class TestModelProjection:
         staged.write_bytes(data)
         persist_artifact(
             db_session,
-            model=model,
-            staged_path=staged,
-            original_filename=staged.name,
-            file_type=FileType.STL,
-            blob_hash=hashlib.sha256(data).hexdigest(),
-            meta={},
+            ArtifactCommand(
+                model=model,
+                staged_path=staged,
+                original_filename=staged.name,
+                file_type=FileType.STL,
+                blob_hash=hashlib.sha256(data).hexdigest(),
+                meta={},
+            ),
         )
         drain_search(db_session)
         assert "Files: spring.stl" in passage_text(db_session, "model", model.id)

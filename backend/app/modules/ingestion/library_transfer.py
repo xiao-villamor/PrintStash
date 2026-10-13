@@ -967,7 +967,7 @@ def _read_provenance_sidecar(
     try:
         raw = archive.read(info)
         sidecar = json.loads(raw)
-    except (json.JSONDecodeError, UnicodeDecodeError):
+    except json.JSONDecodeError, UnicodeDecodeError:
         raise ValueError("portable_provenance_invalid") from None
     if (
         not isinstance(sidecar, dict)
@@ -1276,7 +1276,7 @@ def _portable_v2_provenance_contexts(
             }
             try:
                 capture_manifest = CaptureManifestV2.from_dict(raw_manifest)
-            except (CaptureContractError, TypeError, ValueError):
+            except CaptureContractError, TypeError, ValueError:
                 raise ValueError("portable_provenance_invalid") from None
             for link in links:
                 artifact_source_id = link["artifact_source_id"]
@@ -1482,7 +1482,7 @@ def _portable_provenance_contexts(
                 }
                 try:
                     capture_manifest = CaptureManifestV2.from_dict(raw_manifest)
-                except (CaptureContractError, TypeError, ValueError):
+                except CaptureContractError, TypeError, ValueError:
                     raise ValueError("portable_provenance_invalid") from None
                 contexts.setdefault((model_source_id, artifact_source_id), []).append(
                     (
@@ -1984,20 +1984,26 @@ def import_archive(
                         shutil.copyfileobj(src, dst)
                     file_row = ingestion.persist_artifact(
                         session,
-                        model=model,
-                        staged_path=staged,
-                        original_filename=artifact_data["original_filename"],
-                        file_type=FileType(artifact_data["file_type"]),
-                        blob_hash=artifact_data["sha256"],
-                        meta=artifact_data.get("metadata", {}),
-                        revision_label=artifact_data.get("revision_label"),
-                        revision_status=FileRevisionStatus(
-                            artifact_data["revision_status"]
-                        )
-                        if artifact_data.get("revision_status")
-                        else None,
-                        revision_notes=artifact_data.get("revision_notes"),
-                        is_recommended=artifact_data.get("is_recommended", False),
+                        ingestion.ArtifactCommand(
+                            model=model,
+                            staged_path=staged,
+                            original_filename=artifact_data["original_filename"],
+                            file_type=FileType(artifact_data["file_type"]),
+                            blob_hash=artifact_data["sha256"],
+                            meta=artifact_data.get("metadata", {}),
+                            revision=ingestion.Revision(
+                                label=artifact_data.get("revision_label"),
+                                status=FileRevisionStatus(
+                                    artifact_data["revision_status"]
+                                )
+                                if artifact_data.get("revision_status")
+                                else None,
+                                notes=artifact_data.get("revision_notes"),
+                                is_recommended=artifact_data.get(
+                                    "is_recommended", False
+                                ),
+                            ),
+                        ),
                     )
                     source_files[
                         artifact_data.get("source_id", artifact_data["version"])

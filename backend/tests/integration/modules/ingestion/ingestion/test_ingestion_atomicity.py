@@ -99,7 +99,7 @@ def _persist(db_session: Session, model: Model, staged: Path, **kwargs):
         meta={"estimated_time_s": 120},
     )
     defaults.update(kwargs)
-    return ingestion.persist_artifact(db_session, **defaults)
+    return ingestion.persist_artifact(db_session, ingestion.ArtifactCommand(**defaults))
 
 
 class TestPersistArtifact:
@@ -137,9 +137,9 @@ class TestPersistArtifact:
                         db_session,
                         model,
                         staged,
-                        is_external=True,
-                        external_library_id=library.id,
-                        dest_key_override=str(destination),
+                        destination=ingestion.ExternalWriteback(
+                            str(destination), library.id
+                        ),
                         ingestion_key="issue-210-root-replacement",
                         blob_hash=hashlib.sha256(original).hexdigest(),
                     )
@@ -155,9 +155,7 @@ class TestPersistArtifact:
             db_session,
             model,
             staged,
-            is_external=True,
-            external_library_id=library.id,
-            dest_key_override=str(destination),
+            destination=ingestion.ExternalWriteback(str(destination), library.id),
             ingestion_key="issue-210-root-replacement",
             blob_hash=hashlib.sha256(original).hexdigest(),
         )
@@ -301,12 +299,14 @@ class TestReserveNextVersion:
                     start.wait(timeout=5)
                     ingestion.persist_artifact(
                         session,
-                        model=model_row,
-                        staged_path=path,
-                        original_filename=path.name,
-                        file_type=FileType.GCODE,
-                        blob_hash=hashlib.sha256(content).hexdigest(),
-                        meta={},
+                        ingestion.ArtifactCommand(
+                            model=model_row,
+                            staged_path=path,
+                            original_filename=path.name,
+                            file_type=FileType.GCODE,
+                            blob_hash=hashlib.sha256(content).hexdigest(),
+                            meta={},
+                        ),
                         session_factory=session_factory,
                     )
             except BaseException as exc:  # pragma: no cover - asserted below

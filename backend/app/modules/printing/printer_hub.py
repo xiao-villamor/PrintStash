@@ -141,14 +141,14 @@ def _reported_text(value: Any) -> str | None:
 def _reported_int(value: Any) -> int | None:
     try:
         return int(value) if value is not None and value != "" else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
 def _reported_float(value: Any) -> float | None:
     try:
         return float(value) if value is not None and value != "" else None
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -1256,12 +1256,14 @@ class PrinterHub:
             )
             file_row = ingestion.persist_artifact(
                 session,
-                model=model,
-                staged_path=staged,
-                original_filename=filename,
-                file_type=file_type,
-                blob_hash=blob_hash,
-                ingestion_key=f"bambu-job-{job_id}",
+                ingestion.ArtifactCommand(
+                    model=model,
+                    staged_path=staged,
+                    original_filename=filename,
+                    file_type=file_type,
+                    blob_hash=blob_hash,
+                    ingestion_key=f"bambu-job-{job_id}",
+                ),
                 session_factory=self._session_factory,
             )
             job = session.get(PrintJob, job_id)

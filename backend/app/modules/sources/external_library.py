@@ -52,6 +52,8 @@ from app.db.projections import content_changed
 from app.db.scopes import live
 from app.db.session import SessionFactory, get_session_factory
 from app.modules.ingestion.ingestion import (
+    ArtifactCommand,
+    ExternalIndexed,
     persist_artifact,
     resolve_or_create_model,
 )
@@ -475,16 +477,14 @@ def _index_external_file(
 
     row = persist_artifact(
         session,
-        model=model,
-        staged_path=source_path,
-        original_filename=source_path.name,
-        file_type=file_type,
-        blob_hash=blob_hash,
-        move_blob=False,
-        dest_key_override=str(source_path),
-        is_external=True,
-        external_library_id=library.id,
-        source_mtime=mtime,
+        ArtifactCommand(
+            model=model,
+            staged_path=source_path,
+            original_filename=source_path.name,
+            file_type=file_type,
+            blob_hash=blob_hash,
+            destination=ExternalIndexed(str(source_path), library.id, mtime),
+        ),
     )
     try:
         row.source_key = source_path.relative_to(
@@ -624,16 +624,18 @@ def _index_remote_file(
                     session.refresh(model)
         row = persist_artifact(
             session,
-            model=model,
-            staged_path=read_path,
-            original_filename=source_name.name,
-            file_type=file_type,
-            blob_hash=blob_hash,
-            move_blob=False,
-            dest_key_override=_remote_uri(library, entry.key),
-            is_external=True,
-            external_library_id=library.id,
-            source_mtime=source_timestamp(content.entry.modified_at),
+            ArtifactCommand(
+                model=model,
+                staged_path=read_path,
+                original_filename=source_name.name,
+                file_type=file_type,
+                blob_hash=blob_hash,
+                destination=ExternalIndexed(
+                    _remote_uri(library, entry.key),
+                    library.id,
+                    source_timestamp(content.entry.modified_at),
+                ),
+            ),
         )
         row.source_key = entry.key
         row.source_etag = content.entry.etag
