@@ -100,7 +100,23 @@ export function completeSetupEntry(
   }, signal);
 }
 
-/** SetupGate probes once per navigation subject; acceptance is presentation state. */
+/**
+ * Paths whose admission follows the live setup status: the wizard, sign-in and
+ * the storage step are where `configured` and `storage_choice_required` change.
+ */
+const SETUP_ENTRY_PATHS: readonly string[] = ["/setup", "/login", "/getting-started"];
+
+/**
+ * The subject one setup admission covers. Every application path shares a
+ * single subject, so moving between them keeps the admitted shell and its
+ * effects alive; entering or leaving a setup entry path is a new subject and
+ * is probed again.
+ */
+export function setupAdmissionSubject(pathname: string): string {
+  return SETUP_ENTRY_PATHS.includes(pathname) ? pathname : "application";
+}
+
+/** SetupGate probes once per admission subject; acceptance is presentation state. */
 export function setupGateOptions(entry: string, navigation: number) {
   return queryOptions({
     queryKey: ["setup-gate", entry, navigation],

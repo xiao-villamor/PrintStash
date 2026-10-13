@@ -5,6 +5,7 @@ import {
   setupEntryOptions,
   completeSetupEntry,
   checkSetupEntry,
+  setupAdmissionSubject,
   type SetupEntryApi,
 } from "@/features/setup/entry";
 import {
@@ -153,4 +154,17 @@ describe("setup command scope", () => {
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     expect(api.getSetupStatus).not.toHaveBeenCalled();
   });
+});
+
+describe("setup admission subject", () => {
+  it.each(["/setup", "/login", "/getting-started"])("gives %s its own subject", (pathname) => {
+    expect(setupAdmissionSubject(pathname)).toBe(pathname);
+  });
+
+  it.each(["/", "/models/7", "/settings", "/setup/extra"])(
+    "shares one subject for the application path %s",
+    (pathname) => {
+      expect(setupAdmissionSubject(pathname)).toBe("application");
+    },
+  );
 });

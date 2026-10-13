@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Keep one events connection and one setup admission while moving between
+  application pages. Opening a Model and returning no longer hides the app
+  behind a setup probe, reopens the events socket or refetches every view.
 - Compress 3D preview meshes between the server and the browser. Binary STL
   previews transfer at about half their size and ASCII STL at about an eighth,
   and a slow connection no longer makes the proxy spool a large mesh to disk.
