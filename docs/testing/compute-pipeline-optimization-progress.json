@@ -1,5 +1,5 @@
 {
-  "status": "performance_threshold_met_validation_pending",
+  "status": "performance_threshold_met_runtime_validated",
   "required_reduction_percent": 20,
   "threshold_seconds": 397.836875122,
   "cohort_sha256": "2780f43fa04318c7c8ebbc0b127e250f5887e0b3f4382f2d8800e4d72ccd3824",
@@ -99,12 +99,68 @@
       "byte_identical_images": 238,
       "same_invalid_sources": 12,
       "r2_requests": 0
+    },
+    {
+      "name": "final_committed_source_repeat",
+      "seconds_monotonic": 351.879889222,
+      "seconds_utc": 358.936745306,
+      "seconds_used_for_comparison": 358.936745306,
+      "clock_difference_seconds": 7.056856084000003,
+      "clock_policy": "Use the larger observed elapsed time for the headline comparison; retain both raw clocks. The cause of their discrepancy was not established.",
+      "image": "sha256:4a5b36bc383d44043d34a7892b5eaefb62e315498027c69d65a6ab020d8114e2",
+      "source_commit": "5daf785dbc8d74c9d0a6945bd4f575c3f4e32833",
+      "source_manifest_sha256": "887f1f38d7adcd256da32031cf86e8f1bfc0f6c5d516044a9126e5be972115f6",
+      "runtime_files_equal": 661,
+      "metadata_equal": 250,
+      "byte_identical_images_by_original_sha256": 238,
+      "same_invalid_sources": 12,
+      "r2_requests": 0,
+      "reduction_vs_original_percent": 27.82232764194321,
+      "reduction_vs_fresh_control_percent": 27.792365795200613,
+      "peak_container_ram_bytes": 2510704640,
+      "whole_pool_memory_claims": 15,
+      "native_wait_seconds_accumulated": 115.193145573
     }
   ],
   "scope_notes": [
     "Same observers and rendering settings. No full CPU rerun.",
     "Diagnostic profiling runs do not establish performance gains.",
-    "GPU geometry measurements and bounded streaming preparation are proposed, not implemented.",
+    "GPU geometry measurements and VRAM-first parsing remain unimplemented.",
     "Sequential runs on a shared WSL host; not a randomized multi-run estimate."
-  ]
+  ],
+  "validation": {
+    "ordinary_full_run": {
+      "passed": 21581,
+      "failed": 10,
+      "seconds": 2238.71,
+      "resolution": "Three new-test structure failures and three obsolete worker-wrapper/configuration assumptions corrected. Four other cases (five variants) passed separately; no flake fix is claimed. Latest implementation CI passes every required check."
+    },
+    "compatibility_followup": {
+      "passed": 89,
+      "seconds": 33.39
+    },
+    "resource_lane": {
+      "passed": 688,
+      "failed": 0,
+      "seconds": 3162.35
+    },
+    "array_and_worker_import_followup": {
+      "passed": 22
+    },
+    "root_api_followup": {
+      "passed": 30
+    },
+    "repository_invariants_followup": {
+      "passed": 30
+    },
+    "ruff": "passed",
+    "pyright_errors": 0,
+    "html": "Chromium filters, 47-row matrix, desktop/mobile width and console checks passed",
+    "implementation_ci": {
+      "commit": "5daf785dbc8d74c9d0a6945bd4f575c3f4e32833",
+      "run_id": 38326564073,
+      "checks_passed": 17,
+      "url": "https://github.com/xiao-villamor/PrintStash/actions/runs/38326564073"
+    }
+  }
 }
