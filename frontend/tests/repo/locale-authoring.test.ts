@@ -20,6 +20,10 @@ function fixture(): string {
     join(root, "src/locales/catalogs.ts"),
     'import en from "./en.json" with { type: "json" };\n\nexport const localeDefinitions = {\n  en: { name: "English", direction: "ltr", messages: en },\n} satisfies Record<string, unknown>;\n',
   );
+  writeFileSync(
+    join(root, "src/locales/registry.ts"),
+    'export const localeMetadata = {\n  en: { name: "English", direction: "ltr" },\n} satisfies Record<string, unknown>;\n',
+  );
   return root;
 }
 
@@ -48,6 +52,16 @@ describe("locale authoring", () => {
     );
     expect(readFileSync(join(root, "src/locales/catalogs.ts"), "utf8")).toContain(
       'fr: { name: "Français", direction: "ltr", messages: catalogFr },',
+    );
+  });
+
+  it("registers the draft's display metadata for the running app", () => {
+    const root = fixture();
+
+    scaffoldLocale({ rootDir: root, locale: "fr", name: "Français", direction: "rtl" });
+
+    expect(readFileSync(join(root, "src/locales/registry.ts"), "utf8")).toContain(
+      'fr: { name: "Français", direction: "rtl" },',
     );
   });
 

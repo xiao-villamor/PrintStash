@@ -62,6 +62,9 @@ let stopTaskScope: () => void = () => {};
 /** Fresh module instance, wired to the stubbed job source and events socket. */
 async function loadTaskCenter(): Promise<TaskCenter> {
   stopTaskScope();
+  // A reset module graph has no catalogs yet; the app loads one before it renders.
+  const locale = await import("@/lib/locale");
+  await Promise.all(locale.SUPPORTED_LOCALES.map(locale.ensureLocaleCatalog));
   const taskCenter = await import("@/lib/task-center");
   stopTaskScope = taskCenter.startTaskCenterSessionScope();
   const events = await import("@/lib/events");

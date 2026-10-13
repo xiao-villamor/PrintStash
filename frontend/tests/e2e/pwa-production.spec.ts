@@ -247,6 +247,29 @@ test.describe("production PWA cache contracts", () => {
   });
 });
 
+test.describe("production locale delivery", () => {
+  for (const { locale, other, heading } of [
+    { locale: "en", other: "es", heading: "All Models" },
+    { locale: "es", other: "en", heading: "Todos los modelos" },
+  ] as const) {
+    test(`fetches only the ${locale} catalog to start in ${locale}`, async ({ page }) => {
+      const catalogs: string[] = [];
+      page.on("request", (request) => {
+        const match = /\/assets\/(en|es)-[^/]+\.js$/.exec(new URL(request.url()).pathname);
+        if (match) catalogs.push(match[1]);
+      });
+      await page.addInitScript((value) => localStorage.setItem("printstash.locale", value), locale);
+
+      await page.goto("/");
+      await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
+      await page.waitForLoadState("networkidle");
+
+      expect(catalogs).toContain(locale);
+      expect(catalogs).not.toContain(other);
+    });
+  }
+});
+
 test.describe("production route recovery", () => {
   test.use({ serviceWorkers: "block" });
 

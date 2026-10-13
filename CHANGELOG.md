@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Start with only the selected language. Each translation catalog is now its
+  own asset, loaded when its language is shown, which removes about a fifth of
+  the JavaScript downloaded at startup.
+
 - Keep one events connection and one setup admission while moving between
   application pages. Opening a Model and returning no longer hides the app
   behind a setup probe, reopens the events socket or refetches every view.
