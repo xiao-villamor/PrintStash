@@ -4180,6 +4180,8 @@
   "3D preview processing is disabled": "El procesamiento de la vista 3D está desactivado",
   "3D preview preparation was cancelled": "Se canceló la preparación de la vista 3D",
   "Preparing 3D preview…": "Preparando vista 3D…",
+  "Load 3D preview": "Cargar vista 3D",
+  "Large 3D preview · {size}": "Vista 3D grande · {size}",
   "Could not load this list.": "No se pudo cargar esta lista.",
   "Show more models": "Mostrar más modelos",
   "Search results": "Resultados de búsqueda",

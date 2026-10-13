@@ -154,7 +154,7 @@ AI Search settings: the Settings browser flow waits for loaded AI data, visits g
 
 - ZIP uploads: a failed preparation retains input capacity; Tasks confirms and discards it safely.
 
-`viewer-stl.spec.ts`: an adversarial 3MF displays a persisted memory refusal across browser reloads while its original remains downloadable.
+`viewer-stl.spec.ts`: an adversarial 3MF displays a persisted memory refusal across browser reloads while its original remains downloadable. A 17 MB STL opens on its thumbnail with no mesh request until the viewer asks for the 3D preview.
 
 `provenance.spec.ts` imports an actual browser capture, edits its Source metadata,
 creates a competing conditional edit, and verifies that the retained draft is

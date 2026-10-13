@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Open large Models on their thumbnail. A 3D preview whose source file is over
+  16 MB is no longer downloaded just by opening the Model; the page shows its
+  size and a "Load 3D preview" action instead.
+
 - Keep folder descriptions and model cards together when navigating, clamp long descriptions before the first paint, and avoid fading cached library thumbnails on every visit.
 
 - Enable mesh preview readiness after its first rendered frame; verify overlay alignment, display-mode pixels, and repeated resource cleanup on WebGL/WebGPU.

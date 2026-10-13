@@ -1,9 +1,75 @@
-/** A refused viewer keeps its durable reason across page reloads and preserves originals. */
+/** A large mesh waits to be asked for; a refused viewer keeps its durable reason across reloads and preserves originals. */
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { test, expect } from "./helpers";
 
 test.describe("viewer STL", () => {
+  test("waits to be asked before downloading a large mesh", async ({ page }) => {
+    const name = `e2e-viewer-large-${Date.now()}`;
+    const backend = resolve("../backend");
+    // A real 17 MB binary STL: one over the automatic budget, unique per run.
+    const mesh = execFileSync(
+      resolve(backend, ".venv/bin/python"),
+      [
+        "-c",
+        [
+          "import struct, sys, numpy as np",
+          "n = 412",
+          "u, v = np.meshgrid(np.linspace(0, 6.283, n + 1), np.linspace(0.01, 3.13, n + 1))",
+          "p = np.stack([40 * np.sin(v) * np.cos(u), 40 * np.sin(v) * np.sin(u), 40 * np.cos(v)], -1).astype('<f4')",
+          "a, b, c, d = p[:-1, :-1], p[1:, :-1], p[1:, 1:], p[:-1, 1:]",
+          "t = np.concatenate([np.stack([a, b, c], 2).reshape(-1, 3, 3), np.stack([a, c, d], 2).reshape(-1, 3, 3)])",
+          "r = np.zeros(len(t), dtype=[('n', '<f4', 3), ('v', '<f4', (3, 3)), ('a', '<u2')])",
+          "r['v'] = t",
+          "sys.stdout.buffer.write(sys.argv[1].encode().ljust(80, b' ') + struct.pack('<I', len(t)) + r.tobytes())",
+        ].join("\n"),
+        name,
+      ],
+      { cwd: backend, maxBuffer: 64 * 1024 * 1024 },
+    );
+    expect(mesh.length).toBeGreaterThan(16 * 1024 * 1024);
+    const upload = await page.request.post("/api/v1/ingest/model", {
+      multipart: {
+        file: { name: `${name}.stl`, mimeType: "model/stl", buffer: mesh },
+        model_name: name,
+      },
+    });
+    expect(upload.status()).toBe(202);
+    const jobId = (await upload.json()).job_id;
+    let modelId = 0;
+    let fileId = 0;
+    await expect
+      .poll(
+        async () => {
+          const job = await (await page.request.get(`/api/v1/jobs/${jobId}`)).json();
+          modelId = job.model_id;
+          fileId = job.file_id;
+          return job.state;
+        },
+        { timeout: 60_000 },
+      )
+      .toBe("completed");
+    let meshRequests = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === `/api/v1/files/${fileId}/stl`) meshRequests += 1;
+    });
+    try {
+      // ── Opening the Model costs no mesh download ───────────────────────────
+      await page.goto(`/models/${modelId}`);
+      const load = page.getByRole("button", { name: "Load 3D preview", exact: true });
+      await expect(load).toBeVisible();
+      await page.waitForLoadState("networkidle");
+      expect(meshRequests).toBe(0);
+
+      // ── Asking for it starts the download ──────────────────────────────────
+      await load.click();
+      await expect.poll(() => meshRequests).toBeGreaterThan(0);
+      await expect(load).toHaveCount(0);
+    } finally {
+      expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
+    }
+  });
+
   test("retains a memory refusal while keeping the original downloadable", async ({ page }) => {
     const name = `e2e-viewer-refused-${Date.now()}`;
     const backend = resolve("../backend");
