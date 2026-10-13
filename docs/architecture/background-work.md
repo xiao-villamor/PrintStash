@@ -216,6 +216,7 @@ both Compose files run the first with no setting.
 | Setting (`VAULT_…`) | Default | Meaning |
 | --- | --- | --- |
 | `JOBS_QUEUE_POLL_INTERVAL_SECONDS` | 0.25 | DBOS lane dispatch polling (0.05–5 seconds); lower values trade more local database polling for shorter queue handoffs |
+| `JOBS_RELAXED_QUEUE_POLL_INTERVAL_SECONDS` | 2.0 | Polling of lanes nobody waits on (search, maintenance, notify, similarity, captions, expansion); never faster than the interval above. Every look at a queue costs database statements whether or not work is there |
 | `JOBS_RECONCILE_INTERVAL_SECONDS` | 300 | Safety-net tick |
 | `JOBS_RECONCILE_BATCH` | 500 | Most Jobs one pass creates |
 | `JOBS_LANE_HEADROOM_FACTOR` | 2 | Pending depth multiplier for ordinary lanes; derivation lanes reserve concurrency plus one |

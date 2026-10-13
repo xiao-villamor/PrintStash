@@ -4,6 +4,12 @@
 
 ### Performance
 
+- A file in a bulk upload now waits when the server is busy instead of failing. Session creation was limited to 30 per minute, which held a 200-file drop to one file every two seconds and failed files that arrived faster; that limit now bounds a runaway client (600 per minute) and staging admission paces real uploads.
+
+- Halve the CPU an idle installation spends polling its job queues: lanes nobody waits on (search, maintenance, notifications, similarity, captions, expansion) are looked at every two seconds (`VAULT_JOBS_RELAXED_QUEUE_POLL_INTERVAL_SECONDS`) instead of four times a second.
+
+- Do less database work per uploaded file on SQLite: keep connections pooled instead of reopening them under load (`VAULT_SQLITE_POOL_SIZE`), open the job engine's own SQLite file in write-ahead mode, stop writing a row-level audit entry for every job, reconciler-cursor and capacity-claim heartbeat, check a step's ownership without taking the write lock, and report commit stages only for files slow enough to watch. Cancellation is noticed within half a second and worker memory is sampled ten times a second.
+
 - Release prepared thumbnail parsers before GPU eligibility/dispatch instead of repeating broker status inside each disposable process. Keep model publication ahead of background DBOS captures, preserve guarded recovery from the same geometry packet, use compact exact OBJ corner keys, and skip STL preflight scans that cannot change the minimum memory claim.
 
 - Simplify source geometry preparation and native supervision: load qualified OBJ directly, bound text admission without parsing coordinates twice, avoid redundant vertex/edge sorting, and reuse a narrow cancellation query with fresh results. Keep native settings minimal and sample each staged worker's RAM once. A fixed 250-source WSL GPU comparison improves from 497.090 to 358.937 seconds (27.79%, using the longer of the two recorded clocks in the final repeat; first candidate: 357.279 seconds), preserving all metadata, 238 byte-identical images and the same 12 invalid-source outcomes; CPU-only geometry uses the same preparation path.
