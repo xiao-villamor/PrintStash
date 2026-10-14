@@ -121,6 +121,20 @@ class WorkCatalog:
         except KeyError:
             raise LookupError(f"unknown_job_definition:{name.value}") from None
 
+    @property
+    def additions(self) -> tuple[JobKind, ...]:
+        """Definitions whose Jobs bring Models into the library."""
+        return tuple(
+            name for name, item in self.definitions.items() if item.adds_to_library
+        )
+
+    @property
+    def waiting_for_additions(self) -> tuple[JobKind, ...]:
+        """Definitions whose discovery holds back while additions are active."""
+        return tuple(
+            name for name, item in self.definitions.items() if item.waits_for_additions
+        )
+
     def lane_for(self, definition: JobKind) -> Lane:
         return self.lanes[self.definition(definition).lane]
 

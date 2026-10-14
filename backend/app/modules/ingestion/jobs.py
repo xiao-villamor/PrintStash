@@ -290,6 +290,8 @@ def _definition(
         retry=_retry,
         on_settled=_settled,
         label=label,
+        # Inspecting an archive only lists it; every other request imports.
+        adds_to_library=kind is not IngestRequestKind.ARCHIVE_INSPECT,
     )
 
 

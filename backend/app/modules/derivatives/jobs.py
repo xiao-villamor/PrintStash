@@ -104,6 +104,8 @@ def _definition(name: JobKind, lane: LaneName, produce: Producer) -> JobDefiniti
         retry=retry,
         label=derivative_group.label,
         admission=lambda session: policy.admission(session, name),
+        # A viewer mesh is what opening a Model in 3D waits for; it never yields.
+        waits_for_additions=name is not JobKind.DERIVATIVES_VIEWER_STL,
     )
 
 

@@ -3156,5 +3156,6 @@ def definitions():
             on_failure=_failed,
             retry=lambda _session, _subject: False,
             label="Pending Imports",
+            adds_to_library=True,
         ),
     ]

@@ -1601,5 +1601,6 @@ def definitions():
             on_failure=_failed_scan,
             retry=_retry_scan,
             label="Library scans",
+            adds_to_library=True,
         )
     ]

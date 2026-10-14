@@ -2485,5 +2485,6 @@ def definitions():
             cancel=_cancel_import,
             retry=_retry_import,
             label="Library imports",
+            adds_to_library=True,
         )
     ]

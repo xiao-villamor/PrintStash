@@ -97,6 +97,16 @@ on an epoch its last submission did not carry). Request-originated work with
 nothing waiting to be submitted has nothing a pass could find or submit, so no
 pass is queued for it; the tick repairs what a crash left behind.
 
+**Additions first.** A definition that brings Models into the library (an
+upload, an import, a library scan) declares `adds_to_library`; derived outputs
+(thumbnails, measurements, G-code and toolpath previews) declare
+`waits_for_additions`. While any Job of an adding definition is active, a
+waiting definition's discovery finds nothing new, so a large import shows all
+its Models before their derived work starts competing with it. Jobs already
+created keep running. The last adding Job to settle stamps every waiting
+definition in its own terminal transaction; the tick recovers a lost nudge.
+The viewer mesh does not wait: opening a Model in 3D asks for it.
+
 A nudge (`work.nudge`) stamps the dirty mark and queues a pass unless one is
 already queued within `JOBS_SUBMIT_GRACE_SECONDS`. An interactive nudge is not
 absorbed by a queued backfill pass. The tick, a single persistent DBOS

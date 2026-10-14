@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Models first, then thumbnails.** While an upload, an import or a library
+  scan is still adding Models, thumbnails and other derived previews wait; they
+  start as soon as the last one finishes. A large import shows all its Models
+  sooner, and the library can be browsed while the previews catch up. Opening
+  a Model in 3D is not held back.
+
 - The library no longer starts over while an import runs. Every imported file,
   and every folder an import or a library scan created, told open library
   views that access might have changed, so they discarded what they showed and

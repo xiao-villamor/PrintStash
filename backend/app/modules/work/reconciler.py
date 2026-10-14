@@ -112,6 +112,7 @@ class PassNote(StrEnum):
     COOLING_DOWN = "cooling_down"
     ALREADY_ACTIVE = "already_active"
     CLAIMED_ELSEWHERE = "claimed_elsewhere"
+    WAITING_FOR_ADDITIONS = "waiting_for_additions"
 
 
 @dataclass(frozen=True)
@@ -625,6 +626,12 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
         return
     with get_session_factory().scoped_session() as session:
         if definition.admission(session) is not None:
+            return
+        if definition.waits_for_additions and jobs.any_active(
+            session, catalog_module.get_catalog().additions
+        ):
+            # The last addition to settle nudges this definition.
+            result.count(PassNote.WAITING_FOR_ADDITIONS)
             return
         if isinstance(source, PrioritizedWorkSource):
             budget = _discovery_budget(session, definition)

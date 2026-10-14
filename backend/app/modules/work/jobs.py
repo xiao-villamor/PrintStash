@@ -326,6 +326,21 @@ class JobStore:
             is not None
         )
 
+    @staticmethod
+    def any_active(
+        session: Session, definitions: Iterable[JobKind], *, besides: str | None = None
+    ) -> bool:
+        """Whether a Job of any of ``definitions`` other than ``besides`` is active."""
+        kinds = list(definitions)
+        if not kinds:
+            return False
+        statement = select(Job.id).where(
+            col(Job.kind).in_(kinds), active_job_predicate()
+        )
+        if besides is not None:
+            statement = statement.where(col(Job.id) != besides)
+        return session.exec(statement.limit(1)).first() is not None
+
     def active_for_subject(self, definition: JobKind, subject_key: str) -> str | None:
         with get_session_factory().scoped_session() as session:
             return self._active_id(session, definition, subject_key)

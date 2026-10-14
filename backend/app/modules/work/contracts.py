@@ -328,6 +328,15 @@ class JobDefinition:
     # On a partitioned lane: the partition a subject belongs to (a printer id,
     # a notification channel). Required there and refused elsewhere.
     partition: Callable[[str], str] | None = None
+    # Whether this work brings Models into the library (an upload, an import,
+    # a library scan). Work that ``waits_for_additions`` finds nothing new
+    # while a Job of such a definition is active.
+    adds_to_library: bool = False
+    # Whether discovery holds back while the library is still being added to,
+    # so a large import shows all its Models before their derived outputs
+    # (thumbnails, measurements) start competing with it. The last addition
+    # to settle nudges every definition that waited.
+    waits_for_additions: bool = False
     # Whether each step is admitted as a write-capable operation (drained by a
     # restore, deferred while one holds the fence). Only work that itself takes
     # the restore fence (a vault migration's cutover) opts out and gates itself.

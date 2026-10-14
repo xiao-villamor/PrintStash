@@ -320,5 +320,6 @@ def definitions():
             on_settled=_settled,
             retry=lambda _session, _subject: False,
             label="Resumable uploads",
+            adds_to_library=True,
         ),
     ]

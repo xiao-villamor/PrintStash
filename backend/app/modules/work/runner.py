@@ -165,6 +165,11 @@ class ExecutionContext:
                 session, definition.name, besides=self.job_id
             ):
                 sources.add(definition.name)
+            if definition.adds_to_library:
+                # The last addition to end releases the work that waited.
+                catalog = catalog_module.get_catalog()
+                if not jobs.any_active(session, catalog.additions, besides=self.job_id):
+                    sources.update(catalog.waiting_for_additions)
             for source in sorted(sources):
                 if stamp(session, source, now=now):
                     passes.append(source)
@@ -521,7 +526,14 @@ def _settle(context: ExecutionContext, error: str | None) -> None:
         # not known here, and a repeated nudge costs one covered stamp.
         from .submission import nudge
 
-        for source in dict.fromkeys((definition.name, *definition.completion_nudges)):
+        waiting = (
+            catalog_module.get_catalog().waiting_for_additions
+            if definition.adds_to_library
+            else ()
+        )
+        for source in dict.fromkeys(
+            (definition.name, *definition.completion_nudges, *waiting)
+        ):
             nudge(source)
 
 
