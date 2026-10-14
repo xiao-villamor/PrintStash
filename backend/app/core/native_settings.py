@@ -25,6 +25,7 @@ _NAMES = frozenset(
         "embedding_worker_memory_mb",
         "log_level",
         "max_render_jobs",
+        "mesh_3mf_max_xml_mb",
         "mesh_max_load_mb",
         "mesh_max_render_triangles",
         "mesh_memory_budget_fraction",

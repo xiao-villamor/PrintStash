@@ -21,7 +21,7 @@ from printstash_core.mesh.similarity.components import (
     expand_scene,
 )
 
-from app.core.config import settings
+from app.core.native_settings import settings
 
 if TYPE_CHECKING:
     import numpy as np
