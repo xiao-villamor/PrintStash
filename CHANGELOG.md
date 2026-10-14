@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Upgrading an existing install no longer stops at startup with
+  `derivation_queue_requires_drain` and "no such column: queue_partition_key".
+  The check that waits for old derivation work to drain read the previous
+  version's engine database with a client that expects the new schema, so it
+  failed on every existing install, even with nothing queued. It now reads only
+  the columns every version has; a queue that really still holds old work is
+  still refused.
+
 - Deleted models can be selected in Settings, Trash: tick several (or all) and
   restore or permanently delete them in one step.
 

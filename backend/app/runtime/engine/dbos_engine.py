@@ -28,14 +28,13 @@ from typing import Any, Callable
 
 from dbos import (
     DBOS,
-    DBOSClient,
     DBOSConfig,
     Queue,
     SetEnqueueOptions,
     SetWorkflowID,
 )
 from dbos import error as dbos_error
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import bindparam, create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.schema import DropSchema
 
@@ -81,7 +80,6 @@ _STATUS = {
 _ACTIVE = ["ENQUEUED", "DELAYED", "PENDING"]
 _SETTLED = ["SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"]
 _PRUNE_BATCH = 500
-_FIFO_INSPECTION_PAGE = 100
 _FIFO_INSPECTION_LIMIT = 500
 _FIFO_DRAIN_REQUIRED = (
     "derivation_queue_requires_drain: stop all work processes, drain legacy "
@@ -352,42 +350,53 @@ class DbosJobEngine(JobEngine):
         try:
             if self._fresh_system_database():
                 return
-            client = DBOSClient(
-                system_database_url=self.url,
-                dbos_system_schema=self.schema,
-                lazy=True,
-                retry_connection_errors=False,
-                observability_query_timeout_sec=5,
+            neutral_rank = PRIORITY_RANK[WorkPriority.INTERACTIVE]
+            # Read the columns every engine schema has. The system database is
+            # still the previous version's here: DBOS migrates it only when it
+            # launches, after this check, so its own client would select
+            # columns that do not exist yet and fail every existing install.
+            statement = text(
+                f"SELECT priority FROM {self._workflow_status_table()} "
+                "WHERE queue_name IN :lanes AND status IN :active LIMIT :limit"
+            ).bindparams(
+                bindparam("lanes", expanding=True), bindparam("active", expanding=True)
             )
+            connect_args = (
+                {"connect_timeout": 5}
+                if make_url(self.url).get_backend_name() != "sqlite"
+                else {}
+            )
+            database = create_engine(self.url, connect_args=connect_args)
             try:
-                inspected = 0
-                neutral_rank = PRIORITY_RANK[WorkPriority.INTERACTIVE]
-                for lane in lanes:
-                    offset = 0
-                    while True:
-                        limit = min(
-                            _FIFO_INSPECTION_PAGE, _FIFO_INSPECTION_LIMIT - inspected
+                with database.connect() as connection:
+                    ranks = (
+                        connection.execute(
+                            statement,
+                            {
+                                "lanes": lanes,
+                                "active": _ACTIVE,
+                                "limit": _FIFO_INSPECTION_LIMIT + 1,
+                            },
                         )
-                        if limit == 0:
-                            raise RuntimeError("fifo_queue_inspection_limit")
-                        rows = client.list_workflows(
-                            queue_name=lane,
-                            status=_ACTIVE,
-                            limit=limit,
-                            offset=offset,
-                            load_input=False,
-                            load_output=False,
-                        )
-                        if any(row.priority != neutral_rank for row in rows):
-                            raise RuntimeError("fifo_queue_legacy_rank")
-                        inspected += len(rows)
-                        if len(rows) < limit:
-                            break
-                        offset += len(rows)
+                        .scalars()
+                        .all()
+                    )
             finally:
-                client.destroy()
+                database.dispose()
+            if len(ranks) > _FIFO_INSPECTION_LIMIT:
+                raise RuntimeError("fifo_queue_inspection_limit")
+            if any(rank != neutral_rank for rank in ranks):
+                raise RuntimeError("fifo_queue_legacy_rank")
         except Exception as exc:
             raise RuntimeError(_FIFO_DRAIN_REQUIRED) from exc
+
+    def _workflow_status_table(self) -> str:
+        if make_url(self.url).get_backend_name() == "sqlite":
+            return "workflow_status"
+        if self.schema is None:
+            raise ValueError("engine_requires_system_schema")
+        quote = make_url(self.url).get_dialect()().identifier_preparer.quote_schema
+        return f"{quote(self.schema)}.workflow_status"
 
     def _interval(self, lane: Lane) -> float:
         """How often ``lane`` is polled when nothing has just been handed to it."""

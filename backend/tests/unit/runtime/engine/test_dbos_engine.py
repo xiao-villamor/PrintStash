@@ -329,93 +329,72 @@ class TestFifoStartup:
         engine = _engine(Lane(LaneName.DERIVE_NATIVE, 1, queue_order=LaneOrder.FIFO))
         engine.url = f"sqlite:///{path}"
 
-        def forbidden_client(**kwargs):
-            raise AssertionError("fresh database has no persisted queue")
-
-        monkeypatch.setattr(dbos_engine, "DBOSClient", forbidden_client)
+        monkeypatch.setattr(
+            dbos_engine,
+            "create_engine",
+            lambda *a, **k: pytest.fail("fresh database has no persisted queue"),
+        )
         engine._require_fifo_queues_drained()
 
-    @pytest.mark.parametrize("case", ["legacy", "overflow", "query_failure"])
-    def test_unverified_persisted_queue_fails_closed(self, tmp_path, monkeypatch, case):
-        from types import SimpleNamespace
+    @staticmethod
+    def _previous_engine_database(path, rows):
+        """The system database as the previous engine left it: no newer columns."""
+        import sqlite3
 
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "CREATE TABLE workflow_status (workflow_uuid TEXT PRIMARY KEY, "
+                "status TEXT, queue_name TEXT, priority INTEGER, created_at BIGINT)"
+            )
+            connection.executemany(
+                "INSERT INTO workflow_status VALUES (?, ?, ?, ?, 0)",
+                [(f"w{n}", *row) for n, row in enumerate(rows)],
+            )
+
+    def _inspect(self, tmp_path, rows):
+        from app.modules.work.contracts import LaneOrder
+
+        path = tmp_path / "existing.sqlite"
+        self._previous_engine_database(path, rows)
+        engine = _engine(Lane(LaneName.DERIVE_NATIVE, 1, queue_order=LaneOrder.FIFO))
+        engine.url = f"sqlite:///{path}"
+        engine._require_fifo_queues_drained()
+
+    def test_a_previous_engine_schema_with_nothing_queued_is_accepted(self, tmp_path):
+        self._inspect(tmp_path, [])
+
+    def test_settled_and_other_lane_work_is_ignored(self, tmp_path):
+        self._inspect(
+            tmp_path,
+            [
+                ("SUCCESS", LaneName.DERIVE_NATIVE.value, 1000),
+                ("PENDING", "some-other-queue", 1000),
+            ],
+        )
+
+    def test_neutral_persisted_queue_is_accepted(self, tmp_path):
+        self._inspect(tmp_path, [("ENQUEUED", LaneName.DERIVE_NATIVE.value, 1)])
+
+    def test_a_legacy_rank_still_waiting_fails_closed(self, tmp_path):
+        with pytest.raises(RuntimeError, match="derivation_queue_requires_drain"):
+            self._inspect(tmp_path, [("ENQUEUED", LaneName.DERIVE_NATIVE.value, 1000)])
+
+    def test_more_waiting_work_than_can_be_inspected_fails_closed(self, tmp_path):
+        rows = [("ENQUEUED", LaneName.DERIVE_NATIVE.value, 1)] * 501
+
+        with pytest.raises(RuntimeError, match="derivation_queue_requires_drain"):
+            self._inspect(tmp_path, rows)
+
+    def test_an_unreadable_system_database_fails_closed(self, tmp_path):
         from app.modules.work.contracts import LaneOrder
 
         path = tmp_path / "existing.sqlite"
         path.write_bytes(b"existing system database")
         engine = _engine(Lane(LaneName.DERIVE_NATIVE, 1, queue_order=LaneOrder.FIFO))
         engine.url = f"sqlite:///{path}"
-        destroyed = []
-        calls = []
-
-        class Client:
-            def __init__(self, **options):
-                assert options["lazy"] is True
-                assert options["retry_connection_errors"] is False
-                assert options["observability_query_timeout_sec"] == 5
-
-            def list_workflows(self, **options):
-                calls.append(options)
-                assert options["limit"] <= 100
-                assert options["load_input"] is False
-                assert options["load_output"] is False
-                if case == "query_failure":
-                    raise OSError("corrupt system database")
-                if case == "legacy":
-                    return [SimpleNamespace(priority=1000)]
-                return [SimpleNamespace(priority=1) for _ in range(options["limit"])]
-
-            def destroy(self):
-                destroyed.append(True)
-
-        monkeypatch.setattr(dbos_engine, "DBOSClient", Client)
 
         with pytest.raises(RuntimeError, match="derivation_queue_requires_drain"):
             engine._require_fifo_queues_drained()
-
-        assert destroyed == [True]
-        assert len(calls) <= 5
-
-    def test_neutral_persisted_queue_is_inspected_without_payloads(
-        self, tmp_path, monkeypatch
-    ):
-        from types import SimpleNamespace
-
-        from app.modules.work.contracts import LaneOrder
-
-        path = tmp_path / "existing.sqlite"
-        path.write_bytes(b"existing system database")
-        engine = _engine(Lane(LaneName.DERIVE_NATIVE, 1, queue_order=LaneOrder.FIFO))
-        engine.url = f"sqlite:///{path}"
-        destroyed = []
-        calls = []
-
-        class Client:
-            def __init__(self, **options):
-                assert options["system_database_url"] == engine.url
-
-            def list_workflows(self, **options):
-                calls.append(options)
-                return [SimpleNamespace(priority=1)]
-
-            def destroy(self):
-                destroyed.append(True)
-
-        monkeypatch.setattr(dbos_engine, "DBOSClient", Client)
-        engine._require_fifo_queues_drained()
-
-        assert destroyed == [True]
-        assert {call["queue_name"] for call in calls} == {
-            LaneName.DERIVE_NATIVE.value,
-            LaneName.DERIVE_LIGHT.value,
-        }
-        assert all(
-            call["status"] == ["ENQUEUED", "DELAYED", "PENDING"] for call in calls
-        )
-        assert all(
-            call["load_input"] is False and call["load_output"] is False
-            for call in calls
-        )
 
 
 class TestFifoPostgresStartup:
@@ -444,10 +423,6 @@ class TestFifoPostgresStartup:
         monkeypatch.setattr(dbos_engine, "create_engine", create)
         monkeypatch.setattr(dbos_engine, "inspect", lambda value: Inspector())
 
-        def forbidden_client(**kwargs):
-            raise AssertionError("absent schema has no persisted queues")
-
-        monkeypatch.setattr(dbos_engine, "DBOSClient", forbidden_client)
         engine._require_fifo_queues_drained()
 
         assert inspected == ["dbos"]
