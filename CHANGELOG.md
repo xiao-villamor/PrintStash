@@ -10,6 +10,12 @@
   the columns every version has; a queue that really still holds old work is
   still refused.
 
+- Adding a G-code revision to a Model that comes from a remote Library source no
+  longer ends in "[500] internal_server_error". PrintStash never writes back to a
+  remote source, so it now says so (409) and the dialog shows a readable
+  explanation. In the same dialog, "Mark as recommended" is a star you fill
+  instead of a checkbox next to one.
+
 - Deleted models can be selected in Settings, Trash: tick several (or all) and
   restore or permanently delete them in one step.
 

@@ -3047,6 +3047,7 @@
   "root_marker_conflict": "The library root belongs to another installation. Verify its location before enrolling it.",
   "root_marker_unwritable": "The library root must be writable during enrollment so PrintStash can create its identity marker. It may be remounted read-only afterward.",
   "root_path_unreadable": "PrintStash cannot read this library folder. Check the container mount and permissions.",
+  "remote_writeback_disabled": "This model's source is remote and read-only, so PrintStash cannot add a G-code revision to it. Add the G-code to a model in your vault instead.",
   "root_path_missing": "The library folder is unavailable. Check its path and mount.",
   "remote_storage_list_failed": "PrintStash could not list the remote folder. Check its path, credentials, and read permissions.",
   "storage_connection_backup_probe_failed": "Library listing succeeded, but backup access could not be verified. Use this connection for Library sources only, or check its backup settings and permissions.",

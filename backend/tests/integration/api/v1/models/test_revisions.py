@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from app.core.time import utcnow
-from app.db.models import FileType, Model
+from app.db.models import ExternalLibrary, File, FileType, LibrarySourceKind, Model
 from app.db.session import get_session_factory, override_session_factory
 from app.modules.storage import storage
 from tests.fakes.thread_sessions import ThreadBoundSessionFactory
@@ -85,6 +85,52 @@ class TestAddGcodeRevision:
 
         assert response.status_code == 200, response.text
         assert len(_gcode_files(response.json())) == 1
+
+    def test_refuses_a_revision_for_a_model_in_a_remote_source(
+        self,
+        client: TestClient,
+        auth_headers,
+        model: Model,
+        local_storage,
+        db_session: Session,
+    ) -> None:
+        # Nothing is written back to a remote source, so the bytes have nowhere
+        # to go; that is a conflict the caller can read, not a server fault.
+        config = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={"external_libraries_enabled": True},
+        )
+        assert config.status_code == 200, config.text
+        library = ExternalLibrary(
+            name="Remote", root_path="source://1", source_kind=LibrarySourceKind.S3
+        )
+        db_session.add(library)
+        db_session.commit()
+        db_session.add(
+            File(
+                model_id=model.id,
+                path="source://1/part.stl",
+                original_filename="part.stl",
+                file_type=FileType.STL,
+                size_bytes=1,
+                sha256="0" * 64,
+                is_external=True,
+                external_library_id=library.id,
+            )
+        )
+        db_session.commit()
+
+        response = client.post(
+            f"/api/v1/models/{model.id}/gcode-revisions",
+            headers=auth_headers,
+            files={"file": ("tighter-fit.gcode", GCODE, "text/plain")},
+        )
+
+        assert (response.status_code, response.json()) == (
+            409,
+            {"detail": "remote_writeback_disabled"},
+        )
 
     def test_numbers_revisions_in_upload_order(
         self,

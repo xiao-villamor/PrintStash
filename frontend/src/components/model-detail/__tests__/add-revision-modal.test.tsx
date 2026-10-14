@@ -256,6 +256,18 @@ describe("AddGcodeRevisionModal", () => {
       await waitFor(() => expect(sent()?.get("is_recommended")).toBe("false"));
     });
 
+    it("shows the recommendation as a star that fills when chosen", async () => {
+      const user = userEvent.setup();
+      renderModal();
+      const toggle = screen.getByRole("checkbox", { name: "Mark as recommended" });
+      expect(toggle).toHaveAttribute("aria-checked", "false");
+
+      await user.click(toggle);
+
+      expect(toggle).toHaveAttribute("aria-checked", "true");
+      expect(toggle.querySelector("svg")).toHaveClass("fill-current");
+    });
+
     it("recommends it when the user asks", async () => {
       const user = userEvent.setup();
       const { sent } = renderModal();
@@ -312,6 +324,23 @@ describe("AddGcodeRevisionModal", () => {
       await user.click(screen.getByRole("button", { name: /Add revision/ }));
 
       expect(await screen.findByRole("alert")).toBeInTheDocument();
+    });
+
+    it("explains that a remote source cannot take a revision", async () => {
+      const user = userEvent.setup();
+      renderModal({
+        routes: {
+          "POST /api/v1/models/1/gcode-revisions": json(
+            { detail: "remote_writeback_disabled" },
+            409,
+          ),
+        },
+      });
+      await choose(user, aGcodeFile());
+
+      await user.click(screen.getByRole("button", { name: /Add revision/ }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("source is remote and read-only");
     });
 
     it("leaves the modal open after a failure so the work is not lost", async () => {
