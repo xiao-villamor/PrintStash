@@ -300,6 +300,32 @@ class JobStore:
             )
         ).first()
 
+    @staticmethod
+    def awaits_submission(
+        session: Session, definition: JobKind, *, besides: str
+    ) -> bool:
+        """Whether an active Job of ``definition`` other than ``besides`` has
+        yet to reach the engine: never submitted, interrupted, or holding an
+        epoch its last submission did not carry."""
+        return (
+            session.exec(
+                select(Job.id)
+                .where(
+                    Job.kind == definition,
+                    active_job_predicate(),
+                    col(Job.id) != besides,
+                    or_(
+                        col(Job.state) == JobState.INTERRUPTED,
+                        col(Job.attempts) == 0,
+                        col(Job.submitted_epoch).is_(None),
+                        col(Job.submitted_epoch) != col(Job.execution_epoch),
+                    ),
+                )
+                .limit(1)
+            ).first()
+            is not None
+        )
+
     def active_for_subject(self, definition: JobKind, subject_key: str) -> str | None:
         with get_session_factory().scoped_session() as session:
             return self._active_id(session, definition, subject_key)

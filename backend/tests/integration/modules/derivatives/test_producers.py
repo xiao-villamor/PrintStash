@@ -1398,6 +1398,27 @@ class TestBegin:
 
         assert db_session.exec(select(ArtifactDerivative)).all() == []
 
+    def test_claims_and_returns_the_artifact_in_one_transaction(
+        self, stored, transactions
+    ):
+        artifact = stored("once.gcode", content.gcode())
+
+        def rename(session, file):
+            file.revision_notes = "claimed"
+            session.add(file)
+
+        transactions.clear()
+
+        file, _attempts = producers._begin(
+            artifact.id, JobKind.DERIVATIVES_GCODE, claimed=rename
+        )
+
+        assert (file.revision_notes, file.original_filename, len(transactions)) == (
+            "claimed",
+            "once.gcode",
+            1,
+        )
+
     def test_an_artifact_that_is_gone_claims_nothing(self, db_session):
         called: list[int] = []
 

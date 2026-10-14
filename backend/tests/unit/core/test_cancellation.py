@@ -32,6 +32,29 @@ class TestCancellationScope:
             cancellation.checkpoint(force=True)
         assert calls == [1, 1]
 
+    def test_a_paced_checkpoint_asks_the_idle_probe(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(cancellation.time, "monotonic", lambda: 0.0)
+        with cancellation.cancellation_scope(
+            lambda: bool(asked.append("fresh")), idle=lambda: bool(asked.append("idle"))
+        ):
+            cancellation.checkpoint()
+        assert asked == ["idle"]
+
+    def test_a_forced_checkpoint_never_asks_the_idle_probe(self, monkeypatch):
+        asked = []
+        monkeypatch.setattr(cancellation.time, "monotonic", lambda: 0.0)
+        with cancellation.cancellation_scope(
+            lambda: bool(asked.append("fresh")), idle=lambda: bool(asked.append("idle"))
+        ):
+            cancellation.checkpoint(force=True)
+        assert asked == ["fresh"]
+
+    def test_a_withdrawal_the_idle_probe_reports_stops_the_operation(self):
+        with cancellation.cancellation_scope(lambda: False, idle=lambda: True):
+            with pytest.raises(cancellation.OperationCancelled):
+                cancellation.checkpoint()
+
     def test_latches_withdrawal(self, monkeypatch):
         stopped = [True]
         monkeypatch.setattr(cancellation.time, "monotonic", lambda: 0)

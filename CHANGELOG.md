@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Importing costs the database less. Steps that are only waiting share one
+  cancellation read instead of making one each, a finished upload no longer
+  queues a reconcile pass that has nothing to find, and several reads that ran
+  as their own transaction now ride on one that was already open.
+
 - Opening a collection no longer makes the page jump. Its tags and description
   appeared only once the folder and its description had loaded, pushing the
   models down; their place is now held by a skeleton of the same shape.
@@ -127,6 +132,7 @@
 
 - Start selected collection reads before rendering their destination, cancel abandoned
   reads, and keep pointer prefetch scheduling outside the grid's rendering path.
+
 - Optimize the restored tree's rendering with explicit locale dependencies, preserving
   live language changes, drag-and-drop and pagination. Reuse immutable card projection
   statements with fresh page/user parameters; avoid constructing unused tree ancestry.
@@ -140,17 +146,21 @@
 
 - Keep scheduled upload recovery outside an active verification or Job handoff,
   avoiding spurious upload conflicts while retaining recovery after interruption.
+
 - Reuse the current locale's card-date formatters without caching timestamps.
 
 - Preserve visible nesting at every collection-tree depth and align Model leaves
   beneath their parent, keeping deep rows selectable on narrow screens.
+
 - Ignore system-only maintenance notices in Task Center instead of repeatedly
   downloading an unchanged Jobs list.
 
 - Serialize search-preference writes before reading SQLite state, avoiding failures
   when background processing commits concurrently.
+
 - Reduce thumbnail transfer size with quality-85 WebP color and lossless transparency,
   preserving resolution and regenerating existing mesh/G-code previews through Jobs.
+
 - Restore remembered Library branches in bounded batches, prioritize visible thumbnails,
   and keep deeply nested folders selectable on narrow screens. Load the multipart
   editor separately from Library cards, reuse restoration counts and permission scopes,
@@ -159,8 +169,10 @@
   Reuse authorized empty child levels and defer the initial event connection until
   critical content is ready, retaining immediate permission checks. Opening the mobile
   tree no longer competes with filter catalogs below the visible area.
+
 - Keep the first visit intact when the service worker installs, while still refreshing
   an existing installation after a worker update.
+
 - Measure each Library destination through restored tree rows and decoded viewport
   images, with a reproducible reference-host acceptance command and explicit failures.
   Tie timings to committed history entries and actual input events.
@@ -372,16 +384,22 @@
   analysis, preserving WebP output and complete fingerprints for admitted work.
   Reduce temporary raster buffers while keeping complete frames and output pixels.
   Report queue time independently of native execution.
+
 - Remove the sidebar tree’s global 500-model limit with folder-scoped pages, complete branch counts, and global paginated name search with “Open location”. Keep permissions and library views in the server query; retry failed pages without losing loaded rows (#335).
 
 - Keep backup and vault audit clock inputs within valid minutes on Python 3.14; reject `24:00` rather than treating it as midnight.
+
 - Preserve traceable printer display names for extension-only and genuinely named inputs on Python 3.14.
+
 - Require Python 3.14 for the application and shared core, pin development and container runtimes to 3.14.8, and update the mesh stack to NumPy 2.5.3, SciPy 1.18.1 and Trimesh 5.1.1.
+
 - Publish mesh metadata and thumbnails before optional fingerprints finish, with durable bounded recovery that preserves completed outputs after native failures.
+
 - Reuse immutable mesh positions and smooth normals across each visual pass.
   Embedding views and similarity view hashes consume pixels directly without
   repeated PNG encoding and decoding, while preserving existing preview bytes
   and descriptor identities.
+
 - Retain unique 3MF resources and explicit placements through measurement and
   preview rendering. Measure repeated instances without first allocating a whole
   placed mesh, materialize only for admitted fingerprints or global topology,
@@ -390,22 +408,28 @@
   Preserve finite volume when source and placement scales compensate, and clear
   measurement topology caches before rendering even without fingerprints.
   Refresh mesh outputs under the new eligibility and budget policy.
+
 - Share bounded STL source validation across measurements, full loading, fallback
   samples and streamed previews. Validate complete source facets and stable EOF
   before reporting coverage, retain exact full-source bounds and counts for
   partial samples, and refuse malformed or changed sources consistently.
+
 - Interpret reachable Core 3MF geometry and Production external model references
   through an explicit bounded scene reader. Refuse unsupported required
   capabilities with typed metadata, similarity and viewer reasons while retaining
   original downloads and independently usable embedded previews. Refresh mesh
   derivative recipes without introducing a Lib3MF dependency.
+
 - Keep mesh measurements and previews available when optional fingerprint analysis
   exceeds its triangle budget, and release analysis buffers before STL rendering fallbacks.
   Re-derive earlier terminal refusals at updated mesh recipes.
+
 - Independent mesh, G-code metadata/thumbnail and binary toolpath processing controls, with deployment defaults and live administrator settings. Disabling retains published previews and lets admitted processing finish; re-enabling resumes eligible missing work (#263).
+
 - Harden mesh workers with pre-import address-space limits, one admission controller
   across concurrency changes, process-tree memory accounting, and shared budgets
   for nested CAD/streaming work (#259).
+
 - Report refused mesh geometry separately from usable thumbnails, retain terminal
   failures for unchanged input, and backfill accurate metadata with recipe 3 (#259).
 
@@ -421,6 +445,7 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
   production DBOS ingestion through separate reproducible benchmark paths.
   Preserve phase costs, resource observations and failed samples, with an expanded
   versioned corpus and opt-in large inputs and hash-pinned real slicer projects.
+
 - Publish explicit mesh volume state, method and cause independently of similarity
   fingerprints. Preserve historical scalar provenance, keep small measurements
   unrounded and evaluate signed volume accurately across large translations.
@@ -433,6 +458,7 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 - Deep CI exercises the production mesh pipeline under 1 GiB and 4 GiB
   limits on amd64 and arm64, publishing memory, failure and cleanup evidence.
+
 - Job details show retained ingest capacity and provide a confirmed, identity-checked
   discard action serialized against retry. Completed staging is reconciled at
   startup; failed input retains its existing expiry (#259).
@@ -441,6 +467,7 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
   statement count. Requests exceeding `VAULT_SLOW_REQUEST_MS` (1,000 ms by
   default) emit a warning with those timings and the request ID to help diagnose
   slow library pages without logging query values.
+
 - The API serves the collection tree a page at a time:
   `GET /api/v1/collections/children` lists one level (or a user's top level),
   `GET /api/v1/collections/lookup` resolves a path with its ancestors, and
@@ -462,61 +489,80 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 - Preserve confirmed Model batch results when a later request loses its response, with explicit review and conditional undo of acknowledged changes.
 
 - Bounded STL previews report whether all source triangles are represented independently from a complete source scan. Mesh processing now uses separate admission, loading, measurement and preview owners with validated geometry and fingerprint contracts.
+
 - Mesh workers reject unknown or malformed fingerprint result states before publication.
+
 - Capture and similarity commands keep the API event loop responsive through database writes, background-engine notification and response projection.
+
 - Preserve existing paired Point model manifests and native encoder alignment when mesh rendering recipes change. Visual vector caches still track their rendering recipe.
+
 - Mesh metadata preserves measurement precision, including submillimeter dimensions and small positive volumes; existing rounded measurements are recalculated.
+
 - Small meshes placed far from the coordinate origin retain their thumbnail
   geometry and shading. Visual recipes now refresh previews, view fingerprints,
   and derived image vectors while preserving original files and encoder assets.
+
 - Geometric verification reuses an exact point index and preserves nearest-point
   distances for models placed far from the origin. Previous pair proofs are
   rechecked under the new verifier recipe while retaining review decisions.
+
 - Ingest acceptance keeps the API event loop responsive while staging files,
   recording work and notifying the background engine.
 
 - Keep mesh-worker memory limits and cancellation active after the child closes its reply stream.
+
 - Active mesh workers can release their render admission while a queued worker checks durable cancellation state.
 
-
 - The thumbnail benchmark now runs the real engine, measures persisted local thumbnail reads, and preserves failed attempts with their costs instead of reporting misleading cache timings.
+
 - Large STL files now retain complete bounding dimensions and facet counts when only metadata is requested; measurements no longer depend on producing a thumbnail.
+
 - Mesh previews and image embeddings ignore vertices unused by any face when
   framing the surface. Existing visual derivatives are regenerated.
+
 - Meshes with repeated identical faces no longer expand the same thumbnail pixels
   repeatedly, avoiding unnecessary rasterization work during ingestion.
+
 - Meshes with inconsistent triangle winding now report unknown volume while
   retaining dimensions and triangle counts. Existing metadata is recalculated
   automatically.
+
 - Browser-local upload queues recover as interrupted after a reload, so stale
   tasks can be cleared. Resumable uploads retain their recovery controls, and
   queued browser work now asks users to keep the tab open (#336).
+
 - 3D viewer conversions run as durable, on-demand Jobs. Requests share preparation
   and retain failure reasons; memory refusals show a clear message while original
   downloads and slicer handoff stay available. Hovering a model card no longer
   starts a mesh conversion (#259).
+
 - Containers start with read-only Library source mounts beneath `/data`. Startup
   ownership repair is limited to app-owned directories and preserves external
   sources, including bind mounts on the same filesystem (#330).
+
 - Cancelling active mesh work now stops its native worker tree, releases capacity,
   and preserves the original. Immediate retry cannot resume the cancelled attempt (#259).
+
 - Keep native STEP/STP conversion within small worker memory budgets by using serial tessellation, and classify B-rep allocation failures as resource refusals.
 
 - Background work starts on DBOS 3.0, with a persistent reconciler schedule
   that survives process restarts and is recreated after restore.
+
 - Late derivative results can no longer overwrite cancellation, retries, regeneration, trashed Artifacts or replaced source bytes. Stale Job executions also cannot settle a newer attempt or reclaim its staging files.
 
-
 - Removed the duplicate Wiki entry from the profile dropdown.
+
 - Rendering model views for learned similarity embeddings no longer happens in
   the API process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
   With embeddings enabled, the similarity run rendered six views of every model
   in the library inside the API; it now uses the same disposable worker as the
   other mesh work. A model that exhausts memory or never finishes fails that one
   embedding and the run continues with the rest.
+
 - Collection search, breadcrumbs and subtree counts now follow indexed parent
   links, keeping these reads responsive in libraries with tens of thousands of
   collections ([#295](https://github.com/xiao-villamor/PrintStash/issues/295)).
+
 - Opening the 3D viewer on a 3MF or OBJ no longer converts it inside the API
   process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
   The conversion runs in the same disposable worker as mesh derivatives, so a
@@ -524,18 +570,22 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
   `stl_conversion_failed` instead of taking the API down. A model that cannot
   be converted still answers the same error; the viewer's behaviour is
   otherwise unchanged.
+
 - Comparing two models during a similarity run no longer happens in the API
   process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
   Verification now runs in the same disposable worker as mesh derivatives, so a
   pair whose comparison exhausts memory or never finishes is counted as a failed
   verification and the run moves on to the next pair.
+
 - Analysing the whole library for similar models no longer runs in the API
   process ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)).
   The fingerprint pass now uses the same disposable worker as mesh derivatives,
   so a file that exhausts memory or never finishes is recorded as a failed
   fingerprint for that file alone. The run carries on with the rest of the
   library instead of taking the API down or stopping.
+
 - The Settings Maintenance heading now uses the same framed section treatment as neighboring tabs.
+
 - Opening the 3D viewer, converting to STL, and geometry comparison no longer
   expand a 3MF's repeated parts before checking their size. These paths still
   used a loader that composed every placed instance first, so a small project
@@ -543,11 +593,13 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
   ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)). They now
   share the bounded 3MF resource loader and the same face budget as thumbnail
   generation; an over-budget project is refused instead.
+
 - Manual and scheduled backup tasks now show database snapshot, file archiving,
   archive verification, destination publication and finalization progress in
   Tasks and Background work, including the number of files archived. Scheduled
   backups now appear in administrators' Tasks while they run, and the latest
   completed scheduled backup remains visible if it finished before reconnect.
+
 - A model file that needs more memory than expected can no longer take the API
   down or crash-loop the container
   ([#259](https://github.com/xiao-villamor/PrintStash/issues/259)). Mesh
@@ -557,16 +609,21 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
   memory budget is not retried, while a timeout keeps its bounded retries. Every
   other request keeps working. The deadline is `VAULT_MESH_WORKER_TIMEOUT_SECONDS`
   (default 300 s).
+
 - Backup history disables replica retries when a run has no completed archive
   record. Its guidance now refers to that run instead of implying that existing
   backup archives have been lost.
+
 - Storage migration no longer clears destination fields when an obsolete
   startup request finishes after the form becomes editable.
+
 - Storage migration deadlines now include their UTC timezone, so a fresh plan
   remains usable and source-retention deadlines display correctly outside UTC.
+
 - Restoring a backup no longer fails because a completed ZIP inspection is
   waiting for file selection. Its staged archive remains available; unfinished
   uploads and imports still block restore until they are settled.
+
 - Large STL previews frame every source component and preserve ASCII geometry after large translations.
 
 - Streamed STL previews preserve valid oblique facets that the degeneracy filter could discard.
@@ -575,11 +632,14 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
   retain exact cleanup revocations and preserve newer objects at reused keys.
   S3 backup deletion now requires an immutable object version. Failed commit
   acknowledgements preserve already adopted covers, documents and embedded images.
+
 - Import completion prepares private source-cover candidates and switches their
   visible pointer only under the current Job and Inbox authority.
+
 - Interrupted downloads, archive extraction and local copies retain exact cleanup
   receipts and disk reservations; restart or retry reclaims their private workspaces
   before the next input is admitted.
+
 - Recover maintenance capacity when a process dies after committing a Job result
   but before its engine execution finishes, preserving the completed outcome.
 
@@ -590,15 +650,18 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 - Tag counts now follow collection links when inheriting tags, so listing tags
   stays responsive in libraries with tens of thousands of collections and
   100,000 Models, including for users with collection-specific access.
+
 - **3MF geometry loads about 1.6 times faster.** The bounded 3MF loader read
   every vertex and triangle attribute with a Python call per value; it now
   hands each column to NumPy in one pass. A 320,000-face project went from
   3.1 s to 1.9 s. Memory use is unchanged, and malformed attributes are still
   refused as an invalid package.
+
 - **Splitting a mesh into its separate parts is about three times faster.**
   Similarity fingerprints of STL, OBJ and other non-3MF meshes joined connected
   faces one edge at a time in Python; a 500,000-face surface spent 4.3 s there
   and now spends 1.4 s. The parts found are unchanged.
+
 - **Large libraries load their collection tree in about a second.** A library
   with 9,000 collections and 40,000 Models took over a minute to show its
   sidebar, because each collection's model count was checked against every

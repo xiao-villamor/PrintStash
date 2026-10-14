@@ -18,6 +18,7 @@ Adding a table to the app means adding its builder in the same PR: see
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from functools import partial
 from typing import Any, Callable
 
@@ -339,6 +340,22 @@ def make_storage_publication_locator(
 def make_owned_storage_object(db_session: Session) -> MakeOwnedStorageObject:
     """An ownership ledger row with an explicit proof state and identity."""
     return _bound(factories.build_owned_storage_object, db_session)
+
+
+@pytest.fixture
+def transactions(db_session: Session) -> Iterator[list[str]]:
+    """One entry per transaction the application database begins from here on."""
+    from sqlalchemy import event
+
+    begun: list[str] = []
+
+    def record(_connection) -> None:
+        begun.append("begin")
+
+    target = db_session.get_bind()
+    event.listen(target, "begin", record)
+    yield begun
+    event.remove(target, "begin", record)
 
 
 @pytest.fixture

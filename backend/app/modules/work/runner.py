@@ -19,7 +19,7 @@ from threading import Lock
 from typing import Any
 
 from sqlalchemy import bindparam
-from sqlmodel import select
+from sqlmodel import col, select
 
 from app.core.cancellation import OperationCancelled, cancellation_scope
 from app.core.config import settings
@@ -36,11 +36,16 @@ from .jobs import Settlement, failure_of, jobs
 logger = get_logger(__name__)
 
 _ADMISSION_WAIT_MAX_S = 30.0
-# Cache only the query shape. Every cancellation checkpoint reads fresh state;
-# progress payloads, timestamps, and ORM objects are unnecessary for authority.
+# Cache only the query shape. Every forced cancellation checkpoint reads fresh
+# state; progress payloads, timestamps, and ORM objects are unnecessary for
+# authority.
 _WITHDRAWAL_QUERY = select(Job.state, Job.attempts, Job.execution_epoch).where(
     Job.id == bindparam("withdrawal_job_id")
 )
+# How old an answer a step's paced checkpoint may be given. Steps that only
+# wait (for a worker, a permit, a lane) each probe twice a second; one read
+# for all of them, no older than this, replaces one read each.
+_WATCH_SECONDS = 0.25
 
 
 class StepOutcome(StrEnum):
@@ -151,9 +156,16 @@ class ExecutionContext:
 
         def stamp_completion(session: Any) -> None:
             now = utcnow()
-            for source in sorted(
-                dict.fromkeys((definition.name, *definition.completion_nudges))
+            sources = set(definition.completion_nudges)
+            # A pass over this definition finds the next subject, or submits a
+            # Job the engine has not taken yet. Request-originated work has no
+            # subjects to find, so with nothing waiting to be submitted the
+            # pass would only read; the tick still repairs what a crash left.
+            if definition.source is not None or jobs.awaits_submission(
+                session, definition.name, besides=self.job_id
             ):
+                sources.add(definition.name)
+            for source in sorted(sources):
                 if stamp(session, source, now=now):
                     passes.append(source)
 
@@ -287,6 +299,73 @@ def _withdrawn(
         )
 
 
+def _is_withdrawn(
+    row: tuple[JobState, int, str] | None, attempt: int, execution_epoch: str
+) -> bool:
+    if row is None:
+        return True
+    state, current_attempt, current_epoch = row
+    return (
+        state is JobState.CANCELLED
+        or current_attempt != attempt
+        or state is JobState.QUEUED
+        or current_epoch != execution_epoch
+    )
+
+
+class _WithdrawalWatch:
+    """One read answers the paced checkpoints of every step this process runs.
+
+    A step registers its attempt for as long as it runs. A paced checkpoint
+    takes the last answer read for it when that is recent enough, and
+    otherwise reads every registered attempt at once. Only waiting is served
+    from here: a forced checkpoint, the one that guards a publication, reads
+    its own Job afresh.
+    """
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        # (job id, attempt, epoch) -> the last answer read, if any
+        self._attempts: dict[tuple[str, int, str], bool | None] = {}
+        self._read_at = 0.0
+
+    def add(self, job_id: str, attempt: int, execution_epoch: str) -> None:
+        with self._lock:
+            self._attempts[(job_id, attempt, execution_epoch)] = None
+
+    def remove(self, job_id: str, attempt: int, execution_epoch: str) -> None:
+        with self._lock:
+            self._attempts.pop((job_id, attempt, execution_epoch), None)
+
+    def withdrawn(self, job_id: str, attempt: int, execution_epoch: str) -> bool:
+        key = (job_id, attempt, execution_epoch)
+        with self._lock:
+            answer = self._attempts[key]
+            if answer is None or time.monotonic() - self._read_at >= _WATCH_SECONDS:
+                self._read()
+                answer = self._attempts[key]
+            assert answer is not None
+            return answer
+
+    def _read(self) -> None:
+        with get_session_factory().scoped_session() as session:
+            rows = {
+                job_id: (state, attempts, epoch)
+                for job_id, state, attempts, epoch in session.connection().execute(
+                    select(Job.id, Job.state, Job.attempts, Job.execution_epoch).where(
+                        col(Job.id).in_(sorted({key[0] for key in self._attempts}))
+                    )
+                )
+            }
+        for key in self._attempts:
+            job_id, attempt, epoch = key
+            self._attempts[key] = _is_withdrawn(rows.get(job_id), attempt, epoch)
+        self._read_at = time.monotonic()
+
+
+_watch = _WithdrawalWatch()
+
+
 def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | None:
     """Claim the attempt: ``None`` when it is superseded or the Job is settled.
 
@@ -307,13 +386,16 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
         row.state = JobState.RUNNING
         row.started_at = row.started_at or now
         row.updated_at = now
-        session.add(row)
-        session.commit()
-        return {
+        # Read before the commit expires the row: reading it afterwards is a
+        # second transaction.
+        claim = {
             "kind": row.kind.value,
             "subject_key": row.subject_key,
             "priority": row.priority.value,
         }
+        session.add(row)
+        session.commit()
+        return claim
 
 
 def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
@@ -328,9 +410,10 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
     from app.core.metrics import record_step
     from app.runtime.maintenance import begin_mutating_operation, end_mutating_operation
 
-    if _withdrawn(context.job_id, context.attempt, context.execution_epoch):
-        return StepOutcome.CANCELLED.value
     if mutating and not begin_mutating_operation():
+        # A withdrawn attempt ends here rather than wait out the restore.
+        if _withdrawn(context.job_id, context.attempt, context.execution_epoch):
+            return StepOutcome.CANCELLED.value
         return StepOutcome.DEFERRED.value
     started = time.monotonic()
     try:
@@ -358,8 +441,20 @@ def _run_step(step: Step, context: ExecutionContext, *, mutating: bool) -> str:
             context.flush_due()
             return _withdrawn(context.job_id, context.attempt, context.execution_epoch)
 
-        with cancellation_scope(withdrawn), priority_scope(context.priority):
-            step.fn(context)
+        def waiting() -> bool:
+            context.flush_due()
+            return _watch.withdrawn(*attempt)
+
+        attempt = (context.job_id, context.attempt, context.execution_epoch)
+        _watch.add(*attempt)
+        try:
+            with (
+                cancellation_scope(withdrawn, idle=waiting),
+                priority_scope(context.priority),
+            ):
+                step.fn(context)
+        finally:
+            _watch.remove(*attempt)
     except OperationCancelled:
         record_step(
             context.definition, step.name, "cancelled", time.monotonic() - started

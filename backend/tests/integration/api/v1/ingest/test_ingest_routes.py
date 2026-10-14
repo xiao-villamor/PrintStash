@@ -291,6 +291,31 @@ class TestIngestModel:
             [s for s in submissions if isinstance(s, PassSubmission)],
         ) == ([job_id], [])
 
+    def test_accepting_an_upload_does_not_read_its_request_back(
+        self, tmp_path, client, auth_headers, work_engine, db_session
+    ):
+        from sqlalchemy import event
+
+        use_local_storage(tmp_path)
+        read_back: list[str] = []
+
+        def record(_conn, _cursor, statement, *_rest) -> None:
+            if statement.startswith("SELECT") and "FROM ingest_requests" in statement:
+                read_back.append(statement)
+
+        target = db_session.get_bind()
+        event.listen(target, "before_cursor_execute", record)
+        try:
+            response = client.post(
+                "/api/v1/ingest/model",
+                headers=auth_headers,
+                files={"file": ("cube.stl", _cube_stl_bytes(), "application/sla")},
+            )
+        finally:
+            event.remove(target, "before_cursor_execute", record)
+
+        assert (response.status_code, read_back) == (202, [])
+
     def test_ingest_model_superuser_can_target_unknown_collection(
         self, tmp_path: Path, client: TestClient, auth_headers: dict[str, str]
     ) -> None:

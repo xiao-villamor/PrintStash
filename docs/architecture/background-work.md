@@ -90,6 +90,13 @@ One pass (`work.reconciler.run_pass`) per definition, claimed through its
    its source. A nudge that arrived during the pass (the dirty mark,
    `nudged_at`) makes the pass run once more before it releases.
 
+A completion always nudges the definitions it names (`completion_nudges`). It
+nudges its own definition when that definition has a source, or when another
+active Job of it has yet to reach the engine (never submitted, interrupted, or
+on an epoch its last submission did not carry). Request-originated work with
+nothing waiting to be submitted has nothing a pass could find or submit, so no
+pass is queued for it; the tick repairs what a crash left behind.
+
 A nudge (`work.nudge`) stamps the dirty mark and queues a pass unless one is
 already queued within `JOBS_SUBMIT_GRACE_SECONDS`. An interactive nudge is not
 absorbed by a queued backfill pass. The tick, a single persistent DBOS
@@ -110,6 +117,13 @@ terminal write stamps the sources its completion affects; only the pass is
 queued afterwards. A rolled-back transaction leaves no mark. A process that
 dies between the commit and queuing the pass leaves a mark that covers further
 nudges for the grace window, after which the tick queues the pass.
+
+A step's cancellation checkpoints come in two kinds. A forced checkpoint, the
+kind that guards a publication, reads its own Job afresh. A paced checkpoint,
+the kind a step calls while it waits for a worker, a permit or a lane, is
+answered from one read shared by every step the process is running, no older
+than a quarter of a second: waiting steps cost one read between them rather
+than one each.
 
 ## An attempt's writes
 

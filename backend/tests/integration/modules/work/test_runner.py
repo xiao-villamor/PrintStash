@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 import pytest
 from sqlalchemy import event
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.core.config import _overlay
 from app.db.models import (
@@ -33,6 +33,7 @@ from app.db.models import (
     ReconcileCursor,
     WorkPriority,
 )
+from app.db.session import get_session_factory
 from app.modules.work import catalog as catalog_module
 from app.modules.work.catalog import WorkCatalog, default_lanes
 from app.modules.work.contracts import (
@@ -52,6 +53,17 @@ from app.runtime.engine.inline import InlineJobEngine, _Execution, _Runner
 # Probes borrow real kinds and a lane; this catalog holds only them.
 MUTATING = JobKind.INGESTION_UPLOAD
 READ_ONLY = JobKind.SOURCES_SCAN
+DISCOVERED = JobKind.DERIVATIVES_MESH
+
+
+class _NothingPending:
+    def pending(self, session, *, now, limit):
+        return []
+
+    def next_due(self, session, *, now):
+        return None
+
+
 LANE = LaneName.INGEST
 
 
@@ -112,6 +124,13 @@ def engine() -> InlineJobEngine:
                 mutating=False,
                 label="Read-only probe",
             ),
+            JobDefinition(
+                name=DISCOVERED,
+                lane=LANE,
+                steps=(Step("look", _step("look")),),
+                source=_NothingPending(),
+                label="Discovered probe",
+            ),
         ],
         lanes={**default_lanes(), LANE: Lane(LANE, 2)},
     )
@@ -156,6 +175,15 @@ def _nudged(engine: InlineJobEngine) -> set[JobKind]:
         ex.submission.source
         for ex in engine.executions.values()
         if isinstance(ex.submission, PassSubmission)
+    }
+
+
+def _stamped(session: Session) -> set[JobKind]:
+    """The sources whose dirty mark is set."""
+    return {
+        row.source
+        for row in session.exec(select(ReconcileCursor)).all()
+        if row.nudged_at is not None
     }
 
 
@@ -338,22 +366,61 @@ class TestExecutionContext:
             1,
         )
 
-    def test_finish_stamps_every_source_its_completion_affects(
+    def test_finish_stamps_the_sources_its_completion_names(
         self, engine: InlineJobEngine, make_job, db_session: Session
     ) -> None:
         job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
 
         _context(job).finish(JobOutcome.COMPLETED)
 
-        stamped = {
-            source
-            for source in (MUTATING, READ_ONLY)
-            if db_session.get(ReconcileCursor, source).nudged_at is not None
-        }
-        assert (stamped, _nudged(engine)) == (
-            {MUTATING, READ_ONLY},
-            {MUTATING, READ_ONLY},
-        )
+        assert (_stamped(db_session), _nudged(engine)) == ({READ_ONLY}, {READ_ONLY})
+
+    @pytest.mark.parametrize(
+        "waiting",
+        [
+            {"state": JobState.QUEUED},
+            {"state": JobState.INTERRUPTED, "attempts": 1},
+            {"state": JobState.QUEUED, "attempts": 1, "submitted_epoch": "earlier"},
+        ],
+        ids=["never-submitted", "interrupted", "epoch-not-submitted"],
+    )
+    def test_finish_stamps_its_own_source_while_a_job_awaits_submission(
+        self, engine: InlineJobEngine, make_job, db_session: Session, waiting: dict
+    ) -> None:
+        make_job(kind=MUTATING, **waiting)
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert MUTATING in _stamped(db_session) & _nudged(engine)
+
+    @pytest.mark.parametrize(
+        "other",
+        [
+            {"state": JobState.QUEUED, "attempts": 1},
+            {"state": JobState.RUNNING, "attempts": 1},
+            {"state": JobState.COMPLETED},
+        ],
+        ids=["submitted", "running", "settled"],
+    )
+    def test_finish_queues_no_pass_over_request_work_with_nothing_to_submit(
+        self, engine: InlineJobEngine, make_job, db_session: Session, other: dict
+    ) -> None:
+        make_job(kind=MUTATING, **other)
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert MUTATING not in _stamped(db_session) | _nudged(engine)
+
+    def test_finish_stamps_the_source_of_discovered_work(
+        self, engine: InlineJobEngine, make_job, db_session: Session
+    ) -> None:
+        job = make_job(kind=DISCOVERED, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert DISCOVERED in _stamped(db_session) & _nudged(engine)
 
     def test_finish_leaves_the_settled_cleanup_to_the_end_of_the_attempt(
         self, engine: InlineJobEngine, make_job
@@ -531,7 +598,7 @@ class TestExecuteJob:
 
         _run(engine, job)
 
-        assert {MUTATING, READ_ONLY} <= _nudged(engine)
+        assert READ_ONLY in _nudged(engine)
 
     def test_a_superseded_attempt_does_nothing(
         self, engine: InlineJobEngine, make_job
@@ -697,6 +764,48 @@ class TestExecuteJob:
 
         assert seen == [0]
 
+    def test_a_withdrawn_attempt_ends_instead_of_waiting_out_a_restore(
+        self, engine: InlineJobEngine, make_job, monkeypatch
+    ) -> None:
+        from app.runtime import maintenance
+
+        job = make_job(kind=MUTATING)
+
+        def cancel_then_refuse() -> bool:
+            with get_session_factory().scoped_session() as session:
+                row = session.get(Job, job.id)
+                assert row is not None
+                row.state = JobState.CANCELLED
+                session.add(row)
+                session.commit()
+            return False
+
+        monkeypatch.setattr(maintenance, "begin_mutating_operation", cancel_then_refuse)
+        before = engine.clock
+
+        _run(engine, job)
+
+        assert (TRACE.steps, engine.clock - before) == ([], 0)
+
+    def test_claiming_an_attempt_is_one_transaction(
+        self, engine: InlineJobEngine, make_job, transactions: list[str]
+    ) -> None:
+        from app.modules.work.runner import _begin
+
+        job = make_job(kind=MUTATING)
+        transactions.clear()
+
+        claim = _begin(job.id, 1, job.execution_epoch)
+
+        assert (claim, len(transactions)) == (
+            {
+                "kind": MUTATING.value,
+                "subject_key": job.subject_key,
+                "priority": job.priority.value,
+            },
+            1,
+        )
+
     def test_a_read_only_definition_is_not_held_by_a_restore(
         self, engine: InlineJobEngine, make_job, monkeypatch
     ) -> None:
@@ -738,6 +847,164 @@ class TestExecuteJob:
 
         with pytest.raises(KeyboardInterrupt):
             _run(engine, job)
+
+
+class TestWithdrawalWatch:
+    """Waiting steps share one read; see ``runner._WithdrawalWatch``."""
+
+    @pytest.fixture
+    def reads(self, db_session: Session) -> list[str]:
+        seen: list[str] = []
+
+        def record(_conn, _cursor, statement, *_rest) -> None:
+            if "FROM jobs" in statement:
+                seen.append(statement)
+
+        target = db_session.get_bind()
+        event.listen(target, "before_cursor_execute", record)
+        yield seen
+        event.remove(target, "before_cursor_execute", record)
+
+    def test_one_read_answers_every_registered_attempt(
+        self, make_job, reads: list[str]
+    ) -> None:
+        from app.modules.work.runner import _WithdrawalWatch
+
+        running = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        cancelled = make_job(kind=MUTATING, state=JobState.CANCELLED, attempts=1)
+        watch = _WithdrawalWatch()
+        watch.add(running.id, 1, running.execution_epoch)
+        watch.add(cancelled.id, 1, cancelled.execution_epoch)
+        reads.clear()
+
+        answers = (
+            watch.withdrawn(running.id, 1, running.execution_epoch),
+            watch.withdrawn(cancelled.id, 1, cancelled.execution_epoch),
+        )
+
+        assert (answers, len(reads)) == ((False, True), 1)
+
+    def test_an_answer_older_than_the_window_is_read_again(
+        self, make_job, db_session: Session, monkeypatch
+    ) -> None:
+        from app.modules.work import runner
+
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        clock = [100.0]
+        monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+        watch = runner._WithdrawalWatch()
+        watch.add(job.id, 1, job.execution_epoch)
+        before = watch.withdrawn(job.id, 1, job.execution_epoch)
+        job.state = JobState.CANCELLED
+        db_session.add(job)
+        db_session.commit()
+
+        inside = watch.withdrawn(job.id, 1, job.execution_epoch)
+        clock[0] += runner._WATCH_SECONDS
+        after = watch.withdrawn(job.id, 1, job.execution_epoch)
+
+        assert (before, inside, after) == (False, False, True)
+
+    @pytest.mark.parametrize(
+        "change",
+        [{"attempts": 2}, {"execution_epoch": "replaced"}, {"state": JobState.QUEUED}],
+        ids=["superseded", "epoch-replaced", "requeued"],
+    )
+    def test_an_attempt_that_lost_the_job_is_withdrawn(
+        self, make_job, db_session: Session, change: dict
+    ) -> None:
+        from app.modules.work.runner import _WithdrawalWatch
+
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        epoch = job.execution_epoch
+        for name, value in change.items():
+            setattr(job, name, value)
+        db_session.add(job)
+        db_session.commit()
+        watch = _WithdrawalWatch()
+        watch.add(job.id, 1, epoch)
+
+        assert watch.withdrawn(job.id, 1, epoch)
+
+    def test_a_deleted_job_is_withdrawn(self, make_job, db_session: Session) -> None:
+        from app.modules.work.runner import _WithdrawalWatch
+
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        identity = (job.id, 1, job.execution_epoch)
+        db_session.delete(job)
+        db_session.commit()
+        watch = _WithdrawalWatch()
+        watch.add(*identity)
+
+        assert watch.withdrawn(*identity)
+
+    def test_a_retried_attempt_keeps_its_own_answer_when_the_old_one_leaves(
+        self, make_job
+    ) -> None:
+        from app.modules.work.runner import _WithdrawalWatch
+
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=2)
+        watch = _WithdrawalWatch()
+        watch.add(job.id, 1, job.execution_epoch)
+        watch.add(job.id, 2, job.execution_epoch)
+        watch.remove(job.id, 1, job.execution_epoch)
+
+        assert not watch.withdrawn(job.id, 2, job.execution_epoch)
+
+    def test_a_step_waits_on_the_watch_and_forces_a_fresh_read(
+        self, engine: InlineJobEngine, make_job, reads: list[str]
+    ) -> None:
+        from app.core.cancellation import checkpoint
+
+        job = make_job(kind=MUTATING)
+        seen: list[int] = []
+
+        def waits(_ctx) -> None:
+            reads.clear()
+            checkpoint()
+            checkpoint()
+            seen.append(len(reads))
+            checkpoint(force=True)
+            seen.append(len(reads))
+
+        TRACE.behaviour["one"] = waits
+
+        _run(engine, job)
+
+        assert seen == [1, 2]
+
+    def test_a_step_cancelled_while_it_waits_stops(
+        self, engine: InlineJobEngine, make_job
+    ) -> None:
+        from app.core.cancellation import checkpoint
+
+        job = make_job(kind=MUTATING)
+
+        def cancelled_while_waiting(_ctx) -> None:
+            with get_session_factory().scoped_session() as session:
+                row = session.get(Job, job.id)
+                assert row is not None
+                row.state = JobState.CANCELLED
+                session.add(row)
+                session.commit()
+            checkpoint()
+
+        TRACE.behaviour["one"] = cancelled_while_waiting
+
+        _run(engine, job)
+
+        assert (TRACE.steps, _status(job.id).state) == (["one"], "cancelled")
+
+    def test_a_finished_step_leaves_the_watch(
+        self, engine: InlineJobEngine, make_job
+    ) -> None:
+        from app.modules.work import runner
+
+        job = make_job(kind=MUTATING)
+
+        _run(engine, job)
+
+        assert runner._watch._attempts == {}
 
 
 class TestActiveAttempt:

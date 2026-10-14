@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sqlalchemy import event, update
@@ -73,23 +74,51 @@ def submit(
     engine returns the execution it already has. A reserved backfill submission
     must still name the exact current admitted epoch when arguments are built.
     """
-    now = now or utcnow()
-    engine = catalog_module.get_engine()
-    catalog = catalog_module.get_catalog()
     with get_session_factory().scoped_session() as session:
         row = session.get(Job, job_id)
-        if row is None or row.state not in ACTIVE_JOB_STATES:
+        if row is None:
             return None
-        if reserved_backfill_epoch is not None and (
-            row.execution_epoch != reserved_backfill_epoch
-            or row.backfill_admission_epoch != reserved_backfill_epoch
-        ):
-            return None
-        definition = catalog.definition(row.kind)
-        if definition.admission(session) is not None:
-            return None
-        attempt = row.attempts + 1
-        submission = JobSubmission(
+        prepared = prepare_submission(
+            session,
+            row,
+            reserved_backfill_epoch=reserved_backfill_epoch,
+            expedite=expedite,
+        )
+    return None if prepared is None else hand_over(prepared, now=now)
+
+
+@dataclass(frozen=True)
+class PreparedSubmission:
+    """What one read of an active Job decided to hand the engine."""
+
+    submission: JobSubmission
+    # The Job's current epoch was never submitted: an execution the engine
+    # still holds for this subject belongs to a superseded one.
+    pending_epoch: bool
+
+
+def prepare_submission(
+    session: Session,
+    row: Job,
+    *,
+    reserved_backfill_epoch: str | None = None,
+    expedite: bool = False,
+) -> PreparedSubmission | None:
+    """The next attempt of ``row`` as read in ``session``; ``None`` when it is
+    settled, refused admission, or no longer the reserved backfill epoch."""
+    if row.state not in ACTIVE_JOB_STATES:
+        return None
+    if reserved_backfill_epoch is not None and (
+        row.execution_epoch != reserved_backfill_epoch
+        or row.backfill_admission_epoch != reserved_backfill_epoch
+    ):
+        return None
+    definition = catalog_module.get_catalog().definition(row.kind)
+    if definition.admission(session) is not None:
+        return None
+    attempt = row.attempts + 1
+    return PreparedSubmission(
+        submission=JobSubmission(
             execution_id=execution_id(row.id, attempt, row.execution_epoch),
             job_id=row.id,
             definition=row.kind,
@@ -102,8 +131,21 @@ def submit(
             if definition.partition is None
             else Partitioned(definition.partition(row.subject_key)),
             expedite=expedite,
-        )
-        pending_epoch = row.submitted_epoch != row.execution_epoch
+        ),
+        pending_epoch=row.submitted_epoch != row.execution_epoch,
+    )
+
+
+def hand_over(
+    prepared: PreparedSubmission, *, now: datetime | None = None
+) -> SubmitOutcome:
+    """Submit a prepared attempt and record it once the engine accepted it."""
+    now = now or utcnow()
+    engine = catalog_module.get_engine()
+    submission = prepared.submission
+    pending_epoch = prepared.pending_epoch
+    job_id = submission.job_id
+    attempt = submission.attempt
     outcome = engine.submit(submission)
     if pending_epoch and outcome is SubmitOutcome.DEDUPLICATED:
         _cancel_superseded(submission)

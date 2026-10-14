@@ -164,6 +164,9 @@ def _accept_staged(
             size_bytes=size,
             sha256=sha256,
         )
+        # Read before the commit expires the row: afterwards it is a second
+        # transaction.
+        job_id = request.job_id
         session.commit()
     except staging_leases.StagingCapacityExceeded as exc:
         session.rollback()
@@ -175,8 +178,8 @@ def _accept_staged(
         session.rollback()
         staged.unlink(missing_ok=True)
         raise
-    work_service.dispatch(request.job_id, requests.DEFINITIONS[kind])
-    return JobAccepted(job_id=request.job_id)
+    work_service.dispatch(job_id, requests.DEFINITIONS[kind])
+    return JobAccepted(job_id=job_id)
 
 
 def _resolve_name(model_name: Optional[str], original_filename: str) -> str:

@@ -159,9 +159,12 @@ def _begin(
             )
         if claimed is not None:
             claimed(session, file_row)
-        session.commit()
+        # Load what the caller reads while this transaction is still open: a
+        # refresh after the commit is a second transaction.
+        session.flush()
         session.refresh(file_row)
         session.expunge(file_row)
+        session.commit()
     return file_row, attempts
 
 

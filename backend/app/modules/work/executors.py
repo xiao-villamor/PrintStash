@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 
 from sqlalchemy import delete, update
-from sqlmodel import col, select
+from sqlmodel import Session, col, select
 
 from app.core.config import ProcessRole, settings
 from app.core.time import ensure_utc, utcnow
@@ -116,21 +116,27 @@ def live(*, now: datetime | None = None) -> list[WorkExecutor]:
     return [row for row in rows if not is_stale(row, now=now)]
 
 
+def _all(session: Session) -> list[WorkExecutor]:
+    rows = list(
+        session.exec(select(WorkExecutor).order_by(col(WorkExecutor.started_at))).all()
+    )
+    for row in rows:
+        session.expunge(row)
+    return rows
+
+
 def all_executors() -> list[WorkExecutor]:
     with get_session_factory().scoped_session() as session:
-        rows = list(
-            session.exec(
-                select(WorkExecutor).order_by(col(WorkExecutor.started_at))
-            ).all()
-        )
-        for row in rows:
-            session.expunge(row)
-        return rows
+        return _all(session)
 
 
-def stale_ids(*, now: datetime | None = None) -> set[str]:
+def stale_ids(
+    *, now: datetime | None = None, session: Session | None = None
+) -> set[str]:
+    """Executors whose heartbeat lapsed, read in ``session`` when one is open."""
     now = now or utcnow()
-    return {row.executor_id for row in all_executors() if is_stale(row, now=now)}
+    rows = all_executors() if session is None else _all(session)
+    return {row.executor_id for row in rows if is_stale(row, now=now)}
 
 
 API_ROLES = (ProcessRole.ALL, ProcessRole.API)

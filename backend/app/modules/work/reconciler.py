@@ -66,7 +66,13 @@ from .contracts import (
     WorkPriority,
 )
 from .jobs import TERMINAL_STATES, ActiveJobExists, active_job_predicate, jobs
-from .submission import execution_id, nudge, submit
+from .submission import (
+    execution_id,
+    hand_over,
+    nudge,
+    prepare_submission,
+    submit,
+)
 
 logger = get_logger(__name__)
 _TERMINAL_RECOVERY_BATCH = 500
@@ -230,6 +236,7 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
         )
         for row in rows:
             session.expunge(row)
+        stale = executors.stale_ids(now=now, session=session) if rows else set()
     if not rows:
         return
     admission = _RecoveryAdmission(definition)
@@ -258,7 +265,6 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
         if row.attempts > 0
     ]
     evidence = engine.evidence(ids) if ids else {}
-    stale = executors.stale_ids(now=now)
     grace = timedelta(seconds=settings.jobs_submit_grace_seconds)
     for row in rows:
         seen = (
@@ -532,6 +538,11 @@ def submit_job(
                 row.priority is WorkPriority.BACKFILL
                 and lane.queue_order is LaneOrder.FIFO
             )
+            # Nothing happens between this read and the submission unless an
+            # epoch must be reserved first, so the read serves both.
+            prepared = (
+                None if reserve else prepare_submission(session, row, expedite=expedite)
+            )
         if reserve:
             if lease is None:
                 candidate = _DiscoveryLease(
@@ -550,7 +561,7 @@ def submit_job(
                 return
             outcome = submit(job_id, reserved_backfill_epoch=epoch)
         else:
-            outcome = submit(job_id, expedite=expedite)
+            outcome = None if prepared is None else hand_over(prepared)
     except fences.FenceHeld:
         result.count(PassNote.CLAIMED_ELSEWHERE)
         result.deferred += 1
@@ -610,12 +621,11 @@ def _discovery_budget(session: Session, definition: JobDefinition) -> DiscoveryB
 
 def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -> None:
     source = definition.source
-    with get_session_factory().scoped_session() as session:
-        if definition.admission(session) is not None:
-            return
     if source is None:
         return
     with get_session_factory().scoped_session() as session:
+        if definition.admission(session) is not None:
+            return
         if isinstance(source, PrioritizedWorkSource):
             budget = _discovery_budget(session, definition)
             limit = budget.total

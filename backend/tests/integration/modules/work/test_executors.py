@@ -87,6 +87,18 @@ class TestHeartbeat:
 
 
 class TestLiveness:
+    def test_staleness_is_read_in_a_session_the_caller_has_open(
+        self, make_work_executor, db_session: Session, transactions: list[str]
+    ) -> None:
+        dead = make_work_executor("dead", stale=True)
+        make_work_executor("alive")
+        db_session.commit()
+        transactions.clear()
+
+        stale = executors.stale_ids(session=db_session)
+
+        assert (stale, len(transactions)) == ({dead.executor_id}, 1)
+
     def test_a_silent_executor_is_stale(self, make_work_executor) -> None:
         dead = make_work_executor("dead", stale=True)
         alive = make_work_executor("alive")

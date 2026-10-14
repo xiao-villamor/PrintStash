@@ -122,6 +122,16 @@ def engine() -> InlineJobEngine:
     return built
 
 
+def _definition(kind: JobKind):
+    return catalog_module.get_catalog().definition(kind)
+
+
+def _undecided(*_args, **_kwargs):
+    return reconciler_module.Decision(
+        reconciler_module.Verdict.NONE, reconciler_module.Reason.IN_PROGRESS
+    )
+
+
 def _row(session: Session, job_id: str) -> Job:
     session.expire_all()
     row = session.get(Job, job_id)
@@ -159,6 +169,47 @@ def _stale(make_job, *, attempts: int = 1, **kw) -> Job:
 
 
 class TestRepair:
+    def test_submitting_a_job_reads_it_once_and_records_the_attempt(
+        self,
+        engine: InlineJobEngine,
+        make_job,
+        db_session: Session,
+        transactions: list[str],
+    ) -> None:
+        job = make_job(kind=REQUESTED)
+        result = reconciler_module.PassResult()
+        transactions.clear()
+
+        reconciler_module.submit_job(job.id, result)
+
+        assert (result.submitted, _row(db_session, job.id).attempts) == (1, 1)
+        assert len(transactions) == 2
+
+    def test_a_pass_over_request_work_with_no_jobs_is_one_read(
+        self, engine: InlineJobEngine, transactions: list[str]
+    ) -> None:
+        result = reconciler_module.PassResult()
+        transactions.clear()
+
+        reconciler_module._repair(_definition(REQUESTED), now=utcnow(), result=result)
+        reconciler_module._discover(_definition(REQUESTED), now=utcnow(), result=result)
+
+        assert len(transactions) == 1
+
+    def test_repair_reads_stale_executors_with_its_jobs(
+        self, engine: InlineJobEngine, make_job, transactions: list[str], monkeypatch
+    ) -> None:
+        make_job(kind=REQUESTED, state=JobState.RUNNING, attempts=1)
+        monkeypatch.setattr(engine, "evidence", lambda _ids: {})
+        monkeypatch.setattr(reconciler_module, "decide", _undecided)
+        transactions.clear()
+
+        reconciler_module._repair(
+            _definition(REQUESTED), now=utcnow(), result=reconciler_module.PassResult()
+        )
+
+        assert len(transactions) == 1
+
     def test_submits_the_first_attempt_of_a_queued_job(
         self, engine: InlineJobEngine, make_job, db_session: Session
     ) -> None:
