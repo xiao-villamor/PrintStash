@@ -2468,6 +2468,27 @@ describe("SettingsPanel", () => {
       );
     });
 
+    it("deletes every selected model for good, one after another", async () => {
+      const user = userEvent.setup();
+      const second = { ...TRASHED_MODEL, id: 8, name: "Old hook" };
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=trash",
+        routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, storage_tier: "unguarded" }),
+          "GET /api/v1/models/trash": json([TRASHED_MODEL, second]),
+          "DELETE /api/v1/models/7": json(null, 204),
+          "DELETE /api/v1/models/8": json(null, 204),
+        },
+      });
+
+      await user.click(await screen.findByRole("checkbox", { name: "Select all deleted models" }));
+      await user.click(screen.getByRole("button", { name: "Delete selected" }));
+      await user.click(await screen.findByRole("button", { name: "Remove from catalog" }));
+
+      await waitFor(() => expect(requestsWithMethod("DELETE")).toHaveLength(2));
+      expect(await screen.findByText("Trash is empty.")).toBeVisible();
+    });
+
     it("offers no bulk action until a model is ticked", async () => {
       renderSettings({
         at: "/settings?section=trash",

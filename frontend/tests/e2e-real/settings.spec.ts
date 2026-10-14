@@ -1381,6 +1381,33 @@ test.describe("settings", () => {
     await expect(enable).not.toBeChecked();
   });
 
+  test("deletes several selected trash models for good in one step", async ({ page }) => {
+    const stamp = Date.now();
+    const names = [`e2e-bulk-a-${stamp}`, `e2e-bulk-b-${stamp}`];
+    for (const name of names) {
+      await uploadGcodeModel(page, name);
+      await modelCard(page, name).click();
+      await clickModelAction(page, "Delete model");
+      await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
+    }
+
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Trash" }).click();
+    for (const name of names) {
+      await page.getByRole("checkbox", { name: `Select deleted model ${name}` }).click();
+    }
+    await page.getByRole("button", { name: "Delete selected" }).click();
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: /Delete forever|Remove from catalog/ })
+      .click();
+
+    for (const name of names) await expect(page.getByText(name)).toHaveCount(0);
+    await page.reload();
+    await page.getByRole("button", { name: "Trash", exact: true }).click();
+    for (const name of names) await expect(page.getByText(name)).toHaveCount(0);
+  });
+
   test("expired GC preview is non-destructive without an independent backup", async ({ page }) => {
     const name = `e2e-purge-${Date.now()}`;
     await uploadGcodeModel(page, name);
