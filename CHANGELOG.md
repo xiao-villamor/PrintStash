@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Importing a reviewed archive shows how far along it is. The task used to say
+  "Discovering total…" with an empty bar until the last file was done, although
+  the selection was known from the start.
+
 - G-code exported by BambuStudio 2.x now shows its slicer, estimated print time,
   filament weight and filament length. Its header block writes
   `; BambuStudio 02.08.02.61`, `; total estimated time: 17m 21s` and

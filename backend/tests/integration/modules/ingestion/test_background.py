@@ -1155,6 +1155,7 @@ def batch_window_observation(make_user, make_ingest_request, tmp_path, monkeypat
     baseline_paths = set(incoming.rglob("*"))
     seen_entries = []
     observation = {}
+    totals: dict[str, list] = {}
     read = zipfile.ZipExtFile.read
     ingest = importer._ingest_one_file
 
@@ -1163,7 +1164,20 @@ def batch_window_observation(make_user, make_ingest_request, tmp_path, monkeypat
             seen_entries.append(stream.name)
         return read(stream, size)
 
+    reported: list[dict] = []
+    report = context.update
+
+    def observe_report(**fields):
+        reported.append(fields)
+        return report(**fields)
+
+    monkeypatch.setattr(context, "update", observe_report)
+
     def observe_commit(*args, **kwargs):
+        if "totals_before_first_commit" not in totals:
+            totals["totals_before_first_commit"] = [
+                fields.get("total") for fields in reported if "total" in fields
+            ]
         result = ingest(*args, **kwargs)
         if not observation and result is not None and "file_id" in result:
             # Include unfinished private copies; exclude only paths present
@@ -1213,6 +1227,7 @@ def batch_window_observation(make_user, make_ingest_request, tmp_path, monkeypat
         assert len(staging_leases.job_leases(session, request.job_id)) == 1
     assert set(incoming.rglob("*")) == baseline_paths
     observation["expected_first_bytes"] = bodies["first.gcode"]
+    observation.update(totals)
     return observation
 
 
@@ -1225,6 +1240,11 @@ class TestBatchWindows:
             == batch_window_observation["expected_first_bytes"]
         )
         assert batch_window_observation["entries"] == ("first.gcode",)
+
+    def test_reports_the_selection_total_before_the_first_artifact(
+        self, batch_window_observation
+    ):
+        assert batch_window_observation["totals_before_first_commit"][-1] == 3
 
     def test_bounds_disposable_staging_count(self, batch_window_observation):
         assert batch_window_observation["count"] <= 1

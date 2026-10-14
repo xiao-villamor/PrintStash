@@ -162,8 +162,14 @@ def _consume_archive(
     member_title: str | None = None,
     legacy_candidates: LegacyCandidates | None = None,
     source_spec: EntrySpec | None = None,
+    only_source: bool = False,
 ) -> None:
-    """Freeze the expansion, then consume and release one entry at a time."""
+    """Freeze the expansion, then consume and release one entry at a time.
+
+    ``only_source`` says no other source follows this archive: its frozen
+    entries are the whole batch, so the total is reported before the first
+    entry is consumed rather than after the last.
+    """
     previous = tuple(
         record.spec
         for record in batch.source_entries(source_id)
@@ -175,6 +181,8 @@ def _consume_archive(
     batch.register(specs)
     if source_spec is not None:
         batch.supersede(source_spec)
+    if only_source:
+        batch.discovery_complete()
     by_id = {
         spec.descriptor.entry_id: spec
         for spec in specs
@@ -703,7 +711,12 @@ def run_archive_selection(
     try:
         if not _confirmed_source(batch, source_id):
             _consume_archive(
-                batch, archive, names, source_id=source_id, source_url=source_url
+                batch,
+                archive,
+                names,
+                source_id=source_id,
+                source_url=source_url,
+                only_source=True,
             )
         batch.discovery_complete()
         batch.finish()
