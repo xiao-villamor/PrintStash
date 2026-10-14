@@ -2471,29 +2471,33 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           </div>
 
-          {displayedCollection && (
-            <div className="space-y-3 border-b border-border px-4 py-3 sm:px-6">
-              <EntityTagsDialog
-                entityLabel={displayedCollection.name}
-                tags={displayedCollection.tags}
-                availableTags={tags}
-                canEdit={
-                  browseReady && (!!user?.is_superuser || canWriteCollection(displayedCollection))
-                }
-                help={uiText(
-                  "Collection tags are inherited by Models in this collection and every descendant for search and filtering.",
-                )}
-                onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
-              />
-              <CollectionReadme
-                key={displayedCollection.id}
-                collectionId={displayedCollection.id}
-                hasReadme={displayedCollection.has_readme}
-                canEdit={
-                  browseReady && (!!user?.is_superuser || canWriteCollection(displayedCollection))
-                }
-              />
-            </div>
+          {selectedCollection !== null && !displayedCollection ? (
+            <CollectionHeaderSkeleton />
+          ) : (
+            displayedCollection && (
+              <div className="space-y-3 border-b border-border px-4 py-3 sm:px-6">
+                <EntityTagsDialog
+                  entityLabel={displayedCollection.name}
+                  tags={displayedCollection.tags}
+                  availableTags={tags}
+                  canEdit={
+                    browseReady && (!!user?.is_superuser || canWriteCollection(displayedCollection))
+                  }
+                  help={uiText(
+                    "Collection tags are inherited by Models in this collection and every descendant for search and filtering.",
+                  )}
+                  onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
+                />
+                <CollectionReadme
+                  key={displayedCollection.id}
+                  collectionId={displayedCollection.id}
+                  hasReadme={displayedCollection.has_readme}
+                  canEdit={
+                    browseReady && (!!user?.is_superuser || canWriteCollection(displayedCollection))
+                  }
+                />
+              </div>
+            )
           )}
 
           {activeFilterItems.length > 0 && (
@@ -3403,6 +3407,23 @@ function LoadMore({
         </button>
       </div>
     </Localized>
+  );
+}
+
+/** The tags row and description of a Collection, before its row and readme arrive. */
+export function CollectionHeaderSkeleton() {
+  useUiLocale();
+  return (
+    <div
+      role="status"
+      aria-label={uiText("Loading…")}
+      className="space-y-3 border-b border-border px-4 py-3 sm:px-6"
+    >
+      <Skeleton className="h-8 w-28" />
+      <div className="border-b border-border px-4 py-4 sm:px-6">
+        <Skeleton className="h-5 w-72 max-w-full" />
+      </div>
+    </div>
   );
 }
 

@@ -1218,6 +1218,18 @@ describe("ModelBrowser", () => {
       expect(requests().some((call) => call.url.endsWith("/readme"))).toBe(false);
     });
 
+    it("holds the collection header's place until the folder and its readme arrive", async () => {
+      renderVault({
+        at: "/?c=parts",
+        collections: [aCollection({ id: 1, name: "Parts", path: "parts", has_readme: true })],
+        routes: { "GET /api/v1/collections/1/readme": json({ readme: "Shelf rig parts." }) },
+      });
+
+      expect(screen.getByRole("status", { name: "Loading…" })).toBeInTheDocument();
+      expect(await screen.findByText("Shelf rig parts.")).toBeVisible();
+      expect(screen.queryByRole("status", { name: "Loading…" })).toBeNull();
+    });
+
     it("shows the readme of a folder the list says has one", async () => {
       renderVault({
         at: "/?c=parts",

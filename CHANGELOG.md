@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Opening a collection no longer makes the page jump. Its tags and description
+  appeared only once the folder and its description had loaded, pushing the
+  models down; their place is now held by a skeleton of the same shape.
+
 - Importing a reviewed archive shows how far along it is. The task used to say
   "Discovering total…" with an empty bar until the last file was done, although
   the selection was known from the start.
