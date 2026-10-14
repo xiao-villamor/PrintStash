@@ -2418,6 +2418,67 @@ describe("SettingsPanel", () => {
       );
     });
 
+    it("restores every selected model out of the trash", async () => {
+      const user = userEvent.setup();
+      const second = { ...TRASHED_MODEL, id: 8, name: "Old hook" };
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=trash",
+        routes: {
+          "GET /api/v1/models/trash": json([TRASHED_MODEL, second]),
+          "POST /api/v1/models/7/restore": json({ id: 7 }),
+          "POST /api/v1/models/8/restore": json({ id: 8 }),
+        },
+      });
+
+      await user.click(await screen.findByRole("checkbox", { name: "Select all deleted models" }));
+      await user.click(screen.getByRole("button", { name: "Restore selected" }));
+
+      await waitFor(() =>
+        expect(
+          requestsWithMethod("POST")
+            .filter((call) => call.url.includes("/restore"))
+            .map((call) => new URL(call.url, "http://test").pathname),
+        ).toEqual(["/api/v1/models/7/restore", "/api/v1/models/8/restore"]),
+      );
+    });
+
+    it("deletes only the models that were ticked once the operator confirms", async () => {
+      const user = userEvent.setup();
+      const second = { ...TRASHED_MODEL, id: 8, name: "Old hook" };
+      const { requestsWithMethod } = renderSettings({
+        at: "/settings?section=trash",
+        routes: {
+          "GET /api/v1/config": json({ ...VAULT_CONFIG, storage_tier: "unguarded" }),
+          "GET /api/v1/models/trash": json([TRASHED_MODEL, second]),
+          "DELETE /api/v1/models/8": json(null, 204),
+        },
+      });
+
+      await user.click(
+        await screen.findByRole("checkbox", { name: "Select deleted model Old hook" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Delete selected" }));
+      expect(requestsWithMethod("DELETE")).toHaveLength(0);
+      await user.click(await screen.findByRole("button", { name: "Remove from catalog" }));
+
+      await waitFor(() =>
+        expect(requestsWithMethod("DELETE").map((call) => call.url)).toEqual([
+          expect.stringContaining("/models/8"),
+        ]),
+      );
+    });
+
+    it("offers no bulk action until a model is ticked", async () => {
+      renderSettings({
+        at: "/settings?section=trash",
+        routes: { "GET /api/v1/models/trash": json([TRASHED_MODEL]) },
+      });
+
+      await screen.findByText(TRASHED_MODEL.name);
+
+      expect(screen.queryByRole("button", { name: "Restore selected" })).toBeNull();
+    });
+
     it("shows a retained storage result", async () => {
       const user = userEvent.setup();
       renderSettings({

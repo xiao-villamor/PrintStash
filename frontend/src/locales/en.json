@@ -2777,6 +2777,27 @@
     "one": "{value1} deleted model",
     "other": "{value1} deleted models"
   },
+  "trash.selectedCount": {
+    "one": "{value1} model selected",
+    "other": "{value1} models selected"
+  },
+  "trash.restoredCount": {
+    "one": "Restored {value1} model.",
+    "other": "Restored {value1} models."
+  },
+  "trash.purgedCount": {
+    "one": "Permanently deleted {value1} model.",
+    "other": "Permanently deleted {value1} models."
+  },
+  "trash.purgeSelectedTitle": {
+    "one": "Permanently delete {value1} model?",
+    "other": "Permanently delete {value1} models?"
+  },
+  "Select all deleted models": "Select all deleted models",
+  "Select deleted model {value1}": "Select deleted model {value1}",
+  "Restore selected": "Restore selected",
+  "Delete selected": "Delete selected",
+  "This will delete the selected models and all their files immediately. This cannot be undone.": "This will delete the selected models and all their files immediately. This cannot be undone.",
   "uploads.ignored": {
     "one": "{value1} file ignored — only 3D models ({value3}) are accepted here.",
     "other": "{value1} files ignored — only 3D models ({value3}) are accepted here."

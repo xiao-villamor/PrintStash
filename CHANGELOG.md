@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Deleted models can be selected in Settings, Trash: tick several (or all) and
+  restore or permanently delete them in one step.
+
+- Large slicer 3MF files get a 3D view. A 20 MB Bambu Studio 3MF holds over
+  100 MB of model XML, which hit a fixed 64 MB limit and showed "3D preview
+  omitted due to memory limits". The limit is now `VAULT_MESH_3MF_MAX_XML_MB`
+  (256 by default). A model with more triangles than the memory budget allows
+  still needs `VAULT_MESH_MEMORY_BUDGET_FRACTION` raised; see `docs/compute.md`.
+
 - There is a single PrintStash image, and it can use the GPU. The separate GPU
   image variants are gone: the one image on GHCR uses an NVIDIA, Intel or AMD
   GPU, or the WSL2 GPU, whenever the container is handed one, and runs on the

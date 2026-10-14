@@ -2777,6 +2777,27 @@
     "one": "{value1} modelo eliminado",
     "other": "{value1} modelos eliminados"
   },
+  "trash.selectedCount": {
+    "one": "{value1} modelo seleccionado",
+    "other": "{value1} modelos seleccionados"
+  },
+  "trash.restoredCount": {
+    "one": "Se restauró {value1} modelo.",
+    "other": "Se restauraron {value1} modelos."
+  },
+  "trash.purgedCount": {
+    "one": "Se eliminó definitivamente {value1} modelo.",
+    "other": "Se eliminaron definitivamente {value1} modelos."
+  },
+  "trash.purgeSelectedTitle": {
+    "one": "¿Eliminar definitivamente {value1} modelo?",
+    "other": "¿Eliminar definitivamente {value1} modelos?"
+  },
+  "Select all deleted models": "Seleccionar todos los modelos eliminados",
+  "Select deleted model {value1}": "Seleccionar el modelo eliminado {value1}",
+  "Restore selected": "Restaurar seleccionados",
+  "Delete selected": "Eliminar seleccionados",
+  "This will delete the selected models and all their files immediately. This cannot be undone.": "Esto eliminará de inmediato los modelos seleccionados y todos sus archivos. No se puede deshacer.",
   "uploads.ignored": {
     "one": "Se ha omitido {value1} archivo — aquí solo se aceptan modelos 3D ({value3}).",
     "other": "Se han omitido {value1} archivos — aquí solo se aceptan modelos 3D ({value3})."

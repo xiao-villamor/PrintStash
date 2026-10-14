@@ -46,6 +46,7 @@ import {
   settingsTrashOptions,
   settingsGcOptions,
   useSettingsTrashCommand,
+  type TrashReceipt,
 } from "@/lib/queries/settings-trash";
 import { useBackupPolicyDraft } from "@/lib/queries/settings-backup-policy";
 import { getSessionVersion } from "@/lib/session-transport";
@@ -287,11 +288,13 @@ type ModelThumbnailWidth = (typeof MODEL_THUMBNAIL_WIDTHS)[number];
  * What the trash panel is busy with: the id of the single model being purged, or a
  * label for one of the bulk retention actions.
  */
-type TrashOperation = number | "expired" | "gc";
+type TrashOperation = number | "expired" | "gc" | "selection";
 
 /** Only a per-model purge carries an id; the bulk actions carry their label instead. */
 function isModelPurge(operation: TrashOperation | null): operation is number {
-  return operation !== null && operation !== "expired" && operation !== "gc";
+  return (
+    operation !== null && operation !== "expired" && operation !== "gc" && operation !== "selection"
+  );
 }
 
 // Shared button styles — keep settings actions visually uniform and theme-aware.
@@ -679,6 +682,8 @@ export function SettingsPanel() {
       : (remoteConfigData?.model_thumbnail_width ?? 640);
   const [previewBusy, setPreviewBusy] = useState<"rebuild" | null>(null);
   const [purgeTarget, setPurgeTarget] = useState<TrashedModelRead | null>(null);
+  const [trashSelection, setTrashSelection] = useState<ReadonlySet<number>>(() => new Set());
+  const [purgeSelectionOpen, setPurgeSelectionOpen] = useState(false);
   const [purgeExpiredOpen, setPurgeExpiredOpen] = useState(false);
   const trashRetentionText =
     trashRetentionDraft?.text ?? String(remoteConfigData?.trash_retention_days ?? 30);
@@ -786,6 +791,8 @@ export function SettingsPanel() {
       setTrashPurgeResult(null);
       setGcDigestConfirmation("");
       setPurgeTarget(null);
+      setTrashSelection(new Set());
+      setPurgeSelectionOpen(false);
       setTrashBusy(null);
     });
     return () => {
@@ -1657,6 +1664,76 @@ export function SettingsPanel() {
     }
   }
 
+  const selectedTrash = trashItems.filter((item) => trashSelection.has(item.id));
+
+  function toggleTrashItem(id: number) {
+    setTrashSelection((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAllTrash() {
+    setTrashSelection(
+      selectedTrash.length === trashItems.length
+        ? new Set()
+        : new Set(trashItems.map((item) => item.id)),
+    );
+  }
+
+  /** Runs one trash command per selected model, in order, and keeps what failed selected. */
+  async function runOnSelectedTrash(
+    command: (target: TrashedModelRead, session: number) => Promise<TrashReceipt>,
+    done: (count: number) => string,
+  ) {
+    if (selectedTrash.length === 0 || trashRead.isError || trashBusy !== null) return;
+    const session = getSessionVersion();
+    setTrashBusy("selection");
+    const finished = new Set<number>();
+    let failure: unknown;
+    try {
+      for (const target of selectedTrash) {
+        try {
+          await command(target, session);
+          finished.add(target.id);
+        } catch (error) {
+          failure = error;
+          break;
+        }
+      }
+    } finally {
+      if (accountCurrent(session)) {
+        setTrashSelection((current) => new Set([...current].filter((id) => !finished.has(id))));
+        setTrashBusy(null);
+        if (finished.size > 0) toast.success(done(finished.size));
+        if (failure !== undefined) toast.error(failure);
+      }
+    }
+  }
+
+  function restoreSelectedTrash() {
+    void runOnSelectedTrash(
+      (target, session) => trashCommand.run({ kind: "restore", target, session }),
+      (count) => uiText("trash.restoredCount", { value1: String(count), count }),
+    );
+  }
+
+  function confirmPurgeSelectedTrash() {
+    setPurgeSelectionOpen(false);
+    void runOnSelectedTrash(
+      (target, session) =>
+        trashCommand.run({
+          kind: "purge",
+          target,
+          session,
+          confirmStorageRisk:
+            trashOperations?.catalog_purge.confirmation_required ?? trashStorageTier !== "verified",
+        }),
+      (count) => uiText("trash.purgedCount", { value1: String(count), count }),
+    );
+  }
+
   async function createExpiredGcPreview() {
     if (!user?.is_superuser || gcRead.isError || gcRead.isPending || trashBusy !== null) return;
     const session = getSessionVersion();
@@ -1875,6 +1952,32 @@ export function SettingsPanel() {
             (trashOperations?.physical_delete.allowed ?? trashStorageTier === "verified")
               ? uiText(
                   "This will delete the model and all its files immediately. This cannot be undone.",
+                )
+              : t("storage.catalogOnly")
+          }
+          confirmLabel={
+            (trashOperations?.physical_delete.allowed ?? trashStorageTier === "verified")
+              ? uiText("Delete forever")
+              : t("storage.catalogConfirmAction")
+          }
+        />
+        <ConfirmModal
+          open={purgeSelectionOpen}
+          onClose={() => setPurgeSelectionOpen(false)}
+          onConfirm={confirmPurgeSelectedTrash}
+          busy={trashBusy === "selection"}
+          title={
+            (trashOperations?.physical_delete.allowed ?? trashStorageTier === "verified")
+              ? uiText("trash.purgeSelectedTitle", {
+                  value1: String(selectedTrash.length),
+                  count: selectedTrash.length,
+                })
+              : t("storage.catalogConfirmation")
+          }
+          description={
+            (trashOperations?.physical_delete.allowed ?? trashStorageTier === "verified")
+              ? uiText(
+                  "This will delete the selected models and all their files immediately. This cannot be undone.",
                 )
               : t("storage.catalogOnly")
           }
@@ -4782,12 +4885,45 @@ export function SettingsPanel() {
                 >
                   {trashItems.length > 0 && (
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-                      <span>
-                        {uiText("models.deletedCount", {
-                          value1: String(trashItems.length),
-                          count: Number(trashItems.length),
-                        })}
+                      <span className="flex items-center gap-3">
+                        <Checkbox
+                          checked={selectedTrash.length === trashItems.length}
+                          onChange={toggleAllTrash}
+                          disabled={trashBusy !== null}
+                          ariaLabel={uiText("Select all deleted models")}
+                        />
+                        {selectedTrash.length > 0
+                          ? uiText("trash.selectedCount", {
+                              value1: String(selectedTrash.length),
+                              count: selectedTrash.length,
+                            })
+                          : uiText("models.deletedCount", {
+                              value1: String(trashItems.length),
+                              count: Number(trashItems.length),
+                            })}
                       </span>
+                      {selectedTrash.length > 0 && (
+                        <span className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={restoreSelectedTrash}
+                            disabled={trashBusy !== null}
+                            className={BTN_SECONDARY}
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            {uiText("Restore selected")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPurgeSelectionOpen(true)}
+                            disabled={trashBusy !== null}
+                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {uiText("Delete selected")}
+                          </button>
+                        </span>
+                      )}
                       <span className="font-mono tabular-nums" aria-label={uiText("Trash size")}>
                         {uiText("{value1} reclaimable", {
                           value1: String(
@@ -4820,8 +4956,16 @@ export function SettingsPanel() {
                       trashItems.map((item) => (
                         <div
                           key={item.id}
-                          className="grid gap-3 p-4 sm:p-5 lg:grid-cols-[1fr_auto] lg:items-center"
+                          className="grid gap-3 p-4 sm:p-5 lg:grid-cols-[auto_1fr_auto] lg:items-center"
                         >
+                          <Checkbox
+                            checked={trashSelection.has(item.id)}
+                            onChange={() => toggleTrashItem(item.id)}
+                            disabled={trashBusy !== null}
+                            ariaLabel={uiText("Select deleted model {value1}", {
+                              value1: String(item.name),
+                            })}
+                          />
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="truncate text-sm font-medium text-foreground">
