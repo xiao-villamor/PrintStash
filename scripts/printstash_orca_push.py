@@ -119,7 +119,9 @@ def _source_filename(value: str | None) -> str | None:
 
 
 def _is_gcode_3mf(path: Path) -> bool:
-    return path.name.lower().endswith(".gcode.3mf") and is_zipfile(path)
+    # Orca hands the hook a temporary "<final>.pp" copy of the export.
+    name = path.name.lower().removesuffix(".pp")
+    return name.endswith(".gcode.3mf") and is_zipfile(path)
 
 
 def _gcode_member(archive: ZipFile) -> str | None:
@@ -143,7 +145,7 @@ def _native_lines(path: Path) -> Iterator[str]:
                 with archive.open(member) as stream:
                     for raw_line in stream:
                         yield raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-        except (BadZipFile, OSError):
+        except BadZipFile, OSError:
             return
         return
     try:
@@ -167,7 +169,7 @@ def _archive_project_name(path: Path) -> str | None:
                     match = re.search(r'<metadata key="name" value="([^"]+)"', text)
                     if match:
                         return _clean(match.group(1))
-    except (BadZipFile, KeyError, OSError):
+    except BadZipFile, KeyError, OSError:
         return None
     return None
 

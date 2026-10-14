@@ -383,3 +383,81 @@ class TestSlicerTempFile:
         environ = {"SLIC3R_PP_OUTPUT_NAME": "C:\\exports\\bracket.gcode"}
 
         assert orca_hook.output_name(tmp_path / "tmp.pp", environ) == ("bracket.gcode")
+
+    def test_reads_a_gcode_3mf_under_the_slicer_temp_name(
+        self, tmp_path, orca_hook: ModuleType
+    ) -> None:
+        archive_path = tmp_path / "tmp1234.gcode.3mf.pp"
+        with ZipFile(archive_path, "w") as archive:
+            archive.writestr(
+                "Metadata/plate_1.gcode",
+                "; printing object bracket.stl id:0 copy 0\n",
+            )
+
+        context = orca_hook.extract_native_context(archive_path, {})
+
+        assert context["classification"] == "single_object"
+
+    @staticmethod
+    def _capture_uploads(orca_hook: ModuleType, monkeypatch) -> list[bytes]:
+        sent: list[bytes] = []
+
+        class _Response:
+            status = 202
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc):
+                return False
+
+            def read(self) -> bytes:
+                return b"{}"
+
+        def fake_urlopen(request, timeout):
+            sent.append(request.data)
+            return _Response()
+
+        monkeypatch.setattr(orca_hook.urlrequest, "urlopen", fake_urlopen)
+        return sent
+
+    def test_push_uploads_under_the_slicer_output_name(
+        self, tmp_path, orca_hook: ModuleType, monkeypatch
+    ) -> None:
+        gcode = tmp_path / "tmp1234.gcode.pp"
+        gcode.write_bytes(b"G28\n")
+        monkeypatch.setenv("SLIC3R_PP_OUTPUT_NAME", "/exports/bracket_PLA.gcode")
+        sent = self._capture_uploads(orca_hook, monkeypatch)
+
+        assert orca_hook.push("https://printstash.invalid", "token", gcode, {})
+        assert b'filename="bracket_PLA.gcode"' in sent[0]
+
+    def test_main_uploads_the_slicer_output_name(
+        self, tmp_path, orca_hook: ModuleType, monkeypatch
+    ) -> None:
+        gcode = tmp_path / "tmp1234.gcode.pp"
+        gcode.write_text(
+            "; printing object bracket.stl id:0 copy 0\n", encoding="utf-8"
+        )
+        monkeypatch.setenv("SLIC3R_PP_OUTPUT_NAME", "/exports/bracket_PLA.gcode")
+        monkeypatch.setattr(
+            orca_hook.sys,
+            "argv",
+            [
+                "printstash_orca_push.py",
+                "--url",
+                "https://printstash.invalid",
+                "--username",
+                "orca",
+                "--api-key",
+                "psk_secret",
+                "--log-path",
+                str(tmp_path / "hook.log"),
+                str(gcode),
+            ],
+        )
+        monkeypatch.setattr(orca_hook, "login", lambda *_args: "token")
+        sent = self._capture_uploads(orca_hook, monkeypatch)
+
+        assert orca_hook.main() == 0
+        assert b'filename="bracket_PLA.gcode"' in sent[0]
