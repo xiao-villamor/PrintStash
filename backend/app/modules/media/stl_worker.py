@@ -40,8 +40,14 @@ if TYPE_CHECKING:
 _STL_VALIDATION_FACES = 4096
 
 
-def _validate_float32_facets(mesh: Trimesh) -> None:
-    """Reject float32 overflow or collapsed source facets without changing them.
+# A scan or sculpt can hold a few slivers whose area float32 cannot keep. They
+# are not visible in a viewer, so a handful is dropped; a mesh where more than
+# this share collapses is not representable as an STL and is refused.
+_STL_COLLAPSED_FACE_SHARE = 0.001
+
+
+def _validate_float32_facets(mesh: Trimesh) -> list[int]:
+    """Refuse float32 overflow; return the source facets float32 would collapse.
 
     Index only a bounded face batch, rather than materializing mesh.triangles.
     Normalize source edges before crossing to preserve tiny nonzero areas;
@@ -49,6 +55,7 @@ def _validate_float32_facets(mesh: Trimesh) -> None:
     """
     import numpy as np
 
+    collapsed: list[int] = []
     for start in range(0, len(mesh.faces), _STL_VALIDATION_FACES):
         checkpoint()
         triangles = np.asarray(
@@ -78,8 +85,10 @@ def _validate_float32_facets(mesh: Trimesh) -> None:
         packed_area = np.any(
             np.cross(packed_edges[:, 0], packed_edges[:, 1]) != 0, axis=1
         )
-        if np.any(original_area & ~packed_area):
-            raise MeshWorkerError(ThumbnailFailureReason.INVALID_SOURCE)
+        collapsed.extend(
+            (start + np.flatnonzero(original_area & ~packed_area)).tolist()
+        )
+    return collapsed
 
 
 @dataclass
@@ -101,6 +110,7 @@ class _CappedSTLOutput(io.IOBase):
 
 def convert(path: Path, file_type: str | None, destination: Path) -> STLManifest:
     """Preserve resource refusal reasons instead of collapsing them into no output."""
+    import numpy as np
     import trimesh
 
     file_type = canonical_suffix(path, file_type).lstrip(".")
@@ -144,7 +154,13 @@ def convert(path: Path, file_type: str | None, destination: Path) -> STLManifest
         # Binary STL's exact expansion is known before its exporter allocates.
         if 84 + 50 * len(mesh.faces) > MAX_STL_BYTES:
             raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
-        _validate_float32_facets(mesh)
+        collapsed = _validate_float32_facets(mesh)
+        if collapsed:
+            if len(collapsed) > len(mesh.faces) * _STL_COLLAPSED_FACE_SHARE:
+                raise MeshWorkerError(ThumbnailFailureReason.INVALID_SOURCE)
+            keep = np.ones(len(mesh.faces), dtype=bool)
+            keep[collapsed] = False
+            mesh.update_faces(keep)
         with destination.open("xb") as stream:
             mesh.export(file_obj=_CappedSTLOutput(stream), file_type="stl")
             stream.flush()

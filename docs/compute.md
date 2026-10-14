@@ -46,6 +46,7 @@ Allocation recovery evicts idle entries and makes one bounded inference split. V
 | VAULT_COMPUTE_ADAPTER | unset | Exact physical adapter name or diagnostic identity |
 | VAULT_COMPUTE_MEMORY_MB | 1024 | Shared estimated device ceiling, 256–65536 MiB |
 | VAULT_MESH_MEMORY_BUDGET_FRACTION | 0.5 | Share of the host or container RAM native mesh work may reserve, 0–1; this is the *system* budget that thumbnails and geometry draw on, apart from the GPU's |
+| VAULT_MESH_3MF_MAX_XML_MB | 256 | Uncompressed model XML a 3MF may hold, 1–512 MB. Slicer exports write every coordinate as text, so a 20 MB 3MF can hold over 100 MB of XML. Raise the memory fraction above with it: the triangle ceiling is the memory budget divided by the per-triangle cost (about 1.15 M triangles at 4 GB) |
 | VAULT_EMBEDDING_MEMORY_BUDGET_FRACTION | 0.25 | Share of RAM resident AI models may hold, above 0 and below 1 |
 | VAULT_COMPUTE_BATCH_WAIT_MS | 10 | Background accumulation ceiling, 0–10 ms |
 

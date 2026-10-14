@@ -21,6 +21,8 @@ from printstash_core.mesh.similarity.components import (
     expand_scene,
 )
 
+from app.core.config import settings
+
 if TYPE_CHECKING:
     import numpy as np
     from lxml.etree import _Element
@@ -178,6 +180,7 @@ def read_scene(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> ExpandedSc
                     raise GeometryError("invalid_3mf_relationship")
             parts: dict[str, _ModelPart] = {}
             total_xml = total_indexed = 0
+            xml_budget = settings.mesh_3mf_max_xml_mb * 1024 * 1024
 
             def read_part(name: str) -> _ModelPart:
                 nonlocal total_xml, total_indexed
@@ -186,12 +189,12 @@ def read_scene(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> ExpandedSc
                 info = names[name]
                 total_xml += info.file_size
                 if (
-                    total_xml > 64 * 1024 * 1024
+                    total_xml > xml_budget
                     or info.file_size > max(info.compress_size, 1) * 200
                 ):
                     raise GeometryError("archive_resource_limit")
                 with archive.open(info) as stream:
-                    payload = stream.read(64 * 1024 * 1024 + 1)
+                    payload = stream.read(xml_budget + 1)
                 if len(payload) != info.file_size:
                     raise GeometryError("invalid_archive")
                 tree = etree.parse(

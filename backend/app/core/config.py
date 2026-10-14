@@ -430,6 +430,12 @@ class Settings(BaseSettings):
     # a 3MF still gets its embedded slicer preview. 0 disables the size guard.
     mesh_max_load_mb: int = Field(default=200, ge=0)
 
+    # Uncompressed model XML a 3MF may carry across all of its model parts. Slicer
+    # exports write every coordinate as text, so a 20 MB archive routinely holds
+    # over 100 MB of XML. Parsing is admitted against the mesh memory pool, so
+    # raise this together with VAULT_MESH_MEMORY_BUDGET_FRACTION, not past it.
+    mesh_3mf_max_xml_mb: int = Field(default=256, ge=1, le=512)
+
     # STEP tessellation runs in a disposable child process because its triangle
     # count is unknowable before Cascadio loads it. The child is killed on this
     # deadline; its RSS budget is derived from mesh_memory_budget_fraction and

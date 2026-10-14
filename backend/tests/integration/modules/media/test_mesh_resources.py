@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from printstash_core.mesh.similarity import GeometryError
 
+from app.core.config import _overlay
 from app.modules.media.mesh_resources import load_3mf
 from tests.factories import content
 from tests.factories.geometry import expanding_three_mf, three_mf
@@ -178,6 +179,45 @@ class TestMalformedPackages:
         path.write_bytes(content.zip_bytes({"3D/3dmodel.model": b" " * 500_000}))
         with pytest.raises(GeometryError, match="archive_resource_limit"):
             load_3mf(path)
+
+
+def _verbose_model(vertices: int) -> bytes:
+    """A model whose XML is large but honest: coordinates that do not repeat."""
+    rows = "".join(
+        f'<vertex x="{index * 0.37:.6f}" y="{index * 0.11:.6f}" z="{index % 97 * 0.53:.6f}"/>'
+        for index in range(vertices)
+    )
+    triangles = "".join(
+        f'<triangle v1="{index}" v2="{index + 1}" v3="{index + 2}"/>'
+        for index in range(vertices - 2)
+    )
+    return (
+        '<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">'
+        f'<resources><object id="1" type="model"><mesh><vertices>{rows}</vertices>'
+        f"<triangles>{triangles}</triangles></mesh></object></resources>"
+        '<build><item objectid="1"/></build></model>'
+    ).encode()
+
+
+class TestModelXmlBudget:
+    def test_refuses_model_xml_above_the_configured_budget(self, tmp_path, monkeypatch):
+        monkeypatch.setitem(_overlay, "mesh_3mf_max_xml_mb", 1)
+        path = tmp_path / "verbose.3mf"
+        path.write_bytes(
+            content.zip_bytes({"3D/3dmodel.model": _verbose_model(12_000)})
+        )
+
+        with pytest.raises(GeometryError, match="archive_resource_limit"):
+            load_3mf(path)
+
+    def test_loads_the_same_model_inside_the_budget(self, tmp_path, monkeypatch):
+        monkeypatch.setitem(_overlay, "mesh_3mf_max_xml_mb", 8)
+        path = tmp_path / "verbose.3mf"
+        path.write_bytes(
+            content.zip_bytes({"3D/3dmodel.model": _verbose_model(12_000)})
+        )
+
+        assert len(load_3mf(path).whole_mesh.faces) == 11_998
 
 
 class TestProductionResources:

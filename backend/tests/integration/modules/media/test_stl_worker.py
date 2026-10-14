@@ -89,6 +89,23 @@ class TestMain:
         assert not (tmp_path / "mesh.stl").exists()
         assert source.read_bytes() == payload
 
+    def test_drops_a_lone_sliver_float32_cannot_keep(self, tmp_path, run_worker):
+        sphere = trimesh.creation.icosphere(subdivisions=4)
+        source = tmp_path / "sliver.obj"
+        lines = [f"v {x:.8f} {y:.8f} {z:.8f}" for x, y, z in sphere.vertices]
+        lines += ["v 1000.00000000 1000.00000000 1000.00000000"]
+        lines += ["v 1000.00000010 1000.00000000 1000.00000000"]
+        lines += ["v 1000.00000000 1000.00000020 1000.00000000"]
+        base = len(sphere.vertices)
+        lines += [f"f {a + 1} {b + 1} {c + 1}" for a, b, c in sphere.faces]
+        lines += [f"f {base + 1} {base + 2} {base + 3}"]
+        source.write_text("\n".join(lines) + "\n")
+
+        status, manifest, output = run_worker(source, file_type="obj")
+
+        assert status == 0
+        assert struct.unpack_from("<I", output.read_bytes(), 80)[0] == len(sphere.faces)
+
     def test_refuses_finite_coordinates_outside_float32_range(
         self, tmp_path, run_worker
     ):
