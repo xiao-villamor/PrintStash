@@ -43,20 +43,21 @@ timestamp indices and a nullable backfill admission epoch. The new reservation
 is separate from accepted execution epochs and does not spend a retry attempt.
 
 Derivation queues now share bounded interactive/backfill allowances and use FIFO
-engine dispatch. Before upgrading, stop new uploads, viewer requests and bulk
-regeneration. Allow the existing API and workers to drain their derivation Jobs,
-then stop every API and worker process and restart them on the new image
-together. The native resource receipt format also changes; no old application
-process may continue admitting native or prepared-source work during restart.
-Existing previews remain usable; no new recipe is introduced by scheduling.
+engine dispatch. You do not need to drain them first: stop every API and worker
+process and restart them on the new image together. On start, derivation work
+that is still waiting under the previous version's ordering is given the new
+neutral rank and runs in arrival order; work already handed to a worker is left
+alone, and no Job, managed file or admission receipt is touched. The native
+resource receipt format also changes; no old application process may continue
+admitting native or prepared-source work during restart. Existing previews
+remain usable; no new recipe is introduced by scheduling.
 
-Startup reports `derivation_queue_requires_drain` before enabling consumers if
-legacy derivation ranks remain, inspection fails, or its bounded inspection
-cannot verify the queue. Keep the old image available to finish draining. Do
-not delete application Jobs, managed files or admission receipts to bypass this
-check. As with the DBOS upgrade below, disposable engine state may be rebuilt
-only with all processes stopped; unfinished application Jobs then replay through
-the reconciler, and engine checkpoints are lost.
+If the engine database cannot be read at that point, startup stops with
+`derivation_queue_unreadable`; fix the access problem and start again. A
+database that DBOS cannot migrate stops with `engine_database_unmigratable` and
+the steps to recover: engine state is disposable, so with all processes stopped
+it may be moved aside and rebuilt; unfinished application Jobs then replay
+through the reconciler, and engine checkpoints are lost.
 
 ## Unreleased: DBOS 3.0
 

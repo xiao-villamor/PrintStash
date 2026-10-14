@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Upgrading from 0.13.0 or 0.14.0 no longer requires draining derivation work
+  first. Work still waiting under the old ordering is re-ranked on start instead
+  of stopping the container in a restart loop with
+  `derivation_queue_requires_drain`. Checked on real 0.13.0 and 0.14.0 data
+  directories, including one with old-rank work queued.
+
 - A background-work engine database that DBOS cannot migrate (workflow rows but
   no migration record, left by an earlier failed first start) is now reported at
   startup with what to do, instead of looping on `table workflow_status already

@@ -78,12 +78,13 @@ _STATUS = {
     "CANCELLED": EngineStatus.CANCELLED,
 }
 _ACTIVE = ["ENQUEUED", "DELAYED", "PENDING"]
+_WAITING = ["ENQUEUED", "DELAYED"]
 _SETTLED = ["SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"]
 _PRUNE_BATCH = 500
-_FIFO_INSPECTION_LIMIT = 500
-_FIFO_DRAIN_REQUIRED = (
-    "derivation_queue_requires_drain: stop all work processes, drain legacy "
-    "derivation queues and restart together before enabling FIFO scheduling"
+_FIFO_ADOPTION_FAILED = (
+    "derivation_queue_unreadable: the background-work engine database could not "
+    "be read to adopt waiting derivation work. Check that it is readable and "
+    "that no other PrintStash process holds it, then start again."
 )
 _ENGINE_DATABASE_UNMIGRATABLE = (
     "engine_database_unmigratable: the background-work engine database was "
@@ -302,7 +303,7 @@ class DbosJobEngine(JobEngine):
             if self._launched:
                 return
             self._require_migratable_system_database()
-            self._require_fifo_queues_drained()
+            self._adopt_fifo_queues()
             DBOS.destroy(destroy_registry=True)
             DBOS(config=self._config())
             self._register_workflows()
@@ -366,12 +367,21 @@ class DbosJobEngine(JobEngine):
         if legacy:
             raise RuntimeError(_ENGINE_DATABASE_UNMIGRATABLE)
 
-    def _require_fifo_queues_drained(self) -> None:
-        """Refuse a mixed scheduling rollout before registering consumers.
+    def _adopt_fifo_queues(self) -> None:
+        """Give work queued under the previous scheduling policy the neutral rank.
 
-        Operators must stop every old producer before this bounded snapshot;
-        it cannot fence a process still submitting work under the old policy.
-        Only the public client reads persisted queue state, without payloads.
+        Derivation lanes dispatch in arrival order now. A database that still
+        holds waiting work with the previous version's rank would otherwise be
+        ordered by a policy no new Job is created under. The Job rows in the
+        application database stay the record of the work and keep their own
+        priority; only the engine's waiting copy is re-ranked, so nothing is
+        dropped and an operator never has to drain by hand. Work already handed
+        to a worker is left alone: its rank no longer orders anything.
+
+        This reads and writes the columns every engine schema has. The system
+        database is still the previous version's here (DBOS migrates it when it
+        launches, after this), so its own client would select columns that do not
+        exist yet and fail every existing install.
         """
         lanes = [
             lane.name.value
@@ -383,45 +393,37 @@ class DbosJobEngine(JobEngine):
         try:
             if self._fresh_system_database():
                 return
-            neutral_rank = PRIORITY_RANK[WorkPriority.INTERACTIVE]
-            # Read the columns every engine schema has. The system database is
-            # still the previous version's here: DBOS migrates it only when it
-            # launches, after this check, so its own client would select
-            # columns that do not exist yet and fail every existing install.
-            statement = text(
-                f"SELECT priority FROM {self._workflow_status_table()} "
-                "WHERE queue_name IN :lanes AND status IN :active LIMIT :limit"
-            ).bindparams(
-                bindparam("lanes", expanding=True), bindparam("active", expanding=True)
-            )
-            connect_args = (
-                {"connect_timeout": 5}
-                if make_url(self.url).get_backend_name() != "sqlite"
-                else {}
-            )
-            database = create_engine(self.url, connect_args=connect_args)
-            try:
-                with database.connect() as connection:
-                    ranks = (
-                        connection.execute(
-                            statement,
-                            {
-                                "lanes": lanes,
-                                "active": _ACTIVE,
-                                "limit": _FIFO_INSPECTION_LIMIT + 1,
-                            },
-                        )
-                        .scalars()
-                        .all()
-                    )
-            finally:
-                database.dispose()
-            if len(ranks) > _FIFO_INSPECTION_LIMIT:
-                raise RuntimeError("fifo_queue_inspection_limit")
-            if any(rank != neutral_rank for rank in ranks):
-                raise RuntimeError("fifo_queue_legacy_rank")
         except Exception as exc:
-            raise RuntimeError(_FIFO_DRAIN_REQUIRED) from exc
+            raise RuntimeError(_FIFO_ADOPTION_FAILED) from exc
+        statement = text(
+            f"UPDATE {self._workflow_status_table()} SET priority = :neutral "
+            "WHERE queue_name IN :lanes AND status IN :waiting "
+            "AND priority <> :neutral"
+        ).bindparams(
+            bindparam("lanes", expanding=True), bindparam("waiting", expanding=True)
+        )
+        connect_args = (
+            {"connect_timeout": 5}
+            if make_url(self.url).get_backend_name() != "sqlite"
+            else {}
+        )
+        database = create_engine(self.url, connect_args=connect_args)
+        try:
+            with database.begin() as connection:
+                adopted = connection.execute(
+                    statement,
+                    {
+                        "neutral": PRIORITY_RANK[WorkPriority.INTERACTIVE],
+                        "lanes": lanes,
+                        "waiting": _WAITING,
+                    },
+                ).rowcount
+        except Exception as exc:
+            raise RuntimeError(_FIFO_ADOPTION_FAILED) from exc
+        finally:
+            database.dispose()
+        if adopted:
+            logger.info("re-ranked queued derivation work", extra={"count": adopted})
 
     def _workflow_status_table(self) -> str:
         if make_url(self.url).get_backend_name() == "sqlite":
