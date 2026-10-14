@@ -169,3 +169,17 @@ class TestQueueOrder:
         catalog.apply_overrides(db_session)
 
         assert catalog.lanes[LaneName.DERIVE_NATIVE] == replace(original, concurrency=7)
+
+
+class TestAdditions:
+    def test_lists_the_definitions_that_add_to_the_library(
+        self, additions_engine
+    ) -> None:
+        from .conftest import ADDING, ALSO_ADDING
+
+        assert set(catalog_module.get_catalog().additions) == {ADDING, ALSO_ADDING}
+
+    def test_lists_the_definitions_that_wait_for_them(self, additions_engine) -> None:
+        from .conftest import WAITING
+
+        assert catalog_module.get_catalog().waiting_for_additions == (WAITING,)

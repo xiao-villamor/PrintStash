@@ -1357,3 +1357,43 @@ class TestStepPriority:
         assert observed == [WorkPriority.BACKFILL]
         assert current_priority() is WorkPriority.INTERACTIVE
         assert _status(job.id).state is JobState.FAILED
+
+
+class TestAdditionsRelease:
+    """The last addition to settle releases the work that waited for it."""
+
+    def test_the_last_addition_to_end_nudges_the_waiting_work(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, WAITING
+
+        job = make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        cursor = db_session.get(ReconcileCursor, WAITING)
+        assert cursor is not None and cursor.nudged_at is not None
+        assert WAITING in _nudged(additions_engine)
+
+    def test_an_addition_that_ends_before_others_leaves_it_waiting(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import ADDING, ALSO_ADDING, WAITING
+
+        make_job(kind=ALSO_ADDING, state=JobState.RUNNING, attempts=1)
+        job = make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert WAITING not in _nudged(additions_engine)
+
+    def test_a_failed_addition_releases_the_waiting_work_too(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import ADDING, WAITING
+
+        job = make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.FAILED, error="broken_upload")
+
+        assert WAITING in _nudged(additions_engine)

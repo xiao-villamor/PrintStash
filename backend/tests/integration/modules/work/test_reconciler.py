@@ -1814,3 +1814,49 @@ class TestFIFORecovery:
         assert execution_id(interactive_id, 1, interactive_epoch) in engine.executions
         held = db_session.get(WorkFence, name)
         assert held is not None and held.holder == "other-pass"
+
+
+class TestDiscoveryWaitsForAdditions:
+    """``waits_for_additions``: discovery holds back while the library grows."""
+
+    @staticmethod
+    def _created(session: Session, kind: JobKind) -> list[Job]:
+        return list(session.exec(select(Job).where(Job.kind == kind)).all())
+
+    def test_holds_back_while_an_addition_is_active(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from app.modules.work.reconciler import PassNote
+
+        from .conftest import ADDING, WAITING
+
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        result = run_pass(WAITING)
+
+        assert (self._created(db_session, WAITING), result.outcomes) == (
+            [],
+            {PassNote.WAITING_FOR_ADDITIONS.value: 1},
+        )
+
+    def test_finds_work_once_no_addition_is_active(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, WAITING
+
+        make_job(kind=ADDING, state=JobState.COMPLETED)
+
+        run_pass(WAITING)
+
+        assert len(self._created(db_session, WAITING)) == 1
+
+    def test_work_that_does_not_wait_is_found_meanwhile(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, EAGER
+
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        run_pass(EAGER)
+
+        assert len(self._created(db_session, EAGER)) == 1

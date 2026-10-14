@@ -645,3 +645,45 @@ class TestHeldWork:
         assert work_bootstrap.release_held() is False
 
         assert work_bootstrap.current() is None
+
+
+class TestAdditionDeclarations:
+    """What imports and derived outputs declare in the real catalog."""
+
+    @staticmethod
+    def _declared() -> dict:
+        return {item.name: item for item in work_bootstrap.definitions()}
+
+    @pytest.mark.parametrize(
+        "kind",
+        [
+            JobKind.INGESTION_UPLOAD,
+            JobKind.INGESTION_ARCHIVE_SELECTION,
+            JobKind.INGESTION_URL,
+            JobKind.INGESTION_URL_SELECTION,
+            JobKind.INGESTION_COLLECTION,
+            JobKind.INGESTION_INBOX_IMPORT,
+            JobKind.INGESTION_LIBRARY_IMPORT,
+            JobKind.INGESTION_ARTIFACT_UPLOAD,
+            JobKind.SOURCES_SCAN,
+        ],
+    )
+    def test_imports_add_to_the_library(self, kind: JobKind) -> None:
+        assert self._declared()[kind].adds_to_library
+
+    def test_inspecting_an_archive_adds_nothing(self) -> None:
+        assert not self._declared()[JobKind.INGESTION_ARCHIVE_INSPECT].adds_to_library
+
+    @pytest.mark.parametrize(
+        "kind,waits",
+        [
+            (JobKind.DERIVATIVES_MESH, True),
+            (JobKind.DERIVATIVES_GCODE, True),
+            (JobKind.DERIVATIVES_TOOLPATH, True),
+            (JobKind.DERIVATIVES_VIEWER_STL, False),
+        ],
+    )
+    def test_derived_outputs_wait_except_the_viewer_mesh(
+        self, kind: JobKind, waits: bool
+    ) -> None:
+        assert self._declared()[kind].waits_for_additions is waits

@@ -17,7 +17,7 @@ from tests.e2e._jobs import settle
 from tests.factories.geometry import tetrahedron
 
 
-def _jobs(kind: JobKind) -> list[Job]:
+def _jobs_of(kind: JobKind) -> list[Job]:
     with get_session_factory().scoped_session() as session:
         return list(session.exec(select(Job).where(Job.kind == kind)).all())
 
@@ -53,29 +53,30 @@ async def _upload(api, headers, name: str, scale: float) -> str:
     return accepted.json()["job_id"]
 
 
-@pytest.mark.asyncio
-async def test_thumbnails_start_after_the_last_upload(api, tmp_path) -> None:
-    from app.modules.work.catalog import get_engine
+class TestAdditionsFirst:
+    @pytest.mark.asyncio
+    async def test_thumbnails_start_after_the_last_upload(self, api, tmp_path) -> None:
+        from app.modules.work.catalog import get_engine
 
-    headers = await _setup_and_login(api, tmp_path)
-    engine = get_engine()
-    first = await _upload(api, headers, "first", 1.0)
-    # The first Model's commit queues a thumbnail pass; the second upload
-    # arrives while that pass is still waiting to run.
-    assert engine.run_one() is not None  # type: ignore[attr-defined]
-    second = await _upload(api, headers, "second", 2.0)
-    thumbnails_while_importing: list[int] = []
-    while any(
-        job.state not in (JobState.COMPLETED, JobState.FAILED)
-        for job in _jobs(JobKind.INGESTION_UPLOAD)
-    ):
-        thumbnails_while_importing.append(len(_jobs(JobKind.DERIVATIVES_MESH)))
-        assert engine.run_one() is not None, "the uploads stopped short"  # type: ignore[attr-defined]
+        headers = await _setup_and_login(api, tmp_path)
+        engine = get_engine()
+        first = await _upload(api, headers, "first", 1.0)
+        # The first Model's commit queues a thumbnail pass; the second upload
+        # arrives while that pass is still waiting to run.
+        assert engine.run_one() is not None  # type: ignore[attr-defined]
+        second = await _upload(api, headers, "second", 2.0)
+        thumbnails_while_importing: list[int] = []
+        while any(
+            job.state not in (JobState.COMPLETED, JobState.FAILED)
+            for job in _jobs_of(JobKind.INGESTION_UPLOAD)
+        ):
+            thumbnails_while_importing.append(len(_jobs_of(JobKind.DERIVATIVES_MESH)))
+            assert engine.run_one() is not None, "the uploads stopped short"  # type: ignore[attr-defined]
 
-    settle()
+        settle()
 
-    uploads = {job.id: job.state for job in _jobs(JobKind.INGESTION_UPLOAD)}
-    thumbnails = [job.state for job in _jobs(JobKind.DERIVATIVES_MESH)]
-    assert uploads == {first: JobState.COMPLETED, second: JobState.COMPLETED}
-    assert set(thumbnails_while_importing) == {0}
-    assert thumbnails == [JobState.COMPLETED, JobState.COMPLETED]
+        uploads = {job.id: job.state for job in _jobs_of(JobKind.INGESTION_UPLOAD)}
+        thumbnails = [job.state for job in _jobs_of(JobKind.DERIVATIVES_MESH)]
+        assert uploads == {first: JobState.COMPLETED, second: JobState.COMPLETED}
+        assert set(thumbnails_while_importing) == {0}
+        assert thumbnails == [JobState.COMPLETED, JobState.COMPLETED]
