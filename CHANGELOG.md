@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.15.0
+
+**Upgrade note:** Back up, drain derivative work, and stop all API and worker
+processes before upgrading them together to DBOS 3.0. Source installations now
+require Python 3.14 or newer; Docker images include the runtime. See
+[0.15.0 upgrade notes](UPGRADE.md#0150-notes).
+
 - Deleted models can be selected in Settings, Trash: tick several (or all) and
   restore or permanently delete them in one step.
 
@@ -507,7 +514,7 @@
 
 - Local ONNX models reserve a shared, bounded memory partition across API and worker processes, retain warm reuse, retire idle residents under pressure, and release their credits after guarded process-tree termination.
 
-**Source installs require Python 3.14 or newer.** See [the upgrade guide](UPGRADE.md#unreleased-python-314).
+**Source installs require Python 3.14 or newer.** See [the upgrade guide](UPGRADE.md#0150-python-314).
 
 - Coordinate mesh CPU/RAM credits across local API and worker processes. Bound
   source preparation separately by bytes and I/O slots, retain native credits
@@ -569,7 +576,7 @@
 **Upgrade note:** The background engine now uses DBOS 3.0. Stop all API and
 worker processes before upgrading together. Engine state migrates on startup;
 rolling back requires discarding the upgraded, disposable engine state first.
-See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
+See [the upgrade guide](UPGRADE.md#0150-dbos-30).
 
 ### Added
 

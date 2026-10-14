@@ -2,7 +2,7 @@ manifestVersion: 1
 id: printstash
 category: files
 name: PrintStash
-version: "0.14.0"
+version: "0.15.0"
 tagline: A self-hosted library for 3D models and the G-code that prints them
 description: >-
   PrintStash keeps your 3D models, sliced G-code revisions and print history in
@@ -24,10 +24,11 @@ description: >-
   Sign in with the username and password Umbrel shows for this app, then choose
   where PrintStash stores your files.
 releaseNotes: >-
-  Version 0.14.0 adds durable background jobs, guided first-run setup, AI Search
-  and Similar Models, verified Vault migration, and faster single-volume imports.
-  Back up and follow UPGRADE.md before upgrading: Compose volume layout and
-  several Jobs and Artifact download API endpoints change.
+  Version 0.15.0 adds smoother paginated library browsing, editable Library
+  sources, clearer import and preview progress, multi-material G-code fixes,
+  and a unified image with optional GPU support. Back up, drain derivative
+  work, and stop API and workers together before upgrading to DBOS 3.0.
+  Source installs require Python 3.14 or newer; see UPGRADE.md.
 developer: PrintStash contributors
 website: https://www.printstash.org
 dependencies: []

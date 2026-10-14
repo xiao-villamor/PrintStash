@@ -8,20 +8,20 @@ Roadmap feedback belongs in
 [the public roadmap discussion](https://github.com/xiao-villamor/PrintStash/discussions/1).
 Issues are better for confirmed bugs or scoped implementation work.
 
-## Published: 0.13.0, storage safety and capture provenance
+## Preparing 0.15.0: library browsing, imports, and optional GPU support
 
-[Version 0.13.0 is published](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.13.0),
-including full and lite API images and a frontend image for amd64 and arm64.
-Changes merged afterward remain under [Unreleased](../CHANGELOG.md#unreleased)
-until their own release is published. The app is useful
-for local-first 3D print library workflows and installs through Docker Compose.
-SQLite plus local filesystem storage remain the default path. Postgres,
-S3/R2-compatible storage, cloud backups, and provider adapters are optional.
-Version 0.13.0 adds runtime-probed storage safety tiers and typed remote
-providers, paired-browser marketplace capture and Model Source provenance,
-richer Bambu job evidence, safer mesh/3MF previews, and stricter storage
-ownership and recovery boundaries. See the canonical
-[0.13.0 changelog](../CHANGELOG.md#0130) for the complete scope.
+[Version 0.14.0 is the latest published release](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.14.0).
+The [0.15.0 changelog](../CHANGELOG.md#0150) records the next release's integrated
+scope: scrolling library pagination, subtree filters, editable Library sources,
+bounded imports and previews, multi-material G-code fixes, and a unified image
+with optional GPU support. Read the [upgrade notes](../UPGRADE.md#0150-notes)
+for Python 3.14, DBOS 3.0, and coordinated API/worker restarts.
+
+Release preparation does not publish images or a tag. Download released builds
+from [GitHub Releases](https://github.com/xiao-villamor/PrintStash/releases).
+Future changes go under [Unreleased](../CHANGELOG.md#unreleased).
+SQLite plus local filesystem storage remain the default path; PostgreSQL,
+remote storage, cloud backups, and provider adapters are optional.
 
 Developed features in the current app:
 

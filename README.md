@@ -51,11 +51,12 @@ docker compose up -d
 Open **[http://localhost:3000](http://localhost:3000)** (or
 `http://<server-ip>:3000` from another machine) and complete setup:
 
-1. **Create your administrator account.** There is no default username or
-   password. In v0.13.0, the wizard asks for the setup token from
-   `docker compose logs printstash`; look for the line containing `setup token`.
-   Source builds from `main` use the new [browser registration flow](./docs/first-run.md)
-   without a console token. Keep access restricted until setup is complete.
+1. **Create your administrator account.** The [first-run guide](./docs/first-run.md)
+   walks you through account creation, storage checks, and your first Model.
+   There is no default username, password, or console token to copy. Open the
+   app from localhost or your trusted local network, and keep access restricted
+   until setup is complete. App-store deployments may supply the administrator
+   credentials instead.
 2. **Add your first files.** Upload a Model, or connect an existing folder under
    **Settings → Library sources** and run its first scan. Folder paths must be
    accessible inside the container; see the [mounting guide](./docs/deployment.md#data-and-host-folders).
@@ -66,7 +67,15 @@ It runs one container (web UI and full API) with SQLite and one persistent
 Docker volume at `/data`. No `.env`, build step, PostgreSQL, or S3 service is
 needed.
 Images support `linux/amd64` and `linux/arm64`. Start with 1 GB RAM; 2 GB or
-more helps with large meshes.
+more helps with large meshes. The unified image includes optional GPU support;
+[device access and memory budgets](./docs/compute.md) control its use, and CPU
+processing remains available.
+
+**Upgrading to 0.15.0?** Back up first, let derivative Jobs drain, and stop all
+API and worker processes before upgrading them together. The background engine
+moves to DBOS 3.0; source installs require Python 3.14 or newer. Read the
+[0.15.0 upgrade notes](./UPGRADE.md#0150-notes), including rollback guidance and
+the volume-layout steps if you are coming from 0.13.x or earlier.
 
 **From a Git checkout**, run `docker compose up -d` in the repository root.
 
@@ -106,11 +115,16 @@ You can use the library without connecting a printer.
   Choose files, a Collection, and tags, see partial results, and retry failed
   captures. Imported Models retain available source information, with fields
   you can review and correct. Paired browsers keep marketplace cookies in the browser.
+- **Follow imports and previews:** durable Jobs expose progress, cancellation,
+  and retries. Models appear while imports run; background previews follow
+  after ingestion finishes, with a **Preparing previews** task for administrators.
 - **Use the library you already have:** index mounted folders or NAS shares,
   S3-compatible storage, WebDAV/Nextcloud, SFTP, or Google Drive **in place**.
   Remote sources are read-only; mounted folders can optionally accept new files
   without overwriting existing ones. Scan manually, on a schedule, or watch
-  supported local folders. See [Library sources and NAS setup](./docs/library-sources.md).
+  supported local folders. Edit source names and Collection layouts; remote
+  sources show their connection and path, discovery progress, and empty-scan
+  guidance. See [Library sources and NAS setup](./docs/library-sources.md).
 - **Send slices automatically:** the [OrcaSlicer native upload guide](./docs/orcaslicer.md)
   configures the dependency-free post-processing hook. A single-object slice
   attaches to its exact existing source Model as a `needs_test` Revision;
@@ -119,10 +133,15 @@ You can use the library without connecting a printer.
 ### Find and organize your Models
 
 - Browse thumbnails in grid or list views, navigate nested Collections, and
-  move Models with drag-and-drop.
+  move Models with drag-and-drop. Pages load as you scroll, folder history
+  retains your reading position, and nearby changes appear automatically.
+  Deeper lists offer a refresh notice so your place stays intact.
 - Search names, filenames, Collection paths, tags, and source information.
   Narrow results by file type, material, slicer, printer model, Revision status,
-  print outcome, storage location, or upload date.
+  print outcome, storage location, or upload date. Folder filters search the
+  whole subtree, and each filter group keeps its other values available.
+- Use **AI Search** for indexed text and optional local image or geometry search,
+  and **Similar Models** for opt-in geometry analysis and comparison review.
 - Star favorites and save filtered views so your usual searches are one click away.
 - Select multiple Models to update tags, move them between Collections, change
   Revision labels, or send them to the trash in one action.
@@ -135,23 +154,31 @@ You can use the library without connecting a printer.
 - Give the Multipart Model its own cover, description, tags, Collection, and
   Markdown, PDF, or image guides.
 - Browse Multipart Models alongside ordinary Models in the main library.
-  Use **Organized**, **Everything**, **Multipart sets only**, or **Parts only**
-  to choose how groupings and their members appear.
+  Choose **Everything** or **Multipart Sets** to browse individual Models or
+  their groupings.
+- Track [multipart builds](./docs/multipart-builds.md) with part quantities,
+  selected Revisions, and confirmed usable output.
 - Reuse a Model in several projects. Each keeps its own files, Revisions, and
   print history; removing a grouping leaves those Models and files intact.
 
 ### Inspect files and open your slicer
 
-- Rotate and zoom source meshes in the browser, with solid, X-ray, and wireframe
-  modes, a build-plate grid, fit-to-view, and screenshots.
+- Rotate and zoom source meshes in the browser, including underneath a Model,
+  with solid, X-ray, and wireframe modes, a build-plate grid, fit-to-view, and
+  screenshots. 3D views open directly; size, memory, or conversion refusals
+  explain the cause while originals remain downloadable.
 - Preview plain-text G-code layer by layer, toggle travel moves, and view the
-  printer profile's bed outline.
+  printer profile's bed outline. [BGCODE previews](./docs/bgcode-preview.md)
+  use a bounded converter while downloads retain the original bytes.
 - Inspect extracted dimensions, volume, triangle count, and slicer settings
   where available. Common OrcaSlicer, PrusaSlicer, Bambu Studio, Cura, and
   Klipper-style output can supply nozzle, layer height, infill, temperatures,
   material, and estimated time, filament use, and cost.
+- Read the active materials and total filament use of multi-material plates,
+  including Bambu Studio 2.x headers, and check distinct loaded trays before
+  routing a print.
 - Open a file directly in **OrcaSlicer, Bambu Studio, or PrusaSlicer** using
-  slicer deep links. STEP/STP mesh previews require the full API image.
+  slicer deep links. The unified image includes STEP/STP mesh conversion.
 
 ### Keep track of G-code that works
 
@@ -209,7 +236,8 @@ You can use the library without connecting a printer.
 
 ### Protect and move your library
 
-- Restore trashed Models before permanent cleanup. Physical cleanup is guarded
+- Select one or several trashed Models to restore or permanently delete.
+  Physical cleanup is guarded
   by storage capabilities, administrator approval, a verified independent
   backup, and quarantine; see [storage safety and recovery](./docs/storage-data-safety.md).
 - Run **Quick or Full Vault audits** to find missing files, integrity problems,
@@ -219,7 +247,8 @@ You can use the library without connecting a printer.
   managed files, and thumbnails. PostgreSQL is stored in the archive as a
   portable SQLite-format database snapshot. Schedule one opt-in daily backup and
   send copies to local storage, S3-compatible storage, WebDAV, SFTP, or Google
-  Drive. Library source originals need separate backups.
+  Drive. Destination history shows failed copies and offers retries.
+  Library source originals need separate backups.
 - Export or import a portable library archive with files, metadata, tags,
   Collections, history, favorites, saved views, and captured source information.
   Export metadata alone as JSON or CSV when you need it for analysis.
@@ -237,17 +266,25 @@ You can use the library without connecting a printer.
   installable web app. English and Spanish localization is in progress; some
   screens fall back to English. Library data and printer actions need a live
   connection to your server.
-- Check storage usage, backup status, and printer connectivity in administration;
-  health endpoints and Prometheus metrics support external monitoring.
+- Check storage usage by Vault and Library source, with separate local and
+  remote totals. Administrators can inspect server GPU access, memory budgets,
+  capabilities, and activity under **Settings → GPU**.
+- Check backup status and printer connectivity in administration; health
+  endpoints and Prometheus metrics support external monitoring.
 
-### Available on main, awaiting a release
+### What's new in 0.15.0
 
-The features above describe v0.13.0. Source builds from `main` also include
-[multipart build tracking](./docs/multipart-builds.md) with quantities and
-confirmed usable output, [BGCODE toolpath previews](./docs/bgcode-preview.md),
-[guided browser registration](./docs/first-run.md), and backup destination
-history with retries for failed copies. These are **not included in v0.13.0
-images**. See [Unreleased](./CHANGELOG.md#unreleased) for the complete list.
+- Smoother library navigation, automatic nearby updates, scrolling pagination,
+  and filters that cover the selected folder's subtree.
+- Editable Library sources with real remote locations, discovery progress, and
+  guidance when a scan finds no files.
+- Faster bounded imports, Models before background previews, larger slicer 3MF
+  support, clearer preview failures, and corrected multi-material G-code metadata.
+- One image with optional GPU support, server diagnostics, and configurable
+  memory budgets; CPU processing remains available.
+
+See the [0.15.0 changelog](./CHANGELOG.md#0150) for the complete scope and the
+[upgrade notes](./UPGRADE.md#0150-notes) before updating an existing installation.
 
 ## Printer Compatibility
 
@@ -298,10 +335,10 @@ actions, diagnostics, and the hardware validation record.
 - **Metadata and marketplace captures can be incomplete.** Slicer output and
   source-site access vary. Missing fields, expired browser sessions, or
   unavailable downloads may require manual review or another capture.
-- **Full and lite images differ.** Both generate STL/OBJ/3MF thumbnails. The
-  full image also includes browser-assisted imports, STEP/STP mesh previews,
-  and optional remote storage transports. Lite stores STEP files without mesh
-  previews and retains native local and S3 managed storage.
+- **GPU support depends on runtime access and qualification.** The unified
+  image can use a supported GPU passed into the container. Device discovery
+  alone does not qualify every operation or enable AI features. Unsupported
+  operations retain CPU processing; see [compute support](./docs/compute.md).
 - **Backups have a defined scope.** Built-in database backup/restore supports
   file-backed SQLite and PostgreSQL. Files indexed in place from external Library
   sources remain outside the archive and need separate backups.
@@ -318,7 +355,7 @@ See [Known limitations](./docs/known-limitations.md) for the full boundaries and
 | --- | --- |
 | Learn the app's workflows | [User documentation](https://www.printstash.org/docs/) |
 | Configure Docker, ports, folders, or SSO | [Deployment guide](./docs/deployment.md) |
-| Upgrade an existing installation | [Upgrade notes](./UPGRADE.md) · [v0.13.0 release guide](./docs/0.13.0-release-guide.md) |
+| Upgrade an existing installation | [0.15.0 upgrade notes](./UPGRADE.md#0150-notes) · [Earlier upgrades](./UPGRADE.md#0140-one-data-volume) |
 | Connect a NAS or an existing library | [Library sources](./docs/library-sources.md) |
 | Choose remote storage | [Storage providers](./docs/storage-providers.md) · [Compatibility details](./docs/provider-support.md#storage-and-library-source-compatibility) |
 | Set up browser capture | [Browser extension](./browser-extension/README.md) · [Pending Imports guide](./docs/vault-maintenance-and-capture.md) |
@@ -333,10 +370,10 @@ other printer integrations have explicit [support levels](#printer-compatibility
 
 | At a glance | Current status |
 | --- | --- |
-| **Latest release** | [v0.13.0](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.13.0) · [Changelog](./CHANGELOG.md#0130) |
-| **Recommended installation** | Docker Compose with SQLite and local disk; full and lite images for amd64 and arm64 |
-| **Upgrading** | Back up first, then follow the [upgrade notes](./UPGRADE.md#0130-notes) |
-| **Development** | Changes after v0.13.0 are listed under [Unreleased](./CHANGELOG.md#unreleased); future plans are in the [roadmap](./docs/roadmap.md) |
+| **Version documented here** | [0.15.0 changelog](./CHANGELOG.md#0150) · [Published releases](https://github.com/xiao-villamor/PrintStash/releases) |
+| **Recommended installation** | Docker Compose with SQLite and local disk; one image for amd64 and arm64 with optional GPU support |
+| **Upgrading** | Back up, drain derivative work, stop API and workers together, then follow the [0.15.0 upgrade notes](./UPGRADE.md#0150-notes) |
+| **Development** | Future changes are listed under [Unreleased](./CHANGELOG.md#unreleased); plans are in the [roadmap](./docs/roadmap.md) |
 
 ## Contributing
 
