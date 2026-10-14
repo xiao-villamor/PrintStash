@@ -565,3 +565,87 @@ class TestCandidateVisibility:
                 ).all()
                 == []
             )
+
+
+class TestProjectionLockOrder:
+    """A projection page and a library write never wait on each other in a cycle.
+
+    The projector claims a request and then writes passages, which advance the
+    library revision; an upload advances the library revision and then marks
+    its Model for projection. Taken in opposite orders the two rows deadlock,
+    and PostgreSQL aborts one of them: that was a failed upload.
+    """
+
+    def test_a_page_and_an_upload_both_commit(self, passage_engine, monkeypatch):
+        import threading
+
+        from sqlalchemy import text
+
+        from app.modules.search import projection
+
+        engine, config = passage_engine
+        command.upgrade(config, "head")
+        previous = bind_content_projection(LibraryProjection())
+        try:
+            with Session(engine) as session:
+                model = build_model(session, "Bracket")
+                content_changed(session, "model", [model.id])
+                session.commit()
+                model_id = model.id
+            with Session(engine) as session:
+                page = projection.prepare_pending(session)
+                session.rollback()
+            assert page is not None
+
+            claimed = threading.Event()
+            uploaded = threading.Event()
+            errors: list[BaseException] = []
+            real_sync = projection.sync_subject
+
+            def paused_sync(session, subject, **kwargs):
+                # Hold the claimed request while the upload runs, as a slow
+                # page would; never longer than the upload can take.
+                claimed.set()
+                uploaded.wait(timeout=3)
+                return real_sync(session, subject, **kwargs)
+
+            monkeypatch.setattr(projection, "sync_subject", paused_sync)
+
+            def project() -> None:
+                try:
+                    with Session(engine) as session:
+                        projection.apply_prepared(session, page)
+                        session.commit()
+                except BaseException as exc:  # noqa: BLE001 - reported below
+                    errors.append(exc)
+
+            def upload() -> None:
+                try:
+                    claimed.wait(timeout=10)
+                    with Session(engine) as session:
+                        session.execute(
+                            text("UPDATE models SET name = 'Renamed' WHERE id = :id"),
+                            {"id": model_id},
+                        )
+                        uploaded.set()
+                        content_changed(session, "model", [model_id])
+                        session.commit()
+                except BaseException as exc:  # noqa: BLE001 - reported below
+                    uploaded.set()
+                    errors.append(exc)
+
+            threads = [
+                threading.Thread(target=project),
+                threading.Thread(target=upload),
+            ]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=30)
+
+            assert (errors, [thread.is_alive() for thread in threads]) == (
+                [],
+                [False, False],
+            )
+        finally:
+            bind_content_projection(previous)

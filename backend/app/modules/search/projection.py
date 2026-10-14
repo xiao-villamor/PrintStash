@@ -17,6 +17,7 @@ from sqlmodel import Session, col, select
 
 from app.core.logging import get_logger
 from app.core.time import utcnow
+from app.db.library_revision import lock_library_revision
 from app.db.models import (
     Collection,
     Document,
@@ -134,6 +135,8 @@ def affected_subjects(
 class LibraryProjection:
     def refresh(self, session: Session, sources: tuple[ContentSource, ...]) -> None:
         """Register changes in the caller's transaction; never render or commit."""
+        # A request row is locked after the library revision row, never before.
+        lock_library_revision(session)
         insert = (
             pg_insert
             if session.get_bind().dialect.name == "postgresql"
@@ -232,6 +235,9 @@ def apply_prepared(session: Session, page: PreparedPage) -> int | None:
     other sources eligible.
     """
     begin_write(session, immediate=True)
+    # The passages written below advance the library revision; take that row
+    # before the request row, the order every library writer uses.
+    lock_library_revision(session)
     claimed = session.connection().execute(
         update(SearchProjectionRequest)
         .where(
