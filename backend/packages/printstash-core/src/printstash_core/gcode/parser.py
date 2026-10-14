@@ -122,11 +122,16 @@ _PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r";\s*filament type\s*[:=]\s*([^\r\n]+)", re.IGNORECASE),
     ),
     "material_brand": (
-        re.compile(r";\s*filament_brand\s*=\s*([^\n;]+)", re.IGNORECASE),
-        re.compile(r";\s*filament_vendor\s*=\s*([^\n;]+)", re.IGNORECASE),
-        re.compile(r";\s*filament_settings_id\s*=\s*([^\n;]+)", re.IGNORECASE),
+        re.compile(r";\s*filament_brand\s*=\s*([^\r\n]+)", re.IGNORECASE),
+        re.compile(r";\s*filament_vendor\s*=\s*([^\r\n]+)", re.IGNORECASE),
+        re.compile(r";\s*filament_settings_id\s*=\s*([^\r\n]+)", re.IGNORECASE),
     ),
 }
+
+# BambuStudio/Orca list the 1-based filament slots a plate prints with.
+_USED_SLOTS_RE = re.compile(
+    r"^;[ \t]*filament:[ \t]*([\d,; \t]+?)[ \t]*\r?$", re.MULTILINE
+)
 
 _FILAMENT_COLOR_PATTERNS = (
     re.compile(r";\s*filament_colou?r\s*=\s*([^\r\n]+)", re.IGNORECASE),
@@ -224,10 +229,23 @@ def _to_bool(value: str | None) -> bool | None:
     return None
 
 
-def _normalise_material(value: str | None) -> str | None:
-    if value is None:
+def _used_slots(text: str, slot_count: int) -> tuple[int, ...] | None:
+    """Zero-based slots the plate prints with, or None when the file doesn't say."""
+    match = _USED_SLOTS_RE.search(text)
+    if match is None:
         return None
-    return value.split(";", 1)[0].split(",", 1)[0].strip()
+    slots = sorted(
+        {int(part) - 1 for part in re.split(r"[;,\s]+", match.group(1)) if part}
+    )
+    in_range = tuple(slot for slot in slots if 0 <= slot < slot_count)
+    return in_range or None
+
+
+def _slot_value(values: list[str], slot: int) -> str | None:
+    if len(values) == 1:
+        # One value is a setting shared by every slot, not a per-slot list.
+        return values[0]
+    return values[slot] if slot < len(values) else None
 
 
 def _split_slicer_list(value: str | None) -> list[str]:
@@ -276,21 +294,23 @@ def parse(path: Path) -> GcodeMetadata:
             return GcodeMetadata()
 
     slicer_version = _value(text, "slicer_version")
-    material_text = _value(text, "material_type")
-    material_values = _split_slicer_list(material_text)
+    material_values = _split_slicer_list(_value(text, "material_type"))
+    brand_values = _split_slicer_list(_value(text, "material_brand"))
+    used = _used_slots(text, len(material_values))
+    slots = used if used is not None else tuple(range(len(material_values)))
     color_values = _split_slicer_list(_first_match(text, _FILAMENT_COLOR_PATTERNS))
     material_requirements = (
         tuple(
             MaterialRequirement(
                 tool_index=index,
-                material_type=material,
+                material_type=material_values[index],
                 color_hex=(
                     _normalise_color(color_values[index])
                     if index < len(color_values)
                     else None
                 ),
             )
-            for index, material in enumerate(material_values)
+            for index in slots
         )
         if material_values
         else None
@@ -325,8 +345,10 @@ def parse(path: Path) -> GcodeMetadata:
         filament_weight_g=_to_total(_value(text, "filament_weight_g")),
         filament_length_mm=filament_length_mm,
         filament_cost=_to_float(_value(text, "filament_cost")),
-        material_type=_normalise_material(material_text),
-        material_brand=_normalise_material(_value(text, "material_brand")),
+        # A plate mixing materials reports its first used slot; the per-tool
+        # detail is in `material_requirements`.
+        material_type=material_values[slots[0]] if slots else None,
+        material_brand=_slot_value(brand_values, slots[0] if slots else 0),
         material_requirements=material_requirements,
         printer_preset_name=_value(text, "printer_preset_name"),
     )

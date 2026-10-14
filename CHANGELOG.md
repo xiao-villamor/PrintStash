@@ -22,6 +22,12 @@
   "Discovering total…" with an empty bar until the last file was done, although
   the selection was known from the start.
 
+- A multi-material G-code now shows the material it actually prints with. A
+  plate sliced on AMS slot 3 of a `PETG;PLA;PLA;PETG` setup was shown as PETG,
+  the first slot; the slicer's `; filament: 3` header is now read, and only the
+  slots the plate uses are required of a printer. Files already in the library
+  are re-read in the background (#445, #453).
+
 - G-code exported by BambuStudio 2.x now shows its slicer, estimated print time,
   filament weight and filament length. Its header block writes
   `; BambuStudio 02.08.02.61`, `; total estimated time: 17m 21s` and

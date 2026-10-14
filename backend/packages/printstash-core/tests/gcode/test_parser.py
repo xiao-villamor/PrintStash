@@ -127,6 +127,91 @@ class TestParse:
             ),
         )
 
+    def test_reports_the_material_of_the_slot_the_plate_uses(
+        self, tmp_path: Path
+    ) -> None:
+        # Issue #445: an AMS print on slot 3 reported slot 1's PETG.
+        path = tmp_path / "slot3.gcode"
+        path.write_text(
+            "; HEADER_BLOCK_START\n"
+            "; filament: 3\n"
+            "; HEADER_BLOCK_END\n"
+            "; CONFIG_BLOCK_START\n"
+            "; filament_colour = #111111;#222222;#333333;#444444\n"
+            "; filament_settings_id = Brand PETG;Brand PLA;Brand PLA Matte;Brand PETG\n"
+            "; filament_type = PETG;PLA;PLA;PETG\n",
+            encoding="utf-8",
+        )
+
+        metadata = parse(path)
+
+        assert metadata.material_type == "PLA"
+        assert metadata.material_brand == "Brand PLA Matte"
+        # Only the slot the plate prints with is required, at its own tool index.
+        assert metadata.material_requirements == (
+            MaterialRequirement(2, "PLA", "#333333"),
+        )
+
+    def test_keeps_every_used_slot_and_reports_the_first_as_the_material(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "multi-used.gcode"
+        path.write_text(
+            "; filament: 4,2\n"
+            "; filament_type = PETG;PLA;PLA;ABS\n"
+            "; filament_settings_id = A;B;C;D\n",
+            encoding="utf-8",
+        )
+
+        metadata = parse(path)
+
+        assert metadata.material_type == "PLA"
+        assert metadata.material_brand == "B"
+        assert metadata.material_requirements == (
+            MaterialRequirement(1, "PLA"),
+            MaterialRequirement(3, "ABS"),
+        )
+
+    def test_without_a_used_slot_header_every_slot_is_required(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "prusa.gcode"
+        path.write_text(
+            "; filament_type = PLA;PETG\n; filament_settings_id = A;B\n",
+            encoding="utf-8",
+        )
+
+        metadata = parse(path)
+
+        assert metadata.material_type == "PLA"
+        assert metadata.material_brand == "A"
+        assert metadata.material_requirements == (
+            MaterialRequirement(0, "PLA"),
+            MaterialRequirement(1, "PETG"),
+        )
+
+    def test_a_used_slot_beyond_the_configured_list_is_ignored(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "beyond.gcode"
+        path.write_text("; filament: 9\n; filament_type = PLA;PETG\n", encoding="utf-8")
+
+        # An unresolvable header is no claim about the plate, so the file reads
+        # as if it had none rather than inventing a slot.
+        assert parse(path).material_requirements == (
+            MaterialRequirement(0, "PLA"),
+            MaterialRequirement(1, "PETG"),
+        )
+
+    def test_one_brand_value_is_shared_by_every_slot(self, tmp_path: Path) -> None:
+        path = tmp_path / "shared-brand.gcode"
+        path.write_text(
+            "; filament: 2\n; filament_type = PLA;PETG\n; filament_vendor = Acme\n",
+            encoding="utf-8",
+        )
+
+        assert parse(path).material_brand == "Acme"
+
     @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
     def test_reads_the_bambustudio_2_header_block(
         self, tmp_path: Path, newline: str

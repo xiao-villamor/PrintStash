@@ -990,6 +990,33 @@ class TestDeriveGcode:
         ).all()
         assert [req.tool_index for req in requirements] == [0]
 
+    def test_persists_the_material_of_the_slot_the_plate_uses(
+        self, db_session: Session, stored
+    ) -> None:
+        # Issue #445, through the real parser rather than a stand-in: the plate
+        # prints with AMS slot 3, so its material is slot 3's, not slot 1's.
+        from app.db.models import ArtifactMaterialRequirement
+
+        artifact = stored(
+            "slot3.gcode",
+            b"; HEADER_BLOCK_START\n; filament: 3\n; HEADER_BLOCK_END\n"
+            b"; filament_colour = #111111;#222222;#333333;#444444\n"
+            b"; filament_type = PETG;PLA;PLA;PETG\n",
+        )
+
+        producers.derive_gcode(artifact.id)
+
+        row = db_session.exec(
+            select(Metadata).where(Metadata.file_id == artifact.id)
+        ).one()
+        assert row.material_type == "PLA"
+        (requirement,) = db_session.exec(
+            select(ArtifactMaterialRequirement).where(
+                ArtifactMaterialRequirement.file_id == artifact.id
+            )
+        ).all()
+        assert (requirement.tool_index, requirement.material_type) == (2, "PLA")
+
     def test_malformed_material_entries_are_dropped(
         self, db_session: Session, stored, monkeypatch
     ) -> None:
