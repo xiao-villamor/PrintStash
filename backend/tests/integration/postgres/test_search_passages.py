@@ -576,7 +576,7 @@ class TestProjectionLockOrder:
     and PostgreSQL aborts one of them: that was a failed upload.
     """
 
-    def test_a_page_and_an_upload_both_commit(self, passage_engine, monkeypatch):
+    def test_a_concurrent_upload_commits_beside_a_projection_page(self, passage_engine, monkeypatch):
         import threading
 
         from sqlalchemy import text
