@@ -161,6 +161,61 @@ class TestParse:
         assert metadata.filament_length_mm == 187077.36
         assert metadata.printer_model == "Bambu Lab H2C"
 
+    def test_sums_the_per_filament_totals_of_a_multi_material_plate(
+        self, tmp_path: Path
+    ) -> None:
+        # Verbatim from a two-filament BambuStudio H2C export (issue #453): the
+        # plate used 87.45 g, and reporting only the first figure under-costed it.
+        path = tmp_path / "two-filaments.gcode"
+        path.write_text(
+            "; HEADER_BLOCK_START\n"
+            "; total filament length [mm] : 23418.41,5191.05\n"
+            "; total filament volume [cm^3] : 56327.88,12485.95\n"
+            "; total filament weight [g] : 70.97,16.48\n"
+            "; filament: 1,2\n"
+            "; HEADER_BLOCK_END\n",
+            encoding="utf-8",
+        )
+
+        metadata = parse(path)
+
+        assert metadata.filament_weight_g == 87.45
+        assert metadata.filament_length_mm == 28609.46
+
+    def test_sums_a_prusaslicer_per_extruder_list(self, tmp_path: Path) -> None:
+        path = tmp_path / "prusa-multi.gcode"
+        path.write_text(
+            "; filament used [mm] = 1000.5, 250.25\n; filament used [g] = 3.0, 0.5\n",
+            encoding="utf-8",
+        )
+
+        metadata = parse(path)
+
+        assert metadata.filament_length_mm == 1250.75
+        assert metadata.filament_weight_g == 3.5
+
+    def test_a_single_total_is_unchanged(self, tmp_path: Path) -> None:
+        path = tmp_path / "single.gcode"
+        path.write_text(
+            "; total filament weight [g] : 12.5\n; filament used [mm] = 4000\n",
+            encoding="utf-8",
+        )
+
+        metadata = parse(path)
+
+        assert metadata.filament_weight_g == 12.5
+        assert metadata.filament_length_mm == 4000
+
+    def test_a_list_with_an_unreadable_figure_reports_no_total(
+        self, tmp_path: Path
+    ) -> None:
+        # A partial sum would be a smaller weight than the print used, which the
+        # filament ledger would post as real; no figure is the honest answer.
+        path = tmp_path / "broken.gcode"
+        path.write_text("; total filament weight [g] : 5.0,.\n", encoding="utf-8")
+
+        assert parse(path).filament_weight_g is None
+
     def test_returns_empty_metadata_for_a_missing_file(self, tmp_path: Path) -> None:
         # A queued parse races the library: the artifact can be purged between
         # the job being enqueued and the parse starting.

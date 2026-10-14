@@ -6,6 +6,11 @@
   appeared only once the folder and its description had loaded, pushing the
   models down; their place is now held by a skeleton of the same shape.
 
+- A multi-material G-code now shows the filament weight and length of the whole
+  plate. A two-filament plate (`; total filament weight [g] : 70.97,16.48`) was
+  shown as 70.97 g, its first filament only, and was costed accordingly. Files
+  already in the library are re-read in the background (#453).
+
 - Importing a reviewed archive shows how far along it is. The task used to say
   "Discovering total…" with an empty bar until the last file was done, although
   the selection was known from the start.
