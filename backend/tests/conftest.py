@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import atexit
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -165,26 +167,27 @@ _test_factory = SQLiteSessionFactory(_test_engine)
 # connection — two truly concurrent threads fighting over it can interleave/
 # abort each other's transactions, which surfaced as those tests occasionally
 # reading a stale, pre-terminal job state after the terminal write had
-# already committed. ``cache=shared`` lets every session open its *own* real
-# connection (safe, standard concurrent SQLite) while still sharing one
-# in-memory database; those three files opt into it (see their local
+# already committed. A private SQLite file in WAL mode lets every session open
+# its *own* real connection (safe, standard concurrent SQLite, as in
+# production), and a writer that finds the database busy waits out
+# ``busy_timeout``. An in-memory ``cache=shared`` database was used before: its
+# table locks do not honour ``busy_timeout``, so a hub thread writing while the
+# test read failed at once with "database table is locked" whenever the suite
+# ran under load. Those files opt into it (see their local
 # ``_use_threaded_db`` autouse fixture) instead of it being the suite-wide
 # default, since NullPool's real per-checkout connections add contention
 # under the full suite's much higher, non-threaded concurrency.
+_threaded_db_dir = Path(tempfile.mkdtemp(prefix="printstash-threaded-test-"))
+atexit.register(shutil.rmtree, _threaded_db_dir, ignore_errors=True)
 _threaded_db_name = (
     f"printstash_threaded_test_{_xdist_run_uid or 'serial'}_{_xdist_worker or 'main'}"
 )
-THREADED_DB_URL = (
-    f"sqlite:///file:{_threaded_db_name}?mode=memory&cache=shared&uri=true"
-)
+THREADED_DB_URL = f"sqlite:///{_threaded_db_dir / _threaded_db_name}.sqlite"
 _threaded_engine = create_engine(
     THREADED_DB_URL,
-    connect_args={"check_same_thread": False, "uri": True},
+    connect_args={"check_same_thread": False},
     poolclass=NullPool,
 )
-# Keeps the shared-cache DB alive: SQLite drops it once its last connection
-# closes, and NullPool never holds one open between checkouts.
-_threaded_keepalive_conn = _threaded_engine.raw_connection()
 event.listen(_threaded_engine, "connect", _set_sqlite_pragmas)
 _threaded_factory = SQLiteSessionFactory(_threaded_engine)
 
