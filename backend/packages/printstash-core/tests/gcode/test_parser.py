@@ -152,7 +152,7 @@ class TestParse:
             MaterialRequirement(2, "PLA", "#333333"),
         )
 
-    def test_keeps_every_used_slot_and_reports_the_first_as_the_material(
+    def test_requires_every_used_slot_in_slot_order(
         self, tmp_path: Path
     ) -> None:
         path = tmp_path / "multi-used.gcode"
