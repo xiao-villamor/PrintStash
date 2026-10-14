@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A background-work engine database that DBOS cannot migrate (workflow rows but
+  no migration record, left by an earlier failed first start) is now reported at
+  startup with what to do, instead of looping on `table workflow_status already
+  exists`.
+
 - Upgrading an existing install no longer stops at startup with
   `derivation_queue_requires_drain` and "no such column: queue_partition_key".
   The check that waits for old derivation work to drain read the previous

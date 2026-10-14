@@ -397,6 +397,39 @@ class TestFifoStartup:
             engine._require_fifo_queues_drained()
 
 
+class TestLegacySystemDatabase:
+    @staticmethod
+    def _database(tmp_path, tables):
+        import sqlite3
+
+        path = tmp_path / "engine.sqlite"
+        with sqlite3.connect(path) as connection:
+            for table in tables:
+                connection.execute(f"CREATE TABLE {table} (id INTEGER)")
+        engine = _engine()
+        engine.url = f"sqlite:///{path}"
+        return engine
+
+    def test_workflows_without_a_migration_record_are_named_not_crashed_in(
+        self, tmp_path
+    ):
+        engine = self._database(tmp_path, ["workflow_status"])
+
+        with pytest.raises(RuntimeError, match="engine_database_unmigratable"):
+            engine._require_migratable_system_database()
+
+    def test_a_migrated_database_is_accepted(self, tmp_path):
+        engine = self._database(tmp_path, ["workflow_status", "dbos_migrations"])
+
+        engine._require_migratable_system_database()
+
+    def test_a_fresh_database_is_accepted(self, tmp_path):
+        engine = _engine()
+        engine.url = f"sqlite:///{tmp_path / 'absent.sqlite'}"
+
+        engine._require_migratable_system_database()
+
+
 class TestFifoPostgresStartup:
     def test_an_absent_schema_is_fresh(self, monkeypatch):
         engine = _engine(schema="dbos")

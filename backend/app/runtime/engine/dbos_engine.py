@@ -85,6 +85,14 @@ _FIFO_DRAIN_REQUIRED = (
     "derivation_queue_requires_drain: stop all work processes, drain legacy "
     "derivation queues and restart together before enabling FIFO scheduling"
 )
+_ENGINE_DATABASE_UNMIGRATABLE = (
+    "engine_database_unmigratable: the background-work engine database was "
+    "created by a build that predates its migration table, so it cannot be "
+    "upgraded in place. Stop every PrintStash process, move the engine database "
+    "aside (printstash-dbos.sqlite beside the application database, or the engine "
+    "schema on PostgreSQL) and start again. Unfinished Jobs replay from the "
+    "application database; only engine checkpoints are lost."
+)
 
 
 _client_pool: ThreadPoolExecutor | None = None
@@ -293,6 +301,7 @@ class DbosJobEngine(JobEngine):
         with self._lock:
             if self._launched:
                 return
+            self._require_migratable_system_database()
             self._require_fifo_queues_drained()
             DBOS.destroy(destroy_registry=True)
             DBOS(config=self._config())
@@ -332,6 +341,30 @@ class DbosJobEngine(JobEngine):
             return not inspect(database).has_schema(self.schema)
         finally:
             database.dispose()
+
+    def _require_migratable_system_database(self) -> None:
+        """Name a system database DBOS cannot migrate instead of crashing in it.
+
+        DBOS applies its schema steps in order from the version recorded in
+        ``dbos_migrations``. A database that has workflow rows but no such record
+        comes from an older engine; replaying the first step then fails on a table
+        that already exists, with no hint what to do.
+        """
+        if self._fresh_system_database():
+            return
+        schema = (
+            None if make_url(self.url).get_backend_name() == "sqlite" else self.schema
+        )
+        database = create_engine(self.url)
+        try:
+            tables = inspect(database)
+            legacy = tables.has_table("workflow_status", schema=schema) and not (
+                tables.has_table("dbos_migrations", schema=schema)
+            )
+        finally:
+            database.dispose()
+        if legacy:
+            raise RuntimeError(_ENGINE_DATABASE_UNMIGRATABLE)
 
     def _require_fifo_queues_drained(self) -> None:
         """Refuse a mixed scheduling rollout before registering consumers.
