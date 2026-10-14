@@ -454,26 +454,31 @@ def _index_external_file(
     read_path = _read_path(source_path)
     blob_hash = sha256_file(read_path)
 
+    def home() -> Collection | None:
+        coll_path = _collection_path_for(session, library, source_path)
+        if not coll_path:
+            return None
+        return (
+            taxonomy.resolve_or_create_mirrored_collection(session, coll_path)
+            if library.collection_mode == ExternalLibraryCollectionMode.MIRROR
+            else session.get(Collection, library.target_collection_id)
+        )
+
     model, created = resolve_or_create_model(
         session,
         dedup_hash=blob_hash,
         model_name=source_path.stem,
         actor=None,
+        collection=home,
     )
 
-    if created or model.collection_id is None:
-        coll_path = _collection_path_for(session, library, source_path)
-        if coll_path:
-            coll = (
-                taxonomy.resolve_or_create_mirrored_collection(session, coll_path)
-                if library.collection_mode == ExternalLibraryCollectionMode.MIRROR
-                else session.get(Collection, library.target_collection_id)
-            )
-            if coll is not None:
-                model.collection_id = coll.id
-                session.add(model)
-                session.commit()
-                session.refresh(model)
+    if not created and model.collection_id is None:
+        coll = home()
+        if coll is not None:
+            model.collection_id = coll.id
+            session.add(model)
+            session.commit()
+            session.refresh(model)
 
     row = persist_artifact(
         session,
@@ -605,23 +610,27 @@ def _index_remote_file(
     with source.materialize(entry.key, expected=entry) as content:
         read_path = content.path
         blob_hash = sha256_file(read_path)
+        collection_path = _remote_collection_path(library, entry.key)
+
+        def home() -> Collection | None:
+            if not collection_path:
+                return None
+            return taxonomy.resolve_or_create_collection(session, collection_path)
+
         model, created = resolve_or_create_model(
             session,
             dedup_hash=blob_hash,
             model_name=source_name.stem,
             actor=None,
+            collection=home,
         )
-        if created or model.collection_id is None:
-            collection_path = _remote_collection_path(library, entry.key)
-            if collection_path:
-                collection = taxonomy.resolve_or_create_collection(
-                    session, collection_path
-                )
-                if collection is not None:
-                    model.collection_id = collection.id
-                    session.add(model)
-                    session.commit()
-                    session.refresh(model)
+        if not created and model.collection_id is None:
+            collection = home()
+            if collection is not None:
+                model.collection_id = collection.id
+                session.add(model)
+                session.commit()
+                session.refresh(model)
         row = persist_artifact(
             session,
             ArtifactCommand(

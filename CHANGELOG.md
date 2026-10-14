@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- The library no longer starts over while an import runs. Every imported file,
+  and every folder an import or a library scan created, told open library
+  views that access might have changed, so they discarded what they showed and
+  loaded again. A new Model is now created in its Collection instead of being
+  moved there afterwards (it was also briefly visible at the root), and only a
+  change that can affect access (a role, a disabled account, a moved or deleted
+  Collection) advances the access revision. The upgrade replaces two database
+  triggers; no rows change.
+
 - Importing costs the database less. Steps that are only waiting share one
   cancellation read instead of making one each, a finished upload no longer
   queues a reconcile pass that has nothing to find, and several reads that ran

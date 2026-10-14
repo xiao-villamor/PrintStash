@@ -6,8 +6,10 @@ from alembic.migration import MigrationContext
 from alembic.operations.ops import UpgradeOps
 
 from app.db.library_contracts_autogen import (
+    LibraryAuthorizationOp,
     LibraryContractsOp,
     compare_library_contracts,
+    render_library_authorization,
     render_library_contracts,
 )
 
@@ -34,3 +36,14 @@ class TestRenderLibraryContracts:
             f"library_contracts_v1.{command}(op.get_bind())"
         )
         assert context.imports == {"from app.db import library_contracts_v1"}
+
+    @pytest.mark.parametrize("install", [True, False], ids=["upgrade", "downgrade"])
+    def test_renders_versioned_authorization_call(self, install: bool) -> None:
+        context = AutogenContext(MigrationContext.configure(dialect_name="sqlite"))
+        upgrade = LibraryAuthorizationOp()
+        operation = upgrade if install else upgrade.reverse()
+        command = "install" if install else "uninstall"
+        assert render_library_authorization(context, operation) == (
+            f"library_authorization_v2.{command}(op.get_bind())"
+        )
+        assert context.imports == {"from app.db import library_authorization_v2"}

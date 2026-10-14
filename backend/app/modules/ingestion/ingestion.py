@@ -311,6 +311,7 @@ def resolve_or_create_model(
     model_name: str,
     source_url: str | None = None,
     actor: User | None = None,
+    collection: Callable[[], Collection | None] | None = None,
 ) -> tuple[Model, bool]:
     """Look up a Model by content hash, creating one when absent.
 
@@ -319,15 +320,25 @@ def resolve_or_create_model(
     enforced (system callers such as the library scanner pass ``actor=None``).
     Shared by the upload pipeline and the external-library scan engine so both
     agree on model identity.
+
+    ``collection`` names the Collection a new Model is created in; it is asked
+    only when one is created. A Model moved into its Collection after it was
+    created changes who may see it: it is briefly visible at the root, and
+    every open library view must assume its access changed and start over.
     """
     existing = session.exec(select(Model).where(Model.hash == dedup_hash)).first()
     if existing is None:
+        home = collection() if collection is not None else None
         base_slug = storage.slugify(model_name)
         slug = storage.ensure_unique_slug(
             base_slug, lambda s: _model_exists_with_slug(session, s)
         )
         model = Model(
-            name=model_name, slug=slug, hash=dedup_hash, source_url=source_url
+            name=model_name,
+            slug=slug,
+            hash=dedup_hash,
+            source_url=source_url,
+            collection_id=None if home is None else home.id,
         )
         session.add(model)
         try:
@@ -1130,6 +1141,13 @@ def commit_staged_artifact(
             model_name=artifact.model_name,
             source_url=artifact.source_url,
             actor=actor,
+            collection=(
+                None
+                if not artifact.collection
+                else lambda: taxonomy.resolve_or_create_collection(
+                    session, artifact.collection
+                )
+            ),
         )
         assert model.id is not None
         _apply_taxonomy(session, model, artifact.collection, artifact.tags)

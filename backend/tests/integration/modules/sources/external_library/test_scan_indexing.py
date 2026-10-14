@@ -138,6 +138,28 @@ class TestScanLibrary:
         assert model.collection_rel is not None
         assert model.collection_rel.path == "functional"
 
+    def test_a_scan_into_mirrored_folders_keeps_access(
+        self, tmp_path: Path, db_session: Session
+    ) -> None:
+        from app.modules.library.model_views.browse import revision
+
+        use_local_storage(tmp_path)
+        enable_feature(db_session)
+        nas = tmp_path / "nas"
+        drop_gcode(nas / "functional" / "brackets", "bracket.gcode")
+        drop_stl(nas / "toys", "boat.stl")
+        lib = build_external_library(db_session, nas, name="nas")
+        db_session.commit()
+        before = revision(db_session).authorization_revision
+
+        summary = external_library.scan_library(lib.id)
+
+        db_session.commit()
+        assert (summary["added"], revision(db_session).authorization_revision) == (
+            2,
+            before,
+        )
+
     def test_a_scan_indexes_every_supported_file_type(
         self, tmp_path: Path, db_session: Session
     ) -> None:

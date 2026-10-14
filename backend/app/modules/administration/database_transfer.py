@@ -19,7 +19,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, MetaData, Table, inspect, select, text
 from sqlmodel import Session, SQLModel
 
-from app.db import library_contracts_v1
+from app.db import library_authorization_v2, library_contracts_v1
 from app.db.derived_objects import managed_names
 from app.db.models import IndexGeneration
 from app.modules.search import lexical_index, vector_index
@@ -136,10 +136,12 @@ def _copying_library_rows(connection):
     removal; successful copies reinstall them before publication. The snapshot
     contains the source epoch; admitted restore renews it before this copy.
     """
+    library_authorization_v2.uninstall(connection)
     library_contracts_v1.uninstall(connection)
     connection.execute(text("DELETE FROM library_revision"))
     yield
     library_contracts_v1.install(connection)
+    library_authorization_v2.install(connection)
 
 
 def _defer_foreign_keys(

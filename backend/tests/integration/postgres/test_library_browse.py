@@ -358,6 +358,36 @@ class TestLibraryBrowse:
             session.refresh(model)
             assert model.edit_version > 1
 
+    def test_creating_a_collection_keeps_access(self, pg_library):
+        from app.modules.library.model_views.browse import revision
+        from tests.factories import build_collection
+
+        with Session(pg_library) as session:
+            root = build_collection(session, "Pg Root")
+            before = revision(session)
+            build_collection(session, "Pg Child", parent=root)
+
+            assert revision(session).authorization_revision == (
+                before.authorization_revision
+            )
+
+    def test_disabling_a_user_advances_access(self, pg_library):
+        from sqlalchemy import text
+
+        from app.modules.library.model_views.browse import revision
+
+        with Session(pg_library) as session:
+            user = build_user(session)
+            before = revision(session)
+            session.execute(
+                text("UPDATE users SET is_active=false WHERE id=:id"), {"id": user.id}
+            )
+            session.commit()
+
+            assert revision(session).authorization_revision != (
+                before.authorization_revision
+            )
+
     def test_detects_authorization_write(self, pg_library):
         from app.modules.library.model_views.browse import revision
         from tests.factories import build_collection, grant_collection_role
