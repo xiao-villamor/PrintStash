@@ -37,6 +37,7 @@ from app.db.models import (
     User,
 )
 from app.db.scopes import live
+from app.modules.printing.feed_fit import Feed, FeedFit, Need, fit_requirements
 from app.modules.printing.printer_files import build_traceable_remote_filename
 from app.modules.printing.printer_provider import capabilities_for_provider
 from app.schemas.fleet import (
@@ -268,34 +269,33 @@ def _compatibility_rank(
         row.state == MaterialSlotState.LOADED and not row.material_type
         for row in effective
     )
-    loaded = {
-        row.material_type.strip().casefold()
-        for row in effective
-        if row.state == MaterialSlotState.LOADED
-        and row.material_type
-        and row.material_type.strip()
-    }
+    feed_fit = fit_requirements(
+        [
+            Need(row.tool_index, row.material_type, row.color_hex)
+            for row in requirements
+            if row.material_type and row.material_type.strip()
+        ],
+        [
+            Feed(row.material_type, row.color_hex, row.tool_key)
+            for row in effective
+            if row.state == MaterialSlotState.LOADED
+            and row.material_type
+            and row.material_type.strip()
+        ],
+    )
+    short = bool(feed_fit.short_types)
     if (
         required
         and explicit
         and not has_unknown
         and not has_incomplete_loaded
-        and not required.issubset(loaded)
+        and short
     ):
         return 2
-    if required and (not explicit or not required.issubset(loaded)):
+    if required and (not explicit or short):
         return 1
-    known_requirements = [row for row in requirements if row.material_type]
-    if len(known_requirements) > 1:
-        mapped_tools = {
-            row.tool_key
-            for row in effective
-            if row.state == MaterialSlotState.LOADED and row.tool_key
-        }
-        if not {f"tool{row.tool_index}" for row in known_requirements}.issubset(
-            mapped_tools
-        ):
-            return 1
+    if feed_fit.fit == FeedFit.UNMAPPED:
+        return 1
     if nozzle is not None:
         tool_rows = snapshot.tools_by_printer.get(int(printer.id), ())
         provider_tool_keys = {

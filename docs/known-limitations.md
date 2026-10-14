@@ -331,8 +331,12 @@ manufacturing platform.
   detection. Other providers require manual feed state.
 - Color differences are advisory. PrintStash does not slice files, purchase
   material, or account for consumption across multiple spools in one print.
-- Multi-material G-code without a complete tool-to-feed mapping remains
-  `unknown` rather than being declared compatible or mismatched.
+- A multi-material G-code needs a distinct loaded feed per material it uses.
+  On a printer whose feeds share one tool (a Bambu AMS) any feed will do, so
+  two PLA requirements need two PLA feeds. PrintStash does not choose which
+  tray feeds which slicer filament; the printer applies its own mapping. On a
+  printer reporting several tools, a G-code naming a tool the printer does not
+  report remains `unknown` rather than being declared compatible or mismatched.
 
 ## Storage preset evidence
 

@@ -353,46 +353,85 @@ class TestCompatibilityRank:
             == 2
         )
 
-    def test_ranks_a_multi_tool_job_it_cannot_map_as_unproven(
+    def _declare(
+        self,
+        db_session: Session,
+        printer: Printer,
+        operator: User,
+        types: list[str],
+        tool_keys: list[str] | None = None,
+    ) -> None:
+        keys = tool_keys or ["tool0"] * len(types)
+        materials.replace_manual_state(
+            db_session,
+            int(printer.id),
+            ManualMaterialStateUpdate(
+                tools=[
+                    MaterialToolWrite(tool_key=key, label=key, nozzle_diameter_mm=0.4)
+                    for key in dict.fromkeys(keys)
+                ],
+                slots=[
+                    MaterialSlotWrite(
+                        slot_key=f"feed-{index}",
+                        label=f"Feed {index}",
+                        tool_key=key,
+                        state="loaded",
+                        material_type=material,
+                    )
+                    for index, (material, key) in enumerate(
+                        zip(types, keys, strict=True)
+                    )
+                ],
+            ),
+            operator,
+        )
+
+    def test_ranks_a_multi_material_job_on_a_shared_tool_as_compatible(
         self, db_session: Session, printer: Printer, operator: User
     ) -> None:
         artifact = requiring(db_session, material="PLA", nozzle=0.4)
         build_material_requirement(
             db_session, artifact, tool_index=1, material_type="PETG"
         )
-        materials.replace_manual_state(
-            db_session,
-            int(printer.id),
-            ManualMaterialStateUpdate(
-                tools=[
-                    MaterialToolWrite(
-                        tool_key="tool0", label="Tool 0", nozzle_diameter_mm=0.4
-                    )
-                ],
-                slots=[
-                    MaterialSlotWrite(
-                        slot_key="feed",
-                        label="Feed",
-                        tool_key="tool0",
-                        state="loaded",
-                        material_type="PLA",
-                    ),
-                    MaterialSlotWrite(
-                        slot_key="feed-2",
-                        label="Feed 2",
-                        tool_key="tool0",
-                        state="loaded",
-                        material_type="PETG",
-                    ),
-                ],
-            ),
-            operator,
+        self._declare(db_session, printer, operator, ["PLA", "PETG"])
+
+        # Every tray of an AMS reaches the same extruder, so the job needs a
+        # tray per material rather than a tool-to-tray map. This ranked as
+        # unproven for every multi-material file on every such printer.
+        assert (
+            fleet._compatibility_rank(
+                printer, int(artifact.id), snapshot_for(db_session, artifact)
+            )
+            == 0
         )
 
-        # Both required materials are loaded, so nothing is a proven mismatch —
-        # but they are on one extruder, so which slot feeds tool 1 is a guess.
-        # Ranking it compatible would route a two-material print to a machine
-        # that would print it in the wrong order.
+    def test_ranks_more_requirements_for_a_material_than_feeds_as_a_mismatch(
+        self, db_session: Session, printer: Printer, operator: User
+    ) -> None:
+        artifact = requiring(db_session, material="PLA", nozzle=0.4)
+        build_material_requirement(
+            db_session, artifact, tool_index=1, material_type="PLA"
+        )
+        self._declare(db_session, printer, operator, ["PLA", "PETG"])
+
+        assert (
+            fleet._compatibility_rank(
+                printer, int(artifact.id), snapshot_for(db_session, artifact)
+            )
+            == 2
+        )
+
+    def test_ranks_a_tool_the_printer_does_not_report_as_unproven(
+        self, db_session: Session, printer: Printer, operator: User
+    ) -> None:
+        artifact = requiring(db_session, material="PLA", nozzle=0.4)
+        build_material_requirement(
+            db_session, artifact, tool_index=2, material_type="PETG"
+        )
+        self._declare(
+            db_session, printer, operator, ["PLA", "PETG"], ["tool0", "tool1"]
+        )
+
         assert (
             fleet._compatibility_rank(
                 printer, int(artifact.id), snapshot_for(db_session, artifact)

@@ -17,6 +17,7 @@ from app.db.models import (
     PrinterTool,
     User,
 )
+from app.modules.printing.feed_fit import Feed, FeedFit, Need, fit_requirements
 from app.schemas.materials import (
     ArtifactRequirementRead,
     CompatibilityPrinterRead,
@@ -305,23 +306,26 @@ def compatibility_for_printer(
     ):
         return CompatibilityResult("unknown", ("printer_material_unknown",))
 
-    loaded_types = {
-        _normalise(row.material_type)
-        for row in loaded
-        if row.material_type and row.material_type.strip()
-    }
-    missing = sorted(required_types - loaded_types)
+    feed_fit = fit_requirements(
+        [
+            Need(row.tool_index, row.material_type, row.color_hex)
+            for row in requirements
+            if row.material_type and row.material_type.strip()
+        ],
+        [
+            Feed(row.material_type, row.color_hex, row.tool_key)
+            for row in loaded
+            if row.material_type and row.material_type.strip()
+        ],
+    )
+    missing = list(feed_fit.short_types)
     reasons: list[str] = []
     if missing and explicit_slots and not unknown_slots and not incomplete_loaded:
         reasons.append("material_type_mismatch")
     elif missing:
         reasons.append("printer_material_incomplete")
-    known_requirements = [row for row in requirements if row.material_type]
-    if len(known_requirements) > 1:
-        mapped_tools = {row.tool_key for row in loaded if row.tool_key}
-        required_tools = {f"tool{row.tool_index}" for row in known_requirements}
-        if not required_tools.issubset(mapped_tools):
-            reasons.append("tool_feed_mapping_unknown")
+    elif feed_fit.fit == FeedFit.UNMAPPED:
+        reasons.append("tool_feed_mapping_unknown")
     if nozzle is not None:
         known_nozzles = [
             row.nozzle_diameter_mm
@@ -335,21 +339,7 @@ def compatibility_for_printer(
         elif not known_nozzles:
             reasons.append("printer_nozzle_unknown")
 
-    colors_by_type = {
-        _normalise(row.material_type): row.color_hex
-        for row in loaded
-        if row.material_type and row.color_hex
-    }
-    color_advisories = sorted(
-        {
-            f"tool{row.tool_index}:{row.color_hex}->{colors_by_type[_normalise(row.material_type)]}"
-            for row in requirements
-            if row.material_type
-            and row.color_hex
-            and _normalise(row.material_type) in colors_by_type
-            and colors_by_type[_normalise(row.material_type)] != row.color_hex
-        }
-    )
+    color_advisories = list(feed_fit.color_advisories)
     mismatch_reasons = [reason for reason in reasons if reason.endswith("mismatch")]
     if mismatch_reasons:
         return CompatibilityResult(

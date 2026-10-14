@@ -35,6 +35,7 @@ from tests.factories import (
     a_gcode_artifact,
     build_material_requirement,
     build_material_slot,
+    build_metadata,
     build_printer,
     build_printer_tool,
 )
@@ -42,6 +43,41 @@ from tests.integration.modules.printing.materials.conftest import (
     load_manual_state,
     requiring,
 )
+
+
+def declare_feeds(
+    session: Session,
+    printer: Printer,
+    operator: User,
+    types: list[str],
+    *,
+    tool_keys: list[str] | None = None,
+    colors: list[str | None] | None = None,
+) -> None:
+    """Record loaded feeds, one per material, optionally on distinct tools."""
+    keys = tool_keys or ["tool0"] * len(types)
+    materials.replace_manual_state(
+        session,
+        int(printer.id),
+        ManualMaterialStateUpdate(
+            tools=[
+                MaterialToolWrite(tool_key=key, label=key, nozzle_diameter_mm=0.4)
+                for key in dict.fromkeys(keys)
+            ],
+            slots=[
+                MaterialSlotWrite(
+                    slot_key=f"feed-{index}",
+                    label=f"Feed {index}",
+                    tool_key=key,
+                    state="loaded",
+                    material_type=material,
+                    color_hex=colors[index] if colors else None,
+                )
+                for index, (material, key) in enumerate(zip(types, keys, strict=True))
+            ],
+        ),
+        operator,
+    )
 
 
 class TestCompatibilityForPrinter:
@@ -195,47 +231,174 @@ class TestCompatibilityForPrinter:
         assert result.verdict == "unknown"
         assert result.missing_materials == ("pla",)
 
-    def test_reports_a_multi_tool_artifact_it_cannot_map_as_unknown(
+    def test_places_a_multi_material_job_on_a_shared_tool_by_material(
         self, db_session: Session, printer: Printer, operator: User
     ) -> None:
         artifact = requiring(db_session, material="PLA", nozzle=0.4)
         build_material_requirement(
             db_session, artifact, tool_index=1, material_type="PETG"
         )
-        materials.replace_manual_state(
+        declare_feeds(db_session, printer, operator, ["PLA", "PETG"])
+
+        # An AMS reaches one extruder through every tray, so the job needs a
+        # distinct tray per material and nothing more. It used to be `unknown`
+        # for every multi-material file on every such printer.
+        result = materials.compatibility_for_printer(
+            db_session, int(artifact.id), int(printer.id)
+        )
+
+        assert result.verdict == "compatible"
+
+    def test_a_single_used_slot_beyond_the_first_needs_one_feed(
+        self, db_session: Session, printer: Printer, operator: User
+    ) -> None:
+        # Issue #445: a plate printed from slicer slot 3 asks for one material,
+        # recorded at tool index 2. A four-tray AMS holding it somewhere fits.
+        artifact = a_gcode_artifact(db_session, "slot-3")
+        build_metadata(
+            db_session, artifact, material_type="PLA", nozzle_diameter_mm=0.4
+        )
+        build_material_requirement(
+            db_session, artifact, tool_index=2, material_type="PLA"
+        )
+        declare_feeds(db_session, printer, operator, ["PETG", "ABS", "PLA", "PETG"])
+
+        assert (
+            materials.compatibility_for_printer(
+                db_session, int(artifact.id), int(printer.id)
+            ).verdict
+            == "compatible"
+        )
+
+    def test_two_requirements_for_one_material_need_two_feeds(
+        self, db_session: Session, printer: Printer, operator: User
+    ) -> None:
+        artifact = requiring(db_session, material="PLA", nozzle=0.4)
+        build_material_requirement(
+            db_session, artifact, tool_index=1, material_type="PLA"
+        )
+        declare_feeds(db_session, printer, operator, ["PLA", "PETG"])
+
+        # One PLA spool cannot print a white-and-black PLA job. The set of
+        # required *types* was {PLA}, which one spool satisfied.
+        result = materials.compatibility_for_printer(
+            db_session, int(artifact.id), int(printer.id)
+        )
+
+        assert result.verdict == "mismatch"
+        assert result.missing_materials == ("pla",)
+
+    def test_two_requirements_for_one_material_fit_two_feeds(
+        self, db_session: Session, printer: Printer, operator: User
+    ) -> None:
+        artifact = requiring(db_session, material="PLA", nozzle=0.4)
+        build_material_requirement(
+            db_session, artifact, tool_index=1, material_type="PLA"
+        )
+        declare_feeds(db_session, printer, operator, ["PLA", "PETG", "PLA"])
+
+        assert (
+            materials.compatibility_for_printer(
+                db_session, int(artifact.id), int(printer.id)
+            ).verdict
+            == "compatible"
+        )
+
+    def test_a_multi_tool_job_names_a_tool_the_printer_does_not_report(
+        self, db_session: Session, printer: Printer, operator: User
+    ) -> None:
+        artifact = requiring(db_session, material="PLA", nozzle=0.4)
+        build_material_requirement(
+            db_session, artifact, tool_index=2, material_type="PETG"
+        )
+        declare_feeds(
+            db_session, printer, operator, ["PLA", "PETG"], tool_keys=["tool0", "tool1"]
+        )
+
+        # Two independent tools were reported, and the job asks for a third.
+        # Which feed would supply it is a guess.
+        result = materials.compatibility_for_printer(
+            db_session, int(artifact.id), int(printer.id)
+        )
+
+        assert result.verdict == "unknown"
+        assert "tool_feed_mapping_unknown" in result.reasons
+
+    def test_a_toolchanger_feed_of_the_wrong_material_is_a_mismatch(
+        self, db_session: Session, printer: Printer, operator: User
+    ) -> None:
+        artifact = requiring(db_session, material="PLA", nozzle=0.4)
+        build_material_requirement(
+            db_session, artifact, tool_index=1, material_type="PETG"
+        )
+        declare_feeds(
+            db_session, printer, operator, ["PLA", "ABS"], tool_keys=["tool0", "tool1"]
+        )
+
+        # PETG is not loaded anywhere, and tool 1 holds ABS: a proven mismatch.
+        assert (
+            materials.compatibility_for_printer(
+                db_session, int(artifact.id), int(printer.id)
+            ).verdict
+            == "mismatch"
+        )
+
+    def test_places_each_requirement_on_the_feed_of_its_own_colour(
+        self, db_session: Session, printer: Printer, operator: User
+    ) -> None:
+        artifact = requiring(db_session, material="PLA", nozzle=0.4)
+        build_material_requirement(
             db_session,
-            int(printer.id),
-            ManualMaterialStateUpdate(
-                tools=[MaterialToolWrite(tool_key="tool0", label="Tool 0")],
-                slots=[
-                    MaterialSlotWrite(
-                        slot_key="feed",
-                        label="Feed",
-                        tool_key="tool0",
-                        state="loaded",
-                        material_type="PLA",
-                    ),
-                    MaterialSlotWrite(
-                        slot_key="feed-2",
-                        label="Feed 2",
-                        tool_key="tool0",
-                        state="loaded",
-                        material_type="PETG",
-                    ),
-                ],
-            ),
+            artifact,
+            tool_index=1,
+            material_type="PLA",
+            color_hex="#00FF00",
+        )
+        declare_feeds(
+            db_session,
+            printer,
             operator,
+            ["PLA", "PLA"],
+            colors=["#00FF00", "#FF0000"],
+        )
+
+        # The trays are loaded in the opposite order to the plate's slots, yet
+        # each colour has a tray of its own, so nothing is worth advising.
+        result = materials.compatibility_for_printer(
+            db_session, int(artifact.id), int(printer.id)
+        )
+
+        assert result.verdict == "compatible"
+        assert result.color_advisories == ()
+
+    def test_advises_each_requirement_against_the_feed_it_is_placed_on(
+        self, db_session: Session, printer: Printer, operator: User
+    ) -> None:
+        artifact = requiring(db_session, material="PLA", nozzle=0.4)
+        build_material_requirement(
+            db_session,
+            artifact,
+            tool_index=1,
+            material_type="PLA",
+            color_hex="#00FF00",
+        )
+        declare_feeds(
+            db_session,
+            printer,
+            operator,
+            ["PLA", "PLA"],
+            colors=["#111111", "#222222"],
         )
 
         result = materials.compatibility_for_printer(
             db_session, int(artifact.id), int(printer.id)
         )
 
-        # Both materials are loaded, but on one extruder — so which slot feeds
-        # tool 1 is a guess, and guessing wrong prints the job in two swapped
-        # colours or materials.
-        assert result.verdict == "unknown"
-        assert "tool_feed_mapping_unknown" in result.reasons
+        assert result.verdict == "compatible"
+        assert result.color_advisories == (
+            "tool0:#FF0000->#111111",
+            "tool1:#00FF00->#222222",
+        )
 
     def test_reports_a_printer_that_never_declared_a_nozzle_as_unknown(
         self, db_session: Session, printer: Printer, operator: User

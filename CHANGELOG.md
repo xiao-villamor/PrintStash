@@ -11,6 +11,13 @@
   shown as 70.97 g, its first filament only, and was costed accordingly. Files
   already in the library are re-read in the background (#453).
 
+- Multi-material prints now route to printers with several filaments. A G-code
+  using two or more materials was `unknown` on every Bambu AMS printer, because
+  all its trays share one tool; it now fits when the printer holds a distinct
+  tray for each material, and is a proven mismatch when it does not (two PLA
+  colours on one PLA spool). Colour advice is given per material instead of per
+  last-seen tray (#453).
+
 - Importing a reviewed archive shows how far along it is. The task used to say
   "Discovering total…" with an empty bar until the last file was done, although
   the selection was known from the start.
