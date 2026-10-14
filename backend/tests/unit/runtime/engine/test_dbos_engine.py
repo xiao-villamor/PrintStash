@@ -383,7 +383,7 @@ class TestFifoStartup:
 
         assert self._adopt(tmp_path, [("PENDING", lane, 1000)]) == [("w0", 1000)]
 
-    def test_settled_and_other_lane_work_is_left_alone(self, tmp_path):
+    def test_work_that_is_settled_or_on_another_lane_keeps_its_rank(self, tmp_path):
         rows = [
             ("SUCCESS", LaneName.DERIVE_NATIVE.value, 1000),
             ("ENQUEUED", "some-other-queue", 1000),
