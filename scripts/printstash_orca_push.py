@@ -395,8 +395,21 @@ def submission_id(gcode: Path, context: dict) -> str:
     return digest.hexdigest()
 
 
+def output_name(path: Path, environ: Mapping[str, str]) -> str:
+    """Return the export's real filename, not the slicer's temporary one.
+
+    Orca runs post-processing scripts on a temporary "<final>.pp" copy and puts
+    the intended name in SLIC3R_PP_OUTPUT_NAME.
+    """
+    env_name = _clean(environ.get("SLIC3R_PP_OUTPUT_NAME"))
+    if env_name:
+        return Path(env_name.replace("\\", "/")).name
+    return path.name.removesuffix(".pp")
+
+
 def build_multipart(fields: dict, file_path: Path) -> tuple[bytes, str]:
     """Build a multipart/form-data body using stdlib only."""
+    filename = output_name(file_path, os.environ)
     boundary = f"----PrintStash{uuid.uuid4().hex}"
     crlf = "\r\n"
     body = bytearray()
@@ -409,11 +422,11 @@ def build_multipart(fields: dict, file_path: Path) -> tuple[bytes, str]:
             f'Content-Disposition: form-data; name="{key}"{crlf}{crlf}{value}{crlf}'
         ).encode()
 
-    mime, _ = mimetypes.guess_type(file_path.name)
+    mime, _ = mimetypes.guess_type(filename)
     mime = mime or "application/octet-stream"
     body += f"--{boundary}{crlf}".encode()
     body += (
-        f'Content-Disposition: form-data; name="file"; filename="{file_path.name}"{crlf}'
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"{crlf}'
         f"Content-Type: {mime}{crlf}{crlf}"
     ).encode()
     body += file_path.read_bytes()

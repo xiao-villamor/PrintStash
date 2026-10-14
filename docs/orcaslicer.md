@@ -21,6 +21,10 @@ script file and out of Orca custom G-code. `PRINTSTASH_URL`,
 `PRINTSTASH_USERNAME`, and `PRINTSTASH_API_KEY` can supply the three connection
 arguments instead.
 
+Orca runs post-processing scripts on a temporary `<name>.pp` copy of the export
+and passes the real name in `SLIC3R_PP_OUTPUT_NAME`; the hook uploads under that
+real name.
+
 Orca object labels are enough for ordinary single-object exports. To make the
 native placeholder evidence explicit across profiles, add these comments to a
 custom G-code section that Orca includes in the exported file:

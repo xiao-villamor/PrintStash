@@ -349,3 +349,37 @@ class TestHookContract:
             )
 
         assert orca_hook.main() == 0
+
+
+class TestSlicerTempFile:
+    """Orca hands the hook a temporary "<final>.pp" copy, never the export itself."""
+
+    def test_uploads_under_the_slicer_output_name(
+        self, tmp_path, orca_hook: ModuleType, monkeypatch
+    ) -> None:
+        gcode = tmp_path / "tmp1234.gcode.pp"
+        gcode.write_bytes(b"G28\n")
+        monkeypatch.setenv("SLIC3R_PP_OUTPUT_NAME", "/exports/bracket_PLA.gcode")
+
+        body, _ = orca_hook.build_multipart({}, gcode)
+
+        assert b'filename="bracket_PLA.gcode"' in body
+
+    def test_strips_the_pp_suffix_without_an_output_name(
+        self, tmp_path, orca_hook: ModuleType
+    ) -> None:
+        assert orca_hook.output_name(tmp_path / "bracket.gcode.pp", {}) == (
+            "bracket.gcode"
+        )
+
+    def test_keeps_a_plain_export_name(self, tmp_path, orca_hook: ModuleType) -> None:
+        assert orca_hook.output_name(tmp_path / "bracket.gcode", {}) == (
+            "bracket.gcode"
+        )
+
+    def test_takes_the_basename_of_a_windows_output_name(
+        self, tmp_path, orca_hook: ModuleType
+    ) -> None:
+        environ = {"SLIC3R_PP_OUTPUT_NAME": "C:\\exports\\bracket.gcode"}
+
+        assert orca_hook.output_name(tmp_path / "tmp.pp", environ) == ("bracket.gcode")
