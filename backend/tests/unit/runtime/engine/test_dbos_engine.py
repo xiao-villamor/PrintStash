@@ -363,7 +363,7 @@ class TestFifoStartup:
     def test_a_previous_engine_schema_with_nothing_queued_is_accepted(self, tmp_path):
         self._inspect(tmp_path, [])
 
-    def test_settled_and_other_lane_work_is_ignored(self, tmp_path):
+    def test_work_that_is_settled_or_on_another_lane_is_ignored(self, tmp_path):
         self._inspect(
             tmp_path,
             [
