@@ -169,7 +169,7 @@ def _stale(make_job, *, attempts: int = 1, **kw) -> Job:
 
 
 class TestRepair:
-    def test_submitting_a_job_reads_it_once_and_records_the_attempt(
+    def test_submitting_a_job_is_one_read_before_the_recording_write(
         self,
         engine: InlineJobEngine,
         make_job,

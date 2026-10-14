@@ -121,9 +121,10 @@ nudges for the grace window, after which the tick queues the pass.
 A step's cancellation checkpoints come in two kinds. A forced checkpoint, the
 kind that guards a publication, reads its own Job afresh. A paced checkpoint,
 the kind a step calls while it waits for a worker, a permit or a lane, is
-answered from one read shared by every step the process is running, no older
-than a quarter of a second: waiting steps cost one read between them rather
-than one each.
+answered from one read shared by every step the process is running, about a
+quarter of a second old at most (a step that probes while another is reading
+takes the last answer): waiting steps cost one read between them rather than
+one each. The shared read never holds a lock other steps wait on.
 
 ## An attempt's writes
 

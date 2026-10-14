@@ -884,6 +884,74 @@ class TestWithdrawalWatch:
 
         assert (answers, len(reads)) == ((False, True), 1)
 
+    def test_the_read_runs_without_the_lock_other_steps_wait_on(
+        self, make_job, monkeypatch
+    ) -> None:
+        from app.modules.work.runner import _WithdrawalWatch
+
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        watch = _WithdrawalWatch()
+        watch.add(job.id, 1, job.execution_epoch)
+        read = watch._read
+        locked: list[bool] = []
+
+        def observed(job_ids):
+            locked.append(watch._lock.locked())
+            return read(job_ids)
+
+        monkeypatch.setattr(watch, "_read", observed)
+
+        watch.withdrawn(job.id, 1, job.execution_epoch)
+
+        assert locked == [False]
+
+    def test_a_probe_during_another_steps_read_takes_the_last_answer(
+        self, make_job, monkeypatch
+    ) -> None:
+        from app.modules.work import runner
+
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        identity = (job.id, 1, job.execution_epoch)
+        clock = [100.0]
+        monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+        watch = runner._WithdrawalWatch()
+        watch.add(*identity)
+        watch.withdrawn(*identity)
+        clock[0] += runner._WATCH_SECONDS
+        read = watch._read
+        during: list[bool] = []
+
+        def observed(job_ids):
+            during.append(watch.withdrawn(*identity))
+            return read(job_ids)
+
+        monkeypatch.setattr(watch, "_read", observed)
+
+        watch.withdrawn(*identity)
+
+        assert during == [False]
+
+    def test_a_failed_read_lets_the_next_probe_read(
+        self, make_job, monkeypatch
+    ) -> None:
+        from app.modules.work.runner import _WithdrawalWatch
+
+        job = make_job(kind=MUTATING, state=JobState.RUNNING, attempts=1)
+        identity = (job.id, 1, job.execution_epoch)
+        watch = _WithdrawalWatch()
+        watch.add(*identity)
+        read = watch._read
+
+        def broken(_job_ids):
+            raise RuntimeError("database unavailable")
+
+        monkeypatch.setattr(watch, "_read", broken)
+        with pytest.raises(RuntimeError, match="database unavailable"):
+            watch.withdrawn(*identity)
+        monkeypatch.setattr(watch, "_read", read)
+
+        assert watch.withdrawn(*identity) is False
+
     def test_an_answer_older_than_the_window_is_read_again(
         self, make_job, db_session: Session, monkeypatch
     ) -> None:
@@ -951,7 +1019,7 @@ class TestWithdrawalWatch:
 
         assert not watch.withdrawn(job.id, 2, job.execution_epoch)
 
-    def test_a_step_waits_on_the_watch_and_forces_a_fresh_read(
+    def test_a_steps_paced_checkpoints_share_one_read(
         self, engine: InlineJobEngine, make_job, reads: list[str]
     ) -> None:
         from app.core.cancellation import checkpoint
@@ -964,6 +1032,24 @@ class TestWithdrawalWatch:
             checkpoint()
             checkpoint()
             seen.append(len(reads))
+
+        TRACE.behaviour["one"] = waits
+
+        _run(engine, job)
+
+        assert seen == [1]
+
+    def test_a_steps_forced_checkpoint_reads_its_job_afresh(
+        self, engine: InlineJobEngine, make_job, reads: list[str]
+    ) -> None:
+        from app.core.cancellation import checkpoint
+
+        job = make_job(kind=MUTATING)
+        seen: list[int] = []
+
+        def waits(_ctx) -> None:
+            checkpoint()
+            reads.clear()
             checkpoint(force=True)
             seen.append(len(reads))
 
@@ -971,7 +1057,7 @@ class TestWithdrawalWatch:
 
         _run(engine, job)
 
-        assert seen == [1, 2]
+        assert seen == [1]
 
     def test_a_step_cancelled_while_it_waits_stops(
         self, engine: InlineJobEngine, make_job

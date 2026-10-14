@@ -328,6 +328,7 @@ class _WithdrawalWatch:
         # (job id, attempt, epoch) -> the last answer read, if any
         self._attempts: dict[tuple[str, int, str], bool | None] = {}
         self._read_at = 0.0
+        self._reading = False
 
     def add(self, job_id: str, attempt: int, execution_epoch: str) -> None:
         with self._lock:
@@ -341,26 +342,42 @@ class _WithdrawalWatch:
         key = (job_id, attempt, execution_epoch)
         with self._lock:
             answer = self._attempts[key]
-            if answer is None or time.monotonic() - self._read_at >= _WATCH_SECONDS:
-                self._read()
-                answer = self._attempts[key]
-            assert answer is not None
-            return answer
+            fresh = time.monotonic() - self._read_at < _WATCH_SECONDS
+            if answer is not None and (fresh or self._reading):
+                # Recent enough, or another step is already reading for all.
+                return answer
+            waiting = list(self._attempts)
+            self._reading = True
+        # Never read with the lock held: a step that probes inside its own
+        # transaction would wait for the lock while this read waits for a
+        # connection that step holds.
+        try:
+            rows = self._read({job_id for job_id, _attempt, _epoch in waiting})
+        finally:
+            with self._lock:
+                self._reading = False
+        answers = {
+            (job_id, attempt, epoch): _is_withdrawn(rows.get(job_id), attempt, epoch)
+            for job_id, attempt, epoch in waiting
+        }
+        with self._lock:
+            for registered, verdict in answers.items():
+                if registered in self._attempts:
+                    self._attempts[registered] = verdict
+            self._read_at = time.monotonic()
+        return answers[key]
 
-    def _read(self) -> None:
+    @staticmethod
+    def _read(job_ids: set[str]) -> dict[str, tuple[JobState, int, str]]:
         with get_session_factory().scoped_session() as session:
-            rows = {
+            return {
                 job_id: (state, attempts, epoch)
                 for job_id, state, attempts, epoch in session.connection().execute(
                     select(Job.id, Job.state, Job.attempts, Job.execution_epoch).where(
-                        col(Job.id).in_(sorted({key[0] for key in self._attempts}))
+                        col(Job.id).in_(sorted(job_ids))
                     )
                 )
             }
-        for key in self._attempts:
-            job_id, attempt, epoch = key
-            self._attempts[key] = _is_withdrawn(rows.get(job_id), attempt, epoch)
-        self._read_at = time.monotonic()
 
 
 _watch = _WithdrawalWatch()

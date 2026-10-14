@@ -1398,7 +1398,7 @@ class TestBegin:
 
         assert db_session.exec(select(ArtifactDerivative)).all() == []
 
-    def test_claims_and_returns_the_artifact_in_one_transaction(
+    def test_a_claim_with_its_artifact_is_one_transaction(
         self, stored, transactions
     ):
         artifact = stored("once.gcode", content.gcode())
