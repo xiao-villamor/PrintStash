@@ -22,6 +22,30 @@ import { useMockApi } from "./_setup";
 
 useMockApi();
 
+const accessibleGpu = {
+  mode: "auto",
+  device: {
+    identity: "gpu-0",
+    name: "NVIDIA GeForce RTX 4070",
+    vendor_id: 4318,
+    device_id: 10118,
+    driver: "560.35.03",
+    backend: "Vulkan",
+  },
+  capabilities: [
+    { operation: "render", available: true, reason: "ready" },
+    { operation: "dense", available: false, reason: "unqualified" },
+    { operation: "sparse", available: false, reason: "unqualified" },
+  ],
+  budget_bytes: 1073741824,
+  reserved_bytes: 268435456,
+  resident_entries: 2,
+  queue_depth: 1,
+  completed: 42,
+  fallbacks: 3,
+  cold_start_seconds: 1.2,
+};
+
 test.describe("settings route", () => {
   test("rejects a stale configuration write in the browser fake", async ({ request }) => {
     const before = await (await request.get("/api/v1/config")).json();
@@ -39,38 +63,33 @@ test.describe("settings route", () => {
   test("the GPU section tells an administrator whether the API can reach a GPU", async ({
     page,
   }) => {
-    await page.route("**/api/v1/system/compute", (route) =>
-      route.fulfill({
-        json: {
-          mode: "auto",
-          device: {
-            identity: "gpu-0",
-            name: "NVIDIA GeForce RTX 4070",
-            vendor_id: 4318,
-            device_id: 10118,
-            driver: "560.35.03",
-            backend: "Vulkan",
-          },
-          capabilities: [
-            { operation: "render", available: true, reason: "ready" },
-            { operation: "dense", available: false, reason: "unqualified" },
-            { operation: "sparse", available: false, reason: "unqualified" },
-          ],
-          budget_bytes: 1073741824,
-          reserved_bytes: 268435456,
-          resident_entries: 2,
-          queue_depth: 1,
-          completed: 42,
-          fallbacks: 3,
-          cold_start_seconds: 1.2,
-        },
-      }),
-    );
+    await page.route("**/api/v1/system/compute", (route) => route.fulfill({ json: accessibleGpu }));
     await page.goto("/settings?section=gpu");
     const card = page.getByRole("group", { name: "Server GPU" });
     await expect(card.getByText("GPU accessible from the API")).toBeVisible();
     await expect(card.getByText("NVIDIA GeForce RTX 4070")).toBeVisible();
     await expect(card.getByText("256 MB of 1 GB in use")).toBeVisible();
+  });
+  test("the GPU answer is kept until an administrator checks again", async ({ page }) => {
+    let probes = 0;
+    await page.route("**/api/v1/system/compute", (route) => {
+      probes += 1;
+      return route.fulfill({ json: accessibleGpu });
+    });
+    await page.goto("/settings?section=gpu");
+    const card = page.getByRole("group", { name: "Server GPU" });
+    await expect(card.getByText("GPU accessible from the API")).toBeVisible();
+    // Dev StrictMode aborts and repeats the first read, so count from here.
+    const answered = probes;
+
+    await page.getByRole("button", { name: "About" }).click();
+    await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
+    await page.getByRole("button", { name: "GPU", exact: true }).click();
+    await expect(card.getByText("GPU accessible from the API")).toBeVisible();
+    expect(probes).toBe(answered);
+
+    await card.getByRole("button", { name: "Check again" }).click();
+    await expect.poll(() => probes).toBe(answered + 1);
   });
   test("persists a conditional preference in the browser fake", async ({ page }) => {
     await page.goto("/settings?section=design");
