@@ -1,4 +1,8 @@
-"""Explicit real BGE lane: provision pinned files first; this never downloads."""
+"""Explicit real text-model lane: provision pinned files first; this never downloads.
+
+``AI_SEARCH_TEXT_MODEL`` names the registry key (default BGE) whose files
+``AI_SEARCH_TEXT_ASSETS`` holds.
+"""
 
 import os
 import time
@@ -14,9 +18,9 @@ from app.modules.inference.model_registry import require
 
 
 class TestPreplacedText:
-    def test_embeds_with_the_pinned_bge_model(self, db_session):
+    def test_embeds_with_the_pinned_text_model(self, db_session):
         directory = Path(os.environ["AI_SEARCH_TEXT_ASSETS"])
-        entry = require("bge-small-en-v1.5")
+        entry = require(os.environ.get("AI_SEARCH_TEXT_MODEL", "bge-small-en-v1.5"))
         provider = LocalEmbeddingProvider(
             get_session_factory(), directory, entry.manifest.model_key, 1
         )

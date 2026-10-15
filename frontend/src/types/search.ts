@@ -111,6 +111,7 @@ export interface InferenceModel {
   size_bytes: number;
   installed: boolean;
   curated: boolean;
+  recommended: boolean;
   referenced: boolean;
   runtime_available: boolean;
   mrl_dimensions: number[];

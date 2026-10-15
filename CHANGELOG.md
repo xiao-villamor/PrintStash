@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- AI Search can run a second local text model: **all-MiniLM-L6-v2** (English,
+  90 MB). It embeds a query in about half the time BGE takes and needs less
+  memory, at slightly lower recall. BGE stays the recommended default; the
+  model choice in guided setup now shows each model's size, languages and which
+  one is recommended.
+
 - Upgrading from 0.13.0 or 0.14.0 no longer requires draining derivation work
   first. Work still waiting under the old ordering is re-ranked on start instead
   of stopping the container in a restart loop with

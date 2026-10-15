@@ -71,7 +71,12 @@ export function AiSearchSetup({
       (model) =>
         model.modality === "text" && model.runtime_available && (model.curated || model.installed),
     )
-    .sort((a, b) => Number(b.installed) - Number(a.installed) || a.size_bytes - b.size_bytes);
+    .sort(
+      (a, b) =>
+        Number(b.installed) - Number(a.installed) ||
+        Number(b.recommended) - Number(a.recommended) ||
+        a.size_bytes - b.size_bytes,
+    );
   const local = selected === null ? choices[0] : choices.find((model) => model.id === selected);
   const servers = settings.endpoints.filter((endpoint) => endpoint.kind === "embedding");
   const remote =
@@ -591,9 +596,13 @@ export function AiSearchSetup({
                                       }}
                                     />
                                     <span className="min-w-0 break-words">
-                                      {model.key}
+                                      {model.key}{" "}
                                       <span className="mt-1 block text-xs opacity-80">
-                                        {formatBytes(model.size_bytes)}
+                                        {[
+                                          formatBytes(model.size_bytes),
+                                          model.languages.join(", "),
+                                          ...(model.recommended ? [t("Recommended")] : []),
+                                        ].join(" · ")}
                                       </span>
                                     </span>
                                   </label>

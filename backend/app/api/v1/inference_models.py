@@ -84,6 +84,7 @@ def list_models(session: Session = Depends(get_session)):
                 size_bytes=model.size if model else entry.size,
                 installed=model is not None,
                 curated=entry is not None,
+                recommended=entry is not None and entry.recommended,
                 referenced=model_cache.referenced(session, model) if model else False,
                 runtime_available=runtime,
                 mrl_dimensions=list(capabilities.mrl_dimensions)

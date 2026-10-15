@@ -1,4 +1,4 @@
-"""Real BGE vector fixtures evaluate the actual authorized lexical/hybrid readers."""
+"""Real vectors from each curated text model evaluate the actual authorized lexical/hybrid readers."""
 
 import csv
 import hashlib
@@ -20,8 +20,9 @@ from tests.fakes.precomputed_embeddings import PrecomputedEmbeddings
 from tests.paths import FIXTURES_DIR
 
 
-@pytest.fixture
+@pytest.fixture(params=["bge-small-en-v1.5", "all-minilm-l6-v2"])
 def quality_library(
+    request,
     db_session,
     make_model,
     make_user,
@@ -31,7 +32,7 @@ def quality_library(
     monkeypatch,
 ):
     root = FIXTURES_DIR / "search"
-    measured = PrecomputedEmbeddings(root / "bge-small-en-v1.5-vectors.json")
+    measured = PrecomputedEmbeddings(root / f"{request.param}-vectors.json")
     assert (
         measured.payload["corpus_sha256"]
         == hashlib.sha256((root / "corpus.json").read_bytes()).hexdigest()
@@ -64,7 +65,9 @@ def quality_library(
             )
         ).one()
         make_passage_vector(
-            generation, passage=passage, vector_blob=measured.blob(passage.text)
+            generation,
+            passage=passage,
+            vector_blob=measured.blob(space.document_prefix + passage.text),
         )
     configuration.update(db_session, SearchSettings(enabled=True))
     lexical_index.rebuild_partition(db_session)

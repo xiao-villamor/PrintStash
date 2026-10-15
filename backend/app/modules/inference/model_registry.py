@@ -31,6 +31,8 @@ class RegistryEntry:
     visual_revision: str | None = None
     visual_license: str | None = None
     visual_languages: tuple[str, ...] = ()
+    # The text model guided setup offers first; at most one entry carries it.
+    recommended: bool = False
 
     @property
     def repository(self) -> str:
@@ -86,6 +88,9 @@ def entries() -> tuple[RegistryEntry, ...]:
     manifest = TextModelManifest.model_validate_json(
         (Path(__file__).parent / "registry" / "bge-small-en-v1.5.json").read_bytes()
     )
+    minilm = TextModelManifest.model_validate_json(
+        (Path(__file__).parent / "registry" / "all-minilm-l6-v2.json").read_bytes()
+    )
     clip = LocalModelManifest.model_validate_json(
         (
             Path(__file__).parent / "registry" / "clip-vit-base-patch32-fp32.json"
@@ -120,6 +125,24 @@ def entries() -> tuple[RegistryEntry, ...]:
                     "tokenizer.json",
                     711396,
                     manifest.text.tokenizer.sha256,
+                ),
+            ),
+            recommended=True,
+        ),
+        RegistryEntry(
+            minilm,
+            (
+                DownloadAsset(
+                    "model.onnx",
+                    "onnx/model.onnx",
+                    90405214,
+                    minilm.text.graph.sha256,
+                ),
+                DownloadAsset(
+                    "tokenizer.json",
+                    "tokenizer.json",
+                    466247,
+                    minilm.text.tokenizer.sha256,
                 ),
             ),
         ),

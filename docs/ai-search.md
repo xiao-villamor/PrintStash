@@ -265,8 +265,22 @@ at commit `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a`: English, MIT, 384 native
 float dimensions, CLS pooling, 512-token maximum, explicit query prefix.
 The graph is 133,093,490 bytes and the tokenizer 711,396 bytes. The checked-in
 registry manifest specifies both SHA-256 values, tensor names, opset and an
-independently measured canary. Other models are not advertised as validated by
-this catalog yet.
+independently measured canary. Guided setup offers BGE first (`recommended` in
+`GET /api/v1/inference/models`).
+
+The catalog also offers
+[sentence-transformers/all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/tree/1110a243fdf4706b3f48f1d95db1a4f5529b4d41)
+at commit `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`: English, Apache-2.0, 384
+native float dimensions, mean pooling, 256-token maximum (the model's
+sentence-transformers limit), no prefixes. The graph is 90,405,214 bytes and
+the tokenizer 466,247 bytes. Its canary was computed from the pinned ONNX export
+with ONNX Runtime and matches sentence-transformers on the PyTorch weights to
+within 1.3e-7. On the regression corpus it reaches hybrid recall@5 of 0.91
+(BGE 0.97); its only misses are the Spanish cross-language queries. A query
+embeds in about 11 ms against BGE's 24 ms on the same CPU, and the worker peaks
+near 420 MB against BGE's 610 MB. Its calibrated single-word floor (maximum
+unrelated cosine plus 0.01: 0.34) is below the generic 0.35, so the generic
+floor applies unchanged and keeps every relevant result the model ranks.
 
 `GET /api/v1/inference/models` lists installed and curated models for administrators,
 including languages, license, measured bytes and whether the optional runtime
@@ -317,6 +331,10 @@ cd backend
 AI_SEARCH_TEXT_ASSETS=/absolute/path/to/bge uv run pytest \
   tests/integration/modules/inference/preplaced_text.py -q -s
 ```
+
+`AI_SEARCH_TEXT_MODEL=all-minilm-l6-v2` runs the same lane for another curated
+text model. `python -m tests.fakes.search_text_fixture --model-key <key>`
+regenerates that model's regression vectors from preplaced files.
 
 ## Search and operational UI
 

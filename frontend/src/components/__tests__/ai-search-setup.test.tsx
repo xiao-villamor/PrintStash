@@ -133,6 +133,69 @@ describe("AiSearchSetup", () => {
     });
     expect(app.requestsWithMethod("POST")[0].url).toContain(`/models/${model.key}/download`);
   });
+  it("offers the recommended model first over a smaller one", async () => {
+    const recommended = anInferenceModel({ installed: false });
+    const smaller = anInferenceModel({
+      id: "b".repeat(64),
+      key: "all-minilm-l6-v2",
+      installed: false,
+      recommended: false,
+      size_bytes: 90880310,
+    });
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/inference/models": json([smaller, recommended]),
+      },
+    });
+    expect(await screen.findByRole("radio", { name: /bge-small-en-v1\.5/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /all-minilm-l6-v2/ })).not.toBeChecked();
+  });
+  it("downloads the smaller model when chosen", async () => {
+    const smaller = anInferenceModel({
+      id: "b".repeat(64),
+      key: "all-minilm-l6-v2",
+      installed: false,
+      recommended: false,
+      size_bytes: 90880310,
+    });
+    const app = setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(
+          searchConfiguration({ settings: { ...enabled, download_enabled: true } }),
+        ),
+        "GET /api/v1/inference/models": json([anInferenceModel({ installed: false }), smaller]),
+        "POST /api/v1/inference/models/": json({ job_id: "download-1" }),
+      },
+    });
+    await userEvent.click(await screen.findByRole("radio", { name: /all-minilm-l6-v2/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Allow download and continue" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    expect(app.requestsWithMethod("POST")[0].url).toContain("/models/all-minilm-l6-v2/download");
+  });
+  it("labels each model choice for comparison", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/inference/models": json([
+          anInferenceModel({ installed: false }),
+          anInferenceModel({
+            id: "b".repeat(64),
+            key: "all-minilm-l6-v2",
+            installed: false,
+            recommended: false,
+            size_bytes: 90880310,
+          }),
+        ]),
+      },
+    });
+    expect(
+      await screen.findByRole("radio", {
+        name: /^bge-small-en-v1\.5 [\d.]+ MB · en · Recommended$/,
+      }),
+    ).toBeVisible();
+    expect(screen.getByRole("radio", { name: /^all-minilm-l6-v2 [\d.]+ MB · en$/ })).toBeVisible();
+  });
   it("prepares a library using safe defaults", async () => {
     const app = setup({
       routes: {
