@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- AI Search preparation now shows its four steps (check library content, index
+  passages, catch up on recent changes, verify the index), which one is running
+  and what it does, and how many passages are waiting for a retry. A prepared or
+  active index shows an **Index check**: entries indexed out of searchable
+  entries, entries waiting for a retry or shortened to fit the model, the model,
+  and when verification last passed.
+
 - Upgrading from 0.13.0 or 0.14.0 no longer requires draining derivation work
   first. Work still waiting under the old ordering is re-ranked on start instead
   of stopping the container in a restart loop with
