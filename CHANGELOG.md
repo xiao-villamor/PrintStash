@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Local AI models use less memory: each worker now loads a model's weights once
+  instead of twice and keeps a single tokenizer. Peak worker memory drops from
+  about 610 MB to 500 MB for bge-small-en-v1.5. Graphs still load only after
+  their digest and structure checks pass, now through a pinned file
+  descriptor, so a file swapped in after the check is never loaded.
+
 - Upgrading from 0.13.0 or 0.14.0 no longer requires draining derivation work
   first. Work still waiting under the old ordering is re-ranked on start instead
   of stopping the container in a restart loop with

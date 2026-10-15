@@ -292,6 +292,13 @@ capacity; the cache cap includes staging bytes. Least-recently-used pruning
 only removes unreferenced models. Active, building and retained generations
 protect their encoder, and an OS file lock prevents pruning during loading.
 
+Loading pins each graph by file descriptor, checks its digest (and, for text,
+point and sparse graphs, the opset, operator-domain and no-external-data rules)
+on that descriptor, and builds the ONNX Runtime session from it. A file renamed
+over the graph after the check is never what loads. ONNX Runtime keeps a copy of
+a model handed to it as bytes, so loading by descriptor holds the weights once.
+A worker keeps one tokenizer and counts untruncated tokens on it under a lock.
+
 For air-gapped operation, place the reviewed `manifest.json` and every named
 asset in a child directory of the model cache. The previous
 `VAULT_EMBEDDING_LOCAL_MODEL_DIR` custom directory is also discovered, can be

@@ -84,7 +84,11 @@ class SparseNativeProvider:
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
-        from app.modules.inference.onnx_cpu import OnnxCpuProvider, _verified_bytes
+        from app.modules.inference.onnx_cpu import (
+            OnnxCpuProvider,
+            _verified_bytes,
+            verified_graph,
+        )
 
         if type(threads) is not int or not 1 <= threads <= 4:
             raise EmbeddingError("embedding_thread_budget_invalid")
@@ -106,19 +110,20 @@ class SparseNativeProvider:
         }
         self.bounded_tokenizer = Tokenizer.from_str(self.tokenizer.to_str())
         self.bounded_tokenizer.enable_truncation(max_length=manifest.max_tokens)
-        payload = _verified_bytes(directory, manifest.graph)
-        OnnxCpuProvider._verify_text_graph(payload, manifest.opset)
         options = ort.SessionOptions()
         options.intra_op_num_threads, options.inter_op_num_threads = threads, 1
         options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         options.enable_cpu_mem_arena = options.enable_mem_pattern = False
         options.add_session_config_entry("session.intra_op.allow_spinning", "0")
         options.add_session_config_entry("session.inter_op.allow_spinning", "0")
-        self.model = (
-            ort.InferenceSession(payload, options, providers=["CPUExecutionProvider"])
-            if session_factory is None
-            else session_factory(payload, options)
-        )
+        with verified_graph(directory, manifest.graph, opset=manifest.opset) as source:
+            self.model = (
+                ort.InferenceSession(
+                    source, options, providers=["CPUExecutionProvider"]
+                )
+                if session_factory is None
+                else session_factory(source, options)
+            )
         self.model.disable_fallback()
         expected = {
             manifest.input_name,
