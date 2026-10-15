@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- AI Search preparation now shows its four steps (check library content, index
+  passages, catch up on recent changes, verify the index), which one is running
+  and what it does, and how many passages are waiting for a retry. A prepared or
+  active index shows an **Index check**: entries indexed out of searchable
+  entries, entries waiting for a retry or shortened to fit the model, the model,
+  and when verification last passed.
+
 - Local AI models use less memory: each worker now loads a model's weights once
   instead of twice and keeps a single tokenizer. Loading bge-small-en-v1.5
   peaks near 290 MB instead of 375 MB. Graphs still load only after

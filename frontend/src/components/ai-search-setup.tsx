@@ -8,6 +8,10 @@ import { Check, HardDrive, Server, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
+import {
+  SearchIndexHealth,
+  SearchPreparationStages,
+} from "@/components/search-preparation-progress";
 import { estimateSearchGeneration } from "@/lib/api/search";
 import { searchStatusOptions, useSearchCommands, type AiSearchCatalog } from "@/lib/queries/search";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
@@ -366,6 +370,7 @@ export function AiSearchSetup({
                   {t("Describe what you want to print. Try “a holder for my tools”.")}
                 </p>
               </div>
+              <SearchIndexHealth generation={active} />
               <div className="flex flex-wrap gap-3">
                 <Button asChild>
                   <Link to="/search?q=a%20holder%20for%20my%20tools">
@@ -401,6 +406,7 @@ export function AiSearchSetup({
               <p role="status" className="text-sm font-medium">
                 {phaseLabel}
               </p>
+              <SearchPreparationStages generation={building} />
               {building.phase === "backfill" && (
                 <>
                   <progress
@@ -420,8 +426,14 @@ export function AiSearchSetup({
                       {t("aiSearch.eta", { time: formatDuration(building.eta_seconds) })}
                     </p>
                   )}
+                  {building.quarantined > 0 && (
+                    <p className="text-sm text-warning">
+                      {t("aiSearch.quarantined", { count: building.quarantined })}
+                    </p>
+                  )}
                 </>
               )}
+              {building.phase === "ready" && <SearchIndexHealth generation={building} />}
               {building.error_code && (
                 <p role="alert" className="text-sm text-warning">
                   {building.phase === "verify_failed"

@@ -1,5 +1,5 @@
 /** Guided AI setup keeps consent explicit and advances only after successful server operations. */
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { AiSearchSettings } from "@/components/ai-search-settings";
@@ -415,6 +415,57 @@ describe("AiSearchSetup", () => {
       "/search?q=a%20holder%20for%20my%20tools",
     );
     expect(screen.queryByRole("button", { name: "Prepare my library" })).not.toBeInTheDocument();
+  });
+  it("shows the check of the index in use", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/config/ai-search/generations": json([
+          aSearchGeneration({ state: "active", eligible: 567, indexed: 567 }),
+        ]),
+      },
+    });
+    const check = await screen.findByRole("region", { name: "Index check" });
+    expect(within(check).getByText("567 of 567 indexed")).toBeVisible();
+  });
+  it("shows the check of a prepared index before it is used", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search/generations": json([
+          aSearchGeneration({ state: "building", phase: "ready", eligible: 9, indexed: 9 }),
+        ]),
+      },
+    });
+    const check = await screen.findByRole("region", { name: "Index check" });
+    expect(within(check).getByText("9 of 9 indexed")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Use prepared search" })).toBeVisible();
+  });
+  it("lists the preparation steps while indexing", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search/generations": json([
+          aSearchGeneration({ state: "building", phase: "backfill", eligible: 10, indexed: 4 }),
+        ]),
+      },
+    });
+    expect(await screen.findByRole("list", { name: "Preparation steps" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Index check" })).not.toBeInTheDocument();
+  });
+  it("warns about passages waiting for a retry while indexing", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search/generations": json([
+          aSearchGeneration({
+            state: "building",
+            phase: "backfill",
+            eligible: 10,
+            indexed: 4,
+            quarantined: 2,
+          }),
+        ]),
+      },
+    });
+    expect(await screen.findByText("2 passages need a retry")).toBeVisible();
   });
   it("resumes an existing setup", async () => {
     setup({
