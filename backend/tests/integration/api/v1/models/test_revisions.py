@@ -125,6 +125,55 @@ class TestAddGcodeRevision:
             {"detail": "remote_writeback_disabled"},
         )
 
+    @pytest.mark.parametrize(
+        ("vault_file", "status"),
+        [("live", 200), ("trashed", 409)],
+        ids=["vault-artifact-keeps-it-in-the-vault", "trashed-vault-artifact-does-not"],
+    )
+    def test_a_vault_model_a_remote_source_also_indexes_takes_revisions_in_the_vault(
+        self,
+        client: TestClient,
+        auth_headers,
+        model: Model,
+        local_storage,
+        db_session: Session,
+        vault_file: str,
+        status: int,
+    ) -> None:
+        # The model was uploaded here; a remote source later indexed the same
+        # mesh. The source only references the model, so the revision belongs
+        # in the vault the model already lives in, not in the read-only source.
+        config = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={"external_libraries_enabled": True},
+        )
+        assert config.status_code == 200, config.text
+        build_file(
+            db_session, model, filename="part.stl", trashed=vault_file == "trashed"
+        )
+        library = build_external_library(
+            db_session, "source://1", source_kind=LibrarySourceKind.S3
+        )
+        build_file(
+            db_session,
+            model,
+            filename="part.stl",
+            external=True,
+            external_library_id=library.id,
+        )
+
+        response = client.post(
+            f"/api/v1/models/{model.id}/gcode-revisions",
+            headers=auth_headers,
+            files={"file": ("tighter-fit.gcode", GCODE, "text/plain")},
+        )
+
+        assert response.status_code == status, response.text
+        if status == 200:
+            (revision,) = _gcode_files(response.json())
+            assert revision["is_external"] is False
+
     def test_numbers_revisions_in_upload_order(
         self,
         client: TestClient,
