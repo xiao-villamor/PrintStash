@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ArrowLeft,
@@ -24,25 +25,23 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   cleanupStorageCache,
   cleanupStorageStaging,
-  getCollectionStorage,
   getModelStorage,
-  getStorageCapacityActivity,
-  getStorageCleanupOpportunities,
-  getStorageInventory,
   sampleStorageInventory,
   type CollectionStorageRow,
-  type CleanupOpportunity,
   type ModelStorageRow,
-  type StorageCapacityActivity,
-  type StorageInventoryReport,
 } from "@/lib/api/storage-inventory";
+import {
+  COLLECTION_PAGE_SIZE as PAGE_SIZE,
+  collectionStorageOptions,
+  storageInsightsKeys,
+  storageInsightsOptions,
+} from "@/lib/queries/storage-insights";
 import { useI18n } from "@/lib/i18n";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { bytesByWhere, placeKind } from "@/lib/storage-locations";
 import { formatBytes } from "@printstash/domain/format";
 import { knownUiText } from "@/lib/locale";
 
-const PAGE_SIZE = 10;
 const DESKTOP_MODEL_PAGE_SIZE = 8;
 const MOBILE_MODEL_PAGE_SIZE = 5;
 
@@ -100,12 +99,15 @@ export function StorageInventoryPanel() {
     ? DESKTOP_MODEL_PAGE_SIZE
     : MOBILE_MODEL_PAGE_SIZE;
   const previousModelPageSize = useRef(modelPageSize);
-  const [report, setReport] = useState<StorageInventoryReport | null>(null);
-  const [activity, setActivity] = useState<StorageCapacityActivity | null>(null);
-  const [collections, setCollections] = useState<CollectionStorageRow[]>([]);
-  const [hasMoreCollections, setHasMoreCollections] = useState(false);
-  const [cleanupPreviews, setCleanupPreviews] = useState<CleanupOpportunity[]>([]);
+  const client = useQueryClient();
+  const summaryRead = useQuery(storageInsightsOptions());
   const [collectionOffset, setCollectionOffset] = useState(0);
+  const collectionsRead = useQuery(collectionStorageOptions(collectionOffset));
+  const report = summaryRead.data?.report ?? null;
+  const activity = summaryRead.data?.activity ?? null;
+  const cleanupPreviews = summaryRead.data?.cleanup ?? [];
+  const collections = collectionsRead.data?.rows ?? [];
+  const hasMoreCollections = collectionsRead.data?.hasMore ?? false;
   const [models, setModels] = useState<ModelStorageRow[]>([]);
   const [hasMoreModels, setHasMoreModels] = useState(false);
   const [modelOffset, setModelOffset] = useState(0);
@@ -115,63 +117,32 @@ export function StorageInventoryPanel() {
   const [modelsBusy, setModelsBusy] = useState(false);
   const [modelsError, setModelsError] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
+  const [commandFailed, setCommandFailed] = useState(false);
+  const error = commandFailed || summaryRead.isError;
   const [cleanupTarget, setCleanupTarget] = useState<"staging" | "cache" | null>(null);
   const [result, setResult] = useState<string | null>(null);
 
-  const loadCollectionPage = useCallback(async (offset: number) => {
-    try {
-      const rows = await getCollectionStorage(offset, PAGE_SIZE + 1);
-      setCollections(Array.isArray(rows) ? rows.slice(0, PAGE_SIZE) : []);
-      setHasMoreCollections(Array.isArray(rows) && rows.length > PAGE_SIZE);
-      setCollectionOffset(offset);
-      modelRequestRef.current += 1;
-      setSelectedCollection(null);
-      setLoadingCollectionId(null);
-      setModelsBusy(false);
-    } catch {
-      setCollections([]);
-      setHasMoreCollections(false);
-    }
-  }, []);
+  function showCollectionPage(offset: number) {
+    setCollectionOffset(offset);
+    closeModels();
+  }
 
-  const load = useCallback(async () => {
-    try {
-      const current = await getStorageInventory();
-      setReport(current);
-      setError(false);
-      const [nextActivity, , nextCleanup] = await Promise.allSettled([
-        getStorageCapacityActivity(),
-        loadCollectionPage(0),
-        getStorageCleanupOpportunities(),
-      ]);
-      if (
-        nextActivity.status === "fulfilled" &&
-        Array.isArray(nextActivity.value.active_reservations) &&
-        Array.isArray(nextActivity.value.recent_denials)
-      ) {
-        setActivity(nextActivity.value);
-      }
-      if (nextCleanup.status === "fulfilled" && Array.isArray(nextCleanup.value)) {
-        setCleanupPreviews(nextCleanup.value);
-      }
-    } catch {
-      setError(true);
+  /** Re-read every cached insight; the current figures stay on screen meanwhile. */
+  async function reload() {
+    await client.invalidateQueries({ queryKey: storageInsightsKeys.all });
+    if (client.getQueryState(storageInsightsKeys.summary)?.status === "error") {
+      throw new Error("storage_insights_unavailable");
     }
-  }, [loadCollectionPage]);
-
-  useEffect(() => {
-    // oxlint-disable-next-line react/set-state-in-effect -- state updates follow the request continuation.
-    void load();
-  }, [load]);
+  }
 
   async function refresh() {
     setBusy(true);
     try {
       await sampleStorageInventory();
-      await load();
+      await reload();
+      setCommandFailed(false);
     } catch {
-      setError(true);
+      setCommandFailed(true);
     } finally {
       setBusy(false);
     }
@@ -197,9 +168,10 @@ export function StorageInventoryPanel() {
         );
       }
       setCleanupTarget(null);
-      await load();
+      await reload();
+      setCommandFailed(false);
     } catch {
-      setError(true);
+      setCommandFailed(true);
     } finally {
       setBusy(false);
     }
@@ -954,7 +926,7 @@ export function StorageInventoryPanel() {
                         size="sm"
                         disabled={collectionOffset === 0}
                         onClick={() =>
-                          void loadCollectionPage(Math.max(0, collectionOffset - PAGE_SIZE))
+                          showCollectionPage(Math.max(0, collectionOffset - PAGE_SIZE))
                         }
                       >
                         {t("Previous page")}
@@ -963,7 +935,7 @@ export function StorageInventoryPanel() {
                         variant="outline"
                         size="sm"
                         disabled={!hasMoreCollections}
-                        onClick={() => void loadCollectionPage(collectionOffset + PAGE_SIZE)}
+                        onClick={() => showCollectionPage(collectionOffset + PAGE_SIZE)}
                       >
                         {t("Next page")}
                       </Button>

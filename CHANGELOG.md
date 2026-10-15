@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Settings no longer re-measures **Storage insights** or re-checks **Server
+  GPU** every time you open them. Both took several seconds to load; each
+  answer is now kept for the session. Storage insights are measured again after
+  the library changes or when you choose **Refresh measurement**, and the GPU
+  status when you choose **Check again**. The last figures stay on screen while
+  a new measurement runs.
+
 - AI Search can run a second local text model: **all-MiniLM-L6-v2** (English,
   90 MB). It embeds a query in about half the time BGE takes and needs less
   memory, at slightly lower recall. BGE stays the recommended default; the
