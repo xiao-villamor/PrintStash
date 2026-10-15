@@ -56,6 +56,17 @@ class TestWorkerMemoryBudget:
     def test_preserves_configured_per_model_ceiling(self, memory_policy):
         assert inference_resources.worker_memory_budget_bytes() == 1024**3
 
+    def test_default_ceiling_takes_the_partition_of_an_8_gib_host(self, memory_policy):
+        memory_policy.embedding_worker_memory_mb = 4096
+        assert inference_resources.worker_memory_budget_bytes() == 2 * 1024**3
+
+    def test_default_ceiling_holds_on_a_large_host(self, memory_policy, monkeypatch):
+        memory_policy.embedding_worker_memory_mb = 4096
+        monkeypatch.setattr(
+            inference_resources, "memory_limit_bytes", lambda: 32 * 1024**3
+        )
+        assert inference_resources.worker_memory_budget_bytes() == 4 * 1024**3
+
     def test_fits_the_physical_residency_partition(self, memory_policy, monkeypatch):
         monkeypatch.setattr(inference_resources, "memory_limit_bytes", lambda: 1024**3)
         assert inference_resources.worker_memory_budget_bytes() == 256 * 1024**2
