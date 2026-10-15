@@ -363,9 +363,15 @@ pending provider/model/transform choices. Catalog entries show pinned provenance
 license, languages and measured asset size. Downloads require explicit action;
 preplaced models require verification. History exposes progress, last activity,
 measured ETA when available, valid cancel/retry/activate actions and failures.
-Guided setup shows the current preparation phase. Passage reconciliation runs
-before vector indexing, so its progress has no vector count; the indexed/eligible
-count and measured ETA appear during backfill. Local ONNX inference uses the CPU
+Guided setup lists the four preparation steps (check library content, index
+passages, catch up on recent changes, verify the index), marks which are done,
+and explains what the running step does. Passage reconciliation runs before
+vector indexing, so its progress has no vector count; the indexed/eligible
+count, measured ETA and any passages waiting for a retry appear during
+backfill. Once an index is verified, and for the index in use, an **Index
+check** reports indexed/eligible entries, entries waiting for a retry, entries
+shortened to the model's token limit, the model, and when verification last
+passed. A healthy index has every entry indexed and none waiting for a retry. Local ONNX inference uses the CPU
 only. A GPU on the host does not accelerate this provider; a separately configured
 embedding server may use different hardware.
 The ETA uses recent completed vectors and remains unknown until at least four
