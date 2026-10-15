@@ -32,6 +32,14 @@ test.describe("AI Search local models", () => {
             size_bytes: 90880310,
           }),
           anInferenceModel({ installed: false }),
+          anInferenceModel({
+            id: "c".repeat(64),
+            key: "multilingual-e5-small",
+            installed: false,
+            recommended: false,
+            languages: Array.from({ length: 93 }, (_, index) => `l${index}`),
+            size_bytes: 487351240,
+          }),
         ],
       }),
     );
@@ -51,6 +59,9 @@ test.describe("AI Search local models", () => {
       const smaller = page.getByRole("radio", { name: /all-minilm-l6-v2 [\d.]+ MB · en$/ });
       await expect(recommended).toBeChecked();
       await expect(smaller).not.toBeChecked();
+      await expect(
+        page.getByRole("radio", { name: /multilingual-e5-small [\d.]+ MB · 93 languages$/ }),
+      ).not.toBeChecked();
       await smaller.check();
       await expect(page.getByText(/Download size: 86\.7 MB/)).toBeVisible();
       expect(

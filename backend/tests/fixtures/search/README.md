@@ -11,6 +11,10 @@ with the pinned all-MiniLM-L6-v2 export (`python -m tests.fakes.search_text_fixt
 --model-key all-minilm-l6-v2`). Spanish remains a stress case: it is an English
 model.
 
+`multilingual-e5-small-vectors.json` does the same for the pinned
+multilingual-e5-small export, with its `passage: ` and `query: ` prefixes in
+the embedded (and hashed) text. Spanish is a supported language for it.
+
 SPLADE continuous term weights in `splade-pp-en-v1-terms.json` are measured with
 the pinned Apache-2.0 export declared in the inference model registry. They
 bind the same original CC0 corpus and query hashes. They are neither generated

@@ -3838,6 +3838,10 @@
   "aiSearch.compatibleServers": "Compatible servers",
   "aiSearch.modelsError": "The model catalog could not load. Refresh to try again.",
   "aiSearch.languages": "Languages",
+  "aiSearch.languageCount": {
+    "one": "{count} language",
+    "other": "{count} languages"
+  },
   "aiSearch.license": "License",
   "aiSearch.unspecified": "Not specified",
   "aiSearch.modelSize": "Model files",

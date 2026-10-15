@@ -91,6 +91,9 @@ def entries() -> tuple[RegistryEntry, ...]:
     minilm = TextModelManifest.model_validate_json(
         (Path(__file__).parent / "registry" / "all-minilm-l6-v2.json").read_bytes()
     )
+    e5 = TextModelManifest.model_validate_json(
+        (Path(__file__).parent / "registry" / "multilingual-e5-small.json").read_bytes()
+    )
     clip = LocalModelManifest.model_validate_json(
         (
             Path(__file__).parent / "registry" / "clip-vit-base-patch32-fp32.json"
@@ -143,6 +146,23 @@ def entries() -> tuple[RegistryEntry, ...]:
                     "tokenizer.json",
                     466247,
                     minilm.text.tokenizer.sha256,
+                ),
+            ),
+        ),
+        RegistryEntry(
+            e5,
+            (
+                DownloadAsset(
+                    "model.onnx",
+                    "onnx/model.onnx",
+                    470268510,
+                    e5.text.graph.sha256,
+                ),
+                DownloadAsset(
+                    "tokenizer.json",
+                    "tokenizer.json",
+                    17082730,
+                    e5.text.tokenizer.sha256,
                 ),
             ),
         ),

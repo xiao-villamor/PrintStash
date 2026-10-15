@@ -600,7 +600,11 @@ export function AiSearchSetup({
                                       <span className="mt-1 block text-xs opacity-80">
                                         {[
                                           formatBytes(model.size_bytes),
-                                          model.languages.join(", "),
+                                          model.languages.length > 3
+                                            ? t("aiSearch.languageCount", {
+                                                count: model.languages.length,
+                                              })
+                                            : model.languages.join(", "),
                                           ...(model.recommended ? [t("Recommended")] : []),
                                         ].join(" · ")}
                                       </span>

@@ -282,6 +282,18 @@ near 420 MB against BGE's 610 MB. Its calibrated single-word floor (maximum
 unrelated cosine plus 0.01: 0.34) is below the generic 0.35, so the generic
 floor applies unchanged and keeps every relevant result the model ranks.
 
+For libraries that are not only in English the catalog offers
+[intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small/tree/614241f622f53c4eeff9890bdc4f31cfecc418b3)
+at commit `614241f622f53c4eeff9890bdc4f31cfecc418b3`: about 93 languages
+including Spanish, MIT, 384 native float dimensions, mean pooling, 512-token
+maximum, `query: `/`passage: ` prefixes. The graph is 470,268,510 bytes and the
+tokenizer 17,082,730 bytes; its canary matches sentence-transformers to within
+8.6e-8. It retrieves every labelled query of the regression corpus natively,
+the Spanish ones included (hybrid recall@5 0.97), and embeds a query in about
+16 ms. Its large vocabulary needs a worker near 1.15 GB, which the default
+4 GiB ceiling allows on hosts with at least 6 GB of RAM. Its cosine scores sit
+high (unrelated pairs near 0.77), so its single-word floor is 0.85.
+
 `GET /api/v1/inference/models` lists installed and curated models for administrators,
 including languages, license, measured bytes and whether the optional runtime
 is installed. Listing performs no networking or inference. An installed entry

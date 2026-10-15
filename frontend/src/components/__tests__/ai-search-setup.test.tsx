@@ -196,6 +196,27 @@ describe("AiSearchSetup", () => {
     ).toBeVisible();
     expect(screen.getByRole("radio", { name: /^all-minilm-l6-v2 [\d.]+ MB · en$/ })).toBeVisible();
   });
+  it("counts the languages of a multilingual model", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/inference/models": json([
+          anInferenceModel({ installed: false }),
+          anInferenceModel({
+            id: "c".repeat(64),
+            key: "multilingual-e5-small",
+            installed: false,
+            recommended: false,
+            languages: ["en", "es", "fr", "de"],
+            size_bytes: 487351240,
+          }),
+        ]),
+      },
+    });
+    expect(
+      await screen.findByRole("radio", { name: /^multilingual-e5-small [\d.]+ MB · 4 languages$/ }),
+    ).toBeVisible();
+  });
   it("prepares a library using safe defaults", async () => {
     const app = setup({
       routes: {

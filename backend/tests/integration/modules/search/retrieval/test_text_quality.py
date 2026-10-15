@@ -20,7 +20,9 @@ from tests.fakes.precomputed_embeddings import PrecomputedEmbeddings
 from tests.paths import FIXTURES_DIR
 
 
-@pytest.fixture(params=["bge-small-en-v1.5", "all-minilm-l6-v2"])
+@pytest.fixture(
+    params=["bge-small-en-v1.5", "all-minilm-l6-v2", "multilingual-e5-small"]
+)
 def quality_library(
     request,
     db_session,
@@ -131,3 +133,37 @@ class TestTextQuality:
         )
         assert metrics["hybrid"] >= 0.9
         assert metrics["bm25"] >= 0.6
+
+
+class TestTextFloors:
+    @pytest.mark.parametrize(
+        "model_key,single_word",
+        [
+            ("bge-small-en-v1.5", 0.67),
+            ("all-minilm-l6-v2", 0.35),
+            ("multilingual-e5-small", 0.85),
+        ],
+    )
+    def test_applies_the_calibrated_single_word_floor(self, model_key, single_word):
+        from app.modules.search.query_context import SemanticLeg
+
+        space = PrecomputedEmbeddings(
+            FIXTURES_DIR / "search" / f"{model_key}-vectors.json"
+        ).space
+        settings = SearchSettings()
+        leg = SemanticLeg("semantic_text", 1, space, 0.35, 1.0, 5.0)
+
+        assert semantic.for_query(leg, settings, "bracket").floor == single_word
+
+    @pytest.mark.parametrize(
+        "model_key", ["bge-small-en-v1.5", "all-minilm-l6-v2", "multilingual-e5-small"]
+    )
+    def test_keeps_the_generic_floor_for_several_words(self, model_key):
+        from app.modules.search.query_context import SemanticLeg
+
+        space = PrecomputedEmbeddings(
+            FIXTURES_DIR / "search" / f"{model_key}-vectors.json"
+        ).space
+        leg = SemanticLeg("semantic_text", 1, space, 0.35, 1.0, 5.0)
+
+        assert semantic.for_query(leg, SearchSettings(), "wall bracket").floor == 0.35

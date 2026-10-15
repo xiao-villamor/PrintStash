@@ -1,4 +1,4 @@
-"""An administrator can choose and request the small English text model over HTTP."""
+"""An administrator can choose and request each added local text model over HTTP."""
 
 import pytest
 
@@ -10,8 +10,9 @@ pytestmark = pytest.mark.asyncio
 
 
 class TestLocalTextModels:
-    async def test_queues_a_download_of_the_small_english_model(
-        self, api, superuser_headers, tmp_path, monkeypatch
+    @pytest.mark.parametrize("key", ["all-minilm-l6-v2", "multilingual-e5-small"])
+    async def test_queues_a_download_of_an_added_model(
+        self, key, api, superuser_headers, tmp_path, monkeypatch
     ):
         monkeypatch.setitem(_overlay, "embedding_cache_dir", tmp_path / "models")
         response = await api.put(
@@ -31,12 +32,16 @@ class TestLocalTextModels:
             for row in response.json()
             if row["modality"] == "text" and row["curated"]
         }
-        assert offered.keys() == {"bge-small-en-v1.5", "all-minilm-l6-v2"}
-        minilm = offered["all-minilm-l6-v2"]
-        assert not minilm["installed"]
+        assert offered.keys() == {
+            "bge-small-en-v1.5",
+            "all-minilm-l6-v2",
+            "multilingual-e5-small",
+        }
+        chosen = offered[key]
+        assert not chosen["installed"]
 
         response = await api.post(
-            "/api/v1/inference/models/all-minilm-l6-v2/download",
+            f"/api/v1/inference/models/{key}/download",
             headers=superuser_headers,
         )
 
@@ -47,4 +52,4 @@ class TestLocalTextModels:
             JobKind.INFERENCE_MODEL_DOWNLOAD,
             "queued",
         )
-        assert status.result == {"model_id": minilm["id"]}
+        assert status.result == {"model_id": chosen["id"]}

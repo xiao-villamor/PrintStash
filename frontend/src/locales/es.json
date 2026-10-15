@@ -3838,6 +3838,10 @@
   "aiSearch.compatibleServers": "Servidores compatibles",
   "aiSearch.modelsError": "No se pudo cargar el catálogo de modelos. Actualiza para reintentar.",
   "aiSearch.languages": "Idiomas",
+  "aiSearch.languageCount": {
+    "one": "{count} idioma",
+    "other": "{count} idiomas"
+  },
   "aiSearch.license": "Licencia",
   "aiSearch.unspecified": "Sin especificar",
   "aiSearch.modelSize": "Archivos del modelo",

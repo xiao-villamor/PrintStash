@@ -43,6 +43,13 @@ _CLIP_B32 = "7f56e23951620776f8a65d4de5441b6ff1eecd1f48c8ddf1eca8a82f1dea2089"
 _OPENSHAPE_B32 = "4f845433d48ed5f38609b1538118ea8761405d528f750eb07784fbb795ffe448"
 
 
+# Single-word floors of the pinned local text encoders, by key and revision.
+_SINGLE_WORD_FLOORS = {
+    ("bge-small-en-v1.5", "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"): 0.67,
+    ("multilingual-e5-small", "614241f622f53c4eeff9890bdc4f31cfecc418b3"): 0.85,
+}
+
+
 def score_floor(space: Space, settings: SearchSettings) -> float:
     default = (
         0.1
@@ -59,8 +66,10 @@ def for_query(leg: SemanticLeg, settings: SearchSettings, query) -> SemanticLeg:
     """Single-word object queries need stricter calibrated native-score floors.
 
     Calibration negatives plus a 0.01 safety margin, rounded upward to 0.01:
-    BGE 0.6542 -> 0.67; thumbnail CLIP 0.2592 -> 0.27. Multiword benchmarks and
-    other profiles retain their independently measured policies. Overrides win.
+    BGE 0.6542 -> 0.67; e5-small 0.8313 -> 0.85; thumbnail CLIP 0.2592 -> 0.27.
+    MiniLM's 0.3239 -> 0.34 is below the generic floor, so it needs no entry.
+    Multiword benchmarks and other profiles retain their independently measured
+    policies. Overrides win.
     """
     if (
         not isinstance(query, str)
@@ -70,12 +79,13 @@ def for_query(leg: SemanticLeg, settings: SearchSettings, query) -> SemanticLeg:
         return leg
     space = leg.space
     floor = leg.floor
-    if (
-        space.provider == "onnx_cpu"
-        and space.model_key == "bge-small-en-v1.5"
-        and space.model_revision == "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a"
-    ):
-        floor = max(floor, 0.67)
+    calibrated = (
+        _SINGLE_WORD_FLOORS.get((space.model_key, space.model_revision))
+        if space.provider == "onnx_cpu"
+        else None
+    )
+    if calibrated is not None:
+        floor = max(floor, calibrated)
     elif space.profile == "thumbnail" and space.alignment_identity == _CLIP_B32:
         floor = max(floor, 0.27)
     return replace(leg, floor=floor)

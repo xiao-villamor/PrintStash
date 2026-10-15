@@ -63,6 +63,17 @@ class TestInferenceModels:
         assets = 90405214 + 466247
         assert assets < minilm["size_bytes"] <= assets + 256 * 1024
 
+    def test_offers_the_small_multilingual_text_model(self, client, auth_headers):
+        response = client.get("/api/v1/inference/models", headers=auth_headers)
+        assert response.status_code == 200
+        e5 = next(
+            row for row in response.json() if row["key"] == "multilingual-e5-small"
+        )
+        assert (e5["modality"], e5["curated"], e5["installed"]) == ("text", True, False)
+        assert "es" in e5["languages"]
+        assets = 470268510 + 17082730
+        assert assets < e5["size_bytes"] <= assets + 256 * 1024
+
     def test_recommends_only_the_guided_default(self, client, auth_headers):
         response = client.get("/api/v1/inference/models", headers=auth_headers)
         assert response.status_code == 200

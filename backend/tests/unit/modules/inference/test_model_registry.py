@@ -40,6 +40,44 @@ class TestModelRegistry:
         manifest = require("all-minilm-l6-v2").manifest
         assert (manifest.query_prefix, manifest.document_prefix) == ("", "")
 
+    def test_pins_the_small_multilingual_text_export(self):
+        entry = require("multilingual-e5-small")
+        assert entry.repository == "intfloat/multilingual-e5-small"
+        assert entry.revision == "614241f622f53c4eeff9890bdc4f31cfecc418b3"
+        assert entry.license == "MIT"
+        assert [(asset.source, asset.size, asset.sha256) for asset in entry.files] == [
+            (
+                "onnx/model.onnx",
+                470268510,
+                "ca456c06b3a9505ddfd9131408916dd79290368331e7d76bb621f1cba6bc8665",
+            ),
+            (
+                "tokenizer.json",
+                17082730,
+                "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+            ),
+        ]
+
+    def test_covers_spanish_with_the_multilingual_model(self):
+        languages = require("multilingual-e5-small").languages
+        assert {"en", "es", "fr", "de", "zh"} <= set(languages)
+
+    def test_embeds_the_multilingual_model_as_sentence_transformers_does(self):
+        text = require("multilingual-e5-small").manifest.text
+        assert (text.pooling, text.max_tokens, text.pad_id, text.pad_token) == (
+            "mean",
+            512,
+            1,
+            "<pad>",
+        )
+
+    def test_prefixes_each_multilingual_input_kind(self):
+        manifest = require("multilingual-e5-small").manifest
+        assert (manifest.query_prefix, manifest.document_prefix) == (
+            "query: ",
+            "passage: ",
+        )
+
     def test_recommends_one_text_model_for_guided_setup(self):
         assert [
             entry.manifest.model_key for entry in entries() if entry.recommended

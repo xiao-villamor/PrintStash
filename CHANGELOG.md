@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- AI Search can run **multilingual-e5-small** locally: one model for about 93
+  languages, including Spanish, with the best recall on the search regression
+  corpus. It needs about 1.15 GB of worker memory (hosts with 6 GB of RAM or
+  more). Guided setup shows a language count for multilingual models.
+
 - AI Search can run a second local text model: **all-MiniLM-L6-v2** (English,
   90 MB). It embeds a query in about half the time BGE takes and needs less
   memory, at slightly lower recall. BGE stays the recommended default; the
