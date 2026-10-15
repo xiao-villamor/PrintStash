@@ -18,7 +18,7 @@ Keep the settings that worked with each Model, and send your next print to a com
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](./LICENSE)
 [![Status: beta](https://img.shields.io/badge/status-beta-f59e0b?style=flat-square)](#project-status--roadmap)
 
-[**Get Started**](#quick-start) · [**Documentation**](#documentation) · [**Releases**](https://github.com/xiao-villamor/PrintStash/releases) · [**Contributing**](#contributing)
+[**Get Started**](#quick-start) · [**Documentation**](https://www.printstash.org/docs/) · [**Releases**](https://github.com/xiao-villamor/PrintStash/releases) · [**Contributing**](#contributing)
 
 <a href="screenshots/02-model-detail.png">
   <img src="screenshots/02-model-detail.png" alt="A Model's 3D preview beside its recommended G-code, slicer settings, and printer actions" width="960" />
@@ -202,6 +202,9 @@ depends on the printer's cache; Centauri Carbon 2 upload remains unconfirmed
 on physical hardware.
 
 ## Documentation
+
+Read the [**official PrintStash documentation**](https://www.printstash.org/docs/)
+for installation, everyday workflows, and administration.
 
 | Start here | Guides |
 | --- | --- |
