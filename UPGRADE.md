@@ -3,8 +3,8 @@
 ## 0.15.0 notes
 
 Back up the application database and managed files, and retain the previous
-image. Before upgrading from 0.14.0, let derivative Jobs drain, then stop every
-API and worker process and restart them on the same new image. DBOS 3.0
+image. Stop every API and worker process and restart them on the same new
+image. Derivation queues do not need to drain first. DBOS 3.0
 migrates its disposable engine state; read the [rollback instructions](#0150-dbos-30)
 before starting the upgrade. Do not use `docker compose down -v`.
 
@@ -69,20 +69,21 @@ timestamp indices and a nullable backfill admission epoch. The new reservation
 is separate from accepted execution epochs and does not spend a retry attempt.
 
 Derivation queues now share bounded interactive/backfill allowances and use FIFO
-engine dispatch. Before upgrading, stop new uploads, viewer requests and bulk
-regeneration. Allow the existing API and workers to drain their derivation Jobs,
-then stop every API and worker process and restart them on the new image
-together. The native resource receipt format also changes; no old application
-process may continue admitting native or prepared-source work during restart.
-Existing previews remain usable; no new recipe is introduced by scheduling.
+engine dispatch. You do not need to drain them first: stop every API and worker
+process and restart them on the new image together. On start, derivation work
+that is still waiting under the previous version's ordering is given the new
+neutral rank and runs in arrival order; work already handed to a worker is left
+alone, and no Job, managed file or admission receipt is touched. The native
+resource receipt format also changes; no old application process may continue
+admitting native or prepared-source work during restart. Existing previews
+remain usable; no new recipe is introduced by scheduling.
 
-Startup reports `derivation_queue_requires_drain` before enabling consumers if
-legacy derivation ranks remain, inspection fails, or its bounded inspection
-cannot verify the queue. Keep the old image available to finish draining. Do
-not delete application Jobs, managed files or admission receipts to bypass this
-check. As with the DBOS upgrade below, disposable engine state may be rebuilt
-only with all processes stopped; unfinished application Jobs then replay through
-the reconciler, and engine checkpoints are lost.
+If the engine database cannot be read at that point, startup stops with
+`derivation_queue_unreadable`; fix the access problem and start again. A
+database that DBOS cannot migrate stops with `engine_database_unmigratable` and
+the steps to recover: engine state is disposable, so with all processes stopped
+it may be moved aside and rebuilt; unfinished application Jobs then replay
+through the reconciler, and engine checkpoints are lost.
 
 <a id="unreleased-dbos-30"></a>
 
@@ -479,8 +480,10 @@ worker. The default `VAULT_EMBEDDING_MEMORY_BUDGET_FRACTION=0.25` leaves
 headroom beside geometry's effective 0.5 allocation. The combined fractions must
 be below 1. Unknown physical memory refuses local model admission. Set
 `VAULT_EMBEDDING_RESIDENT_WORKERS` (default 1, maximum 2) and
-`VAULT_EMBEDDING_WORKER_MEMORY_MB` (default 1024, minimum 512) for the models
-you install; a model whose mappings exceed the ceiling fails with a memory error.
+`VAULT_EMBEDDING_WORKER_MEMORY_MB` (default 4096, minimum 512; before 0.15 the
+default was 1024) for the models you install. It is a ceiling capped by the
+model partition, so an 8 GiB host gives a worker 2 GiB; a model whose mappings
+exceed the ceiling fails with a memory error.
 
 Stop all API and worker processes before changing memory partitions or model
 residency settings, then restart all with the same profile and shared local data

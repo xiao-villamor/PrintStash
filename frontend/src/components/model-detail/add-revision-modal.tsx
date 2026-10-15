@@ -1,6 +1,7 @@
 "use client";
 
 import { uiMessage } from "@/lib/locale";
+import { userMessage } from "@/lib/errors";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -14,7 +15,6 @@ import { toast } from "@/lib/toast";
 import { formatBytes } from "@/lib/format";
 import { ModelRead } from "@/types";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { cn } from "@/lib/utils";
@@ -86,7 +86,7 @@ export function AddGcodeRevisionModal({
         progress: 100,
       });
     } catch (e: any) {
-      setError(e.message);
+      setError(userMessage(e));
       updateTask(taskId, {
         detail: e.message || uiMessage("Revision upload failed"),
         status: "failed",
@@ -239,19 +239,17 @@ export function AddGcodeRevisionModal({
               recommended ? "border-primary bg-primary-soft" : "border-border bg-background",
             )}
           >
-            <Checkbox
-              checked={recommended}
-              onChange={setRecommended}
+            <button
+              type="button"
+              role="checkbox"
+              aria-checked={recommended}
+              aria-label={uiText("Mark as recommended")}
               disabled={submitting}
-              ariaLabel={uiText("Mark as recommended")}
-              className="mt-0.5"
-            />
-            <Star
-              className={cn(
-                "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground",
-                recommended && "fill-current text-primary",
-              )}
-            />
+              onClick={() => setRecommended(!recommended)}
+              className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-[color,transform] duration-press hover:text-primary active:scale-[0.95] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-50"
+            >
+              <Star className={cn("h-5 w-5", recommended && "fill-current text-primary")} />
+            </button>
             <div>
               <p className="text-sm font-medium text-foreground">{uiText("Mark as recommended")}</p>
               <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">

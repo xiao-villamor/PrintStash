@@ -374,7 +374,10 @@ class Settings(BaseSettings):
     # Restart all processes together when changing either memory partition.
     embedding_memory_budget_fraction: float = Field(default=0.25, gt=0, lt=1)
     embedding_resident_workers: int = Field(default=1, ge=1, le=2)
-    embedding_worker_memory_mb: int = Field(default=1024, ge=512)
+    # A ceiling, not a reservation: the residency partition caps it, so an
+    # 8 GiB host still gives one worker 2 GiB. 1 GiB refused full-length
+    # BGE batches and the multilingual vocabulary of e5-small.
+    embedding_worker_memory_mb: int = Field(default=4096, ge=512)
     embedding_batch_size: int = Field(default=8, ge=1, le=8)
     embedding_cache_dir: Path = Field(default=None, validate_default=True)
     embedding_cache_max_bytes: int = Field(

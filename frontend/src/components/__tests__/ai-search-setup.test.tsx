@@ -1,5 +1,5 @@
 /** Guided AI setup keeps consent explicit and advances only after successful server operations. */
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { AiSearchSettings } from "@/components/ai-search-settings";
@@ -132,6 +132,90 @@ describe("AiSearchSetup", () => {
       download_enabled: true,
     });
     expect(app.requestsWithMethod("POST")[0].url).toContain(`/models/${model.key}/download`);
+  });
+  it("offers the recommended model first over a smaller one", async () => {
+    const recommended = anInferenceModel({ installed: false });
+    const smaller = anInferenceModel({
+      id: "b".repeat(64),
+      key: "all-minilm-l6-v2",
+      installed: false,
+      recommended: false,
+      size_bytes: 90880310,
+    });
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/inference/models": json([smaller, recommended]),
+      },
+    });
+    expect(await screen.findByRole("radio", { name: /bge-small-en-v1\.5/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /all-minilm-l6-v2/ })).not.toBeChecked();
+  });
+  it("downloads the smaller model when chosen", async () => {
+    const smaller = anInferenceModel({
+      id: "b".repeat(64),
+      key: "all-minilm-l6-v2",
+      installed: false,
+      recommended: false,
+      size_bytes: 90880310,
+    });
+    const app = setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(
+          searchConfiguration({ settings: { ...enabled, download_enabled: true } }),
+        ),
+        "GET /api/v1/inference/models": json([anInferenceModel({ installed: false }), smaller]),
+        "POST /api/v1/inference/models/": json({ job_id: "download-1" }),
+      },
+    });
+    await userEvent.click(await screen.findByRole("radio", { name: /all-minilm-l6-v2/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Allow download and continue" }));
+    await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
+    expect(app.requestsWithMethod("POST")[0].url).toContain("/models/all-minilm-l6-v2/download");
+  });
+  it("labels each model choice for comparison", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/inference/models": json([
+          anInferenceModel({ installed: false }),
+          anInferenceModel({
+            id: "b".repeat(64),
+            key: "all-minilm-l6-v2",
+            installed: false,
+            recommended: false,
+            size_bytes: 90880310,
+          }),
+        ]),
+      },
+    });
+    expect(
+      await screen.findByRole("radio", {
+        name: /^bge-small-en-v1\.5 [\d.]+ MB · en · Recommended$/,
+      }),
+    ).toBeVisible();
+    expect(screen.getByRole("radio", { name: /^all-minilm-l6-v2 [\d.]+ MB · en$/ })).toBeVisible();
+  });
+  it("counts the languages of a multilingual model", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/inference/models": json([
+          anInferenceModel({ installed: false }),
+          anInferenceModel({
+            id: "c".repeat(64),
+            key: "multilingual-e5-small",
+            installed: false,
+            recommended: false,
+            languages: ["en", "es", "fr", "de"],
+            size_bytes: 487351240,
+          }),
+        ]),
+      },
+    });
+    expect(
+      await screen.findByRole("radio", { name: /^multilingual-e5-small [\d.]+ MB · 4 languages$/ }),
+    ).toBeVisible();
   });
   it("prepares a library using safe defaults", async () => {
     const app = setup({
@@ -415,6 +499,57 @@ describe("AiSearchSetup", () => {
       "/search?q=a%20holder%20for%20my%20tools",
     );
     expect(screen.queryByRole("button", { name: "Prepare my library" })).not.toBeInTheDocument();
+  });
+  it("shows the check of the index in use", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
+        "GET /api/v1/config/ai-search/generations": json([
+          aSearchGeneration({ state: "active", eligible: 567, indexed: 567 }),
+        ]),
+      },
+    });
+    const check = await screen.findByRole("region", { name: "Index check" });
+    expect(within(check).getByText("567 of 567 indexed")).toBeVisible();
+  });
+  it("shows the check of a prepared index before it is used", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search/generations": json([
+          aSearchGeneration({ state: "building", phase: "ready", eligible: 9, indexed: 9 }),
+        ]),
+      },
+    });
+    const check = await screen.findByRole("region", { name: "Index check" });
+    expect(within(check).getByText("9 of 9 indexed")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Use prepared search" })).toBeVisible();
+  });
+  it("lists the preparation steps while indexing", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search/generations": json([
+          aSearchGeneration({ state: "building", phase: "backfill", eligible: 10, indexed: 4 }),
+        ]),
+      },
+    });
+    expect(await screen.findByRole("list", { name: "Preparation steps" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Index check" })).not.toBeInTheDocument();
+  });
+  it("warns about passages waiting for a retry while indexing", async () => {
+    setup({
+      routes: {
+        "GET /api/v1/config/ai-search/generations": json([
+          aSearchGeneration({
+            state: "building",
+            phase: "backfill",
+            eligible: 10,
+            indexed: 4,
+            quarantined: 2,
+          }),
+        ]),
+      },
+    });
+    expect(await screen.findByText("2 passages need a retry")).toBeVisible();
   });
   it("resumes an existing setup", async () => {
     setup({

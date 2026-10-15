@@ -441,7 +441,7 @@ class TestQueueOrder:
 
 class TestQueueTransition:
     @pytest.mark.parametrize("lane", [LaneName.DERIVE_NATIVE, LaneName.DERIVE_LIGHT])
-    def test_refuses_legacy_backfill_before_consumption(self, lane, tmp_path):
+    def test_re_ranks_legacy_backfill_before_consumption(self, lane, tmp_path):
         from dbos import DBOSClient
 
         from app.modules.work.contracts import LaneOrder
@@ -488,17 +488,14 @@ class TestQueueTransition:
                     catalog.lanes[lane], queue_order=LaneOrder.FIFO
                 )
 
-                with pytest.raises(
-                    RuntimeError, match="derivation_queue_requires_drain"
-                ):
-                    harness.engine.launch(listen_lanes=[lane])
+                harness.engine.launch(listen_lanes=[])
 
                 assert RECORD.steps == []
                 remaining = client.list_workflows(
                     queue_name=lane.value, status="ENQUEUED"
                 )
                 assert [(row.workflow_id, row.priority) for row in remaining] == [
-                    (saved[0].workflow_id, 1000)
+                    (saved[0].workflow_id, 1)
                 ]
                 with get_session_factory().scoped_session() as session:
                     job = session.get(Job, job_id)

@@ -28,14 +28,13 @@ from typing import Any, Callable
 
 from dbos import (
     DBOS,
-    DBOSClient,
     DBOSConfig,
     Queue,
     SetEnqueueOptions,
     SetWorkflowID,
 )
 from dbos import error as dbos_error
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import bindparam, create_engine, inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.schema import DropSchema
 
@@ -79,13 +78,21 @@ _STATUS = {
     "CANCELLED": EngineStatus.CANCELLED,
 }
 _ACTIVE = ["ENQUEUED", "DELAYED", "PENDING"]
+_WAITING = ["ENQUEUED", "DELAYED"]
 _SETTLED = ["SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"]
 _PRUNE_BATCH = 500
-_FIFO_INSPECTION_PAGE = 100
-_FIFO_INSPECTION_LIMIT = 500
-_FIFO_DRAIN_REQUIRED = (
-    "derivation_queue_requires_drain: stop all work processes, drain legacy "
-    "derivation queues and restart together before enabling FIFO scheduling"
+_FIFO_ADOPTION_FAILED = (
+    "derivation_queue_unreadable: the background-work engine database could not "
+    "be read to adopt waiting derivation work. Check that it is readable and "
+    "that no other PrintStash process holds it, then start again."
+)
+_ENGINE_DATABASE_UNMIGRATABLE = (
+    "engine_database_unmigratable: the background-work engine database was "
+    "created by a build that predates its migration table, so it cannot be "
+    "upgraded in place. Stop every PrintStash process, move the engine database "
+    "aside (printstash-dbos.sqlite beside the application database, or the engine "
+    "schema on PostgreSQL) and start again. Unfinished Jobs replay from the "
+    "application database; only engine checkpoints are lost."
 )
 
 
@@ -295,7 +302,8 @@ class DbosJobEngine(JobEngine):
         with self._lock:
             if self._launched:
                 return
-            self._require_fifo_queues_drained()
+            self._require_migratable_system_database()
+            self._adopt_fifo_queues()
             DBOS.destroy(destroy_registry=True)
             DBOS(config=self._config())
             self._register_workflows()
@@ -335,12 +343,45 @@ class DbosJobEngine(JobEngine):
         finally:
             database.dispose()
 
-    def _require_fifo_queues_drained(self) -> None:
-        """Refuse a mixed scheduling rollout before registering consumers.
+    def _require_migratable_system_database(self) -> None:
+        """Name a system database DBOS cannot migrate instead of crashing in it.
 
-        Operators must stop every old producer before this bounded snapshot;
-        it cannot fence a process still submitting work under the old policy.
-        Only the public client reads persisted queue state, without payloads.
+        DBOS applies its schema steps in order from the version recorded in
+        ``dbos_migrations``. A database that has workflow rows but no such record
+        comes from an older engine; replaying the first step then fails on a table
+        that already exists, with no hint what to do.
+        """
+        if self._fresh_system_database():
+            return
+        schema = (
+            None if make_url(self.url).get_backend_name() == "sqlite" else self.schema
+        )
+        database = create_engine(self.url)
+        try:
+            tables = inspect(database)
+            legacy = tables.has_table("workflow_status", schema=schema) and not (
+                tables.has_table("dbos_migrations", schema=schema)
+            )
+        finally:
+            database.dispose()
+        if legacy:
+            raise RuntimeError(_ENGINE_DATABASE_UNMIGRATABLE)
+
+    def _adopt_fifo_queues(self) -> None:
+        """Give work queued under the previous scheduling policy the neutral rank.
+
+        Derivation lanes dispatch in arrival order now. A database that still
+        holds waiting work with the previous version's rank would otherwise be
+        ordered by a policy no new Job is created under. The Job rows in the
+        application database stay the record of the work and keep their own
+        priority; only the engine's waiting copy is re-ranked, so nothing is
+        dropped and an operator never has to drain by hand. Work already handed
+        to a worker is left alone: its rank no longer orders anything.
+
+        This reads and writes the columns every engine schema has. The system
+        database is still the previous version's here (DBOS migrates it when it
+        launches, after this), so its own client would select columns that do not
+        exist yet and fail every existing install.
         """
         lanes = [
             lane.name.value
@@ -352,42 +393,45 @@ class DbosJobEngine(JobEngine):
         try:
             if self._fresh_system_database():
                 return
-            client = DBOSClient(
-                system_database_url=self.url,
-                dbos_system_schema=self.schema,
-                lazy=True,
-                retry_connection_errors=False,
-                observability_query_timeout_sec=5,
-            )
-            try:
-                inspected = 0
-                neutral_rank = PRIORITY_RANK[WorkPriority.INTERACTIVE]
-                for lane in lanes:
-                    offset = 0
-                    while True:
-                        limit = min(
-                            _FIFO_INSPECTION_PAGE, _FIFO_INSPECTION_LIMIT - inspected
-                        )
-                        if limit == 0:
-                            raise RuntimeError("fifo_queue_inspection_limit")
-                        rows = client.list_workflows(
-                            queue_name=lane,
-                            status=_ACTIVE,
-                            limit=limit,
-                            offset=offset,
-                            load_input=False,
-                            load_output=False,
-                        )
-                        if any(row.priority != neutral_rank for row in rows):
-                            raise RuntimeError("fifo_queue_legacy_rank")
-                        inspected += len(rows)
-                        if len(rows) < limit:
-                            break
-                        offset += len(rows)
-            finally:
-                client.destroy()
         except Exception as exc:
-            raise RuntimeError(_FIFO_DRAIN_REQUIRED) from exc
+            raise RuntimeError(_FIFO_ADOPTION_FAILED) from exc
+        statement = text(
+            f"UPDATE {self._workflow_status_table()} SET priority = :neutral "
+            "WHERE queue_name IN :lanes AND status IN :waiting "
+            "AND priority <> :neutral"
+        ).bindparams(
+            bindparam("lanes", expanding=True), bindparam("waiting", expanding=True)
+        )
+        connect_args = (
+            {"connect_timeout": 5}
+            if make_url(self.url).get_backend_name() != "sqlite"
+            else {}
+        )
+        database = create_engine(self.url, connect_args=connect_args)
+        try:
+            with database.begin() as connection:
+                adopted = connection.execute(
+                    statement,
+                    {
+                        "neutral": PRIORITY_RANK[WorkPriority.INTERACTIVE],
+                        "lanes": lanes,
+                        "waiting": _WAITING,
+                    },
+                ).rowcount
+        except Exception as exc:
+            raise RuntimeError(_FIFO_ADOPTION_FAILED) from exc
+        finally:
+            database.dispose()
+        if adopted:
+            logger.info("re-ranked queued derivation work", extra={"count": adopted})
+
+    def _workflow_status_table(self) -> str:
+        if make_url(self.url).get_backend_name() == "sqlite":
+            return "workflow_status"
+        if self.schema is None:
+            raise ValueError("engine_requires_system_schema")
+        quote = make_url(self.url).get_dialect()().identifier_preparer.quote_schema
+        return f"{quote(self.schema)}.workflow_status"
 
     def _interval(self, lane: Lane) -> float:
         """How often ``lane`` is polled when nothing has just been handed to it."""

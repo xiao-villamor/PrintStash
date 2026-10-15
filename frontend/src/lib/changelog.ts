@@ -34,7 +34,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Mesh measurements, thumbnails, viewer conversion, and similarity work run with bounded native workers and durable cancellation, retry, and publication authority",
       "Library, search, thumbnails, and uploads use fewer repeated reads and writes, with bounded caches and explicit recovery from competing edits",
       "Storage insights separate local and remote locations, while Trash supports selecting several Models to restore or permanently delete",
-      "Upgrade all API and worker processes together after draining derivative Jobs: DBOS moves to 3.0, and source installs require Python 3.14 or newer; see UPGRADE.md",
+      "Upgrade all API and worker processes together: DBOS moves to 3.0, and source installs require Python 3.14 or newer; see UPGRADE.md",
     ],
   },
   {

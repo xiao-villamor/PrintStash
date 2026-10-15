@@ -222,7 +222,7 @@ class TestInferenceResidencySettings:
         configured = FrozenSettings(_env_file=None)
         assert configured.embedding_memory_budget_fraction == 0.25
         assert configured.embedding_resident_workers == 1
-        assert configured.embedding_worker_memory_mb == 1024
+        assert configured.embedding_worker_memory_mb == 4096
 
     @pytest.mark.parametrize(
         ("field", "value"),

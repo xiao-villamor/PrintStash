@@ -282,14 +282,18 @@ command and the readiness check are written once, so a local run and a CI run ar
 the same run.
 
 **No Docker is an error, not a skip.** If a selected test carries one of these
-markers and no daemon is reachable, `pytest_collection_modifyitems` stops the
+markers and no daemon is reachable, `pytest_collection_finish` stops the
 session with a message naming the prerequisite. This is the rule the whole
 arrangement exists for: the previous setup passed locally with 21 tests quietly
 absent, and those 21 were the dialect-sensitive SQL, the migration path
 self-hosters upgrade through, and the S3 storage and backup destinations. A run
 that verified none of that must not look like a run that did. Selecting a subset
 that needs neither service (`./scripts/test.sh fast`, or any single unit file) is
-unaffected — the check only fires for markers a *selected* test carries.
+unaffected — the check only fires for markers a *selected* test carries. It runs
+after `-m`, `-k` and `--deselect`, and it reads real markers
+(`get_closest_marker`), never `item.keywords`, where a parameter id such as
+`[postgres]` would count as one. `tests/repo/test_resource_check.py` holds it to
+that.
 
 Containers start lazily, on the first selected test that needs one, and stop once
 at session end. A run that touches neither starts nothing.

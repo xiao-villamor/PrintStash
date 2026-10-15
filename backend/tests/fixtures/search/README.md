@@ -6,6 +6,15 @@ The 32 fictional printable designs include opaque names, related distractors, or
 
 Vectors must be generated offline using the exact registry model and passage recipe; ordinary CI never downloads weights. Do not change labels after measuring a result. Permission coverage uses the separate actual authorization integration suite.
 
+`all-minilm-l6-v2-vectors.json` holds the same corpus and queries embedded
+with the pinned all-MiniLM-L6-v2 export (`python -m tests.fakes.search_text_fixture
+--model-key all-minilm-l6-v2`). Spanish remains a stress case: it is an English
+model.
+
+`multilingual-e5-small-vectors.json` does the same for the pinned
+multilingual-e5-small export, with its `passage: ` and `query: ` prefixes in
+the embedded (and hashed) text. Spanish is a supported language for it.
+
 SPLADE continuous term weights in `splade-pp-en-v1-terms.json` are measured with
 the pinned Apache-2.0 export declared in the inference model registry. They
 bind the same original CC0 corpus and query hashes. They are neither generated

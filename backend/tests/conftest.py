@@ -98,7 +98,7 @@ def _isolate_inline_foreign_key_rendering() -> Iterator[None]:
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark the tiers that have their own lane, and refuse to run without a service.
+    """Mark the tiers that have their own lane.
 
     The tier of a test is the directory it lives in, so the marker is derived from the
     path — never from the filename. ``unit`` and ``integration`` get no marker at all:
@@ -106,26 +106,50 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     heuristic (``*_integration.py``, ``"migration" in name``) silently mis-tiered any
     file that did not happen to match.
 
-    ``postgres``, ``s3``, and ``remote_storage`` are *resource* markers, not tiers:
-    they gate a subset inside a tier and get their service from a container. If a
-    selected test carries one and Docker is not running, the **session stops here**
-    rather than skipping — a green run with those tests quietly absent verified none
-    of what it claimed.
-    Checking at collection means the failure arrives before any test runs, naming
-    the prerequisite once instead of twenty-one times.
+    This runs before pytest's own ``-m``/``-k``/``--deselect`` handling, which is
+    what lets ``-m postgres`` select a test that gets its marker from the
+    ``postgres`` directory rather than a ``pytestmark``.
     """
-    # Markers first, in their own pass: the `postgres` marker comes from the
-    # *directory* rather than a `pytestmark`, so computing what is needed before
-    # adding them would miss every postgres test.
     for item in items:
         parts = Path(str(item.path)).parts
         for directory, marker in {**_TIER_MARKERS, **_RESOURCE_DIRS}.items():
             if directory in parts:
                 item.add_marker(getattr(pytest.mark, marker))
 
+
+def pytest_collection_finish(session: pytest.Session) -> None:
+    """Refuse to run without a service that a selected test needs.
+
+    ``postgres``, ``s3``, ``remote_storage`` and ``bgcode`` are *resource* markers,
+    not tiers: they gate a subset inside a tier and get their service from a
+    container. If a selected test carries one and Docker is not running, the
+    **session stops here** rather than skipping — a green run with those tests
+    quietly absent verified none of what it claimed. Checking at collection means
+    the failure arrives before any test runs, naming the prerequisite once instead
+    of twenty-one times.
+
+    Two details decide what "selected" means. This hook runs after every
+    ``pytest_collection_modifyitems``, so ``session.items`` no longer holds what
+    ``-m``, ``-k`` or ``--deselect`` removed. And it asks for real markers:
+    ``item.keywords`` also holds parameter ids, so an unmarked case with the id
+    ``[postgres]`` used to demand a daemon from the ``fast`` lane.
+
+    Nothing runs under ``--collect-only``, and a collection error or an earlier stop
+    is the failure to report, so none of those is replaced by this one. Under
+    xdist every worker stops on its own and only ``shouldstop`` reaches the
+    controller; without it the reason is lost behind an error of the controller's
+    own ("Unexpectedly no active workers available", or an INTERNALERROR for the
+    test it had handed to a worker that was already leaving).
+    """
+    if session.config.option.collectonly or session.testsfailed or session.shouldstop:
+        return
     for marker, resource in sorted(_RESOURCES.items()):
-        if any(marker in item.keywords for item in items):
-            containers.require_docker(resource)
+        if any(item.get_closest_marker(marker) is not None for item in session.items):
+            try:
+                containers.require_docker(resource)
+            except pytest.exit.Exception as stop:
+                session.shouldstop = stop.msg
+                raise
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:

@@ -265,8 +265,34 @@ at commit `5c38ec7c405ec4b44b94cc5a9bb96e735b38267a`: English, MIT, 384 native
 float dimensions, CLS pooling, 512-token maximum, explicit query prefix.
 The graph is 133,093,490 bytes and the tokenizer 711,396 bytes. The checked-in
 registry manifest specifies both SHA-256 values, tensor names, opset and an
-independently measured canary. Other models are not advertised as validated by
-this catalog yet.
+independently measured canary. Guided setup offers BGE first (`recommended` in
+`GET /api/v1/inference/models`).
+
+The catalog also offers
+[sentence-transformers/all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/tree/1110a243fdf4706b3f48f1d95db1a4f5529b4d41)
+at commit `1110a243fdf4706b3f48f1d95db1a4f5529b4d41`: English, Apache-2.0, 384
+native float dimensions, mean pooling, 256-token maximum (the model's
+sentence-transformers limit), no prefixes. The graph is 90,405,214 bytes and
+the tokenizer 466,247 bytes. Its canary was computed from the pinned ONNX export
+with ONNX Runtime and matches sentence-transformers on the PyTorch weights to
+within 1.3e-7. On the regression corpus it reaches hybrid recall@5 of 0.91
+(BGE 0.97); its only misses are the Spanish cross-language queries. A query
+embeds in about 11 ms against BGE's 24 ms on the same CPU, and the worker peaks
+near 420 MB against BGE's 610 MB. Its calibrated single-word floor (maximum
+unrelated cosine plus 0.01: 0.34) is below the generic 0.35, so the generic
+floor applies unchanged and keeps every relevant result the model ranks.
+
+For libraries that are not only in English the catalog offers
+[intfloat/multilingual-e5-small](https://huggingface.co/intfloat/multilingual-e5-small/tree/614241f622f53c4eeff9890bdc4f31cfecc418b3)
+at commit `614241f622f53c4eeff9890bdc4f31cfecc418b3`: about 93 languages
+including Spanish, MIT, 384 native float dimensions, mean pooling, 512-token
+maximum, `query: `/`passage: ` prefixes. The graph is 470,268,510 bytes and the
+tokenizer 17,082,730 bytes; its canary matches sentence-transformers to within
+8.6e-8. It retrieves every labelled query of the regression corpus natively,
+the Spanish ones included (hybrid recall@5 0.97), and embeds a query in about
+16 ms. Its large vocabulary needs a worker near 1.15 GB, which the default
+4 GiB ceiling allows on hosts with at least 6 GB of RAM. Its cosine scores sit
+high (unrelated pairs near 0.77), so its single-word floor is 0.85.
 
 `GET /api/v1/inference/models` lists installed and curated models for administrators,
 including languages, license, measured bytes and whether the optional runtime
@@ -291,6 +317,13 @@ within the registry/CDN/mirror policy. Model acquisition reserves physical disk
 capacity; the cache cap includes staging bytes. Least-recently-used pruning
 only removes unreferenced models. Active, building and retained generations
 protect their encoder, and an OS file lock prevents pruning during loading.
+
+Loading pins each graph by file descriptor, checks its digest (and, for text,
+point and sparse graphs, the opset, operator-domain and no-external-data rules)
+on that descriptor, and builds the ONNX Runtime session from it. A file renamed
+over the graph after the check is never what loads. ONNX Runtime keeps a copy of
+a model handed to it as bytes, so loading by descriptor holds the weights once.
+A worker keeps one tokenizer and counts untruncated tokens on it under a lock.
 
 For air-gapped operation, place the reviewed `manifest.json` and every named
 asset in a child directory of the model cache. The previous
@@ -318,6 +351,10 @@ AI_SEARCH_TEXT_ASSETS=/absolute/path/to/bge uv run pytest \
   tests/integration/modules/inference/preplaced_text.py -q -s
 ```
 
+`AI_SEARCH_TEXT_MODEL=all-minilm-l6-v2` runs the same lane for another curated
+text model. `python -m tests.fakes.search_text_fixture --model-key <key>`
+regenerates that model's regression vectors from preplaced files.
+
 ## Search and operational UI
 
 The top bar previews lexical matches while typing. Enter opens `/search?q=…`
@@ -333,9 +370,15 @@ pending provider/model/transform choices. Catalog entries show pinned provenance
 license, languages and measured asset size. Downloads require explicit action;
 preplaced models require verification. History exposes progress, last activity,
 measured ETA when available, valid cancel/retry/activate actions and failures.
-Guided setup shows the current preparation phase. Passage reconciliation runs
-before vector indexing, so its progress has no vector count; the indexed/eligible
-count and measured ETA appear during backfill. Local ONNX inference uses the CPU
+Guided setup lists the four preparation steps (check library content, index
+passages, catch up on recent changes, verify the index), marks which are done,
+and explains what the running step does. Passage reconciliation runs before
+vector indexing, so its progress has no vector count; the indexed/eligible
+count, measured ETA and any passages waiting for a retry appear during
+backfill. Once an index is verified, and for the index in use, an **Index
+check** reports indexed/eligible entries, entries waiting for a retry, entries
+shortened to the model's token limit, the model, and when verification last
+passed. A healthy index has every entry indexed and none waiting for a retry. Local ONNX inference uses the CPU
 only. A GPU on the host does not accelerate this provider; a separately configured
 embedding server may use different hardware.
 The ETA uses recent completed vectors and remains unknown until at least four

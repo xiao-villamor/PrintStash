@@ -8,6 +8,10 @@ import { Check, HardDrive, Server, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
+import {
+  SearchIndexHealth,
+  SearchPreparationStages,
+} from "@/components/search-preparation-progress";
 import { estimateSearchGeneration } from "@/lib/api/search";
 import { searchStatusOptions, useSearchCommands, type AiSearchCatalog } from "@/lib/queries/search";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
@@ -71,7 +75,12 @@ export function AiSearchSetup({
       (model) =>
         model.modality === "text" && model.runtime_available && (model.curated || model.installed),
     )
-    .sort((a, b) => Number(b.installed) - Number(a.installed) || a.size_bytes - b.size_bytes);
+    .sort(
+      (a, b) =>
+        Number(b.installed) - Number(a.installed) ||
+        Number(b.recommended) - Number(a.recommended) ||
+        a.size_bytes - b.size_bytes,
+    );
   const local = selected === null ? choices[0] : choices.find((model) => model.id === selected);
   const servers = settings.endpoints.filter((endpoint) => endpoint.kind === "embedding");
   const remote =
@@ -366,6 +375,7 @@ export function AiSearchSetup({
                   {t("Describe what you want to print. Try “a holder for my tools”.")}
                 </p>
               </div>
+              <SearchIndexHealth generation={active} />
               <div className="flex flex-wrap gap-3">
                 <Button asChild>
                   <Link to="/search?q=a%20holder%20for%20my%20tools">
@@ -401,6 +411,7 @@ export function AiSearchSetup({
               <p role="status" className="text-sm font-medium">
                 {phaseLabel}
               </p>
+              <SearchPreparationStages generation={building} />
               {building.phase === "backfill" && (
                 <>
                   <progress
@@ -420,8 +431,14 @@ export function AiSearchSetup({
                       {t("aiSearch.eta", { time: formatDuration(building.eta_seconds) })}
                     </p>
                   )}
+                  {building.quarantined > 0 && (
+                    <p className="text-sm text-warning">
+                      {t("aiSearch.quarantined", { count: building.quarantined })}
+                    </p>
+                  )}
                 </>
               )}
+              {building.phase === "ready" && <SearchIndexHealth generation={building} />}
               {building.error_code && (
                 <p role="alert" className="text-sm text-warning">
                   {building.phase === "verify_failed"
@@ -591,9 +608,17 @@ export function AiSearchSetup({
                                       }}
                                     />
                                     <span className="min-w-0 break-words">
-                                      {model.key}
+                                      {model.key}{" "}
                                       <span className="mt-1 block text-xs opacity-80">
-                                        {formatBytes(model.size_bytes)}
+                                        {[
+                                          formatBytes(model.size_bytes),
+                                          model.languages.length > 3
+                                            ? t("aiSearch.languageCount", {
+                                                count: model.languages.length,
+                                              })
+                                            : model.languages.join(", "),
+                                          ...(model.recommended ? [t("Recommended")] : []),
+                                        ].join(" · ")}
                                       </span>
                                     </span>
                                   </label>

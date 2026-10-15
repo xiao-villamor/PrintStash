@@ -49,6 +49,38 @@ class TestInferenceModels:
         # Capacity includes the bounded manifest as well as both towers.
         assert assets < clip["size_bytes"] <= assets + 256 * 1024
 
+    def test_offers_the_small_english_text_model(self, client, auth_headers):
+        response = client.get("/api/v1/inference/models", headers=auth_headers)
+        assert response.status_code == 200
+        minilm = next(
+            row for row in response.json() if row["key"] == "all-minilm-l6-v2"
+        )
+        assert minilm["modality"] == "text"
+        assert minilm["curated"]
+        assert not minilm["installed"]
+        assert minilm["languages"] == ["en"]
+        assert minilm["native_dimension"] == 384
+        assets = 90405214 + 466247
+        assert assets < minilm["size_bytes"] <= assets + 256 * 1024
+
+    def test_offers_the_small_multilingual_text_model(self, client, auth_headers):
+        response = client.get("/api/v1/inference/models", headers=auth_headers)
+        assert response.status_code == 200
+        e5 = next(
+            row for row in response.json() if row["key"] == "multilingual-e5-small"
+        )
+        assert (e5["modality"], e5["curated"], e5["installed"]) == ("text", True, False)
+        assert "es" in e5["languages"]
+        assets = 470268510 + 17082730
+        assert assets < e5["size_bytes"] <= assets + 256 * 1024
+
+    def test_recommends_only_the_guided_default(self, client, auth_headers):
+        response = client.get("/api/v1/inference/models", headers=auth_headers)
+        assert response.status_code == 200
+        assert [row["key"] for row in response.json() if row["recommended"]] == [
+            "bge-small-en-v1.5"
+        ]
+
     def test_reports_local_unavailable_while_offering_remote(
         self, client, auth_headers, monkeypatch, make_inference_endpoint
     ):

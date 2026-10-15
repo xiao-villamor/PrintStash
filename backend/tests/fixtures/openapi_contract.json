@@ -7355,6 +7355,10 @@
             "title": "Native Dimension",
             "type": "integer"
           },
+          "recommended": {
+            "title": "Recommended",
+            "type": "boolean"
+          },
           "referenced": {
             "title": "Referenced",
             "type": "boolean"
@@ -7395,6 +7399,7 @@
           "size_bytes",
           "installed",
           "curated",
+          "recommended",
           "referenced",
           "runtime_available"
         ],

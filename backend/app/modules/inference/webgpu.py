@@ -30,7 +30,7 @@ class SessionFactory:
         if len(self.devices) != 1:
             raise ComputeUnavailable(Reason.ADAPTER_MISSING)
 
-    def __call__(self, payload: bytes, template):
+    def __call__(self, source: str | bytes, template):
         # Each tower gets its own provider registration; SessionOptions passed
         # by the CPU adapter may be shared across image/text/point construction.
         options = self.ort.SessionOptions()
@@ -53,7 +53,7 @@ class SessionFactory:
                 "defaultBufferCacheMode": "disabled",
             },
         )
-        session = self.ort.InferenceSession(payload, sess_options=options)
+        session = self.ort.InferenceSession(source, sess_options=options)
         session.disable_fallback()
         return session
 

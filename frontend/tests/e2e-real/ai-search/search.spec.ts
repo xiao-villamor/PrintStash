@@ -197,6 +197,11 @@ test.describe("AI Search", () => {
       await expect(page.getByText("Search currently in use").locator("..")).toContainText(
         model!.key,
       );
+      await page.getByRole("tab", { name: "Guided setup" }).click();
+      const check = page.getByRole("region", { name: "Index check" });
+      await expect(check).toContainText(/(\d+) of \1 indexed/);
+      await expect(check).toContainText(/Passed /);
+      await check.screenshot({ path: testInfo.outputPath("index-check.png") });
       await page.goto("/");
       const requests: string[] = [];
       page.on("request", (request) => {

@@ -119,7 +119,9 @@ def _source_filename(value: str | None) -> str | None:
 
 
 def _is_gcode_3mf(path: Path) -> bool:
-    return path.name.lower().endswith(".gcode.3mf") and is_zipfile(path)
+    # Orca hands the hook a temporary "<final>.pp" copy of the export.
+    name = path.name.lower().removesuffix(".pp")
+    return name.endswith(".gcode.3mf") and is_zipfile(path)
 
 
 def _gcode_member(archive: ZipFile) -> str | None:
@@ -143,7 +145,7 @@ def _native_lines(path: Path) -> Iterator[str]:
                 with archive.open(member) as stream:
                     for raw_line in stream:
                         yield raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-        except (BadZipFile, OSError):
+        except BadZipFile, OSError:
             return
         return
     try:
@@ -167,7 +169,7 @@ def _archive_project_name(path: Path) -> str | None:
                     match = re.search(r'<metadata key="name" value="([^"]+)"', text)
                     if match:
                         return _clean(match.group(1))
-    except (BadZipFile, KeyError, OSError):
+    except BadZipFile, KeyError, OSError:
         return None
     return None
 
@@ -395,8 +397,21 @@ def submission_id(gcode: Path, context: dict) -> str:
     return digest.hexdigest()
 
 
+def output_name(path: Path, environ: Mapping[str, str]) -> str:
+    """Return the export's real filename, not the slicer's temporary one.
+
+    Orca runs post-processing scripts on a temporary "<final>.pp" copy and puts
+    the intended name in SLIC3R_PP_OUTPUT_NAME.
+    """
+    env_name = _clean(environ.get("SLIC3R_PP_OUTPUT_NAME"))
+    if env_name:
+        return Path(env_name.replace("\\", "/")).name
+    return path.name.removesuffix(".pp")
+
+
 def build_multipart(fields: dict, file_path: Path) -> tuple[bytes, str]:
     """Build a multipart/form-data body using stdlib only."""
+    filename = output_name(file_path, os.environ)
     boundary = f"----PrintStash{uuid.uuid4().hex}"
     crlf = "\r\n"
     body = bytearray()
@@ -409,11 +424,11 @@ def build_multipart(fields: dict, file_path: Path) -> tuple[bytes, str]:
             f'Content-Disposition: form-data; name="{key}"{crlf}{crlf}{value}{crlf}'
         ).encode()
 
-    mime, _ = mimetypes.guess_type(file_path.name)
+    mime, _ = mimetypes.guess_type(filename)
     mime = mime or "application/octet-stream"
     body += f"--{boundary}{crlf}".encode()
     body += (
-        f'Content-Disposition: form-data; name="file"; filename="{file_path.name}"{crlf}'
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"{crlf}'
         f"Content-Type: {mime}{crlf}{crlf}"
     ).encode()
     body += file_path.read_bytes()

@@ -1,4 +1,10 @@
-"""Regenerate real-model regression vectors from explicitly preplaced assets."""
+"""Regenerate real-model regression vectors from explicitly preplaced assets.
+
+``python -m tests.fakes.search_text_fixture --model-key all-minilm-l6-v2
+--model-dir /path/to/preplaced --output tests/fixtures/search/<key>-vectors.json``
+Passages are embedded with the model's document prefix and keyed by the exact
+text embedded, as queries are, so replay matches what the indexer sends.
+"""
 
 import argparse
 import base64
@@ -14,6 +20,7 @@ from printstash_core.inference.context import InferenceContext
 from printstash_core.search.passages import PassageContent, render_passages
 from sqlmodel import SQLModel, create_engine
 
+from app.bootstrap import native_resources
 from app.db.session import SQLiteSessionFactory
 from app.modules.inference.local import LocalEmbeddingProvider
 from app.modules.inference.model_registry import require
@@ -21,13 +28,14 @@ from app.modules.inference.worker_pool import pool
 from tests.paths import FIXTURES_DIR
 
 
-def generate(directory: Path, output: Path):
+def generate(directory: Path, model_key: str, output: Path):
     corpus_root = FIXTURES_DIR / "search"
     corpus = json.loads((corpus_root / "corpus.json").read_text())
     with (corpus_root / "queries.csv").open() as stream:
         queries = list(csv.DictReader(stream))
-    entry = require("bge-small-en-v1.5")
+    entry = require(model_key)
     with tempfile.TemporaryDirectory(prefix="printstash-text-evaluation-") as temporary:
+        native_resources.configure(Path(temporary))
         engine = create_engine(f"sqlite:///{temporary}/compute.sqlite")
         SQLModel.metadata.create_all(engine)
         provider = LocalEmbeddingProvider(
@@ -36,7 +44,8 @@ def generate(directory: Path, output: Path):
         if provider.validate() != entry.manifest:
             raise ValueError("fixture_model_mismatch")
         inputs = [
-            render_passages(
+            provider.space.document_prefix
+            + render_passages(
                 PassageContent(title=row["name"], description=row["description"])
             )[0].text
             for row in corpus
@@ -77,7 +86,8 @@ def generate(directory: Path, output: Path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--model-key", default="bge-small-en-v1.5")
     parser.add_argument("--model-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
-    generate(arguments.model_dir, arguments.output)
+    generate(arguments.model_dir, arguments.model_key, arguments.output)

@@ -15,6 +15,7 @@ class InferenceModelRead(BaseModel):
     size_bytes: int
     installed: bool
     curated: bool
+    recommended: bool
     referenced: bool
     runtime_available: bool
     mrl_dimensions: list[int] = Field(default_factory=list)

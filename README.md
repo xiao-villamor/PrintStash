@@ -233,8 +233,8 @@ English fallbacks on some screens. See [known limitations](./docs/known-limitati
 - **Next:** follow [Unreleased](./CHANGELOG.md#unreleased) and the
   [roadmap](./docs/roadmap.md) for future work.
 
-**Before upgrading to 0.15.0:** back up, drain derivative Jobs, and stop all API
-and worker processes before upgrading them together to DBOS 3.0. Source installs
+**Before upgrading to 0.15.0:** back up and stop all API and worker processes
+before upgrading them together to DBOS 3.0. Source installs
 require Python 3.14 or newer. Read the [upgrade and rollback guidance](./UPGRADE.md#0150-notes).
 
 ## Contributing

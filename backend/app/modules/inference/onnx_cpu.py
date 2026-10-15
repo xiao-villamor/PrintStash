@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +30,51 @@ def _verified_bytes(directory: Path, asset: ModelAsset) -> bytes:
     return payload
 
 
+@contextmanager
+def verified_graph(
+    directory: Path, asset: ModelAsset, *, opset: int | None = None
+) -> Iterator[str]:
+    """Yield a path that reopens exactly the graph file whose digest matched.
+
+    ONNX Runtime keeps its own copy of a model handed over as bytes, so a
+    session built from verified bytes holds the weights twice; from a path it
+    holds them once. The path names the pinned descriptor rather than the
+    directory entry, so a file renamed over the graph after verification is
+    never what loads. ``opset`` also applies the text-graph rules to the same
+    bytes the digest covered.
+    """
+    try:
+        fd = os.open(
+            directory / asset.filename, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
+    except OSError as exc:
+        raise EmbeddingError("embedding_asset_invalid") from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise EmbeddingError("embedding_asset_invalid")
+        source = _descriptor_path(fd)
+        if opset is None:
+            with open(source, "rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+            if digest != asset.sha256:
+                raise EmbeddingError("embedding_asset_digest_mismatch")
+        else:
+            payload = Path(source).read_bytes()
+            if hashlib.sha256(payload).hexdigest() != asset.sha256:
+                raise EmbeddingError("embedding_asset_digest_mismatch")
+            OnnxCpuProvider._verify_text_graph(payload, opset)
+            del payload
+        yield str(source)
+    finally:
+        os.close(fd)
+
+
+def _descriptor_path(fd: int) -> Path:
+    """``/proc/self/fd`` on Linux; ``/dev/fd`` elsewhere, which reopens the same file."""
+    proc = Path(f"/proc/self/fd/{fd}")
+    return proc if proc.parent.is_dir() else Path(f"/dev/fd/{fd}")
+
+
 class OnnxCpuProvider:
     def __init__(
         self,
@@ -41,9 +91,9 @@ class OnnxCpuProvider:
         except ImportError as exc:
             raise EmbeddingError("embedding_runtime_unavailable") from exc
 
-        def cpu_factory(payload, options) -> Any:
+        def cpu_factory(source: str, options) -> Any:
             return ort.InferenceSession(
-                payload, sess_options=options, providers=["CPUExecutionProvider"]
+                source, sess_options=options, providers=["CPUExecutionProvider"]
             )
 
         factory = cpu_factory if session_factory is None else session_factory
@@ -51,7 +101,7 @@ class OnnxCpuProvider:
         self.manifest = manifest
         self.space = manifest.space()
         self.tokenizer = None
-        self.count_tokenizer = None
+        self._tokenizer_lock = threading.Lock()
         self.dynamic_text_length = False
         self.truncations: list[bool] = []
         options = ort.SessionOptions()
@@ -64,10 +114,8 @@ class OnnxCpuProvider:
         options.add_session_config_entry("session.inter_op.allow_spinning", "0")
         self.image: Any = None
         if isinstance(manifest, (LocalModelManifest, PointModelManifest)):
-            self.image = factory(
-                _verified_bytes(directory, manifest.image.graph),
-                options,
-            )
+            with verified_graph(directory, manifest.image.graph) as source:
+                self.image = factory(source, options)
             self.image.disable_fallback()
             image_size = manifest.image.image_size
             self._validate_signature(
@@ -86,26 +134,21 @@ class OnnxCpuProvider:
                 from tokenizers import Tokenizer
             except ImportError as exc:
                 raise EmbeddingError("embedding_runtime_unavailable") from exc
+            # Graph checks hold a parsed copy of the weights; release it before
+            # the tokenizer, which is large for multilingual vocabularies.
+            with verified_graph(
+                directory,
+                manifest.text.graph,
+                opset=manifest.text.opset
+                if isinstance(manifest, TextModelManifest)
+                else None,
+            ) as source:
+                self.text = factory(source, options)
+            self.text.disable_fallback()
             self.tokenizer = Tokenizer.from_str(
                 _verified_bytes(directory, manifest.text.tokenizer).decode("utf-8")
             )
-            self.count_tokenizer = Tokenizer.from_str(self.tokenizer.to_str())
-            self.count_tokenizer.no_truncation()
-            self.count_tokenizer.no_padding()
-            self.tokenizer.enable_truncation(max_length=manifest.text.max_tokens)
-            self.tokenizer.enable_padding(
-                length=manifest.text.max_tokens,
-                pad_id=manifest.text.pad_id,
-                pad_token=manifest.text.pad_token,
-            )
-            graph = _verified_bytes(directory, manifest.text.graph)
-            if isinstance(manifest, TextModelManifest):
-                self._verify_text_graph(graph, manifest.text.opset)
-            self.text = factory(
-                graph,
-                options,
-            )
-            self.text.disable_fallback()
+            self._limit_tokenizer()
             inputs = {
                 manifest.text.input_name: (
                     "tensor(int64)",
@@ -144,16 +187,13 @@ class OnnxCpuProvider:
                 # Dynamic exports need only their real tokens. Padding every
                 # short query to 512 makes CPU self-attention needlessly costly.
                 self.dynamic_text_length = True
-                self.tokenizer.enable_padding(
-                    length=None,
-                    pad_id=manifest.text.pad_id,
-                    pad_token=manifest.text.pad_token,
-                )
+                self._limit_tokenizer()
         self.point: Any = None
         if isinstance(manifest, PointModelManifest):
-            graph = _verified_bytes(directory, manifest.point.graph)
-            self._verify_text_graph(graph, manifest.point.opset)
-            self.point = factory(graph, options)
+            with verified_graph(
+                directory, manifest.point.graph, opset=manifest.point.opset
+            ) as source:
+                self.point = factory(source, options)
             self.point.disable_fallback()
             self._validate_signature(
                 self.point,
@@ -164,6 +204,34 @@ class OnnxCpuProvider:
                 manifest.point.output_name,
             )
         self._check_canaries()
+
+    def _limit_tokenizer(self) -> None:
+        """Truncate to the export's limit; pad to it unless the export is dynamic."""
+        assert self.tokenizer is not None and self.manifest.text is not None
+        text = self.manifest.text
+        self.tokenizer.enable_truncation(max_length=text.max_tokens)
+        self.tokenizer.enable_padding(
+            length=None if self.dynamic_text_length else text.max_tokens,
+            pad_id=text.pad_id,
+            pad_token=text.pad_token,
+        )
+
+    def _token_counts(self, texts: list[str]) -> list[int]:
+        """Untruncated token counts from the one loaded tokenizer.
+
+        A second tokenizer would hold a multilingual vocabulary twice, so
+        counting lifts the limits on the shared one under the tokenizer lock.
+        """
+        assert self.tokenizer is not None
+        with self._tokenizer_lock:
+            self.tokenizer.no_truncation()
+            self.tokenizer.no_padding()
+            try:
+                return [
+                    len(encoded.ids) for encoded in self.tokenizer.encode_batch(texts)
+                ]
+            finally:
+                self._limit_tokenizer()
 
     @staticmethod
     def _verify_text_graph(payload: bytes, opset: int) -> None:
@@ -276,7 +344,6 @@ class OnnxCpuProvider:
             if (
                 self.text is None
                 or self.tokenizer is None
-                or self.count_tokenizer is None
                 or self.manifest.text is None
             ):
                 raise EmbeddingError("embedding_text_unavailable")
@@ -290,10 +357,10 @@ class OnnxCpuProvider:
                 + (item.text or "")
                 for item in items
             ]
-            tokens = self.tokenizer.encode_batch(texts)
+            with self._tokenizer_lock:
+                tokens = self.tokenizer.encode_batch(texts)
             self.truncations.extend(
-                len(encoded.ids) > contract.max_tokens
-                for encoded in self.count_tokenizer.encode_batch(texts)
+                count > contract.max_tokens for count in self._token_counts(texts)
             )
             values = {
                 contract.input_name: np.asarray(
@@ -458,11 +525,9 @@ class OnnxCpuProvider:
             if session is None or not self._dynamic_batch(session):
                 bucket = index + 100000
             elif item.modality == "text" and self.dynamic_text_length:
-                assert (
-                    self.count_tokenizer is not None and self.manifest.text is not None
-                )
+                assert self.manifest.text is not None
                 length = min(
-                    len(self.count_tokenizer.encode(item.text or "").ids),
+                    self._token_counts([item.text or ""])[0],
                     self.manifest.text.max_tokens,
                 )
                 bucket = max(32, 1 << max(0, length - 1).bit_length())

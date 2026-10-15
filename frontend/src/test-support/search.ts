@@ -131,6 +131,7 @@ export function anInferenceModel(overrides: Partial<InferenceModel> = {}): Infer
     size_bytes: 133805086,
     installed: true,
     curated: true,
+    recommended: true,
     referenced: false,
     runtime_available: true,
     mrl_dimensions: [],
