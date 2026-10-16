@@ -1086,6 +1086,39 @@ class TestSweepLostTerminalAttempts:
             override_session_factory(previous)
 
 
+class TestSweepLostWork:
+    def test_frees_every_kind_of_lost_work(
+        self, engine, make_job, make_work_executor
+    ):
+        dead = make_work_executor("round-dead", stale=True)
+        _stranded_pass(engine, SOURCED, dead.executor_id)
+        job = make_job(kind=REQUESTED, state=JobState.COMPLETED, attempts=1)
+        _stranded_job(engine, job, dead.executor_id)
+
+        assert reconciler_module.sweep_lost_work() == (1, 1)
+
+    def test_reads_the_engine_once_for_both_sweeps(
+        self, engine, make_job, make_work_executor, monkeypatch
+    ):
+        # Both sweeps run every tick; each used to list the engine's in-flight
+        # executions (and the executors) on its own.
+        dead = make_work_executor("round-dead", stale=True)
+        job = make_job(kind=REQUESTED, state=JobState.COMPLETED, attempts=1)
+        _stranded_job(engine, job, dead.executor_id)
+        reads: list[None] = []
+        active = engine.active
+
+        def counted():
+            reads.append(None)
+            return active()
+
+        monkeypatch.setattr(engine, "active", counted)
+
+        reconciler_module.sweep_lost_work()
+
+        assert len(reads) == 1
+
+
 class TestSweepForeignVersions:
     def test_cancels_every_execution_of_another_version(
         self, engine: InlineJobEngine, make_job

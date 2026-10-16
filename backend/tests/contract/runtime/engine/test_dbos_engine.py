@@ -319,6 +319,33 @@ def _waiting_job(subject: str) -> Job:
     return job
 
 
+class TestSubmission:
+    """A submission is one enqueue; nothing is read from the engine first.
+
+    It used to read the workflow's status (joined with its input and output)
+    before every enqueue, only to tell a reused id from a new one. The insert
+    already reports that, so every Job and every reconcile pass paid a read for
+    nothing.
+    """
+
+    def test_a_submission_reads_no_workflow_before_enqueuing(self, engine):
+        job = _waiting_job("submission/one-write")
+        caller = threading.get_ident()
+        statements: list[str] = []
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            if threading.get_ident() == caller and "workflow_status" in statement:
+                statements.append(statement.lstrip().split(None, 1)[0].upper())
+
+        event.listen(Engine, "before_cursor_execute", capture)
+        try:
+            outcome = engine.engine.submit(_submission(job))
+        finally:
+            event.remove(Engine, "before_cursor_execute", capture)
+
+        assert (outcome, statements) == (SubmitOutcome.ACCEPTED, ["INSERT"])
+
+
 class TestRecovery:
     """An execution DBOS recovers is bounded like one the reconciler resubmits.
 

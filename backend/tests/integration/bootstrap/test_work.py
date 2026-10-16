@@ -49,6 +49,16 @@ POSTGRES = "postgresql://printstash:secret@db/printstash"
 _BUILD_ENGINE = work_bootstrap.build_engine
 
 
+def _findable(catalog: WorkCatalog) -> set[JobKind]:
+    """Definitions a startup pass could find work for, with no Job active:
+    those with a source (requested work has nothing to repair)."""
+    return {
+        name
+        for name, definition in catalog.definitions.items()
+        if definition.source is not None
+    }
+
+
 def _passes(engine) -> set[JobKind]:
     return {
         execution.submission.source
@@ -267,8 +277,8 @@ class TestStart:
         finally:
             work_bootstrap.stop()
 
-    def test_reconciles_every_definition_once(self, started, work_engine) -> None:
-        assert _passes(work_engine) == set(started.catalog.definitions)
+    def test_reconciles_every_definition_with_work_to_find_once(self, started, work_engine) -> None:
+        assert _passes(work_engine) == _findable(started.catalog)
 
     def test_startup_passes_are_backfill(self, started, work_engine) -> None:
         # So an upload arriving during startup is not queued behind them.
@@ -552,7 +562,7 @@ class TestAfterRestore:
 
         # The restored database is authoritative; what it owes is resubmitted.
         assert not before & set(work_engine.executions)
-        assert _passes(work_engine) == set(started.catalog.definitions)
+        assert _passes(work_engine) == _findable(started.catalog)
         assert db_session.get(WorkExecutor, executors.executor_id()) is not None
 
     def test_is_a_live_executor_before_its_engine_relaunches(
@@ -609,7 +619,7 @@ class TestAfterRestore:
             work_bootstrap.after_restore()
 
             assert work_bootstrap.current() is not None
-            assert _passes(work_engine) == set(work_catalog.definitions)
+            assert _passes(work_engine) == _findable(work_catalog)
         finally:
             work_bootstrap.stop()
 
@@ -643,7 +653,7 @@ class TestHeldWork:
             assert work_bootstrap.release_held() is True
 
             assert work_bootstrap.current() is not None
-            assert _passes(work_engine) == set(work_catalog.definitions)
+            assert _passes(work_engine) == _findable(work_catalog)
         finally:
             work_bootstrap.stop()
 

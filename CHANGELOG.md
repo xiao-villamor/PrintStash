@@ -34,6 +34,13 @@
   times as `VAULT_JOBS_MAX_RESUBMITS` allows (3 by default), instead of up to
   100 restarts.
 
+- Background work does less redundant database work: submitting a job no
+  longer reads the engine first, creating one no longer reads it back, the
+  periodic check skips the 12 kinds of requested work that have nothing to
+  repair (a third of its engine runs, and of the history they leave behind), and
+  its two sweeps share one read. Per job that is about 10% fewer database
+  statements on each of the engine and application databases.
+
 - A reconcile interval that does not divide evenly into a minute, hour or day
   (for example 90 seconds) now runs at an even cadence rounded down, instead of
   firing twice in quick succession.

@@ -683,15 +683,55 @@ class TestNudgeAfterCommit:
 
 
 class TestNudgeAll:
-    def test_nudges_every_definition_as_backfill(self, work_engine) -> None:
+    def test_nudges_every_definition_with_a_source_as_backfill(
+        self, work_engine
+    ) -> None:
+        sourced = {
+            name
+            for name, definition in work_engine.catalog.definitions.items()
+            if definition.source is not None
+        }
+
         nudge_all()
 
         submitted = {
             execution.submission.source: execution.submission.priority
             for execution in work_engine.executions.values()
         }
-        assert set(submitted) == set(work_engine.catalog.definitions)
-        assert set(submitted.values()) == {WorkPriority.BACKFILL}
+        assert (set(submitted), set(submitted.values())) == (
+            sourced,
+            {WorkPriority.BACKFILL},
+        )
+
+    def test_nudges_requested_work_while_one_of_its_jobs_is_active(
+        self, work_engine, make_job
+    ) -> None:
+        requested = _requested(work_engine)
+        make_job(kind=requested)
+
+        nudge_all()
+
+        assert len(_passes(work_engine, requested)) == 1
+
+    def test_skips_requested_work_with_no_active_job(
+        self, work_engine, make_job
+    ) -> None:
+        # Its pass could only repair its own Jobs; there are none to repair.
+        requested = _requested(work_engine)
+        make_job(kind=requested, state=JobState.COMPLETED)
+
+        nudge_all()
+
+        assert _passes(work_engine, requested) == []
+
+
+def _requested(engine) -> JobKind:
+    """A definition with no source: its work only ever comes from requests."""
+    return min(
+        name
+        for name, definition in engine.catalog.definitions.items()
+        if definition.source is None
+    )
 
 
 class TestForgetQueuedPasses:

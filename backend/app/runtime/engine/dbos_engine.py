@@ -560,9 +560,13 @@ class DbosJobEngine(JobEngine):
         return _detached(self._submit, submission)
 
     def _submit(self, submission: Submission) -> SubmitOutcome:
+        """Enqueue in one write; the insert itself reports an id or key in use.
+
+        A reused execution id is refused by its own insert (``reject``), and a
+        dedupe key another workflow holds names that holder (``return-existing``)
+        so its read is paid only on a conflict. No status is read beforehand.
+        """
         queue = self._queues[submission.lane]
-        if DBOS.get_workflow_status(submission.execution_id) is not None:
-            return SubmitOutcome.EXISTING
         # Equal engine ranks preserve FIFO without changing the Job's logical priority.
         rank = (
             PRIORITY_RANK[WorkPriority.INTERACTIVE]
@@ -573,22 +577,34 @@ class DbosJobEngine(JobEngine):
         if isinstance(submission, JobSubmission):
             if isinstance(submission.routing, Deduplicated):
                 options["deduplication_id"] = submission.routing.key
+                options["duplication_policy"] = "return-existing"
             else:
                 options["queue_partition_key"] = submission.routing.key
         if submission.delay_seconds:
             options["delay_seconds"] = submission.delay_seconds
         try:
-            with SetWorkflowID(submission.execution_id), SetEnqueueOptions(**options):
+            with (
+                SetWorkflowID(
+                    submission.execution_id, workflow_id_reuse_policy="reject"
+                ),
+                SetEnqueueOptions(**options),
+            ):
                 if isinstance(submission, PassSubmission):
-                    queue.enqueue(self._reconcile_workflow, submission.source.value)
+                    handle = queue.enqueue(
+                        self._reconcile_workflow, submission.source.value
+                    )
                 else:
-                    queue.enqueue(
+                    handle = queue.enqueue(
                         self._job_workflow,
                         submission.job_id,
                         submission.attempt,
                         submission.execution_epoch,
                     )
-        except dbos_error.DBOSQueueDeduplicatedError:
+        except dbos_error.DBOSWorkflowIDInUseError:
+            return SubmitOutcome.EXISTING
+        holder = handle.get_workflow_id()
+        if holder != submission.execution_id:
+            # Only a dedupe key held by another workflow names a different one.
             return SubmitOutcome.DEDUPLICATED
         if isinstance(submission, JobSubmission) and submission.expedite:
             self._boost(submission.lane)

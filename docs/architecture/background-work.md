@@ -112,8 +112,15 @@ The viewer mesh does not wait: opening a Model in 3D asks for it.
 A nudge (`work.nudge`) stamps the dirty mark and queues a pass unless one is
 already queued within `JOBS_SUBMIT_GRACE_SECONDS`. An interactive nudge is not
 absorbed by a queued backfill pass. The tick, a single persistent DBOS
-schedule, nudges every definition at `JOBS_RECONCILE_INTERVAL_SECONDS` as a
-safety net, and schedule sources become due on it.
+schedule, nudges at `JOBS_RECONCILE_INTERVAL_SECONDS` as a safety net every
+definition a pass could find work for: each one with a source, and a requested
+one only while one of its Jobs is active (otherwise its pass would read two
+empty results and stay in the engine's history). Schedule sources become due
+on it. Its two lost-work sweeps share one read of the engine and the executors.
+
+A submission is one engine write: a reused execution id is refused by its own
+insert and a dedupe key another workflow holds names that holder, so no status
+is read before enqueuing.
 
 A request that records a Job it will wait on (an upload, a URL import)
 dispatches it itself after its commit: it submits the Job through the same
