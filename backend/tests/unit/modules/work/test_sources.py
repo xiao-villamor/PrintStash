@@ -59,6 +59,20 @@ class TestIntervalCron:
     ) -> None:
         assert interval_cron(seconds) == expression
 
+    @pytest.mark.parametrize(
+        ("seconds", "expression"),
+        [
+            pytest.param(7 * 60, "*/6 * * * *", id="7min-to-6min"),
+            pytest.param(50 * 60, "*/30 * * * *", id="50min-to-30min"),
+            pytest.param(5 * 3600, "0 */4 * * *", id="5h-to-4h"),
+        ],
+    )
+    def test_an_uneven_interval_rounds_down_to_an_even_cadence(
+        self, seconds: int, expression: str
+    ) -> None:
+        # */7 minutes fires at :56 and again at :00, a four-minute gap.
+        assert interval_cron(seconds) == expression
+
 
 class TestFixed:
     def test_is_always_on(self) -> None:

@@ -247,6 +247,26 @@ class TestStart:
         assert row.role == settings.process_role
         assert set(row.lanes.split(",")) == set(started.catalog.lanes)
 
+    def test_is_a_live_executor_before_its_engine_takes_work(
+        self, work_engine, work_catalog, monkeypatch
+    ) -> None:
+        # Other processes rerun an execution whose executor is not proven
+        # alive, and the engine dequeues as soon as it launches.
+        seen_at_launch: list[set[str]] = []
+        launch = work_engine.launch
+
+        def observed(*, listen_lanes):
+            seen_at_launch.append(executors.live_ids())
+            launch(listen_lanes=listen_lanes)
+
+        monkeypatch.setattr(work_engine, "launch", observed)
+
+        work_bootstrap.start(engine=work_engine, catalog=work_catalog)
+        try:
+            assert executors.executor_id() in seen_at_launch[0]
+        finally:
+            work_bootstrap.stop()
+
     def test_reconciles_every_definition_once(self, started, work_engine) -> None:
         assert _passes(work_engine) == set(started.catalog.definitions)
 
@@ -455,6 +475,23 @@ class TestStart:
         finally:
             work_bootstrap.stop()
 
+    def test_registers_again_when_its_row_is_gone(
+        self, work_engine, work_catalog, db_session: Session
+    ) -> None:
+        # A restored snapshot that never held this worker drops its row; other
+        # processes would rerun the work of an executor they cannot see.
+        _overlay["fence_heartbeat_seconds"] = 1
+        work_bootstrap.start(engine=work_engine, catalog=work_catalog)
+        try:
+            db_session.delete(db_session.get(WorkExecutor, executors.executor_id()))
+            db_session.commit()
+            deadline = time.monotonic() + 5
+            while executors.executor_id() not in executors.live_ids():
+                assert time.monotonic() < deadline, "never registered again"
+                time.sleep(0.1)
+        finally:
+            work_bootstrap.stop()
+
 
 class TestStop:
     def test_releases_the_fences_this_executor_held(
@@ -517,6 +554,25 @@ class TestAfterRestore:
         assert not before & set(work_engine.executions)
         assert _passes(work_engine) == set(started.catalog.definitions)
         assert db_session.get(WorkExecutor, executors.executor_id()) is not None
+
+    def test_is_a_live_executor_before_its_engine_relaunches(
+        self, started, work_engine, db_session: Session, monkeypatch
+    ) -> None:
+        # The restored snapshot need not hold this executor's row.
+        db_session.delete(db_session.get(WorkExecutor, executors.executor_id()))
+        db_session.commit()
+        seen_at_launch: list[set[str]] = []
+        launch = work_engine.launch
+
+        def observed(*, listen_lanes):
+            seen_at_launch.append(executors.live_ids())
+            launch(listen_lanes=listen_lanes)
+
+        monkeypatch.setattr(work_engine, "launch", observed)
+
+        work_bootstrap.after_restore()
+
+        assert executors.executor_id() in seen_at_launch[0]
 
     def test_a_pass_the_snapshot_shows_queued_does_not_suppress_reconciling(
         self, started, work_engine, db_session: Session

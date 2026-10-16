@@ -160,7 +160,7 @@ _held: dict | None = None
 _held_lock = threading.Lock()
 
 
-def _heartbeat_loop(stop: threading.Event) -> None:
+def _heartbeat_loop(stop: threading.Event, lanes: list[LaneName]) -> None:
     """Renew this executor's row and fences until the process stops."""
     from app.db.session import get_session_factory
     from app.modules.storage.capacity import CapacityManager
@@ -169,7 +169,12 @@ def _heartbeat_loop(stop: threading.Event) -> None:
     interval = max(1, settings.fence_heartbeat_seconds)
     while not stop.wait(interval):
         try:
-            executors.heartbeat(active_mutations=active_mutations())
+            renewed = executors.heartbeat(active_mutations=active_mutations())
+            if not renewed and not stop.is_set():
+                # A restore can replace the table with a snapshot that never
+                # held this process. Other processes rerun the work of an
+                # executor with no row, so a live one registers again.
+                executors.register(role=settings.process_role, lanes=lanes)
             fences.heartbeat(executors.executor_id())
             # The burst that raised this process's capacity lease has passed
             # by the next beat: hand back what it no longer holds.
@@ -205,11 +210,13 @@ def start(
     jobs.clear_listeners()
     jobs.subscribe(events.job_changed)
     catalog_module.bind(engine, catalog)
-    engine.launch(listen_lanes=lanes)
+    # Registered before launching: other processes treat an execution whose
+    # executor has no live row as stranded, and the engine dequeues at launch.
     executors.register(
         role=settings.process_role,
         lanes=list(catalog.lanes) if lanes is None else lanes,
     )
+    engine.launch(listen_lanes=lanes)
     if sole_api:
         retired = executors.retire_predecessors()
         if retired:
@@ -244,7 +251,11 @@ def start(
     # factory the rest of startup used.
     heartbeat = threading.Thread(
         target=contextvars.copy_context().run,
-        args=(_heartbeat_loop, stop),
+        args=(
+            _heartbeat_loop,
+            stop,
+            list(catalog.lanes) if lanes is None else lanes,
+        ),
         name="work-heartbeat",
         daemon=True,
     )
@@ -350,11 +361,13 @@ def after_restore() -> None:
     runtime.engine.reset()
     catalog_module.bind(runtime.engine, runtime.catalog)
     lanes = listen_lanes()
-    runtime.engine.launch(listen_lanes=lanes)
+    # The restored database may not hold this executor's row; register it
+    # before the relaunched engine dequeues anything.
     executors.register(
         role=settings.process_role,
         lanes=list(runtime.catalog.lanes) if lanes is None else lanes,
     )
+    runtime.engine.launch(listen_lanes=lanes)
     # The snapshot's "a pass is already queued" marks belong to the engine of
     # the process that took it; the reset engine will never run those passes.
     forget_queued_passes()

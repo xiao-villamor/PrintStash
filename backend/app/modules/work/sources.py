@@ -43,14 +43,24 @@ def next_occurrence(expression: str, *, now: datetime) -> datetime:
     return ensure_utc(croniter(expression, ensure_utc(now)).get_next(datetime))
 
 
+def even_step(whole: int, at_most: int) -> int:
+    """The largest step that divides ``whole`` evenly, no larger than ``at_most``.
+
+    A cron step restarts at every minute, hour or day, so one that does not
+    divide it fires unevenly: ``*/7`` minutes leaves a four-minute gap at each
+    hour. Rounding down keeps the cadence even and never slower than asked.
+    """
+    return max(step for step in range(1, max(1, at_most) + 1) if whole % step == 0)
+
+
 def interval_cron(seconds: int) -> str:
-    """A cron expression firing every ``seconds`` (minute granularity)."""
-    minutes = max(1, seconds // 60)
+    """A cron expression firing evenly, at most every ``seconds`` (minute granularity)."""
+    minutes = seconds // 60
     if minutes < 60:
-        return f"*/{minutes} * * * *"
-    hours = max(1, minutes // 60)
+        return f"*/{even_step(60, minutes)} * * * *"
+    hours = minutes // 60
     if hours < 24:
-        return f"0 */{hours} * * *"
+        return f"0 */{even_step(24, hours)} * * *"
     return "0 0 * * *"
 
 

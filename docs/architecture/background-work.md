@@ -73,7 +73,9 @@ One pass (`work.reconciler.run_pass`) per definition, claimed through its
 1. **Repair.** Active Job rows are compared with the engine's evidence for
    their current attempt, and the pure `decide()` returns none, complete,
    resubmit, interrupt or fail. Work of another application version, or
-   stranded on an executor that stopped heartbeating, is cancelled and rerun.
+   stranded on an executor not proven alive (its heartbeat lapsed, or it has
+   no row at all), is cancelled and rerun. A process registers its executor
+   before its engine launches, so its own work is never mistaken for lost.
    A Job resubmitted more than `JOBS_MAX_RESUBMITS` times fails.
 2. **Discover.** The source is asked for at most
    `min(JOBS_RECONCILE_BATCH, lane headroom)` items, where headroom is the
@@ -281,10 +283,10 @@ both Compose files run the first with no setting.
 | `JOBS_QUEUE_POLL_INTERVAL_SECONDS` | 0.25 | DBOS lane dispatch polling (0.05–5 seconds); lower values trade more local database polling for shorter queue handoffs |
 | `JOBS_RELAXED_QUEUE_POLL_INTERVAL_SECONDS` | 2.0 | Polling of lanes nobody waits on (search, maintenance, notify, similarity, captions, expansion); never faster than the interval above. Every look at a queue costs database statements whether or not work is there |
 | `JOBS_BOOSTED_QUEUE_POLL_INTERVAL_SECONDS` / `JOBS_QUEUE_BOOST_SECONDS` | 0.1 / 3.0 | A lane a request has just dispatched a Job to is polled at the first for the second, then returns to its own interval; a window of 0 disables it |
-| `JOBS_RECONCILE_INTERVAL_SECONDS` | 300 | Safety-net tick |
+| `JOBS_RECONCILE_INTERVAL_SECONDS` | 300 | Safety-net tick. Runs as a cron, so an interval that does not divide the minute, hour or day evenly is rounded down to one that does (90 runs every minute) |
 | `JOBS_RECONCILE_BATCH` | 500 | Most Jobs one pass creates |
 | `JOBS_LANE_HEADROOM_FACTOR` | 2 | Pending depth multiplier for ordinary lanes; derivation lanes reserve concurrency plus one |
-| `JOBS_MAX_RESUBMITS` | 3 | Interrupted attempts before a Job fails |
+| `JOBS_MAX_RESUBMITS` | 3 | Interrupted attempts before a Job fails; also how often the engine recovers one execution after its process died (with a pinned `EXECUTOR_ID`) |
 | `JOBS_RESUBMIT_COOLDOWN_SECONDS` / `JOBS_RESUBMIT_BURST` | 30 / 3 | A subject finished this often waits the window out |
 | `JOBS_SUBMIT_GRACE_SECONDS` | 60 | How long a queued pass absorbs further nudges |
 | `JOBS_PROGRESS_HOLD_SECONDS` | 1.0 | How long an attempt runs before the progress it reports is written (0–60 seconds; 0 writes every report) |
@@ -344,6 +346,24 @@ are only ever recognised by their heartbeat going stale.
   `JOBS_EXECUTOR_STALE_SECONDS` a pass sees the execution stranded, cancels it
   and resubmits the next attempt. Derivative rows it left running go stale and
   are offered again.
+- **A clean stop outlasts a step.** Shutdown waits ten seconds for running
+  executions, then deletes its executor's row. A step still running stays
+  running in the engine, which only recovers its own executor's work; the next
+  pass sees an executor with no row, cancels the execution and reruns the Job.
+- **The database refuses a write for a moment.** Claiming an attempt and
+  recording its outcome retry a busy SQLite file or a PostgreSQL restart (up to
+  five tries over about fifteen seconds). Only a refusal that outlasts them
+  ends the execution in error, which fails its Job.
+- **A running Job is cancelled.** Its execution is left to stop on its own: the
+  step sees the cancelled Job at its next check and ends. The engine is told to
+  cancel only queued or delayed executions, because cancelling a running one
+  frees its lane slot while its step is still running. A step that never
+  checks would hold the slot forever, so the tick cancels any settled Job's
+  execution still running `JOBS_EXECUTOR_STALE_SECONDS` after it settled.
+- **A restore drops a live executor's row.** A restored snapshot need not hold
+  every running process. A process registers again on its next heartbeat when
+  its row is gone, since other processes rerun the work of an executor they
+  cannot see.
 - **Upgrade.** The new version cancels executions of the old one at startup and
   reruns them on the new code, without waiting for staleness.
 - **Restore.** A restore holds the restore fence, so no step starts; afterwards

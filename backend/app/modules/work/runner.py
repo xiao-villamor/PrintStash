@@ -19,6 +19,8 @@ from threading import Lock
 from typing import Any
 
 from sqlalchemy import bindparam
+from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlmodel import col, select
 
 from app.core.cancellation import OperationCancelled, cancellation_scope
@@ -30,7 +32,7 @@ from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, WorkPriorit
 from app.db.session import get_session_factory
 
 from . import catalog as catalog_module
-from .contracts import NO_RETRY, JobOutcome, Step, StepRunner, no_hook
+from .contracts import JobOutcome, RetryPolicy, Step, StepRunner, no_hook
 from .jobs import Settlement, failure_of, jobs
 
 logger = get_logger(__name__)
@@ -46,6 +48,17 @@ _WITHDRAWAL_QUERY = select(Job.state, Job.attempts, Job.execution_epoch).where(
 # wait (for a worker, a permit, a lane) each probe twice a second; one read
 # for all of them, no older than this, replaces one read each.
 _WATCH_SECONDS = 0.25
+# Claiming an attempt and recording its outcome are the runner's bookkeeping,
+# not the Job's work. A write the database refuses for a moment (a busy SQLite
+# file, a PostgreSQL restart) is retried here: left to fail, it ends the
+# execution in error, and the reconciler then fails a Job whose work succeeded.
+# Both are idempotent: the claim only moves forward, the first settlement wins.
+BOOKKEEPING_RETRY = RetryPolicy(
+    max_attempts=5,
+    interval_seconds=1.0,
+    backoff_rate=2.0,
+    retry_on=(OperationalError, InterfaceError, PoolTimeoutError),
+)
 
 
 class StepOutcome(StrEnum):
@@ -546,7 +559,7 @@ def execute_job(
     begun = runner.run(
         f"work.begin#{attempt}",
         lambda: _begin(job_id, attempt, execution_epoch),
-        NO_RETRY,
+        BOOKKEEPING_RETRY,
     )
     if begun is None:
         return
@@ -591,4 +604,4 @@ def execute_job(
         )
         # An exception with no message still names what failed.
         error = failure_of(exc)
-    runner.run("work.settle", lambda: _settle(context, error), NO_RETRY)
+    runner.run("work.settle", lambda: _settle(context, error), BOOKKEEPING_RETRY)
