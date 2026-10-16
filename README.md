@@ -28,25 +28,6 @@ Keep the settings that worked with each Model, and send your next print to a com
 
 </div>
 
-## See PrintStash in action
-
-| Model Library | G-code Revisions | Printer Management |
-| --- | --- | --- |
-| [![Library with Collections, filters, favorites, and model previews](screenshots/01-vault-overview.png)](screenshots/01-vault-overview.png) | [![G-code revisions with needs-test and known-good labels](screenshots/04-artifact-compare.png)](screenshots/04-artifact-compare.png) | [![Moonraker printer showing print progress, temperatures, and controls](screenshots/05-printer-live.png)](screenshots/05-printer-live.png) |
-| Find a Model in your Collections. | Keep tested settings and compare revisions. | Follow prints on compatible printers. |
-
-Select a screenshot to see it at full size. Screenshots use demonstration data;
-printer actions depend on the [integration](#printer-compatibility).
-
-<details>
-<summary>Watch a short workflow demo</summary>
-
-![PrintStash library, Model details, revisions, and printer workflow](screenshots/00-demo-v010.gif)
-
-This demo was recorded for an earlier version; some interface details have changed.
-
-</details>
-
 ## Why PrintStash?
 
 - **Organize everything.** Bring models, files, Collections, and imports into
@@ -179,6 +160,27 @@ administrator approval, a verified independent backup, and quarantine.
 Manage local accounts, scoped API keys, Collection and printer permissions, or
 optional OIDC/SSO. See [disaster recovery](./docs/disaster-recovery.md),
 [storage safety](./docs/storage-data-safety.md), and [security](./SECURITY.md).
+
+## Screenshots
+
+<details>
+<summary>Explore the library, G-code revisions, and printer workflow</summary>
+
+| Model Library | G-code Revisions | Printer Management |
+| --- | --- | --- |
+| [![Library with Collections, filters, favorites, and model previews](screenshots/01-vault-overview.png)](screenshots/01-vault-overview.png) | [![G-code revisions with needs-test and known-good labels](screenshots/04-artifact-compare.png)](screenshots/04-artifact-compare.png) | [![Moonraker printer showing print progress, temperatures, and controls](screenshots/05-printer-live.png)](screenshots/05-printer-live.png) |
+| Find a Model in your Collections. | Keep tested settings and compare revisions. | Follow prints on compatible printers. |
+
+Select a screenshot to see it at full size. Screenshots use demonstration data;
+printer actions depend on the [integration](#printer-compatibility).
+
+### Workflow demo
+
+![PrintStash library, Model details, revisions, and printer workflow](screenshots/00-demo-v010.gif)
+
+This demo was recorded for an earlier version; some interface details have changed.
+
+</details>
 
 ## Printer Compatibility
 
