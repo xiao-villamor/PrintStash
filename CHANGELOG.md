@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- An idle server on SQLite no longer uses more CPU the longer it runs. Each
+  background-work lane keeps checking for queued work on a short interval, and on
+  SQLite every check read the engine's entire workflow history, which the
+  default 7-day retention grows into tens of thousands of rows. On a low-power
+  mini PC that kept the server near 30% CPU with nothing to do. The checks now
+  use an index (DBOS 3.3). PostgreSQL was not affected.
+
 - Settings no longer re-measures **Storage insights** or re-checks **Server
   GPU** every time you open them. Both took several seconds to load; each
   answer is now kept for the session. Storage insights are measured again after

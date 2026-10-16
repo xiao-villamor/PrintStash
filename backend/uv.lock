@@ -617,19 +617,19 @@ wheels = [
 
 [[package]]
 name = "dbos"
-version = "3.0.0"
+version = "3.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
+    { name = "croniter" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dateutil" },
     { name = "pyyaml" },
     { name = "sqlalchemy", extra = ["asyncio"] },
-    { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9a/f0/043a3385913f01a19b58631f1fb82cdd44acc87207528e5bd396ca5453ca/dbos-3.0.0.tar.gz", hash = "sha256:d9b8b92ee139b3ef1f707dd054831c4f8db039d2f790975cd0c817ecbd276c1f", size = 537283, upload-time = "2026-09-16T17:14:23.554Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/54/1bcf792851d184e82c27f3de1ce1e7e2008482083d3098ea4ffc97c873f8/dbos-3.3.0.tar.gz", hash = "sha256:5b5fe81272e7f0b16b8e98befe1d4475b1ad72ba57e0a421900e3f7df21eb898", size = 516801, upload-time = "2026-10-15T17:20:59.905Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/0b/cb00852815db8bb684f7a5ab10fb53124bc61b0f5e990bc8b14ab6b17f70/dbos-3.0.0-py3-none-any.whl", hash = "sha256:cc552877a11e8d017dbaa7a305a81fbc3c15c3c4d5628f9c2edf42f4de8fb537", size = 266753, upload-time = "2026-09-16T17:14:21.88Z" },
+    { url = "https://files.pythonhosted.org/packages/94/db/407d2748b9aaccd28930815a0f3de6013bc53b7ddb87c3b7949abc8741f7/dbos-3.3.0-py3-none-any.whl", hash = "sha256:398e5c3182d0aa9fa4115c9f06028202365d0c356c172f2ec21c1fd8be6e441b", size = 246771, upload-time = "2026-10-15T17:20:58.114Z" },
 ]
 
 [[package]]
@@ -1724,7 +1724,7 @@ requires-dist = [
     { name = "cheroot", marker = "extra == 'dev'", specifier = ">=11,<12" },
     { name = "croniter", specifier = ">=6.2,<7" },
     { name = "cryptography", specifier = ">=50,<51" },
-    { name = "dbos", specifier = ">=3.0,<4" },
+    { name = "dbos", specifier = ">=3.3,<4" },
     { name = "deptry", marker = "extra == 'dev'", specifier = ">=0.23,<1" },
     { name = "fast-simplification", marker = "extra == 'dev'", specifier = ">=0.2.0,<0.3" },
     { name = "fastapi", specifier = ">=0.141,<1" },

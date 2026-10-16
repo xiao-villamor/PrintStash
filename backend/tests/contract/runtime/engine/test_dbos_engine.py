@@ -1,4 +1,4 @@
-"""Actual engine queue ordering, persistent ticks and DBOS system-state upgrades.
+"""Actual engine queue ordering, polling, persistent ticks and DBOS system-state upgrades.
 
 The engine finds queued work only by polling. A lane that was just handed
 interactive work is polled faster for a short window and then returns to its
@@ -8,13 +8,15 @@ polling interval for nothing, or an idle server keeps paying for the fast one.
 
 import sqlite3
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from dbos import DBOS
-from sqlalchemy import Column, Integer, MetaData, Table, create_engine
+from sqlalchemy import Column, Integer, MetaData, Table, create_engine, event
+from sqlalchemy.engine import Engine
 from sqlmodel import select
 
 from app.core.config import _overlay
@@ -247,6 +249,54 @@ class TestLaneBoost:
         engine.settle()
 
         assert engine.state(job_id) == JobState.COMPLETED
+
+
+@contextmanager
+def _statements_on(url: str) -> Iterator[set[tuple[str, tuple]]]:
+    """Every distinct workflow query the engine sends to the database at ``url``."""
+    seen: set[tuple[str, tuple]] = set()
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        if str(conn.engine.url) == url and "workflow_status" in statement:
+            seen.add((statement, tuple(parameters)))
+
+    event.listen(Engine, "before_cursor_execute", capture)
+    try:
+        yield seen
+    finally:
+        event.remove(Engine, "before_cursor_execute", capture)
+
+
+class TestIdlePolling:
+    """An idle server polls every lane forever (#476).
+
+    On SQLite a poll that cannot use an index reads every retained workflow row,
+    so idle CPU grows with history: ~30% on a mini PC holding a week of
+    reconcile passes. The plan, not the row count, decides this.
+    """
+
+    def test_no_poll_scans_the_workflow_table_on_sqlite(self, tmp_path):
+        url = f"sqlite:///{tmp_path / 'engine.sqlite'}"
+        with running_engine((url, None)) as harness:
+            # Launch recovers this executor's work once; polling is what repeats.
+            harness.relaunch(app_version=VERSION, listen_lanes=None)
+            with _statements_on(url) as seen:
+                lanes = {lane.value for lane in harness.catalog.lanes}
+                harness.wait_for(
+                    lambda: lanes <= {p for _, ps in list(seen) for p in ps}
+                )
+                polled = set(seen)
+
+        with sqlite3.connect(url.removeprefix("sqlite:///")) as connection:
+            scans = {
+                statement: detail
+                for statement, parameters in polled
+                for *_, detail in connection.execute(
+                    f"EXPLAIN QUERY PLAN {statement}", parameters
+                )
+                if detail.startswith("SCAN") and "workflow_status" in detail
+            }
+        assert scans == {}
 
 
 def _recover_legacy_job(harness):
