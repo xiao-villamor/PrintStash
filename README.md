@@ -18,7 +18,7 @@ Keep the settings that worked with each Model, and send your next print to a com
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](./LICENSE)
 [![Status: beta](https://img.shields.io/badge/status-beta-f59e0b?style=flat-square)](#project-status--roadmap)
 
-[**Get Started**](#quick-start) · [**Documentation**](https://www.printstash.org/docs/) · [**Releases**](https://github.com/xiao-villamor/PrintStash/releases) · [**Contributing**](#contributing)
+[**Get Started**](#quick-start) · [**Documentation**](https://www.printstash.org/en/docs/) · [**Releases**](https://github.com/xiao-villamor/PrintStash/releases) · [**Contributing**](#contributing)
 
 <a href="screenshots/02-model-detail.png">
   <img src="screenshots/02-model-detail.png" alt="A Model's 3D preview beside its recommended G-code, slicer settings, and printer actions" width="960" />
@@ -45,12 +45,12 @@ for your files. Start with **1 GB RAM**; 2 GB or more helps with large meshes.
 > [!WARNING]
 > **Use a trusted network and restrict access until setup is complete.** The
 > first person to finish registration becomes the administrator. For remote
-> access, configure a [reverse proxy with TLS and access controls](./docs/deployment.md#https-and-reverse-proxies).
+> access, configure a [reverse proxy with TLS and access controls](https://www.printstash.org/en/docs/getting-started/installation/#reverse-proxy-with-tls).
 
 The commands below use the `latest` image, which can also be published from
 `main`. To install the latest published release, create a `.env` file containing
 `PRINTSTASH_VERSION=0.14.0` beside the downloaded Compose file before running
-`docker compose up -d`. See [version pinning](./docs/deployment.md#port-and-image-version).
+`docker compose up -d`. See [version pinning](https://www.printstash.org/en/docs/guides/upgrading/#pinning-images).
 
 ```bash
 mkdir -p printstash && cd printstash
@@ -64,10 +64,10 @@ Open **[http://localhost:3000](http://localhost:3000)**, or
 1. **Create your administrator account and check storage.** There is no default
    username, password, or console token to copy in 0.14.0 and later. App-store
    deployments may provision the administrator instead. See the
-   [first-run guide](./docs/first-run.md).
+   [first-run guide](https://www.printstash.org/en/docs/getting-started/first-run/).
 2. **Add files.** Upload a Model or connect an existing folder under
    **Settings → Library sources** and run its first scan. Host/NAS folders must be
-   [mounted inside the container](./docs/deployment.md#data-and-host-folders).
+   [mounted inside the container](https://www.printstash.org/en/docs/guides/shared-volumes/#mount-a-folder-into-docker).
 3. **Open a Model.** Explore the preview, add G-code as a Revision, and connect
    a printer when you are ready.
 
@@ -77,9 +77,9 @@ service is required. From a Git checkout, the same `docker compose up -d`
 command works in the repository root.
 
 For ports, HTTPS, updates, PostgreSQL, remote storage, or SSO, read the
-[**deployment guide**](./docs/deployment.md).
+[**deployment guide**](https://www.printstash.org/en/docs/getting-started/installation/).
 [docker-compose.advanced.yml](./docker-compose.advanced.yml) lists all settings.
-Always back up before upgrading; check [upgrade notes](./UPGRADE.md) for your
+Always back up before upgrading; check [upgrade notes](https://www.printstash.org/en/docs/guides/upgrading/) for your
 version, especially when moving from 0.13.x or earlier to the single `/data` volume.
 
 ## Features
@@ -97,10 +97,10 @@ and keep favorites and saved views. Bulk edits handle tags and organization;
 Multipart Models keep multi-piece projects together without duplicating their
 files. Attach notes and Documents, or share a Model with an expiring, read-only
 link; original downloads are off unless you enable them.
-Optional [AI Search](./docs/ai-search.md) and [Similar Models](./docs/similar-models.md)
+Optional [AI Search](https://www.printstash.org/en/docs/guides/ai-search/) and Similar Models
 help explore the library; learned search needs operator-supplied local models,
 and similarity is review evidence, not a guarantee of printable compatibility.
-Track part quantities and confirmed output with [multipart builds](./docs/multipart-builds.md).
+Track part quantities and confirmed output with [multipart builds](https://www.printstash.org/en/docs/guides/multipart-models/#create-and-track-a-build).
 
 ### Imports & Storage
 
@@ -109,9 +109,9 @@ or index an existing folder or NAS in place. Remote Library sources are
 read-only; mounted folders can optionally accept new files without overwriting
 existing ones. Storage maturity and safety guarantees vary by provider.
 
-See [Library sources](./docs/library-sources.md),
-[storage providers](./docs/storage-providers.md), and the
-[browser extension](./browser-extension/README.md). MakerWorld packages need
+See [Library sources](https://www.printstash.org/en/docs/guides/shared-volumes/),
+[storage providers](https://www.printstash.org/en/docs/guides/storage-providers/), and the
+[browser extension](https://www.printstash.org/en/docs/guides/browser-capture/). MakerWorld packages need
 browser transfer; Thingiverse downloads need the extension or manual upload.
 Site access and metadata can be incomplete and may need review.
 
@@ -121,8 +121,8 @@ Inspect meshes and G-code layers in the browser, open originals in your slicer,
 and keep **known good**, **needs test**, **failed**, or **archived** Revisions.
 Recommend a file for the next print and compare its settings and recorded results.
 STL, 3MF, OBJ, STEP/STP, DXF, G-code, and `.bgcode` are supported inputs; DXF
-originals have no preview, and [BGCODE previews](./docs/bgcode-preview.md) have
-conversion limits. The [OrcaSlicer hook](./docs/orcaslicer.md) can attach a slice
+originals have no preview, and [BGCODE previews](https://www.printstash.org/en/docs/reference/known-limitations/#files-and-previews) have
+conversion limits. The [OrcaSlicer hook](https://www.printstash.org/en/docs/guides/user-guide/#skip-the-manual-upload-the-orcaslicer-hook) can attach a slice
 to its source Model.
 
 **You still need a slicer.** The toolpath viewer does not simulate firmware or
@@ -158,8 +158,8 @@ supported remote destinations. Physical cleanup is guarded by storage capabiliti
 administrator approval, a verified independent backup, and quarantine.
 
 Manage local accounts, scoped API keys, Collection and printer permissions, or
-optional OIDC/SSO. See [disaster recovery](./docs/disaster-recovery.md),
-[storage safety](./docs/storage-data-safety.md), and [security](./SECURITY.md).
+optional OIDC/SSO. See [disaster recovery](https://www.printstash.org/en/docs/guides/backup-and-restore/),
+[storage safety](https://www.printstash.org/en/docs/guides/data-safety/), and [security](./SECURITY.md).
 
 ## Screenshots
 
@@ -197,25 +197,25 @@ The app exposes capabilities and disables unsupported actions.
 | **OctoPrint / OctoPi** | Beta | Local status, G-code upload/start, remote files, pause/resume/cancel |
 | **Elegoo Centauri Carbon / Carbon 2** | Beta | Local status, G-code upload/start, pause/resume/cancel; no remote file inventory or history import |
 
-See [**provider support**](./docs/provider-support.md) for authentication,
-unsupported actions, diagnostics, and the hardware validation record. Automated
+See the [**printer guide**](https://www.printstash.org/en/docs/guides/printers/) for setup,
+supported actions, diagnostics, and validation limits. Automated
 protocol tests do not establish hardware certification. Bambu file recovery
 depends on the printer's cache; Centauri Carbon 2 upload remains unconfirmed
 on physical hardware.
 
 ## Documentation
 
-Read the [**official PrintStash documentation**](https://www.printstash.org/docs/)
+Read the [**official PrintStash documentation**](https://www.printstash.org/en/docs/)
 for installation, everyday workflows, and administration.
 
 | Start here | Guides |
 | --- | --- |
-| **Installation & Deployment** | [Deployment](./docs/deployment.md) · [First run](./docs/first-run.md) · [Upgrading](./UPGRADE.md) |
-| **Library Sources** | [Folders and NAS](./docs/library-sources.md) · [Browser capture](./browser-extension/README.md) · [Pending Imports](./docs/vault-maintenance-and-capture.md) |
-| **Printer Compatibility** | [Provider support](./docs/provider-support.md) · [OrcaSlicer](./docs/orcaslicer.md) · [Multipart builds](./docs/multipart-builds.md) |
-| **Storage & Backups** | [Storage providers](./docs/storage-providers.md) · [Data safety](./docs/storage-data-safety.md) · [Disaster recovery](./docs/disaster-recovery.md) |
-| **Security** | [Security policy](./SECURITY.md) · [HTTPS and proxies](./docs/deployment.md#https-and-reverse-proxies) |
-| **Development & Contributing** | [Contributor guide](./CONTRIBUTING.md) · [Architecture](./docs/architecture/backend.md) · [Starter issues](./docs/community-starter-issues.md) |
+| **Installation & Deployment** | [Deployment](https://www.printstash.org/en/docs/getting-started/installation/) · [First run](https://www.printstash.org/en/docs/getting-started/first-run/) · [Upgrading](https://www.printstash.org/en/docs/guides/upgrading/) |
+| **Library Sources** | [Folders and NAS](https://www.printstash.org/en/docs/guides/shared-volumes/) · [Browser capture](https://www.printstash.org/en/docs/guides/browser-capture/) · [Pending Imports](https://www.printstash.org/en/docs/guides/browser-capture/#review-pending-imports) |
+| **Printer Compatibility** | [Provider support](https://www.printstash.org/en/docs/guides/printers/) · [OrcaSlicer](https://www.printstash.org/en/docs/guides/user-guide/#skip-the-manual-upload-the-orcaslicer-hook) · [Multipart builds](https://www.printstash.org/en/docs/guides/multipart-models/#create-and-track-a-build) |
+| **Storage & Backups** | [Storage providers](https://www.printstash.org/en/docs/guides/storage-providers/) · [Data safety](https://www.printstash.org/en/docs/guides/data-safety/) · [Disaster recovery](https://www.printstash.org/en/docs/guides/backup-and-restore/) |
+| **Security** | [Users and access](https://www.printstash.org/en/docs/guides/users-and-access/) · [HTTPS and proxies](https://www.printstash.org/en/docs/getting-started/installation/#reverse-proxy-with-tls) |
+| **Development & Contributing** | [Developer guide](https://www.printstash.org/en/docs/contributing/development/) · [Architecture](https://www.printstash.org/en/docs/reference/architecture/) · [API reference](https://www.printstash.org/en/docs/reference/api/) |
 
 ## Project Status & Roadmap
 
@@ -223,7 +223,7 @@ PrintStash is **beta**. Library management and Moonraker/Klipper are its
 best-established workflows. The supported deployment runs **one API process per
 Vault**; library data, uploads, and printer actions need a live server, including
 in the installed web app. English and Spanish localization is in progress, with
-English fallbacks on some screens. See [known limitations](./docs/known-limitations.md).
+English fallbacks on some screens. See [known limitations](https://www.printstash.org/en/docs/reference/known-limitations/).
 
 - **Published: [0.14.0](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.14.0).**
   Includes durable background work, guided ZIP imports, browser first-run setup,
@@ -234,19 +234,19 @@ English fallbacks on some screens. See [known limitations](./docs/known-limitati
   fixes, and a unified image with optional GPU support. These changes are not yet
   a published release. GPU use needs device access and operation qualification;
   detection alone does not enable AI features. CPU processing remains available;
-  see [compute support](./docs/compute.md).
+  see [compute support](https://www.printstash.org/en/docs/guides/previews-and-gpu/).
 - **Next:** follow [Unreleased](./CHANGELOG.md#unreleased) and the
-  [roadmap](./docs/roadmap.md) for future work.
+  [roadmap](https://www.printstash.org/en/roadmap/) for future work.
 
 **Before upgrading to 0.15.0:** back up and stop all API and worker processes
 before upgrading them together to DBOS 3.0. Source installs
-require Python 3.14 or newer. Read the [upgrade and rollback guidance](./UPGRADE.md#0150-notes).
+require Python 3.14 or newer. Read the [upgrade and rollback guidance](https://www.printstash.org/en/docs/guides/upgrading/#version-0150).
 
 ## Contributing
 
 Bug reports, hardware validation, documentation, translations, and focused PRs
 are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and
-[community starter issues](./docs/community-starter-issues.md).
+the [development guide](https://www.printstash.org/en/docs/contributing/development/).
 [Report a bug](https://github.com/xiao-villamor/PrintStash/issues) or discuss ideas
 in [Discussions](https://github.com/xiao-villamor/PrintStash/discussions).
 
@@ -255,7 +255,7 @@ in [Discussions](https://github.com/xiao-villamor/PrintStash/discussions).
 Report vulnerabilities as described in [SECURITY.md](./SECURITY.md).
 Use PrintStash on trusted self-hosted networks. For public access, put it behind
 a reverse proxy with TLS and your own access controls; the
-[deployment guide](./docs/deployment.md#https-and-reverse-proxies) explains how
+[deployment guide](https://www.printstash.org/en/docs/getting-started/installation/#reverse-proxy-with-tls) explains how
 to bind the frontend to `127.0.0.1`.
 
 ## License
