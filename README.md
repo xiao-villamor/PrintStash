@@ -49,7 +49,7 @@ for your files. Start with **1 GB RAM**; 2 GB or more helps with large meshes.
 
 The commands below use the `latest` image, which can also be published from
 `main`. To install the latest published release, create a `.env` file containing
-`PRINTSTASH_VERSION=0.14.0` beside the downloaded Compose file before running
+`PRINTSTASH_VERSION=0.15.0` beside the downloaded Compose file before running
 `docker compose up -d`. See [version pinning](https://www.printstash.org/en/docs/guides/upgrading/#pinning-images).
 
 ```bash
@@ -86,9 +86,8 @@ version, especially when moving from 0.13.x or earlier to the single `/data` vol
 
 A **Model** connects a design's files, G-code Revisions, and print history.
 **Collections** organize the library; **Multipart Models** group related Models
-as named pieces and alternatives. These core workflows are available in
-[0.14.0](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.14.0);
-[0.15.0 changes](#project-status--roadmap) are listed separately below.
+as named pieces and alternatives. The workflows below describe **0.15.0**;
+see [release highlights](#project-status--roadmap) for what's new.
 
 ### Library & Organization
 
@@ -225,14 +224,10 @@ Vault**; library data, uploads, and printer actions need a live server, includin
 in the installed web app. English and Spanish localization is in progress, with
 English fallbacks on some screens. See [known limitations](https://www.printstash.org/en/docs/reference/known-limitations/).
 
-- **Published: [0.14.0](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.14.0).**
-  Includes durable background work, guided ZIP imports, browser first-run setup,
-  and a single persistent data volume, alongside the core workflows above.
-- **Preparing: [0.15.0](./CHANGELOG.md#0150).** This branch prepares changes
-  integrated since 0.14.0: scrolling library pagination, subtree filters, editable
-  Library sources, clearer import and preview progress, multi-material G-code
-  fixes, and a unified image with optional GPU support. These changes are not yet
-  a published release. GPU use needs device access and operation qualification;
+- **Published: [0.15.0](./CHANGELOG.md#0150).** Includes scrolling library
+  pagination, subtree filters, editable Library sources, clearer import and
+  preview progress, multi-material G-code fixes, and a unified image with
+  optional GPU support. GPU use needs device access and operation qualification;
   detection alone does not enable AI features. CPU processing remains available;
   see [compute support](https://www.printstash.org/en/docs/guides/previews-and-gpu/).
 - **Next:** follow [Unreleased](./CHANGELOG.md#unreleased) and the
