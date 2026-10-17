@@ -1,0 +1,81 @@
+{
+  "cosmos-installer": {
+    "form": [
+      {
+        "name": "adminUsername",
+        "label": "Administrator username (3 to 128 characters)",
+        "initialValue": "admin",
+        "type": "text"
+      },
+      {
+        "name": "adminPassword",
+        "label": "Administrator password (8 to 256 characters). Shown here once: PrintStash creates this account at first start.",
+        "initialValue": "{Passwords.0}",
+        "type": "text"
+      },
+      {
+        "name": "adminEmail",
+        "label": "Administrator email (optional)",
+        "initialValue": "",
+        "type": "email"
+      }
+    ],
+    "post-install": [
+      {
+        "type": "info",
+        "name": "firstRun",
+        "label": "Sign in with the administrator account from this form, then choose where PrintStash stores your files. Keep /data in your backups: it holds the database, uploads, thumbnails and backups."
+      }
+    ]
+  },
+  "minVersion": "0.8.0",
+  "services": {
+    "{ServiceName}": {
+      "image": "ghcr.io/xiao-villamor/printstash:0.14.0",
+      "container_name": "{ServiceName}",
+      "restart": "unless-stopped",
+      "stop_grace_period": "60s",
+      "environment": [
+        "VAULT_SETUP_MODE=environment",
+        "VAULT_RESTART_ENABLED=true",
+        "VAULT_SETUP_ADMIN_USERNAME={Context.adminUsername}",
+        "VAULT_SETUP_ADMIN_PASSWORD={Context.adminPassword}",
+        "VAULT_SETUP_ADMIN_EMAIL={Context.adminEmail}",
+        "VAULT_COMPUTE_MODE=auto",
+        "VAULT_COMPUTE_MEMORY_MB=1024",
+        "VAULT_MESH_MEMORY_BUDGET_FRACTION=0.5",
+        "VAULT_EMBEDDING_MEMORY_BUDGET_FRACTION=0.25"
+      ],
+      "labels": {
+        "cosmos-persistent-env": "VAULT_SETUP_ADMIN_USERNAME, VAULT_SETUP_ADMIN_PASSWORD, VAULT_SETUP_ADMIN_EMAIL",
+        "cosmos-force-network-secured": "true",
+        "cosmos-auto-update": "false",
+        "cosmos-icon": "https://azukaar.github.io/cosmos-servapps-official/servapps/PrintStash/icon.png",
+        "cosmos-stack": "{ServiceName}",
+        "cosmos-stack-main": "{ServiceName}"
+      },
+      "volumes": [
+        {
+          "source": "{ServiceName}-data",
+          "target": "/data",
+          "type": "volume"
+        }
+      ],
+      "routes": [
+        {
+          "name": "{ServiceName}",
+          "description": "Expose {ServiceName} to the web",
+          "useHost": true,
+          "target": "http://{ServiceName}:3000",
+          "mode": "SERVAPP",
+          "Timeout": 14400000,
+          "ThrottlePerMinute": 12000,
+          "BlockCommonBots": true,
+          "SmartShield": {
+            "Enabled": true
+          }
+        }
+      ]
+    }
+  }
+}

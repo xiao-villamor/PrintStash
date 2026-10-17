@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- PrintStash now keeps a manifest for the Cosmos Cloud market
+  (`azukaar/cosmos-servapps-official`) next to the other store catalogues, with the
+  install dialog creating the first administrator and the same memory budgets the
+  other stores pass. Nothing changes for existing installations; the store
+  submission is a separate step, described in `catalogues/README.md`.
+
 - An idle server on SQLite no longer uses more CPU the longer it runs. Each
   background-work lane keeps checking for queued work on a short interval, and on
   SQLite every check read the engine's entire workflow history, which the

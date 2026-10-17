@@ -1,0 +1,18 @@
+{
+  "name": "PrintStash",
+  "description": "A self-hosted library for 3D models and the G-code that prints them",
+  "longDescription": "<p>PrintStash keeps your 3D models, sliced G-code revisions and print history in one searchable library on your own server.</p><p>Preview STL, 3MF, OBJ, STEP and G-code in the browser, keep the revisions that printed well, index an existing folder in place, and send prints to Klipper/Moonraker, with beta support for OctoPrint, PrusaLink, Bambu Lab (LAN) and Elegoo printers.</p><p>More at <a href=\"https://www.printstash.org\">printstash.org</a>.</p>",
+  "tags": [
+    "3d printing",
+    "3d models",
+    "g-code",
+    "library",
+    "self-hosted"
+  ],
+  "repository": "https://github.com/xiao-villamor/PrintStash",
+  "image": "https://ghcr.io/xiao-villamor/printstash",
+  "supported_architectures": [
+    "amd64",
+    "arm64"
+  ]
+}

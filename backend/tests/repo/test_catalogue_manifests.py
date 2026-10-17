@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 import yaml
+from PIL import Image
 
 from app.core.config import Settings, settings
 from app.modules.administration import setup_policy
@@ -29,17 +30,21 @@ CATALOGUES = REPO_ROOT / "catalogues"
 RUNTIPI = CATALOGUES / "runtipi" / "printstash"
 UMBREL = CATALOGUES / "umbrel" / "printstash"
 CASAOS = CATALOGUES / "casaos" / "PrintStash"
+COSMOS = CATALOGUES / "cosmos" / "PrintStash"
 
-# The service that runs PrintStash in each store's compose file.
+# The service that runs PrintStash in each store's compose file. Cosmos keeps the
+# service name a template variable, so its key is the placeholder the store renders.
 MAIN_SERVICES = {
     "casaos": (CASAOS / "docker-compose.yml", "printstash"),
+    "cosmos": (COSMOS / "cosmos-compose.json", "{ServiceName}"),
     "runtipi": (RUNTIPI / "docker-compose.yml", "printstash"),
     "umbrel": (UMBREL / "docker-compose.yml", "web"),
 }
 STORES = sorted(MAIN_SERVICES)
 # Stores whose install always supplies VAULT_SETUP_ADMIN_* (required form fields on
-# Runtipi, Umbrel's per-app credentials), and those whose fields may be left blank.
-ALWAYS_PROVISIONED = ["runtipi", "umbrel"]
+# Runtipi, Umbrel's per-app credentials, Cosmos' install dialog), and those whose
+# fields may be left blank.
+ALWAYS_PROVISIONED = ["cosmos", "runtipi", "umbrel"]
 OPTIONALLY_PROVISIONED = ["casaos"]
 ADMIN_SETTINGS = ["VAULT_SETUP_ADMIN_USERNAME", "VAULT_SETUP_ADMIN_PASSWORD"]
 # The limits the browser wizard and VAULT_SETUP_ADMIN_* validation enforce.
@@ -47,6 +52,10 @@ WIZARD_LIMITS = SetupRequest.model_json_schema()["properties"]
 
 
 def _load(path: Path) -> dict[str, Any]:
+    """A store's compose document, in whichever format that store reads."""
+    if path.suffix == ".json":
+        return json.loads(path.read_text())
+
     return yaml.safe_load(path.read_text())
 
 
@@ -66,6 +75,11 @@ def _environment(store: str) -> dict[str, str]:
 def _runtipi_fields() -> dict[str, dict[str, Any]]:
     config = json.loads((RUNTIPI / "config.json").read_text())
     return {item["env_variable"]: item for item in config["form_fields"]}
+
+
+def _cosmos_form() -> dict[str, dict[str, Any]]:
+    installer = _load(MAIN_SERVICES["cosmos"][0])["cosmos-installer"]
+    return {field["name"]: field for field in installer["form"]}
 
 
 class TestEveryCatalogue:
@@ -297,3 +311,59 @@ class TestCasaOS:
     @pytest.mark.parametrize("variable", ["PUID", "PGID"], ids=str)
     def test_uses_the_host_file_identity(self, variable: str) -> None:
         assert _environment("casaos")[variable] == f"${variable}"
+
+
+class TestCosmos:
+    def test_routes_to_the_web_port(self) -> None:
+        route = _service("cosmos")["routes"][0]
+
+        assert (route["target"], route["mode"]) == (
+            "http://{ServiceName}:3000",
+            "SERVAPP",
+        )
+
+    def test_installs_the_owner_the_dialog_collects(self) -> None:
+        # Cosmos terminates TLS and proxies every app, so registration from the
+        # browser through that proxy is refused: the install dialog has to collect
+        # the owner, and the manifest has to wire it, or setup stays closed.
+        form = _cosmos_form()
+        environment = _environment("cosmos")
+
+        assert environment["VAULT_SETUP_ADMIN_USERNAME"] == "{Context.adminUsername}"
+        assert environment["VAULT_SETUP_ADMIN_PASSWORD"] == "{Context.adminPassword}"
+        assert environment["VAULT_SETUP_ADMIN_EMAIL"] == "{Context.adminEmail}"
+        assert form["adminPassword"]["initialValue"] == "{Passwords.0}"
+
+    def test_keeps_the_template_parseable_as_written(self) -> None:
+        # The store renders whiskers before parsing. Using no conditionals and no
+        # unquoted placeholder keeps this file valid JSON, so the test reads exactly
+        # the template a reviewer sees, and the render only substitutes strings.
+        manifest = _load(MAIN_SERVICES["cosmos"][0])
+
+        assert isinstance(manifest["services"], dict)
+        assert manifest["minVersion"] == "0.8.0"
+
+    def test_names_the_icon_the_store_serves(self) -> None:
+        assert _service("cosmos")["labels"]["cosmos-icon"] == (
+            "https://azukaar.github.io/cosmos-servapps-official/servapps/"
+            "PrintStash/icon.png"
+        )
+
+    def test_describes_the_app_the_manifest_installs(self) -> None:
+        description = json.loads((COSMOS / "description.json").read_text())
+
+        assert description["image"].removeprefix("https://") == IMAGE, (
+            "the store checks description.image against the primary service image"
+        )
+        assert description["repository"] == (
+            "https://github.com/xiao-villamor/PrintStash"
+        )
+        assert description["supported_architectures"] == ["amd64", "arm64"]
+
+    def test_ships_the_store_assets(self) -> None:
+        # The store's Pages build needs a square icon and at least one screenshot;
+        # a missing screenshots/ directory crashes the whole deploy.
+        icon = Image.open(COSMOS / "icon.png")
+
+        assert icon.size == (256, 256), "the store shows icon.png at 256x256"
+        assert len(sorted((COSMOS / "screenshots").glob("*.png"))) >= 1
