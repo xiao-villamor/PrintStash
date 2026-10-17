@@ -1,6 +1,26 @@
 # PrintStash Upgrade Guide
 
-## Unreleased: bounded import windows
+## 0.15.0 notes
+
+Back up the application database and managed files, and retain the previous
+image. Stop every API and worker process and restart them on the same new
+image. Derivation queues do not need to drain first. DBOS 3.0
+migrates its disposable engine state; read the [rollback instructions](#0150-dbos-30)
+before starting the upgrade. Do not use `docker compose down -v`.
+
+Docker installations need no host Python change. Source installations require
+Python 3.14 or newer. The unified image includes optional GPU support; existing
+CPU-only installations continue to work. Device access and memory budgets are
+documented in [Optional portable compute](docs/compute.md).
+
+After startup, verify sign-in, library browsing, an upload, a Library source
+scan if configured, previews, and backup creation and verification. Review any
+processing refusals in Tasks and Settings. Upgrading from 0.13.x or earlier
+also requires the [0.14.0 volume-layout instructions](#0140-one-data-volume).
+
+<a id="unreleased-bounded-import-windows"></a>
+
+## 0.15.0: bounded import windows
 
 Batch imports materialize one disposable entry at a time. The positive settings
 `VAULT_INGESTION_BATCH_MAX_FILES=4` and `VAULT_INGESTION_BATCH_MAX_MB=512` set
@@ -15,7 +35,9 @@ Stop API and workers together before upgrading, then restart on the same image
 so every writer participates in per-entry confirmation. Back up before upgrading
 as usual. Existing reviewed ZIP validation is retained.
 
-## Unreleased: request command capacity
+<a id="unreleased-request-command-capacity"></a>
+
+## 0.15.0: request command capacity
 
 File acceptance now has a separate per-API-process command limit. The default
 `VAULT_API_COMMAND_CONCURRENCY=8` accepts values from 1 through 128; add it to
@@ -26,7 +48,9 @@ next body chunk holds neither a command token nor a SQL Session.
 Restart the API on the new image. This change adds no database migration or
 derivative recipe; SQLite remains the default and existing data stays in place.
 
-## Unreleased: Python 3.14
+<a id="unreleased-python-314"></a>
+
+## 0.15.0: Python 3.14
 
 Source installations of the application and shared core require Python 3.14 or
 newer. Recreate the backend virtual environment with Python 3.14 and run
@@ -34,7 +58,9 @@ newer. Recreate the backend virtual environment with Python 3.14 and run
 CI and official images use Python 3.14.8; image installations need no host Python
 upgrade. Earlier Python runtimes are no longer supported.
 
-## Unreleased: derivative scheduling
+<a id="unreleased-derivative-scheduling"></a>
+
+## 0.15.0: derivative scheduling
 
 SQLite remains the default; this upgrade does not move data to PostgreSQL.
 The additive application migrations preserve existing Artifacts, scan positions
@@ -59,7 +85,9 @@ the steps to recover: engine state is disposable, so with all processes stopped
 it may be moved aside and rebuilt; unfinished application Jobs then replay
 through the reconciler, and engine checkpoints are lost.
 
-## Unreleased: DBOS 3.0
+<a id="unreleased-dbos-30"></a>
+
+## 0.15.0: DBOS 3.0
 
 The embedded background engine upgrades from DBOS 2.31.1 to 3.0.0. Its first
 startup automatically migrates the engine database on SQLite and PostgreSQL;

@@ -14,8 +14,8 @@ manufacturing platform.
 - Bambu LAN remote-file inventory, deletion, raw G-code controls, and measured
   filament consumption are not implemented.
 - Multipart Models reference existing Models as named pieces and alternatives.
-  `Unreleased` adds quantities and [manufacturing builds](multipart-builds.md)
-  with selected Revisions and confirmed physical output. Compatibility rules
+  Quantities and [manufacturing builds](multipart-builds.md) track selected
+  Revisions and confirmed physical output. Compatibility rules
   between pieces, mixed-piece plates and automatic physical reprints remain
   outside this workflow. Models and their files remain in the main Models view;
   deleting a Multipart Model removes only the grouping.

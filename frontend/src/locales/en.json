@@ -4448,5 +4448,16 @@
   "{count} files read in place": "{count} files read in place",
   "Library sources stay where they are. Their previews and catalog are kept in the vault.": "Library sources stay where they are. Their previews and catalog are kept in the vault.",
   "On this computer": "On this computer",
-  "In remote storage": "In remote storage"
+  "In remote storage": "In remote storage",
+  "Oct 2026": "Oct 2026",
+  "Library browsing now loads pages as you scroll, keeps folder history and reading positions, filters whole subtrees, and applies nearby changes without rebuilding the collection tree": "Library browsing now loads pages as you scroll, keeps folder history and reading positions, filters whole subtrees, and applies nearby changes without rebuilding the collection tree",
+  "Library sources can be renamed and remapped; remote sources show their real location, report discovery progress, and explain empty scans": "Library sources can be renamed and remapped; remote sources show their real location, report discovery progress, and explain empty scans",
+  "Imports publish Models before background previews, use bounded per-entry staging, and show clearer reviewed-ZIP and preview preparation progress": "Imports publish Models before background previews, use bounded per-entry staging, and show clearer reviewed-ZIP and preview preparation progress",
+  "One container image includes optional GPU support, shared memory budgets, CPU recovery, and server GPU diagnostics in Settings": "One container image includes optional GPU support, shared memory budgets, CPU recovery, and server GPU diagnostics in Settings",
+  "Large slicer 3MF files can use a configurable XML budget; 3D views open directly, orbit underneath Models, and explain conversion or memory refusals": "Large slicer 3MF files can use a configurable XML budget; 3D views open directly, orbit underneath Models, and explain conversion or memory refusals",
+  "Multi-material G-code reports the plate's actual materials and total filament use, improves Bambu Studio 2.x metadata, and matches distinct printer trays": "Multi-material G-code reports the plate's actual materials and total filament use, improves Bambu Studio 2.x metadata, and matches distinct printer trays",
+  "Mesh measurements, thumbnails, viewer conversion, and similarity work run with bounded native workers and durable cancellation, retry, and publication authority": "Mesh measurements, thumbnails, viewer conversion, and similarity work run with bounded native workers and durable cancellation, retry, and publication authority",
+  "Library, search, thumbnails, and uploads use fewer repeated reads and writes, with bounded caches and explicit recovery from competing edits": "Library, search, thumbnails, and uploads use fewer repeated reads and writes, with bounded caches and explicit recovery from competing edits",
+  "Storage insights separate local and remote locations, while Trash supports selecting several Models to restore or permanently delete": "Storage insights separate local and remote locations, while Trash supports selecting several Models to restore or permanently delete",
+  "Upgrade all API and worker processes together: DBOS moves to 3.0, and source installs require Python 3.14 or newer; see UPGRADE.md": "Upgrade all API and worker processes together: DBOS moves to 3.0, and source installs require Python 3.14 or newer; see UPGRADE.md"
 }

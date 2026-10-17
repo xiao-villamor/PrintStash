@@ -103,14 +103,21 @@
   The check that waits for old derivation work to drain read the previous
   version's engine database with a client that expects the new schema, so it
   failed on every existing install, even with nothing queued. It now reads only
-  the columns every version has; a queue that really still holds old work is
-  still refused.
+  the columns every version has; waiting work from the old ordering is
+  re-ranked on startup.
 
 - Adding a G-code revision to a Model that comes from a remote Library source no
   longer ends in "[500] internal_server_error". PrintStash never writes back to a
   remote source, so it now says so (409) and the dialog shows a readable
   explanation. In the same dialog, "Mark as recommended" is a star you fill
   instead of a checkbox next to one.
+
+## 0.15.0
+
+**Upgrade note:** Back up and stop all API and worker processes before
+upgrading them together to DBOS 3.0. Source installations now
+require Python 3.14 or newer; Docker images include the runtime. See
+[0.15.0 upgrade notes](UPGRADE.md#0150-notes).
 
 - Deleted models can be selected in Settings, Trash: tick several (or all) and
   restore or permanently delete them in one step.
@@ -617,7 +624,7 @@
 
 - Local ONNX models reserve a shared, bounded memory partition across API and worker processes, retain warm reuse, retire idle residents under pressure, and release their credits after guarded process-tree termination.
 
-**Source installs require Python 3.14 or newer.** See [the upgrade guide](UPGRADE.md#unreleased-python-314).
+**Source installs require Python 3.14 or newer.** See [the upgrade guide](UPGRADE.md#0150-python-314).
 
 - Coordinate mesh CPU/RAM credits across local API and worker processes. Bound
   source preparation separately by bytes and I/O slots, retain native credits
@@ -679,7 +686,7 @@
 **Upgrade note:** The background engine now uses DBOS 3.0. Stop all API and
 worker processes before upgrading together. Engine state migrates on startup;
 rolling back requires discarding the upgraded, disposable engine state first.
-See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
+See [the upgrade guide](UPGRADE.md#0150-dbos-30).
 
 ### Added
 
