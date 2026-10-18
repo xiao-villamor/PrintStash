@@ -12,15 +12,26 @@ import { PreviewActivityTracker } from "@/components/preview-activity-tracker";
 import * as jobsApi from "@/lib/api/jobs";
 import * as taskCenter from "@/lib/task-center";
 import { aJob } from "@/test-support/factories";
+import { LibraryStartupContext } from "@/lib/library-startup-context";
 
-function mount(enabled: boolean) {
+function mount(enabled: boolean, activityAllowed = true) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
+  const view = (allowed: boolean) => (
     <QueryClientProvider client={client}>
-      <PreviewActivityTracker enabled={enabled} />
-    </QueryClientProvider>,
+      <LibraryStartupContext.Provider
+        value={{
+          complete: allowed,
+          canLoad: () => allowed,
+          request: () => {},
+          settle: () => {},
+        }}
+      >
+        <PreviewActivityTracker enabled={enabled} />
+      </LibraryStartupContext.Provider>
+    </QueryClientProvider>
   );
-  return client;
+  const rendered = render(view(activityAllowed));
+  return { client, allowActivity: () => rendered.rerender(view(true)) };
 }
 
 beforeEach(() => {
@@ -58,13 +69,38 @@ describe("PreviewActivityTracker", () => {
       .spyOn(jobsApi, "listWorkJobs")
       .mockResolvedValueOnce([aJob({ kind: "derivatives.mesh", state: "running" })])
       .mockResolvedValue([aJob({ kind: "derivatives.mesh", state: "completed" })]);
-    const client = mount(true);
+    const { client } = mount(true);
     await waitFor(() => expect(taskCenter.listTasks()).toHaveLength(1));
 
     await client.invalidateQueries({ queryKey: ["work", "preview-activity"] });
     await waitFor(() => expect(list).toHaveBeenCalledTimes(2));
 
     await waitFor(() => expect(taskCenter.listTasks()[0].status).toBe("completed"));
+  });
+
+  it("defers preview activity while Library startup is pending", () => {
+    const list = vi.spyOn(jobsApi, "listWorkJobs").mockResolvedValue([]);
+
+    mount(true, false);
+
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("loads preview activity when startup admits the read", async () => {
+    vi.spyOn(jobsApi, "listWorkJobs").mockResolvedValue([
+      aJob({ kind: "derivatives.mesh", state: "running" }),
+    ]);
+    const { allowActivity } = mount(true, false);
+
+    allowActivity();
+
+    await waitFor(() =>
+      expect(taskCenter.listTasks()[0]).toMatchObject({
+        title: "Preparing previews",
+        status: "running",
+        total: 1,
+      }),
+    );
   });
 
   it("reads nothing for someone who is not an administrator", () => {

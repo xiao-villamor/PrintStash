@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preparing-preview activity waits until the Library is ready before reading
+  the background queue. Opening Notifications can still request activity early.
+
 - Interrupted uploads remain in Notifications after reloading the page, so you
   can select the same file and resume the existing upload session.
 
