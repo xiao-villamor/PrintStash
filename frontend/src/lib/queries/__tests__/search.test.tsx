@@ -9,6 +9,7 @@ import {
   searchKeys,
   searchPreferencesOptions,
   searchSettingsOptions,
+  inferenceModelsOptions,
   useSearchCommands,
 } from "@/lib/queries/search";
 import {
@@ -296,6 +297,20 @@ function CatalogCommands() {
   return (
     <>
       <button
+        onClick={() =>
+          commands.importEndpoint.mutate({ kind: "embedding", session: getSessionVersion() })
+        }
+      >
+        Import endpoint
+      </button>
+      <button
+        onClick={() =>
+          commands.validate.mutate({ id: "a".repeat(64), session: getSessionVersion() })
+        }
+      >
+        Validate encoder
+      </button>
+      <button
         onClick={() => commands.remove.mutate({ id: "a".repeat(64), session: getSessionVersion() })}
       >
         Delete encoder
@@ -371,5 +386,61 @@ describe("Search catalog command receipts", () => {
     await waitFor(() =>
       expect(app.client.getQueryData(searchKeys.settings)).toMatchObject({ endpoints: [accepted] }),
     );
+  });
+});
+
+function EndpointImport() {
+  const settings = useQuery(searchSettingsOptions());
+  return (
+    <>
+      <CatalogCommands />
+      <p>{settings.data?.endpoints.map((endpoint) => endpoint.model).join(",")}</p>
+    </>
+  );
+}
+function EncoderValidation() {
+  const models = useQuery(inferenceModelsOptions());
+  return (
+    <>
+      <CatalogCommands />
+      <p>{models.data?.map((model) => model.key + ":" + model.installed).join(",")}</p>
+    </>
+  );
+}
+describe("Search catalog command refresh", () => {
+  it("refreshes the canonical catalog after environment endpoint import", async () => {
+    const endpoint = anInferenceEndpoint({ model: "imported-encoder" });
+    let imported = false;
+    renderApp(<EndpointImport />, {
+      routes: {
+        "GET /api/v1/config/ai-search": () =>
+          json(searchConfiguration({ endpoints: imported ? [endpoint] : [] })),
+        "POST /api/v1/config/ai-search/endpoints/from-environment/embedding": () => {
+          imported = true;
+          return json(endpoint);
+        },
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Import endpoint" }));
+
+    expect(await screen.findByText("imported-encoder")).toBeVisible();
+  });
+  it("refreshes installed status after encoder validation", async () => {
+    let validated = false;
+    renderApp(<EncoderValidation />, {
+      routes: {
+        "GET /api/v1/inference/models": () => json([anInferenceModel({ installed: validated })]),
+        [`POST /api/v1/inference/models/${"a".repeat(64)}/validate`]: () => {
+          validated = true;
+          return json({ id: "a".repeat(64), ready: true });
+        },
+      },
+    });
+    await screen.findByText("bge-small-en-v1.5:false");
+
+    await userEvent.click(screen.getByRole("button", { name: "Validate encoder" }));
+
+    expect(await screen.findByText("bge-small-en-v1.5:true")).toBeVisible();
   });
 });
