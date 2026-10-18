@@ -118,11 +118,20 @@ test.describe("AI Search", () => {
       await (await capture).setFiles({ name: "camera-query", mimeType, buffer: queryImage });
       await expect(result).toBeVisible();
       await page.getByRole("button", { name: "Clear image" }).click();
+      const modelDocuments: string[] = [];
+      page.on("request", (request) => {
+        if (
+          request.resourceType() === "document" &&
+          new URL(request.url()).pathname === `/models/${ids[0]}`
+        )
+          modelDocuments.push(request.url());
+      });
       await page.goto(`/models/${ids[0]}`);
       await page.getByRole("button", { name: "Model actions" }).click();
       await page.getByRole("menuitem", { name: "Find related Models" }).click();
       await expect(page.getByRole("link", { name: names[1], exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: names[0], exact: true })).toHaveCount(0);
+      expect(modelDocuments).toHaveLength(1);
     } finally {
       await page.request.put(`${API}/api/v1/config/ai-search`, { data: initial.settings });
       for (const id of ids) await page.request.delete(`${API}/api/v1/models/${id}`);
