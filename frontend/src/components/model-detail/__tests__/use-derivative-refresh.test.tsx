@@ -8,6 +8,7 @@ import { useDerivativeRefresh } from "../use-derivative-refresh";
 import { modelDetailOptions, useModelDetail } from "@/features/library/model-detail";
 import { setEventSocketFactory, type EventSocket } from "@/lib/events";
 import { aModel } from "@/test-support/factories";
+import type { ModelRead } from "@/types";
 import { json, renderApp } from "@/test-support/render";
 
 class FakeSocket implements EventSocket {
@@ -38,6 +39,18 @@ function LifetimeProbe() {
         Stop following
       </button>
       {following && <RefreshFollower />}
+    </>
+  );
+}
+function PublicationProbe({ receipt }: { receipt: ModelRead }) {
+  const model = useModelDetail(3, initialModel);
+  useDerivativeRefresh(3);
+  return (
+    <>
+      <p>{model.data?.name}</p>
+      <button type="button" onClick={() => void model.publish(receipt)}>
+        Confirm edit
+      </button>
     </>
   );
 }
@@ -161,6 +174,30 @@ describe("useDerivativeRefresh", () => {
     await act(async () => pending.resolve(json({ detail: "temporarily_unavailable" }, 503)));
 
     expect(await screen.findByText("Recovered")).toBeVisible();
+    expect(view.requests()).toHaveLength(2);
+  });
+  it("rechecks a cancelled refresh after a confirmed edit", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<Response>();
+    const view = renderApp(
+      <PublicationProbe receipt={aModel({ id: 3, name: "Confirmed", edit_version: 3 })} />,
+      {
+        routes: { "GET /api/v1/models/3": () => pending.promise },
+      },
+    );
+    await subscribed();
+    send({ type: "derivative", model_id: 3, state: "ready" });
+    await waitFor(() => expect(view.requests()).toHaveLength(1));
+    view.route({
+      "GET /api/v1/models/3": json(aModel({ id: 3, name: "Latest metadata", edit_version: 3 })),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Confirm edit" }));
+    await act(async () =>
+      pending.resolve(json(aModel({ id: 3, name: "Earlier", edit_version: 2 }))),
+    );
+
+    expect(await screen.findByText("Latest metadata")).toBeVisible();
     expect(view.requests()).toHaveLength(2);
   });
   it("stops queued refreshes when their owner closes", async () => {

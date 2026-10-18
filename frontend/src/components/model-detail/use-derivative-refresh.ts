@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { isCancelledError, useQueryClient } from "@tanstack/react-query";
 import { followModel } from "@/lib/events";
 import { getSessionVersion } from "@/lib/session-transport";
 import { modelDetailOptions } from "@/features/library/model-detail";
@@ -31,7 +31,18 @@ export function useDerivativeRefresh(modelId: number): void {
           // Joining another owner's request can return a snapshot from before
           // this hint. It needs a fresh read even when no second hint arrives.
           const joinedRead = client.getQueryState(queryKey)?.fetchStatus === "fetching";
-          await client.invalidateQueries({ queryKey, exact: true }, { cancelRefetch: false });
+          const invalidation = client.invalidateQueries(
+            { queryKey, exact: true },
+            { cancelRefetch: false },
+          );
+          try {
+            // The fetch promise exposes cancellation. invalidateQueries resolves
+            // with reverted data when an edit cancels an older read.
+            await client.getQueryCache().find({ queryKey, exact: true })?.promise;
+          } catch (cause) {
+            if (isCancelledError(cause)) needsRead = true;
+          }
+          await invalidation;
           if (joinedRead) needsRead = true;
         }
       } finally {
