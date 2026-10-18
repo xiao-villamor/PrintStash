@@ -961,3 +961,43 @@ class TestThumbnailVectorReuse:
         assert vectors[0].vector_blob == expected_vector
         assert vectors[0].subject_id == model.id
         assert vectors[0].file_id == file.id
+
+
+class TestInterruptedVisualUnit:
+    @pytest.mark.parametrize("code", ["embedding_compute_busy", "inference_cancelled"])
+    def test_leaves_interrupted_source_available_for_retry(
+        self, db_session, visual_setup, monkeypatch, code
+    ):
+        from unittest.mock import Mock
+
+        from printstash_core.inference import EmbeddingError
+        from printstash_core.inference.context import InferenceContext
+
+        actor, encoder, _, _ = visual_setup
+        generations.prepare(db_session, actor, proposal(encoder))
+        generation_id, token = indexing.claim(db_session)
+        monkeypatch.setattr(
+            visual_index, "render", Mock(side_effect=EmbeddingError(code))
+        )
+        with pytest.raises(EmbeddingError, match=code):
+            visual_index.process(
+                get_session_factory(),
+                generation_id,
+                token,
+                InferenceContext.bounded(10),
+            )
+        db_session.expire_all()
+        assert (
+            db_session.exec(
+                select(SearchIndexFailure).where(
+                    SearchIndexFailure.generation_id == generation_id
+                )
+            ).all()
+            == []
+        )
+        assert (
+            visual_index.pending(
+                db_session, db_session.get(IndexGeneration, generation_id)
+            )
+            is not None
+        )

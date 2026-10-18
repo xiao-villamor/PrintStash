@@ -200,3 +200,81 @@ class TestExecutePreparedMany:
 
         assert outputs == [struct.pack("!III", 24, 4, 1) + expected]
         assert type(outputs[0]) is bytes
+
+
+class TestWireRendering:
+    def test_executes_an_encoded_singleton(self, renderer, prepared):
+        from app.modules.media.compute_geometry import encode
+
+        payload = encode(prepared, 24, 4, [None], False)
+        result = renderer.execute(payload)
+        assert struct.unpack("!III", result[:12]) == (24, 4, 1)
+        assert len(result) == 12 + 24 * 4 * 4
+        assert renderer.submissions == 1
+
+    def test_refuses_mixed_frame_dimensions(self, renderer, prepared):
+        from app.modules.media.compute_geometry import encode
+
+        with pytest.raises(ValueError, match="compute_batch_dimensions"):
+            renderer.execute_many(
+                [
+                    encode(prepared, 24, 4, [None], False),
+                    encode(prepared, 32, 4, [None], False),
+                ]
+            )
+        assert renderer.submissions == 0
+
+    def test_recovers_only_geometry_refused_by_device_normals(
+        self, renderer, prepared, monkeypatch
+    ):
+        from app.modules.media.gpu_normals import defer
+
+        deferred = defer(
+            PreparedRenderGeometry(prepared.vertices, 1, prepared.face_chunks)
+        )
+        reads = []
+        original = Buffer.read_mapped
+
+        def read(buffer, *, size=None, copy=True):
+            if buffer is not renderer.readback:
+                return original(buffer, size=size, copy=copy)
+            reads.append(size)
+            result = bytearray(size)
+            if len(reads) == 1:
+                struct.pack_into("<I", result, size - 4, 1)
+            return memoryview(result)
+
+        monkeypatch.setattr(Buffer, "read_mapped", read)
+        output = renderer.execute_prepared_many(
+            [(deferred, 32, 4, [None], False)],
+            ["geometry:recover"],
+            ["recover"],
+            raw=True,
+        )
+        assert struct.unpack("!III", output[0][:12]) == (64, 8, 1)
+        assert renderer.geometry_cpu_normal_fallbacks == 1
+        assert renderer.readback_batches == 2
+        assert not renderer.unverified_normals
+
+    def test_keeps_rasterization_after_postprocess_canary_failure(
+        self, renderer, prepared, monkeypatch
+    ):
+        from unittest.mock import Mock
+
+        renderer.postprocessor.close()
+        renderer.postprocessor = None
+        renderer.postprocess_attempted = False
+        monkeypatch.setattr(
+            Postprocessor, "canary", Mock(side_effect=ValueError("native mismatch"))
+        )
+        output = renderer.execute_prepared_many(
+            [(prepared, 24, 4, [None], False)],
+            ["geometry:cpu-final"],
+            ["final"],
+            raw=True,
+            gpu_finalize=True,
+        )
+        assert struct.unpack("!III", output[0][:12]) == (48, 8, 1)
+        assert renderer.postprocessor is None
+        assert renderer.postprocess_attempted
+        assert renderer.readback_batches == 1
