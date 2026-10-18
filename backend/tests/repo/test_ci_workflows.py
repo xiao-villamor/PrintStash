@@ -211,6 +211,19 @@ class TestQuickGate:
 
 
 class TestDeepSuite:
+    def test_provisions_a_disposable_root_for_mounted_browser_contracts(self):
+        commands = _commands(_workflow("deep-ci.yml")["jobs"]["browser-real"])
+
+        assert (
+            'export PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT="$(mktemp -d "${RUNNER_TEMP}/printstash-mounted.XXXXXX")"'
+            in commands
+        )
+        assert commands.index(
+            "export PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT="
+        ) < commands.index(
+            "pnpm exec playwright test --config=playwright.real.config.ts"
+        )
+
     def test_runs_compatibility_phases_independently(self) -> None:
         job = _workflow("deep-ci.yml")["jobs"]["backend-python314"]
 

@@ -405,6 +405,7 @@ jobs:
         run: |
           case "$SUITE" in
             main)
+              export PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT="$(mktemp -d "${RUNNER_TEMP}/printstash-mounted.XXXXXX")"
               pnpm exec playwright test --config=playwright.real.config.ts
               ;;
             onboarding)
