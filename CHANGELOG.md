@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Mesh previews and geometry processing continue to work when a busy server has
+  more than 1,024 files open. Warm workers preserve high-numbered resource permits
+  and close every unrelated descriptor before processing a model.
+
 - An idle server on SQLite no longer uses more CPU the longer it runs. Each
   background-work lane keeps checking for queued work on a short interval, and on
   SQLite every check read the engine's entire workflow history, which the
