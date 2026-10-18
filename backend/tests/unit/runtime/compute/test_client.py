@@ -243,9 +243,9 @@ class TestRenderResponseBudget:
 
 @pytest.fixture
 def status_transport(monkeypatch, tmp_path):
-    import select
     from contextlib import contextmanager
     from types import SimpleNamespace
+    from unittest.mock import MagicMock
 
     from app.core.config import _overlay
     from app.runtime.compute.contracts import Reason
@@ -280,7 +280,10 @@ def status_transport(monkeypatch, tmp_path):
     monkeypatch.setattr(client, "cooling", lambda root: False)
     monkeypatch.setattr(client.importlib.util, "find_spec", lambda name: object())
     monkeypatch.setattr(client.time, "monotonic", lambda: state.now)
-    monkeypatch.setattr(select, "select", lambda *args: ([object()], [], []))
+    selector = MagicMock()
+    selector.__enter__.return_value = selector
+    selector.select.return_value = [(object(), client.selectors.EVENT_READ)]
+    monkeypatch.setattr(client.selectors, "DefaultSelector", lambda: selector)
     return state
 
 

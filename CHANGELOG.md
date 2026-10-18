@@ -18,8 +18,10 @@
   can select the same file and resume the existing upload session.
 
 - Mesh previews and geometry processing continue to work when a busy server has
-  more than 1,024 files open. Warm workers preserve high-numbered resource permits
-  and close every unrelated descriptor before processing a model.
+  more than 1,024 files open. Compute connections also wait for replies and detect
+  disconnected peers without the same descriptor limit. Warm workers preserve
+  high-numbered resource permits and close every unrelated descriptor before
+  processing a model.
 
 - An idle server on SQLite no longer uses more CPU the longer it runs. Each
   background-work lane keeps checking for queued work on a short interval, and on

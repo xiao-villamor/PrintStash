@@ -1,7 +1,9 @@
 """Real IPC fault isolation; the native executor is deliberately injected."""
 
+import fcntl
 import json
 import os
+import socket
 import subprocess
 import sys
 
@@ -114,51 +116,108 @@ class TestBroker:
         assert report == {"refusal": "capacity", "healthy": "healthy", "cooldown": 0.0}
 
 
+@pytest.fixture(params=[False, True], ids=["normal-fd", "high-fd"])
+def live_peer(request):
+    left, right = socket.socketpair()
+    try:
+        if request.param:
+            descriptor = fcntl.fcntl(left.fileno(), fcntl.F_DUPFD_CLOEXEC, 2048)
+            left.close()
+            left = socket.socket(fileno=descriptor)
+            assert left.fileno() >= 2048
+        left.settimeout(1)
+        yield left, right
+    finally:
+        left.close()
+        right.close()
+
+
 class TestPeerLiveness:
-    def test_checks_idle_peer_without_timeout_delay(self):
-        import socket
+    def test_checks_idle_peer_without_timeout_delay(self, live_peer):
         import time
 
         from app.runtime.compute.protocol import peer_disconnected
 
-        left, right = socket.socketpair()
-        try:
-            left.settimeout(1)
-            start = time.monotonic()
-            assert peer_disconnected(left) is False
-            assert time.monotonic() - start < 0.25
-        finally:
-            left.close()
-            right.close()
+        left, _ = live_peer
+        start = time.monotonic()
+        assert peer_disconnected(left) is False
+        assert time.monotonic() - start < 0.25
 
-    def test_detects_closed_peer(self):
-        import socket
-
+    def test_detects_closed_peer(self, live_peer):
         from app.runtime.compute.protocol import peer_disconnected
 
-        left, right = socket.socketpair()
-        try:
-            left.settimeout(1)
-            right.close()
-            assert peer_disconnected(left) is True
-        finally:
-            left.close()
-            right.close()
+        left, right = live_peer
+        right.close()
+        assert peer_disconnected(left) is True
 
-    def test_preserves_pending_peer_bytes(self):
-        import socket
-
+    def test_preserves_pending_peer_bytes(self, live_peer):
         from app.runtime.compute.protocol import peer_disconnected
 
-        left, right = socket.socketpair()
-        try:
-            left.settimeout(1)
-            right.sendall(b"x")
-            assert peer_disconnected(left) is False
-            assert left.recv(1) == b"x"
-        finally:
-            left.close()
-            right.close()
+        left, right = live_peer
+        right.sendall(b"x")
+        assert peer_disconnected(left) is False
+        assert left.recv(1) == b"x"
+
+
+class TestControlExchange:
+    def test_reads_a_ready_reply(self, live_peer, tmp_path, monkeypatch):
+        import time
+
+        from app.runtime.compute import client
+        from app.runtime.compute.protocol import StatusRequest, receive, send
+
+        left, right = live_peer
+        monkeypatch.setattr(client, "directory", lambda: tmp_path)
+        monkeypatch.setattr(client, "_connect", lambda *args, **kwargs: left)
+        send(right, b'{"ready":true}')
+        send(right, b'{"healthy":true}')
+        deadline = time.monotonic() + 2
+
+        assert (
+            client.exchange(StatusRequest(), deadline=deadline) == b'{"healthy":true}'
+        )
+        assert json.loads(receive(right, deadline)) == {"operation": "status"}
+        assert left.fileno() == -1
+
+    def test_withdraws_while_waiting_for_reply(self, live_peer, tmp_path, monkeypatch):
+        from app.core.cancellation import OperationCancelled
+        from app.runtime.compute import client
+        from app.runtime.compute.protocol import StatusRequest, send
+
+        left, right = live_peer
+        monkeypatch.setattr(client, "directory", lambda: tmp_path)
+        monkeypatch.setattr(client, "_connect", lambda *args, **kwargs: left)
+        send(right, b'{"ready":true}')
+
+        def checkpoint():
+            try:
+                queued = right.recv(4096, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+            except BlockingIOError:
+                return
+            if len(queued) > 4:
+                raise OperationCancelled()
+
+        with pytest.raises(OperationCancelled):
+            client.exchange(StatusRequest(), checkpoint=checkpoint)
+        assert left.fileno() == -1
+
+    def test_preserves_reply_deadline(self, live_peer, tmp_path, monkeypatch):
+        import time
+
+        from app.runtime.compute import client
+        from app.runtime.compute.contracts import ComputeUnavailable, Reason
+        from app.runtime.compute.protocol import StatusRequest, send
+
+        left, right = live_peer
+        monkeypatch.setattr(client, "directory", lambda: tmp_path)
+        monkeypatch.setattr(client, "_connect", lambda *args, **kwargs: left)
+        send(right, b'{"ready":true}')
+        deadline = time.monotonic() + 0.1
+
+        with pytest.raises(ComputeUnavailable) as exc:
+            client.exchange(StatusRequest(), deadline=deadline)
+        assert exc.value.reason is Reason.DEADLINE
+        assert left.fileno() == -1
 
 
 class TestRenderLifecycle:

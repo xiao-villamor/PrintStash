@@ -3,7 +3,7 @@
 import json
 import socket
 import struct
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
@@ -89,7 +89,10 @@ class TestWireBoundaries:
     def test_keeps_live_peer_after_readiness_race(self, monkeypatch, error):
         connection = Mock()
         connection.recv.side_effect = error
-        monkeypatch.setattr(
-            protocol.select, "select", lambda *args: ([connection], [], [])
-        )
+        selector = MagicMock()
+        selector.__enter__.return_value = selector
+        selector.select.return_value = [(Mock(), protocol.selectors.EVENT_READ)]
+        monkeypatch.setattr(protocol.selectors, "DefaultSelector", lambda: selector)
         assert not protocol.peer_disconnected(connection)
+        selector.select.assert_called_once_with(timeout=0)
+        selector.__exit__.assert_called_once()

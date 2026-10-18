@@ -2,7 +2,7 @@
 
 import json
 import math
-import select
+import selectors
 import socket
 import struct
 import time
@@ -164,8 +164,10 @@ def valid_deadline(deadline: float, now: float) -> bool:
 
 def peer_disconnected(connection: socket.socket) -> bool:
     """Never let timeout-mode recv delay a completed ticket."""
-    if not select.select([connection], [], [], 0)[0]:
-        return False
+    with selectors.DefaultSelector() as selector:
+        selector.register(connection, selectors.EVENT_READ)
+        if not selector.select(timeout=0):
+            return False
     try:
         return connection.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT) == b""
     except BlockingIOError, socket.timeout:
