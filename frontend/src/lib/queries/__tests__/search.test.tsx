@@ -11,7 +11,14 @@ import {
   searchSettingsOptions,
   useSearchCommands,
 } from "@/lib/queries/search";
-import { searchConfiguration, searchPreferences, searchSettings } from "@/test-support/search";
+import {
+  searchConfiguration,
+  searchPreferences,
+  searchSettings,
+  anInferenceEndpoint,
+  anInferenceModel,
+  aSearchGeneration,
+} from "@/test-support/search";
 import { json, renderApp } from "@/test-support/render";
 function SettingsCommand() {
   const settings = useQuery(searchSettingsOptions());
@@ -281,5 +288,88 @@ describe("Search preference command lifetime", () => {
     });
     expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     expect(app.client.getQueriesData({ queryKey: ["search-preferences"] })).toEqual([]);
+  });
+});
+
+function CatalogCommands() {
+  const commands = useSearchCommands();
+  return (
+    <>
+      <button
+        onClick={() => commands.remove.mutate({ id: "a".repeat(64), session: getSessionVersion() })}
+      >
+        Delete encoder
+      </button>
+      <button
+        onClick={() =>
+          commands.generationAction.mutate({
+            generation: aSearchGeneration({ state: "building" }),
+            action: "activate",
+            session: getSessionVersion(),
+          })
+        }
+      >
+        Activate index
+      </button>
+      <button
+        onClick={() =>
+          commands.endpoint.mutate({
+            payload: {
+              kind: "embedding",
+              base_url: "http://inference.local/v1",
+              model: "new-encoder",
+              revision: "pinned-v2",
+            },
+            session: getSessionVersion(),
+          })
+        }
+      >
+        Register endpoint
+      </button>
+    </>
+  );
+}
+
+describe("Search catalog command receipts", () => {
+  it("removes only the acknowledged encoder from the cached catalog", async () => {
+    const retained = anInferenceModel({ id: "b".repeat(64), key: "retained-encoder" });
+    const app = renderApp(<CatalogCommands />, {
+      seed: [[searchKeys.models, [anInferenceModel(), retained]]],
+      routes: { [`DELETE /api/v1/inference/models/${"a".repeat(64)}`]: json(null, 204) },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete encoder" }));
+
+    await waitFor(() => expect(app.client.getQueryData(searchKeys.models)).toEqual([retained]));
+  });
+  it("publishes activation only into the matching index row", async () => {
+    const retained = aSearchGeneration({ id: 2, model: "other-encoder" });
+    const accepted = aSearchGeneration({ state: "active", version_token: "b".repeat(32) });
+    const app = renderApp(<CatalogCommands />, {
+      seed: [[searchKeys.generations, [aSearchGeneration({ state: "building" }), retained]]],
+      routes: { "POST /api/v1/config/ai-search/generations/1/activate": json(accepted) },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Activate index" }));
+
+    await waitFor(() =>
+      expect(app.client.getQueryData(searchKeys.generations)).toEqual([accepted, retained]),
+    );
+  });
+  it.each([
+    { label: "new", endpoints: [] },
+    { label: "existing", endpoints: [anInferenceEndpoint({ model: "old-encoder" })] },
+  ])("publishes an acknowledged $label endpoint", async ({ endpoints }) => {
+    const accepted = anInferenceEndpoint({ model: "new-encoder", revision: "pinned-v2" });
+    const app = renderApp(<CatalogCommands />, {
+      seed: [[searchKeys.settings, searchConfiguration({ endpoints })]],
+      routes: { "POST /api/v1/config/ai-search/endpoints": json(accepted) },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Register endpoint" }));
+
+    await waitFor(() =>
+      expect(app.client.getQueryData(searchKeys.settings)).toMatchObject({ endpoints: [accepted] }),
+    );
   });
 });
