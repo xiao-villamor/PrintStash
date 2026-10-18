@@ -369,7 +369,7 @@ else:
             try:
                 self.request("/api/v1/health")
                 return
-            except (urllib.error.URLError, TimeoutError, ConnectionError):
+            except urllib.error.URLError, TimeoutError, ConnectionError:
                 time.sleep(0.5)
         raise AssertionError("production API did not start")
 
@@ -484,6 +484,16 @@ else:
         final = self.sample()
         assert final["oom_kill"] == self.baseline["oom_kill"]
         assert self.rows("SELECT id FROM staging_leases") == []
+        # Transient claims leave a process high-water lease until two idle
+        # executor heartbeats have handed its room back. Keep the strict final
+        # empty-table invariant, but observe the real lease lifecycle first.
+        self.report["capacity_before_cleanup"] = self.rows(
+            "SELECT operation_id,resources_json,owner_identity_json "
+            "FROM capacity_reservations"
+        )
+        self.wait(
+            lambda: not self.rows("SELECT operation_id FROM capacity_reservations")
+        )
         assert self.rows("SELECT operation_id FROM capacity_reservations") == []
         self.report["final"] = final
         self.report["passed"] = True
