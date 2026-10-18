@@ -156,7 +156,11 @@ test.describe("Library navigation", () => {
       await expect(
         page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
       ).toBeVisible();
-      // Exercise actual Query GC rather than reaching into the app's cache from a test hook.
+      // Flush the departure's animation frames and passive unsubscription before
+      // crossing the five-minute Query GC deadline. A single clock jump can
+      // otherwise run the unsubscription at the end of that jump and keep the
+      // pages cached, so this case never exercises reconstruction.
+      await page.clock.runFor(1_000);
       await page.clock.fastForward(301_000);
       returning = true;
       await page.getByRole("link", { name: "Back", exact: true }).click();
