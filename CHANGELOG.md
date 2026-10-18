@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Restoring large unfiltered collection trees reuses subtree counts instead of
+  repeating the same lookup for every descendant.
+
 - Model metadata stays current when derivative updates arrive during an in-flight
   detail read, including revision comparison fields.
 

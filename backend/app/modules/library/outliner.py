@@ -346,27 +346,30 @@ def _page_count_query(
             .cte("page_direct")
         )
     )
-    raw = (
-        select(direct.c.id, direct.c.models.label("count")).subquery()
-        if unfiltered_counts is not None
-        else (
+    totals_source = descendants.join(
+        Collection, col(Collection.id) == descendants.c.id
+    ).outerjoin(direct, direct.c.id == col(Collection.id))
+    if unfiltered_counts is None:
+        raw = (
             select(col(Model.collection_id).label("id"), func.count().label("count"))
             .where(live(Model))
             .group_by(col(Model.collection_id))
             .subquery()
         )
-    )
+        totals_source = totals_source.outerjoin(raw, raw.c.id == col(Collection.id))
+        model_count = raw.c.count
+    else:
+        # The unfiltered aggregate already contains the raw Model count. Joining
+        # it again repeats the same lookup for every descendant in the page.
+        model_count = direct.c.models
     totals = (
         select(
             descendants.c.root,
             func.sum(direct.c.count).label("count"),
-            func.coalesce(func.sum(raw.c.count), 0).label("models"),
+            func.coalesce(func.sum(model_count), 0).label("models"),
             (func.count(col(Collection.id)) - 1).label("folders"),
         )
-        .select_from(descendants)
-        .join(Collection, col(Collection.id) == descendants.c.id)
-        .outerjoin(direct, direct.c.id == col(Collection.id))
-        .outerjoin(raw, raw.c.id == col(Collection.id))
+        .select_from(totals_source)
         .where(live(Collection), col(Collection.id).in_(visible))
         .group_by(descendants.c.root)
         .subquery()

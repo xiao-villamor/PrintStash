@@ -1182,3 +1182,68 @@ class TestRestore:
         )
 
         assert response.status_code == 403, response.text
+
+
+class TestRestoredMixedCounts:
+    @pytest.mark.parametrize(
+        "viewer", [False, True], ids=["administrator", "granted-viewer"]
+    )
+    def test_preserves_raw_model_counts_in_unfiltered_restoration(
+        self,
+        client,
+        auth_headers,
+        make_user,
+        headers_for,
+        grant_role,
+        make_collection,
+        make_model,
+        make_multipart_model,
+        viewer,
+    ):
+        parent = make_collection("Private ancestor")
+        root = make_collection("Shared", parent=parent)
+        child = make_collection("Parts", parent=root)
+        make_model("Direct", collection=root)
+        make_model("Nested", collection=child)
+        make_multipart_model("Assembly", collection=child)
+        make_model("Trashed", collection=child, deleted_at=utcnow())
+        hidden = make_collection("Hidden sibling", parent=parent)
+        make_model("Private model", collection=hidden)
+        user = make_user("count-viewer")
+        grant_role(user, root, CollectionRole.VIEW)
+        response = client.post(
+            RESTORE,
+            headers=headers_for(user) if viewer else auth_headers,
+            json={
+                "view": "all",
+                "expanded_paths": [parent.path, root.path, child.path],
+            },
+        )
+        assert response.status_code == 200, response.text
+        pages = {
+            row["parent_id"]: row["page"] for row in response.json()["collections"]
+        }
+        root_node = next(
+            row
+            for level in pages.values()
+            for row in level["items"]
+            if row["id"] == root.id
+        )
+        child_node = next(
+            row for row in pages[root.id]["items"] if row["id"] == child.id
+        )
+        assert (
+            root_node["model_count"],
+            root_node["subtree_entry_count"],
+            root_node["direct_entry_count"],
+        ) == (2, 3, 1)
+        assert (
+            child_node["model_count"],
+            child_node["subtree_entry_count"],
+            child_node["direct_entry_count"],
+        ) == (1, 2, 2)
+        assert pages[child.id]["parent_direct_entry_count"] == 2
+        if viewer:
+            assert "Private ancestor" not in response.text
+            assert "Hidden sibling" not in response.text
+            assert "Private model" not in response.text
