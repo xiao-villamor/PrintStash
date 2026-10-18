@@ -17,11 +17,11 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/errors";
-import { toast } from "@/lib/toast";
+import { toast, toastCatch } from "@/lib/toast";
 import { renderApp } from "@/test-support/render";
 
 /** Mount the toaster, then raise one error through it. */
@@ -89,5 +89,41 @@ describe("toast.error", () => {
 
       expect(await screen.findByText(NETWORK_COPY)).toBeInTheDocument();
     });
+  });
+});
+
+describe("toast.successAction", () => {
+  it("runs the offered action when selected", async () => {
+    renderApp(<p>the page</p>);
+    const action = vi.fn<() => void>();
+
+    act(() => toast.successAction("Import ready", "Open Model", action));
+    fireEvent.click(await screen.findByRole("button", { name: "Open Model" }));
+
+    expect(action).toHaveBeenCalledOnce();
+  });
+});
+describe("toast.undo", () => {
+  it("invokes undo from the visible notification", async () => {
+    renderApp(<p>the page</p>);
+    const undo = vi.fn<() => Promise<void>>().mockResolvedValue();
+
+    act(() => toast.undo("Model moved", undo));
+    fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
+
+    expect(undo).toHaveBeenCalledOnce();
+  });
+});
+describe("toastCatch", () => {
+  it("returns the successful operation result", async () => {
+    await expect(toastCatch(Promise.resolve(25))).resolves.toBe(25);
+  });
+  it("shows recovery guidance for a failed operation", async () => {
+    renderApp(<p>the page</p>);
+
+    const result = await toastCatch(Promise.reject(new ApiError(404, "model_not_found", "gone")));
+
+    expect(result).toBeUndefined();
+    expect(await screen.findByText("This model no longer exists.")).toBeVisible();
   });
 });
