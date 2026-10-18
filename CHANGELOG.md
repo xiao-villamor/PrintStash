@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preparing-preview activity waits until the Library is ready before reading
+  the background queue. Opening Notifications can still request activity early.
+
 - An idle server on SQLite no longer uses more CPU the longer it runs. Each
   background-work lane keeps checking for queued work on a short interval, and on
   SQLite every check read the engine's entire workflow history, which the

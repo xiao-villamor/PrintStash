@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { listWorkJobs } from "@/lib/api/jobs";
 import { previewJobsRemaining, previewProgress } from "@/lib/preview-activity";
 import { uiText } from "@/lib/locale";
+import { useLibraryStartup } from "@/lib/library-startup-context";
 import { createTask, updateTask } from "@/lib/task-center";
 
 const BUSY_MS = 4_000;
@@ -17,10 +18,11 @@ const IDLE_MS = 30_000;
  * resume it.
  */
 export function PreviewActivityTracker({ enabled }: { enabled: boolean }) {
+  const startup = useLibraryStartup();
   const jobs = useQuery({
     queryKey: ["work", "preview-activity"],
     queryFn: ({ signal }) => listWorkJobs({ signal }),
-    enabled,
+    enabled: enabled && startup.canLoad("activity"),
     retry: false,
     refetchOnWindowFocus: false,
     refetchInterval: (query) =>
