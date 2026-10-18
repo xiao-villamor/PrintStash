@@ -26,7 +26,9 @@ independent jobs. The ordinary phase includes slow tests and retains work-steali
 the resource phase runs serially so each real service starts once. Tests marked
 `native_host` also run in that mandatory phase: independent test vaults have
 independent admission pools, so an xdist companion would consume CPU/RAM outside
-the pool whose wall-clock bounds are being measured. Fairness still runs real
+the pool whose wall-clock bounds are being measured. The broker-batched render publication and cancellation cases use that same
+serial phase, retaining every geometry, thumbnail, original-byte and cancellation
+assertion. Fairness still runs real
 DBOS/native workers with the same budgets, six arrivals and 110/130-second limits.
 Coverage appends that serial phase before evaluating its unchanged floors. Their marker
 sets are disjoint and together cover the full lane, excluding the separately
