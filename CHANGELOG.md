@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Interrupted uploads remain in Notifications after reloading the page, so you
+  can select the same file and resume the existing upload session.
+
 - An idle server on SQLite no longer uses more CPU the longer it runs. Each
   background-work lane keeps checking for queued work on a short interval, and on
   SQLite every check read the engine's entire workflow history, which the
