@@ -241,7 +241,9 @@ function recoverTaskAfterReload(task: TaskItem): TaskItem {
     ...task,
     archiveUploading: false,
     status: "failed",
-    detail: uiText(message),
+    // Restoring persisted work runs before the locale catalog is loaded.
+    // taskDetail translates the descriptor when the task is displayed.
+    detail: message,
     detailMessage: uiMessage(message),
     error: null,
     progress: 100,

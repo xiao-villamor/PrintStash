@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Interrupted uploads remain in Notifications after reloading the page, so you
+  can select the same file and resume the existing upload session.
+
 - Mesh previews and geometry processing continue to work when a busy server has
   more than 1,024 files open. Warm workers preserve high-numbered resource permits
   and close every unrelated descriptor before processing a model.
