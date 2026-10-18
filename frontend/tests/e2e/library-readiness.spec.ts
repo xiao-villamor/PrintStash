@@ -486,7 +486,9 @@ test.describe("Library readiness", () => {
           },
         });
       });
-      await page.goto("/");
+      // The selected branch always restores its ancestors; unrelated remembered
+      // branches are deliberately bounded to six by the startup contract.
+      await page.goto(`/?c=${encodeURIComponent(nodes[7].path)}`);
       if (width === 390) await page.getByRole("button", { name: "Filters", exact: true }).click();
       const tree = page.locator(width === 390 ? '[role="dialog"]' : "aside");
       const positions: number[] = [];
