@@ -7,6 +7,7 @@ import sys
 
 import pytest
 
+from tests.fixtures.compute_renderer import qualified_renderer as qualified_renderer
 from tests.paths import BACKEND_DIR
 
 
@@ -34,6 +35,13 @@ def render_probe(tmp_path):
 
 
 class TestBroker:
+    def test_owns_a_separate_process_budget_for_controlled_rendering(
+        self, qualified_renderer
+    ):
+        assert qualified_renderer.owner_pid is not None
+        assert qualified_renderer.owner_pid > 0
+        assert qualified_renderer.owner_pid != os.getpid()
+
     def test_isolates_bad_members_of_a_real_socket_batch(self, tmp_path):
         result = subprocess.run(
             [

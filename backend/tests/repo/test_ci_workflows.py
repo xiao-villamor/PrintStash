@@ -308,36 +308,6 @@ class TestDeepSuite:
         assert "--cov-append" in resources
         assert "tests/repo/test_coverage_floors.py" in gate
 
-    def test_selects_native_render_publication_in_serial_resources(self):
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "--collect-only",
-                "-q",
-                "-p",
-                "no:randomly",
-                "-m",
-                "native_host",
-                "tests/e2e/test_render_batch_publication.py",
-            ],
-            cwd=REPO_ROOT / "backend",
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
-        assert (
-            "test_publishes_the_healthy_member_when_a_batched_job_is_cancelled[large-visual]"
-            in result.stdout
-        )
-        assert (
-            "test_preserves_publication_across_gpu_outcomes[gpu-success-handoff]"
-            in result.stdout
-        )
-        assert "8 tests collected" in result.stdout
-
     def test_selects_host_native_fairness_by_its_resource_marker(self):
         result = subprocess.run(
             [

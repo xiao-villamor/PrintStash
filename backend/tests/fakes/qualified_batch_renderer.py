@@ -7,8 +7,8 @@ network service is contacted.
 from __future__ import annotations
 
 import json
+import os
 import struct
-import threading
 import time
 
 import numpy as np
@@ -31,17 +31,44 @@ from app.runtime.compute.qualification import Qualification
 
 
 class QualifiedBatchRenderer:
-    def __init__(self):
-        self.owner_busy = threading.Event()
-        self.release_owner = threading.Event()
-        self.batch_started = threading.Event()
-        self.release_batch = threading.Event()
-        self.stop = threading.Event()
-        self.batches = []
-        self.failure: Reason | None = None
-        self.colors = [(180, 60, 30, 255), (30, 150, 210, 255)]
+    def __init__(self, manager):
+        self.owner_busy = manager.Event()
+        self.release_owner = manager.Event()
+        self.batch_started = manager.Event()
+        self.release_batch = manager.Event()
+        self.stop = manager.Event()
+        self.batches = manager.list()
+        self._shared = manager.Namespace()
+        self._shared.failure = None
+        self._shared.colors = [(180, 60, 30, 255), (30, 150, 210, 255)]
+        self._shared.owner_pid = None
+
+    @property
+    def failure(self) -> Reason | None:
+        return self._shared.failure
+
+    @failure.setter
+    def failure(self, value: Reason | None) -> None:
+        self._shared.failure = value
+
+    @property
+    def colors(self) -> list[tuple[int, int, int, int]]:
+        return self._shared.colors
+
+    @colors.setter
+    def colors(self, value: list[tuple[int, int, int, int]]) -> None:
+        self._shared.colors = value
+
+    @property
+    def owner_pid(self) -> int | None:
+        return self._shared.owner_pid
+
+    @owner_pid.setter
+    def owner_pid(self, value: int) -> None:
+        self._shared.owner_pid = value
 
     def dispatcher(self, root, **kwargs):
+        self.owner_pid = os.getpid()
         controls = self
 
         class TestDevice:
@@ -159,3 +186,12 @@ class QualifiedBatchRenderer:
             header=header,
         )
         return client.exchange_render(request, body)
+
+
+def serve_qualified(root, controls, configuration):
+    """Keep broker RSS and fatal process exits inside a real disposable owner."""
+    from app.core.config import _overlay
+    from app.runtime.compute.broker import serve
+
+    _overlay.update(configuration)
+    serve(root, dispatcher_factory=controls.dispatcher)

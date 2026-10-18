@@ -30,11 +30,6 @@ from app.runtime.compute.contracts import Reason
 from app.runtime.compute.protocol import Priority
 from tests.fixtures.compute_renderer import qualified_renderer as qualified_renderer
 
-# These cases coordinate overlapping real native workers through a broker fence.
-# Independent xdist vaults own independent admission pools; use the mandatory
-# serial native-host phase for the complete publication/cancellation contract.
-pytestmark = pytest.mark.native_host
-
 
 async def _wait_until(predicate, message):
     deadline = time.monotonic() + 20
@@ -154,9 +149,7 @@ class TestRenderBatchPublication:
                 assert [priority for _key, priority, _mode in batch] == [
                     Priority.BACKGROUND
                 ] * 2
-                assert [mode for _key, _priority, mode in batch] == [
-                    "gpu-visual-v2"
-                ] * 2
+                assert [mode for _key, _priority, mode in batch] == ["gpu-visual-v2"] * 2
                 cancelled = await api.post(
                     f"/api/v1/jobs/{cancelled_job.id}/cancel", headers=headers
                 )
