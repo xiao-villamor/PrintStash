@@ -66,7 +66,10 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 describe("uploadArtifact", () => {
   it("persists only the opaque session id", async () => {
@@ -204,6 +207,65 @@ describe("uploadArtifact", () => {
       etag: '"part-1"',
     });
     expect(localStorage.getItem("printstash.artifact-upload-session-ids")).toBe("session-1");
+  });
+
+  it.each([
+    {
+      label: "is rejected",
+      response: () => new Response(null, { status: 403 }),
+      error: "artifact_upload_part_failed",
+    },
+    {
+      label: "has no receipt",
+      response: () => new Response(null, { status: 200 }),
+      error: "artifact_upload_receipt_missing",
+    },
+  ])("preserves the upload session after a signed part $label", async ({ response, error }) => {
+    const api = anApi();
+    vi.mocked(api.getArtifactUpload).mockResolvedValue(aSession({ mode: "native_parts" }));
+    vi.mocked(api.getArtifactUploadPlan).mockResolvedValue({
+      session_id: "session-1",
+      mode: "native_parts",
+      chunk_size: 8,
+      max_parallel: 1,
+      upload_path: "/opaque/parts/{part_number}",
+      uploaded_parts: [],
+      expires_at: NOW,
+    });
+    vi.mocked(api.signArtifactUploadPart).mockResolvedValue({
+      url: "https://objects.example.test/private-part?signature=temporary",
+      method: "PUT",
+      headers: {},
+      expires_at: NOW,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async () => response()),
+    );
+
+    await expect(
+      resumeArtifactUpload("session-1", new File(["12345678"], "part.stl"), { api, digest }),
+    ).rejects.toThrow(error);
+
+    expect(rememberedArtifactUploads()).toEqual(["session-1"]);
+    expect(isArtifactUploadActive("session-1")).toBe(false);
+    expect(api.recordArtifactUploadPart).not.toHaveBeenCalled();
+    expect(api.finalizeArtifactUpload).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "filename", file: () => new File(["12345678"], "different.stl") },
+    { label: "byte length", file: () => new File(["1234"], "part.stl") },
+  ])("rejects a resumed file with a different $label", async ({ file }) => {
+    const api = anApi();
+    vi.mocked(api.getArtifactUpload).mockResolvedValue(aSession());
+
+    await expect(resumeArtifactUpload("session-1", file(), { api, digest })).rejects.toThrow(
+      "artifact_upload_file_mismatch",
+    );
+
+    expect(api.getArtifactUploadPlan).not.toHaveBeenCalled();
+    expect(rememberedArtifactUploads()).toEqual([]);
   });
 
   it("pauses an active transfer without aborting its durable server session", async () => {
@@ -486,6 +548,22 @@ describe("upload admission", () => {
 
     expect(result.job_id).toBe("job-1");
     expect(pauses).toEqual([500]);
+  });
+
+  it("respects the busy admission delay before retrying", async () => {
+    vi.useFakeTimers();
+    const api = admittingApi();
+    vi.mocked(api.createArtifactUpload)
+      .mockRejectedValueOnce(new ApiError(429, "rate_limited", "rate_limited"))
+      .mockResolvedValueOnce(aSession());
+
+    const pending = uploadArtifact(file(), request, { api, digest });
+    await vi.advanceTimersByTimeAsync(499);
+    expect(api.createArtifactUpload).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+
+    await expect(pending).resolves.toMatchObject({ state: "ingesting", job_id: "job-1" });
+    expect(api.createArtifactUpload).toHaveBeenCalledTimes(2);
   });
 
   it("waits for staging room without opening a second session", async () => {

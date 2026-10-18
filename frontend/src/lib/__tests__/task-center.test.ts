@@ -1018,6 +1018,51 @@ describe("syncImportJobs", () => {
     );
   });
 
+  it.each([
+    { label: "waiting for a worker", stage: null, expected: "Waiting for backup worker" },
+    {
+      label: "snapshotting",
+      stage: "snapshotting",
+      expected: "Snapshotting database · continues in background",
+    },
+    {
+      label: "archiving an unknown total",
+      stage: "archiving",
+      expected: "Archiving files · continues in background",
+    },
+    {
+      label: "verifying",
+      stage: "verifying",
+      expected: "Verifying backup archive · continues in background",
+    },
+    {
+      label: "publishing locally",
+      stage: "publishing",
+      expected: "Publishing backup · continues in background",
+    },
+    {
+      label: "finalizing",
+      stage: "finalizing",
+      expected: "Finishing backup · continues in background",
+    },
+  ] as const)("describes backup progress while $label", async ({ stage, expected }) => {
+    tc.trackImportJob("backup-progress", "Backup");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "backup-progress",
+        kind: "backups.create",
+        state: "running",
+        stage,
+        total: null,
+        current_item: null,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(expected);
+  });
+
   it("describes the scheduled backup publication destination", async () => {
     listJobs.mockResolvedValue([
       aJob({
@@ -1931,6 +1976,19 @@ describe("private task scope", () => {
     }
     vi.resetModules();
     tc = await loadTaskCenter();
+    expect(tc.listTasks()).toEqual([]);
+  });
+});
+
+/** Truncated persisted metadata cannot prevent the application from starting. */
+describe("task snapshot recovery", () => {
+  it("discards an unreadable task snapshot", async () => {
+    tc.createTask({ title: "Interrupted snapshot" });
+    localStorage.setItem("printstash:import-tasks:v1", '[{"id":');
+    vi.resetModules();
+
+    tc = await loadTaskCenter();
+
     expect(tc.listTasks()).toEqual([]);
   });
 });
