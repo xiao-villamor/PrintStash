@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Uploads wait for newly created tags to be saved, so a quick submission keeps
+  every selected tag. Cancelling a draft ignores late tag acknowledgements.
+
 - Restoring large unfiltered collection trees reuses subtree counts instead of
   repeating the same lookup for every descendant.
 
