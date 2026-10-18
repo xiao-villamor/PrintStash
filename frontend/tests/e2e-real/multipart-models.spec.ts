@@ -54,7 +54,25 @@ test.describe("multipart models", () => {
         ),
       });
     await expect(page.getByText("Uploaded from your computer")).toBeVisible();
-    await page.getByRole("button", { name: "Save changes" }).click();
+    // The cover is an independent write. Wait for its acknowledgement before
+    // submitting the composition, then prove that write reached persistence.
+    await expect(page.getByText("Cover image uploaded", { exact: true })).toBeVisible();
+    const save = page.getByRole("button", { name: "Save changes" });
+    await expect(save).toBeEnabled();
+    const compositionPath = `/api/v1${new URL(page.url()).pathname}`;
+    const saving = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === compositionPath &&
+        response.request().method() === "PUT",
+    );
+    await save.focus();
+    await save.press("Enter");
+    const receipt = await saving;
+    expect(receipt.ok(), await receipt.text()).toBe(true);
+    const persisted: MultipartModelRead = await receipt.json();
+    expect(persisted.parts).toHaveLength(2);
+    expect(persisted.cover_image_uploaded).toBe(true);
+    await expect(page.getByRole("button", { name: "Edit multipart set" })).toBeVisible();
     await expect(page.getByText("Changes saved")).toBeVisible();
     const uploadedCover = page.getByRole("img", { name: group });
     await expect(uploadedCover).toBeVisible();
@@ -248,6 +266,8 @@ test.describe("Multipart auxiliary editing", () => {
   test("recovers auxiliary conflicts without rebasing the composition draft", async ({ page }) => {
     const api = `http://127.0.0.1:${process.env.PLAYWRIGHT_REAL_API_PORT ?? 8410}`;
     const name = `e2e-multipart-review-${Date.now()}`;
+    const localTag = `${name}-local-tag`;
+    const competingTag = `${name}-competing-tag`;
     const created = await page.request.post(`${api}/api/v1/multipart-models`, {
       data: { name, description: null, collection_id: null },
     });
@@ -262,14 +282,14 @@ test.describe("Multipart auxiliary editing", () => {
       await page.getByRole("button", { name: "Add tags" }).click();
       // The dialog label reflects the composition draft's title at opening.
       const tagDialog = page.getByRole("dialog");
-      await tagDialog.getByRole("textbox", { name: "Tags to add" }).fill("Local review tag");
+      await tagDialog.getByRole("textbox", { name: "Tags to add" }).fill(localTag);
       await tagDialog.getByRole("button", { name: "Create tag" }).click();
       const competing = await page.request.put(`${api}${path}/tags`, {
         headers: {
           "If-Match": `"multipart-${initial.id}-e${initial.edit_epoch}-v${initial.edit_version}"`,
           "X-PrintStash-Edit-Contract": "conditional-v1",
         },
-        data: { tags: ["Other editor tag"] },
+        data: { tags: [competingTag] },
       });
       expect(competing.ok(), await competing.text()).toBe(true);
       const latest: MultipartModelRead = await competing.json();
@@ -283,7 +303,7 @@ test.describe("Multipart auxiliary editing", () => {
       await expect(tagDialog.getByRole("button", { name: "Save tags" })).toBeDisabled();
       await tagDialog.getByRole("button", { name: "Review latest version" }).click();
       await expect(tagDialog.getByRole("region", { name: "Latest saved version" })).toContainText(
-        "Other editor tag",
+        competingTag,
       );
       const tagConfirmed = page.waitForResponse(
         (response) =>
@@ -351,7 +371,7 @@ test.describe("Multipart auxiliary editing", () => {
       );
       const persisted: MultipartModelRead = await (await page.request.get(`${api}${path}`)).json();
       expect(persisted.name).toBe(name);
-      expect(persisted.tags).toEqual(["Local review tag"]);
+      expect(persisted.tags).toEqual([localTag]);
       expect(persisted.cover_image_uploaded).toBe(true);
       await page.reload();
       await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();

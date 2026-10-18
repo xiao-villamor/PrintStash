@@ -211,6 +211,22 @@ class TestQuickGate:
 
 
 class TestDeepSuite:
+    @pytest.mark.parametrize(
+        "job_name", ["browser-mock", "browser-real", "library-startup"]
+    )
+    def test_rejects_retry_only_browser_passes(self, job_name):
+        commands = _commands(_workflow("deep-ci.yml")["jobs"][job_name])
+        invocations = [
+            line.split()
+            for line in commands.splitlines()
+            if "pnpm test:e2e" in line
+            or "pnpm test:startup" in line
+            or "pnpm exec playwright test " in line
+        ]
+
+        assert invocations
+        assert all("--fail-on-flaky-tests" in command for command in invocations)
+
     def test_provisions_a_disposable_root_for_mounted_browser_contracts(self):
         commands = _commands(_workflow("deep-ci.yml")["jobs"]["browser-real"])
 

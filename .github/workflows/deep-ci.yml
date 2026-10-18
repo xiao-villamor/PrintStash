@@ -350,11 +350,11 @@ jobs:
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
+      - run: pnpm test:e2e --fail-on-flaky-tests
       - name: Verify production PWA cache contracts
         env:
           PLAYWRIGHT_PRODUCTION_PWA: "1"
-        run: pnpm test:e2e
+        run: pnpm test:e2e --fail-on-flaky-tests
       - name: Upload Playwright report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
@@ -406,22 +406,22 @@ jobs:
           case "$SUITE" in
             main)
               export PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT="$(mktemp -d "${RUNNER_TEMP}/printstash-mounted.XXXXXX")"
-              pnpm exec playwright test --config=playwright.real.config.ts
+              pnpm exec playwright test --config=playwright.real.config.ts --fail-on-flaky-tests
               ;;
             onboarding)
-              pnpm exec playwright test --config=playwright.onboarding.config.ts
-              PLAYWRIGHT_ONBOARDING_LOST_RESPONSE=1 pnpm exec playwright test --config=playwright.onboarding.config.ts
+              pnpm exec playwright test --config=playwright.onboarding.config.ts --fail-on-flaky-tests
+              PLAYWRIGHT_ONBOARDING_LOST_RESPONSE=1 pnpm exec playwright test --config=playwright.onboarding.config.ts --fail-on-flaky-tests
               ;;
             environment)
-              pnpm exec playwright test --config=playwright.environment-admin.config.ts
-              pnpm exec playwright test --config=playwright.migration.config.ts
-              pnpm exec playwright test --config=playwright.ai-search.config.ts
+              pnpm exec playwright test --config=playwright.environment-admin.config.ts --fail-on-flaky-tests
+              pnpm exec playwright test --config=playwright.migration.config.ts --fail-on-flaky-tests
+              pnpm exec playwright test --config=playwright.ai-search.config.ts --fail-on-flaky-tests
               ;;
             storage)
-              pnpm exec playwright test --config=playwright.storage.config.ts
-              pnpm exec playwright test --config=playwright.storage-presets.config.ts
-              pnpm exec playwright test --config=playwright.delivery.config.ts
-              pnpm exec playwright test --config=playwright.critical-backup.config.ts
+              pnpm exec playwright test --config=playwright.storage.config.ts --fail-on-flaky-tests
+              pnpm exec playwright test --config=playwright.storage-presets.config.ts --fail-on-flaky-tests
+              pnpm exec playwright test --config=playwright.delivery.config.ts --fail-on-flaky-tests
+              pnpm exec playwright test --config=playwright.critical-backup.config.ts --fail-on-flaky-tests
               ;;
             *) exit 2 ;;
           esac
@@ -625,7 +625,7 @@ jobs:
         working-directory: frontend
         env:
           STARTUP_DISTRIBUTION: ${{ matrix.distribution }}
-        run: pnpm test:startup
+        run: pnpm test:startup --fail-on-flaky-tests
       - name: Publish individual samples and browser evidence
         if: always()
         uses: actions/upload-artifact@v7
