@@ -23,8 +23,9 @@ commit to be tagged and wait for success. Release publication requires green
 `CI` and `Deep CI` runs for that SHA. Nightly and manual `latest` publication
 require a green `CI` run for the same SHA on `main`.
 
-Python compatibility runs the `full-ordinary` and `full-resources` lanes in
-independent jobs. The ordinary phase includes slow tests and retains work-stealing;
+Python compatibility runs two disjoint file partitions of `full-ordinary` and
+the serial `full-resources` lane in independent jobs. The ordinary partitions
+include slow tests and retain work-stealing;
 the resource phase runs serially so each real service starts once. Tests marked
 `native_host` also run in that mandatory phase: independent test vaults have
 independent admission pools, so an xdist companion would consume CPU/RAM outside

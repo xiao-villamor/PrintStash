@@ -1,9 +1,11 @@
 /** Settled derivatives refresh the authorized detail without competing local copies. */
 import "@testing-library/jest-dom/vitest";
+import { useState } from "react";
+import userEvent from "@testing-library/user-event";
 import { act, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useDerivativeRefresh } from "../use-derivative-refresh";
-import { useModelDetail } from "@/features/library/model-detail";
+import { modelDetailOptions, useModelDetail } from "@/features/library/model-detail";
 import { setEventSocketFactory, type EventSocket } from "@/lib/events";
 import { aModel } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
@@ -21,6 +23,23 @@ function Probe() {
   const model = useModelDetail(3, initialModel);
   useDerivativeRefresh(3);
   return <p>{model.data?.name}</p>;
+}
+function RefreshFollower() {
+  useDerivativeRefresh(3);
+  return null;
+}
+function LifetimeProbe() {
+  const model = useModelDetail(3, initialModel);
+  const [following, setFollowing] = useState(true);
+  return (
+    <>
+      <p>{model.data?.name}</p>
+      <button type="button" onClick={() => setFollowing(false)}>
+        Stop following
+      </button>
+      {following && <RefreshFollower />}
+    </>
+  );
 }
 async function subscribed() {
   await waitFor(() => expect(socket.onmessage).not.toBeNull());
@@ -81,7 +100,7 @@ describe("useDerivativeRefresh", () => {
 
     expect(await screen.findByText("Reconnected")).toBeVisible();
   });
-  it("coalesces settled derivative notices into one read", async () => {
+  it("coalesces notices received during a read into one follow-up", async () => {
     const pending = Promise.withResolvers<Response>();
     const view = renderApp(<Probe />, {
       routes: { "GET /api/v1/models/3": () => pending.promise },
@@ -89,15 +108,82 @@ describe("useDerivativeRefresh", () => {
     await subscribed();
     send({ type: "derivative", model_id: 3, state: "ready" });
     await waitFor(() => expect(view.requests()).toHaveLength(1));
+    view.route({
+      "GET /api/v1/models/3": json(aModel({ id: 3, name: "Latest", edit_version: 3 })),
+    });
 
     send({ type: "resync" });
     send({ type: "derivative", model_id: 3, state: "ready" });
     await act(async () =>
-      pending.resolve(json(aModel({ id: 3, name: "Derived", edit_version: 2 }))),
+      pending.resolve(json(aModel({ id: 3, name: "Earlier", edit_version: 2 }))),
     );
 
-    expect(await screen.findByText("Derived")).toBeVisible();
-    expect(view.requests().map((request) => request.url)).toEqual(["/api/v1/models/3"]);
+    expect(await screen.findByText("Latest")).toBeVisible();
+    expect(view.requests().map((request) => request.url)).toEqual([
+      "/api/v1/models/3",
+      "/api/v1/models/3",
+    ]);
+  });
+  it("reads again when a notice joins an existing request", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const view = renderApp(<Probe />, {
+      routes: { "GET /api/v1/models/3": () => pending.promise },
+    });
+    await subscribed();
+    const reading = view.client.fetchQuery({ ...modelDetailOptions(3), staleTime: 0 });
+    await waitFor(() => expect(view.requests()).toHaveLength(1));
+    view.route({
+      "GET /api/v1/models/3": json(aModel({ id: 3, name: "Latest", edit_version: 3 })),
+    });
+
+    send({ type: "derivative", model_id: 3, state: "ready" });
+    await act(async () => {
+      pending.resolve(json(aModel({ id: 3, name: "Earlier", edit_version: 2 })));
+      await reading;
+    });
+
+    expect(await screen.findByText("Latest")).toBeVisible();
+    expect(view.requests()).toHaveLength(2);
+  });
+  it("recovers a failed read when a resync is queued", async () => {
+    const pending = Promise.withResolvers<Response>();
+    const view = renderApp(<Probe />, {
+      routes: { "GET /api/v1/models/3": () => pending.promise },
+    });
+    await subscribed();
+    send({ type: "derivative", model_id: 3, state: "ready" });
+    await waitFor(() => expect(view.requests()).toHaveLength(1));
+    view.route({
+      "GET /api/v1/models/3": json(aModel({ id: 3, name: "Recovered", edit_version: 3 })),
+    });
+
+    send({ type: "resync" });
+    await act(async () => pending.resolve(json({ detail: "temporarily_unavailable" }, 503)));
+
+    expect(await screen.findByText("Recovered")).toBeVisible();
+    expect(view.requests()).toHaveLength(2);
+  });
+  it("stops queued refreshes when their owner closes", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<Response>();
+    const view = renderApp(<LifetimeProbe />, {
+      routes: { "GET /api/v1/models/3": () => pending.promise },
+    });
+    await subscribed();
+    send({ type: "derivative", model_id: 3, state: "ready" });
+    await waitFor(() => expect(view.requests()).toHaveLength(1));
+    view.route({
+      "GET /api/v1/models/3": json(aModel({ id: 3, name: "Late refresh", edit_version: 3 })),
+    });
+    send({ type: "resync" });
+
+    await user.click(screen.getByRole("button", { name: "Stop following" }));
+    await act(async () =>
+      pending.resolve(json(aModel({ id: 3, name: "Earlier", edit_version: 2 }))),
+    );
+
+    expect(await screen.findByText("Earlier")).toBeVisible();
+    expect(view.requests()).toHaveLength(1);
   });
   it("reads nothing when the subscription starts from the revision on screen", async () => {
     const view = renderApp(<Probe />);

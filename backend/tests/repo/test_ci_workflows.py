@@ -243,11 +243,50 @@ class TestDeepSuite:
     def test_runs_compatibility_phases_independently(self) -> None:
         job = _workflow("deep-ci.yml")["jobs"]["backend-python314"]
 
-        assert job["strategy"]["matrix"]["phase"] == ["full-ordinary", "full-resources"]
+        rows = job["strategy"]["matrix"]["include"]
+        assert [row["phase"] for row in rows] == [
+            "full-ordinary",
+            "full-ordinary",
+            "full-resources",
+        ]
+        assert [row["shard"] for row in rows] == ["a", "b", "services"]
+        assert rows[2]["paths"] == "tests"
         assert job["strategy"]["fail-fast"] is False
         assert job["timeout-minutes"] == 60
-        assert "./scripts/test.sh ${{ matrix.phase }} -q" in _commands(job)
+        assert (
+            "./scripts/test.sh ${{ matrix.phase }} ${{ matrix.paths }} -q"
+            in _commands(job)
+        )
         assert not job.get("continue-on-error", False)
+
+    def test_ordinary_shards_cover_every_test_file_once(self):
+        rows = _workflow("deep-ci.yml")["jobs"]["backend-python314"]["strategy"][
+            "matrix"
+        ]["include"]
+        roots = [
+            path
+            for row in rows
+            if row["phase"] == "full-ordinary"
+            for path in row["paths"].split()
+        ]
+        files = [
+            path.relative_to(REPO_ROOT / "backend")
+            for path in (REPO_ROOT / "backend/tests").rglob("test_*.py")
+            if path.relative_to(REPO_ROOT / "backend/tests").parts[0]
+            in {"unit", "integration", "contract", "e2e", "repo"}
+        ]
+        occurrences = {
+            str(file): sum(
+                fnmatch(str(file), root) if "*" in root else file.is_relative_to(root)
+                for root in roots
+            )
+            for file in files
+        }
+
+        assert occurrences
+        assert set(occurrences.values()) == {1}, {
+            file: count for file, count in occurrences.items() if count != 1
+        }
 
     @pytest.mark.parametrize(
         ("lane", "expected_parallel", "expression"),

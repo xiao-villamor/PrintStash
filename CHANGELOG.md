@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Model metadata stays current when derivative updates arrive during an in-flight
+  detail read, including revision comparison fields.
+
 - Preparing-preview activity waits until the Library is ready before reading
   the background queue. Opening Notifications can still request activity early.
 
