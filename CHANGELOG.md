@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Library titles and controls adapt to the available pane width. Cards use the
+  full grid width, collection tags and description actions share a compact row,
+  and description editing stays visible and usable on phones.
+
 - Library filters keep their position while facet counts load, so a response
   arriving during a click does not lose the selected filter.
 

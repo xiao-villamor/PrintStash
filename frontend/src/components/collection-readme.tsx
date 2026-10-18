@@ -14,6 +14,7 @@ import { uploadCollectionImage } from "@/lib/api";
 import { invalidateCachedAsset } from "@/lib/asset-cache";
 import { useCollectionReadme } from "@/lib/queries";
 import { queryKeys } from "@/lib/query-client";
+import { Button } from "@/components/ui/button";
 import { MarkdownView } from "@/components/markdown-view";
 import { toast } from "@/lib/toast";
 
@@ -132,7 +133,7 @@ export function CollectionReadme({
 
   if (editing) {
     return (
-      <div className="px-4 sm:px-6 py-4 bg-background border-b border-border">
+      <div className="min-w-0 basis-full space-y-2">
         <textarea
           ref={textareaRef}
           value={draft}
@@ -150,34 +151,32 @@ export function CollectionReadme({
             }
           }}
           rows={8}
+          aria-label={uiText("Description")}
           placeholder={uiText(
             "A short description of this collection. Markdown — paste or drop images.",
           )}
           className="w-full bg-surface text-on-surface font-mono text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
         />
-        <div className="flex items-center gap-2 mt-2">
-          <button
-            onClick={save}
-            disabled={saving}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover disabled:opacity-50"
-          >
-            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Button type="button" size="sm" onClick={save} loading={saving}>
             {uiText("Save")}
-          </button>
-          <button
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
             onClick={() => setEditing(false)}
             disabled={saving}
-            className="px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
           >
             {uiText("Cancel")}
-          </button>
+          </Button>
           {uploading && (
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
               {uiText(" Uploading image…")}
             </span>
           )}
-          <span className="ml-auto text-xs text-muted-foreground">
+          <span className="min-w-0 basis-full text-xs text-muted-foreground sm:ml-auto sm:basis-auto">
             {uiText("Markdown · paste or drop images")}
           </span>
         </div>
@@ -186,45 +185,55 @@ export function CollectionReadme({
   }
 
   return (
-    <div className="px-4 sm:px-6 py-4 bg-background border-b border-border">
+    <div className={readme ? "min-w-0 basis-full" : "min-w-0"}>
       {readme ? (
-        <div className="relative group/readme">
-          <div ref={contentRef} className={!expanded ? "max-h-48 overflow-hidden" : ""}>
+        <div>
+          <div
+            ref={contentRef}
+            className={!expanded ? "relative max-h-48 overflow-hidden" : "relative"}
+          >
             <MarkdownView source={readme} />
+            {overflows && !expanded && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background to-transparent" />
+            )}
           </div>
-          {overflows && (
-            <>
-              {!expanded && (
-                <div className="pointer-events-none absolute inset-x-0 bottom-7 h-12 bg-gradient-to-t from-background to-transparent" />
-              )}
-              <button
-                onClick={() => setExpanded((v) => !v)}
-                className="mt-1 text-xs font-medium text-primary hover:underline"
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {overflows && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => setExpanded((value) => !value)}
               >
                 {expanded ? uiText("Show less") : uiText("Show more")}
-              </button>
-            </>
-          )}
-          {canEdit && (
-            <button
-              onClick={startEdit}
-              disabled={disabled}
-              className="absolute top-0 right-0 flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted opacity-0 group-hover/readme:opacity-100 transition-opacity"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-              {uiText(" Edit")}
-            </button>
-          )}
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={startEdit}
+                disabled={disabled}
+              >
+                <Pencil className="h-3.5 w-3.5" aria-hidden />
+                {uiText(" Edit")}
+              </Button>
+            )}
+          </div>
         </div>
       ) : (
-        <button
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
           onClick={startEdit}
           disabled={disabled}
-          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
+          className="h-auto min-h-8 max-w-full justify-start whitespace-normal text-left text-muted-foreground"
         >
-          <FileText className="w-4 h-4" />
+          <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />
           {uiText(" Add a description for this collection")}
-        </button>
+        </Button>
       )}
     </div>
   );
