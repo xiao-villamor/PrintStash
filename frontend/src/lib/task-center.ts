@@ -155,7 +155,6 @@ export class JobStatusUnavailableError extends Error {
     this.name = "JobStatusUnavailableError";
   }
 }
-let cleanupTimer: ReturnType<typeof setTimeout> | null = null;
 let syncTimer: ReturnType<typeof setTimeout> | null = null;
 let syncSubscribers = 0;
 let syncFailures = 0;
@@ -296,53 +295,8 @@ function clampProgress(progress: number): number {
   return Math.max(0, Math.min(100, Math.round(progress)));
 }
 
-function taskTtl(task: TaskItem): number | null {
-  // Result summaries remain until user explicitly clears them.
-  void task;
-  return null;
-}
-
-function pruneExpired(now = Date.now()): boolean {
-  const next = tasks.filter((task) => {
-    const ttl = taskTtl(task);
-    return ttl === null || now - task.updatedAt < ttl;
-  });
-  if (next.length === tasks.length) return false;
-  tasks = next;
-  return true;
-}
-
-function scheduleCleanup(): void {
-  if (!isBrowser()) return;
-  if (cleanupTimer) {
-    clearTimeout(cleanupTimer);
-    cleanupTimer = null;
-  }
-
-  const now = Date.now();
-  const nextExpiry = tasks.reduce<number | null>((soonest, task) => {
-    const ttl = taskTtl(task);
-    if (ttl === null) return soonest;
-    const expiresAt = task.updatedAt + ttl;
-    return soonest === null ? expiresAt : Math.min(soonest, expiresAt);
-  }, null);
-
-  if (nextExpiry === null) return;
-  cleanupTimer = setTimeout(
-    () => {
-      cleanupTimer = null;
-      if (pruneExpired()) emit();
-      scheduleCleanup();
-    },
-    Math.max(0, nextExpiry - now),
-  );
-}
-
+/** Summaries remain until explicit clearing; reading the store never expires work. */
 export function listTasks(): TaskItem[] {
-  if (pruneExpired()) {
-    emit();
-    scheduleCleanup();
-  }
   return [...tasks].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
@@ -420,7 +374,6 @@ export function createTask(input: TaskPatch & { title: TaskText }): string {
   ]);
   persist();
   emit();
-  scheduleCleanup();
   return id;
 }
 
@@ -436,7 +389,6 @@ export function updateTask(id: string, patch: TaskPatch): void {
   });
   persist();
   emit();
-  scheduleCleanup();
 }
 
 export function linkTaskToJob(taskId: string, jobId: string): void {
@@ -483,7 +435,6 @@ export function clearCompletedTasks(): void {
   persistDismissedJobIds();
   persist();
   emit();
-  scheduleCleanup();
 }
 
 /** Forget browser projections without cancelling durable server Jobs. */
@@ -502,10 +453,6 @@ function retireTasks(errorForWaiter: (jobId: string) => Error): void {
   terminalWaiters.clear();
   for (const [jobId, entries] of waiters)
     for (const waiter of entries) waiter.reject(errorForWaiter(jobId));
-  if (cleanupTimer !== null) {
-    clearTimeout(cleanupTimer);
-    cleanupTimer = null;
-  }
   clearPersistedTasks();
   emit();
 }
