@@ -34,7 +34,7 @@ import type { SimilarityRun } from "@/types/similarity";
 
 // task-center holds module-private state, so each test gets a fresh module via
 // resetModules() + dynamic import. Fake timers (which also fake Date.now in
-// vitest) drive the TTL-based pruning of completed/failed tasks. The server's
+// vitest) verify that task summaries survive elapsed time until cleared. The server's
 // job list is injected through the module's own JobSource seam, and the events
 // socket through its factory seam, so no network (and no module mocking) is
 // involved.
@@ -352,16 +352,26 @@ describe("listTasks", () => {
     tc.createTask({ title: "second" });
     expect(tc.listTasks().map((t) => t.title)).toEqual(["second", "first"]);
   });
-});
 
-describe("pruneTasks", () => {
   it("keeps completed summaries until the user clears them", () => {
     const id = tc.createTask({ title: "done" });
     tc.updateTask(id, { status: "completed" });
     expect(tc.listTasks()).toHaveLength(1);
 
-    vi.advanceTimersByTime(12_000 + 1);
-    expect(tc.listTasks()).toHaveLength(1);
+    vi.advanceTimersByTime(30 * 24 * 60 * 60 * 1000);
+    expect(tc.listTasks()).toMatchObject([{ id, status: "completed" }]);
+  });
+
+  it("keeps a failed task after thirty days", () => {
+    const id = tc.createTask({
+      title: "Failed upload",
+      status: "failed",
+      detail: "invalid_source",
+    });
+
+    vi.advanceTimersByTime(30 * 24 * 60 * 60 * 1000);
+
+    expect(tc.listTasks()).toMatchObject([{ id, status: "failed", detail: "invalid_source" }]);
   });
 
   it("keeps running tasks indefinitely (no TTL)", () => {
