@@ -249,7 +249,9 @@ describe("StructuredFilters", () => {
     it("says the values are still coming", async () => {
       renderFilters({ facets: undefined, loading: true });
 
-      expect(await screen.findByText("Loading filter values…")).toBeInTheDocument();
+      expect(
+        await screen.findByRole("status", { name: "Loading filter values…" }),
+      ).toBeInTheDocument();
     });
 
     it("keeps an already-active filter visible while they load", async () => {

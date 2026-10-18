@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Library filters keep their position while facet counts load, so a response
+  arriving during a click does not lose the selected filter.
+
 - Uploads wait for newly created tags to be saved, so a quick submission keeps
   every selected tag. Cancelling a draft ignores late tag acknowledgements.
 
@@ -9,7 +12,8 @@
   repeating the same lookup for every descendant.
 
 - Model metadata stays current when derivative updates arrive during an in-flight
-  detail read, including revision comparison fields.
+  detail read, including revision comparison fields. Confirmed edit receipts
+  with a different derivative snapshot trigger a fresh authorized read.
 
 - Preparing-preview activity waits until the Library is ready before reading
   the background queue. Opening Notifications can still request activity early.

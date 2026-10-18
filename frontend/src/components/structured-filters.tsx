@@ -1,5 +1,6 @@
 import { FilterGroup } from "@/components/filter-group";
 import { Input } from "@/components/ui/input";
+import { Spinner } from "@/components/ui/spinner";
 import { PrintHistoryFields } from "@/components/print-history-fields";
 import { historyKeys } from "@/lib/search-filters";
 import type { SavedViewFilters } from "@/types";
@@ -141,9 +142,14 @@ export function StructuredFilters({
     <Localized>
       <section>
         <div className="mb-2 flex items-center justify-between pl-2 pr-1">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            {uiText("Model filters")}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              {uiText("Model filters")}
+            </h3>
+            <span className="h-3.5 w-3.5 shrink-0">
+              {loading && <Spinner size="sm" label={uiText("Loading filter values…")} />}
+            </span>
+          </div>
           {count > 0 && (
             <button
               type="button"
@@ -156,11 +162,6 @@ export function StructuredFilters({
             </button>
           )}
         </div>
-        {loading && (
-          <p className="px-2 py-2 text-xs text-muted-foreground">
-            {uiText("Loading filter values…")}
-          </p>
-        )}
         {error && (
           <p className="mx-2 mb-2 rounded-md border border-destructive/30 px-2 py-2 text-xs text-destructive">
             {uiText("Filter values could not be loaded.")}

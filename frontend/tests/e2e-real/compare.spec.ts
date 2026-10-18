@@ -13,6 +13,8 @@ import { modelCard, uploadModel } from "./util";
 // panel appears and shows a field-level diff — matching values render plain,
 // differing values are highlighted.
 
+test.use({ trace: "retain-on-failure" });
+
 test.describe("revision comparison", () => {
   test("comparing two revisions surfaces differing metadata", async ({ page }) => {
     const name = `e2e-compare-${Date.now()}`;

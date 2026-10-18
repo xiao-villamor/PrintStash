@@ -25,6 +25,44 @@ function calibrationCube(offset: number) {
 }
 
 test.describe("Standalone similarity", () => {
+  test("keeps a pointer selection when lazy filter values arrive", async ({ page }) => {
+    let release = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/v1/models/facets**", async (route) => {
+      await pending;
+      await route.continue();
+    });
+    try {
+      await page.goto("/?type=all&sort=date-desc");
+      await expect(page.getByRole("main").getByText(/^\d+ items? shown$/)).toBeVisible();
+      await expect(page.getByRole("complementary").locator(".animate-pulse")).toHaveCount(0);
+      await openFilters(page);
+      const loading = page
+        .getByText("Loading filter values…", { exact: true })
+        .or(page.getByRole("status", { name: "Loading filter values…", exact: true }));
+      await expect(loading).toBeVisible();
+      const checkbox = page.getByRole("checkbox", { name: "Has similar candidates" });
+      await checkbox.scrollIntoViewIfNeeded();
+      const box = await checkbox.boundingBox();
+      expect(box).not.toBeNull();
+      await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+      await page.mouse.down();
+      const response = page.waitForResponse((value) =>
+        new URL(value.url()).pathname.endsWith("/api/v1/models/facets"),
+      );
+      release();
+      expect((await response).ok()).toBe(true);
+      await expect(loading).toHaveCount(0);
+      await page.mouse.up();
+
+      await expect(checkbox).toBeChecked();
+      await expect(page).toHaveURL(/has_similar_candidates=yes/);
+    } finally {
+      release();
+    }
+  });
   test("keeps a draft budget while a real analysis refreshes settings", async ({ page }) => {
     const enabled = await page.request.patch(`${API}/api/v1/similarity/settings`, {
       data: { enabled: true, embeddings_enabled: false, triangle_cap: 180000 },
@@ -152,6 +190,8 @@ test.describe("Standalone similarity", () => {
       await test.step("Similarity Saved View survives navigation", async () => {
         const viewName = `Review similar ${Date.now()}`;
         await page.goto("/");
+        await expect(modelCard(page, models[0].name)).toBeVisible();
+        await expect(page.getByRole("complementary").locator(".animate-pulse")).toHaveCount(0);
         await openFilters(page);
         await page.getByRole("checkbox", { name: "Has similar candidates" }).click();
         await expect(page).toHaveURL(/has_similar_candidates=yes/);

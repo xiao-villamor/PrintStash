@@ -80,14 +80,25 @@ export function useModelDetail(id: number, initialModel?: ModelRead) {
       await client.cancelQueries({ queryKey: queryKeys.model(id), exact: true });
       if (session !== getSessionVersion()) return false;
       let accepted = false;
+      let derivativesChanged = false;
       client.setQueryData<ModelRead>(queryKeys.model(id), (current) => {
         const candidate = next instanceof Function ? (current ? next(current) : undefined) : next;
         if (!candidate || candidate.id !== id) return current;
         if (!acceptsEditingSnapshot(current, candidate, observedEpoch)) return current;
+        derivativesChanged =
+          current?.edit_epoch === candidate.edit_epoch &&
+          current.derivatives_revision !== candidate.derivatives_revision;
         accepted = true;
         return candidate;
       });
-      if (accepted) refreshLibraryMetadata(client, session, { kind: "model", id });
+      if (accepted) {
+        refreshLibraryMetadata(client, session, { kind: "model", id });
+        // Edit counters order edits, while derivative revisions only name a
+        // snapshot. A late receipt can replace a completed background read;
+        // revalidate differing revisions rather than ordering the opaque token.
+        if (derivativesChanged)
+          void client.invalidateQueries({ queryKey: queryKeys.model(id), exact: true });
+      }
       return accepted;
     },
     [client, id, session, observedEpoch],
