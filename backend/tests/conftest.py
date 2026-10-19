@@ -390,6 +390,7 @@ def _patch_engine(
         _label_ancestry,
         _subtree_counts_template,
     )
+    from app.modules.library.library_search import _unscoped_effective_tag_pairs
     from app.modules.library.model_views.projections import _list_related_queries
     from app.modules.library.outliner import (
         _administrator_restore_counts,
@@ -406,6 +407,7 @@ def _patch_engine(
     _label_ancestry.cache_clear()
     _endpoint_queries.cache_clear()
     _evidence_predicate.cache_clear()
+    _unscoped_effective_tag_pairs.cache_clear()
     _overlay.clear()
     # The tables are emptied between tests; so is what this process believes
     # it still holds against them.

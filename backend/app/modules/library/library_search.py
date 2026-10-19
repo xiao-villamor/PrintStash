@@ -7,6 +7,8 @@ the browse query and taxonomy counts cannot drift apart.
 
 from __future__ import annotations
 
+from functools import cache
+
 from sqlalchemy import func, or_, union_all
 from sqlalchemy.orm import aliased
 from sqlmodel import select
@@ -30,7 +32,7 @@ def _escaped_like(value: str) -> str:
     return f"%{escaped}%"
 
 
-def effective_tag_pairs(visible_collection_ids=None):
+def _build_effective_tag_pairs(visible_collection_ids=None):
     """Return ``(tag_id, model_id)`` for every live effective tag association."""
     model_collection = aliased(Collection)
     tagged_collection = aliased(Collection)
@@ -94,6 +96,19 @@ def effective_tag_pairs(visible_collection_ids=None):
         artifact = artifact.where(scope)
         collection = collection.where(scope)
     return union_all(direct, artifact, collection)
+
+
+@cache
+def _unscoped_effective_tag_pairs():
+    """Reuse an immutable query expression, never database rows or access scope."""
+    return _build_effective_tag_pairs()
+
+
+def effective_tag_pairs(visible_collection_ids=None):
+    """Return current live associations, applying each caller's access scope."""
+    if visible_collection_ids is None:
+        return _unscoped_effective_tag_pairs()
+    return _build_effective_tag_pairs(visible_collection_ids)
 
 
 def _text_match_model_ids(query: str):
