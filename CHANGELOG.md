@@ -15,6 +15,16 @@
   import on a 4-core test server took 60 s instead of 121 s (0.14.0: 55–67 s).
   Library browsing and filters do not depend on it.
 
+- A valid 3MF too large to read within the preview memory budget is reported
+  as too large to preview, not as a damaged file. Its XML parser running out
+  of memory was recorded as `invalid_source`. The `invalid_source` message now
+  says the file may be damaged or incomplete instead of asking you to check
+  its storage.
+
+- A ZIP over the upload limit says so, with its size and the settings that
+  raise the limit, and the message stays in Tasks. The image's proxy refused it
+  with its own page, which the app reported as a server it could not reach.
+
 - Library titles and controls adapt to the available pane width. Cards use the
   full grid width, collection tags and description actions share a compact row,
   and description editing stays visible and usable on phones.

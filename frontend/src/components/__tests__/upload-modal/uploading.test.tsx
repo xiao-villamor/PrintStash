@@ -35,6 +35,7 @@ import {
   listTasks,
   setJobSource,
   syncImportJobs,
+  taskDetail,
   startTaskCenterSessionScope,
 } from "@/lib/task-center";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
@@ -774,8 +775,34 @@ describe("UploadModal ingestion", () => {
           "failed",
         ),
       );
-      expect(listTasks().find((task) => task.title === "Upload oversized.zip")?.detail).toBe(
-        "upload_too_large",
+      expect(
+        taskDetail(listTasks().find((task) => task.title === "Upload oversized.zip")!),
+      ).toMatch(
+        /^oversized\.zip is .+, more than this server accepts in one upload\. .*VAULT_MAX_UPLOAD_MB/,
+      );
+    });
+
+    it("names the size limit when the proxy refuses the ZIP with its own page", async () => {
+      const user = userEvent.setup();
+      const { container } = renderUpload({
+        routes: {
+          "POST /api/v1/ingest/archive/inspect": () =>
+            new Response("<html><h1>413 Request Entity Too Large</h1></html>", {
+              status: 413,
+              headers: { "Content-Type": "text/html" },
+            }),
+        },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File(["x"], "huge.zip"));
+
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      await waitFor(() =>
+        expect(listTasks().find((task) => task.title === "Upload huge.zip")?.status).toBe("failed"),
+      );
+      expect(taskDetail(listTasks().find((task) => task.title === "Upload huge.zip")!)).toMatch(
+        /^huge\.zip is .+, more than this server accepts in one upload\./,
       );
     });
 

@@ -178,6 +178,42 @@ print(json.dumps({
             "forbidden": [],
         }
 
+    def test_reports_xml_beyond_the_memory_ceiling_as_a_resource_limit(self, tmp_path):
+        # A valid model whose XML tree does not fit under the worker's address
+        # space: libxml2 fails its allocation and raises a syntax error. This
+        # is the real fault, induced with a real ceiling 64 MiB above the
+        # interpreter's own size, not a damaged file.
+        path = tmp_path / "large.3mf"
+        path.write_bytes(
+            three_mf(meshes={1: trimesh.creation.icosphere(subdivisions=6)})
+        )
+        source = """
+import resource
+import sys
+from pathlib import Path
+import lxml.etree, numpy
+from printstash_core.mesh.similarity import GeometryError
+from app.modules.media.three_mf_scene import read_scene
+with open("/proc/self/status") as status:
+    size = next(int(line.split()[1]) * 1024 for line in status if line.startswith("VmSize:"))
+ceiling = size + 64 * 1024 * 1024
+resource.setrlimit(resource.RLIMIT_AS, (ceiling, ceiling))
+try:
+    read_scene(Path(sys.argv[1]))
+except GeometryError as exc:
+    print(exc.code)
+"""
+
+        completed = subprocess.run(
+            [sys.executable, "-c", source, str(path)],
+            capture_output=True,
+            text=True,
+            check=True,
+            cwd=BACKEND_DIR,
+        )
+
+        assert completed.stdout.strip() == "resource_limit", completed.stderr
+
 
 def _model_with_attributes(attributes: str) -> bytes:
     with zipfile.ZipFile(io.BytesIO(three_mf())) as archive:

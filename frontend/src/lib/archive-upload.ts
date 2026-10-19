@@ -1,8 +1,12 @@
 import { inspectArchive } from "@/lib/api";
 import { ApiError } from "@/lib/errors";
+import { formatBytes } from "@/lib/format";
 import { uiMessage, uiText } from "@/lib/locale";
 import { attachTaskToImportJob, updateTask } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
+
+const TOO_LARGE =
+  "{value1} is {value2}, more than this server accepts in one upload. An administrator can raise the limit with VAULT_MAX_UPLOAD_MB and NGINX_CLIENT_MAX_BODY_SIZE.";
 
 const activeTransfers = new Map<string, AbortController>();
 
@@ -57,12 +61,19 @@ export async function startArchiveTransfer(taskId: string, file: File): Promise<
     );
   } catch (error) {
     if (controller.signal.aborted) return;
+    // Name the size, so the failure left in the task list says what to change.
+    // A failed task's plain detail is read as an error code; a message is shown as is.
+    const tooLarge =
+      error instanceof ApiError && error.code === "upload_too_large"
+        ? uiMessage(TOO_LARGE, { value1: file.name, value2: formatBytes(file.size) })
+        : undefined;
     const detail =
-      error instanceof ApiError
+      tooLarge ??
+      (error instanceof ApiError
         ? error.code
         : error instanceof Error
           ? error.message
-          : String(error);
+          : String(error));
     updateTask(taskId, {
       status: "failed",
       archiveUploading: false,
@@ -70,7 +81,7 @@ export async function startArchiveTransfer(taskId: string, file: File): Promise<
       detail,
       retryable: false,
     });
-    toast.error(error);
+    toast.error(tooLarge ? uiText(tooLarge.key, tooLarge.values) : error);
   } finally {
     if (activeTransfers.get(taskId) === controller) activeTransfers.delete(taskId);
   }
