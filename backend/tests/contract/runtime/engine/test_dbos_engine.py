@@ -14,7 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from dbos import DBOS
+from dbos import DBOS, DBOSClient
 from sqlalchemy import Column, Integer, MetaData, Table, create_engine, event
 from sqlalchemy.engine import Engine
 from sqlmodel import select
@@ -42,6 +42,7 @@ from tests.contract.modules.work._harness import (
     InlineHarness,
     contract_catalog,
     gated,
+    harness_for,
     shared_app_db,
 )
 from tests.factories.ops import build_job
@@ -717,3 +718,80 @@ class TestQueueTransition:
                 client.destroy()
                 harness.close()
                 catalog_module.bind(None, None)
+
+
+@pytest.fixture(params=["closed", "invalidated", "disposed"], ids=str)
+def lose_pooled_connection(request):
+    def lose(database):
+        if request.param == "disposed":
+            database.dispose()
+            return
+        pooled = database.raw_connection()
+        if request.param == "closed":
+            raw = pooled.dbapi_connection
+            assert raw is not None
+            pooled.close()
+            raw.close()
+        else:
+            pooled.invalidate()
+            pooled.close()
+
+    return lose
+
+
+class TestSQLitePoolRecovery:
+    def test_reads_queued_work_after_a_pooled_connection_is_lost(
+        self, tmp_path, lose_pooled_connection
+    ):
+        url = f"sqlite:///{tmp_path / 'pool-recovery.sqlite'}"
+        with running_engine((url, None)) as harness:
+            job_id = harness.job(PLAIN, "pool/recovery")
+            submission.submit(job_id)
+            config = harness.engine._config()
+            database = create_engine(
+                url, **config["db_engine_kwargs"], pool_size=1, max_overflow=0
+            )
+            client = DBOSClient(
+                system_database_engine=database, dbos_system_schema=None
+            )
+            try:
+                before = client.list_workflows(status="ENQUEUED")
+                assert len(before) == 1
+                original_id = before[0].workflow_id
+
+                lose_pooled_connection(database)
+                after = client.list_workflows(status="ENQUEUED")
+
+                assert [row.workflow_id for row in after] == [original_id]
+                assert harness.state(job_id) is JobState.QUEUED
+            finally:
+                client.destroy()
+                database.dispose()
+
+    def test_completes_work_after_the_checkpoint_pool_loses_a_connection(
+        self, tmp_path, lose_pooled_connection
+    ):
+        from dbos._dbos import _get_dbos_instance
+
+        gate = threading.Event()
+        with (
+            shared_app_db(tmp_path / "application.sqlite"),
+            harness_for("dbos", tmp_path) as harness,
+        ):
+            job_id = harness.job(PLAIN, "pool/checkpoint", behaviour=gated(gate))
+            submission.submit(job_id)
+            try:
+                harness.started("pool/checkpoint")
+                # Inject a real connection loss at the SDK's database boundary.
+                # The production adapter must retain its durable step contract.
+                lose_pooled_connection(_get_dbos_instance()._sys_db.engine)
+                gate.set()
+                harness.settle()
+
+                assert harness.state(job_id) is JobState.COMPLETED
+                assert RECORD.steps == [
+                    ("pool/checkpoint", "first"),
+                    ("pool/checkpoint", "second"),
+                ]
+            finally:
+                gate.set()

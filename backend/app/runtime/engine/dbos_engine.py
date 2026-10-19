@@ -272,7 +272,8 @@ class DbosJobEngine(JobEngine):
             config["dbos_system_schema"] = self.schema
         else:
             config["db_engine_kwargs"] = {
-                "creator": _sqlite_system_connection(self.url)
+                "creator": _sqlite_system_connection(self.url),
+                "pool_pre_ping": False,
             }
         return config
 
