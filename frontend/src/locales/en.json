@@ -4039,7 +4039,7 @@
   "aiSearch.filter.printed": "Has print history",
   "aiSearch.filter.print_outcome": "Print outcome",
   "aiSearch.filter.material_type": "Material",
-  "aiSearch.filter.file_type": "Artifact type",
+  "aiSearch.filter.file_type": "File type",
   "aiSearch.filter.revision_status": "Revision status",
   "aiSearch.filter.storage": "Storage",
   "aiSearch.filter.slicer_name": "Slicer",

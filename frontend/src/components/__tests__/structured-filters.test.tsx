@@ -30,7 +30,7 @@ type Props = Parameters<typeof StructuredFilters>[0];
 
 /**
  * The rendered label for the `file_type` group. It says "File type" like the
- * active-filter chip ("file type: STL") and the Spanish panel ("Tipo de archivo").
+ * active-filter chip ("File type: STL") and the Spanish panel ("Tipo de archivo").
  */
 const FILE_TYPE_GROUP = "File type";
 
@@ -72,8 +72,48 @@ describe("StructuredFilters", () => {
       await userEvent.setup().click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
       await userEvent.setup().click(screen.getByRole("button", { name: "Material" }));
 
-      expect(screen.getByText("stl")).toBeInTheDocument();
+      expect(screen.getByText("STL")).toBeInTheDocument();
       expect(screen.getByText("PLA")).toBeInTheDocument();
+    });
+
+    it("writes file formats the way they name themselves", async () => {
+      renderFilters();
+      await userEvent.setup().click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
+
+      expect(screen.getByText("STL")).toBeInTheDocument();
+      expect(screen.getByText("G-code")).toBeInTheDocument();
+    });
+
+    it("lists sliced G-code after the source formats", async () => {
+      // G-code is the output of a source format, not another one of them; mixed
+      // in by count it sat between STL and 3MF.
+      renderFilters({
+        facets: {
+          ...FACETS,
+          file_type: [
+            { value: "gcode", count: 40 },
+            { value: "stl", count: 12 },
+            { value: "3mf", count: 3 },
+          ],
+        },
+      });
+      await userEvent.setup().click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
+
+      const options = screen
+        .getAllByRole("checkbox")
+        .map((box) => box.closest("label")?.textContent);
+      expect(options.filter((text) => /STL|3MF|G-code/.test(text ?? ""))).toEqual([
+        "STL12",
+        "3MF3",
+        "G-code40",
+      ]);
+    });
+
+    it("shows a material name as the library wrote it", async () => {
+      renderFilters({ facets: { ...FACETS, material_type: [{ value: "pla", count: 9 }] } });
+      await userEvent.setup().click(screen.getByRole("button", { name: "Material" }));
+
+      expect(screen.getByText("pla")).toBeInTheDocument();
     });
 
     it("shows how many models each value matches", async () => {
@@ -98,7 +138,7 @@ describe("StructuredFilters", () => {
       const { onChange } = renderFilters();
 
       await user.click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
-      await user.click(screen.getByText("stl"));
+      await user.click(screen.getByText("STL"));
 
       expect(onChange).toHaveBeenCalledWith("file_type", ["stl"]);
     });
@@ -109,7 +149,7 @@ describe("StructuredFilters", () => {
       const user = userEvent.setup();
       const { onChange } = renderFilters({ active: { file_type: ["stl"] } });
 
-      await user.click(screen.getByText("gcode"));
+      await user.click(screen.getByText("G-code"));
 
       expect(onChange).toHaveBeenCalledWith("file_type", ["stl", "gcode"]);
     });
@@ -118,7 +158,7 @@ describe("StructuredFilters", () => {
       const user = userEvent.setup();
       const { onChange } = renderFilters({ active: { file_type: ["stl", "gcode"] } });
 
-      await user.click(screen.getByText("stl"));
+      await user.click(screen.getByText("STL"));
 
       expect(onChange).toHaveBeenCalledWith("file_type", ["gcode"]);
     });
@@ -131,7 +171,7 @@ describe("StructuredFilters", () => {
 
       await user.click(screen.getByRole("button", { name: /File type/ }));
 
-      expect(screen.queryByText("stl")).toBeNull();
+      expect(screen.queryByText("STL")).toBeNull();
     });
 
     it("brings them back when it is expanded again", async () => {
@@ -140,7 +180,7 @@ describe("StructuredFilters", () => {
 
       await user.click(screen.getByRole("button", { name: FILE_TYPE_GROUP }));
 
-      expect(screen.getByText("stl")).toBeInTheDocument();
+      expect(screen.getByText("STL")).toBeInTheDocument();
     });
 
     it("starts a rarely-used group collapsed", () => {

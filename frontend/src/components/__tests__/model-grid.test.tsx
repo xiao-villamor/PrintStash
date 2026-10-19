@@ -3633,7 +3633,13 @@ describe("ModelBrowser", () => {
       // English or the user cannot tell which filter to drop.
       renderVault({ at: "/?revision_status=needs_test" });
 
-      expect(await screen.findByText("revision status: needs test")).toBeInTheDocument();
+      expect(await screen.findByText("Revision: Needs test")).toBeInTheDocument();
+    });
+
+    it("names a file-type filter as the filter panel does", async () => {
+      renderVault({ at: "/?file_type=gcode" });
+
+      expect(await screen.findByText("File type: G-code")).toBeInTheDocument();
     });
 
     it("names an upload-date filter", async () => {

@@ -42,12 +42,13 @@ import {
   narrowsLibrary,
   sameLibraryFilters,
   structuredLibraryFilterKeys as STRUCTURED_FILTER_KEYS,
+  structuredLibraryFilterLabel,
   type StructuredLibraryFilterKey as StructuredFilterKey,
 } from "@/features/library/filters";
 
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 
-import { knownUiText, uiText, type MessageKey } from "@/lib/locale";
+import { uiText, type MessageKey } from "@/lib/locale";
 import { getErrorMessage, parseApiError, userMessage } from "@/lib/errors";
 import { filterValueText } from "@/lib/filter-labels";
 
@@ -1963,7 +1964,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       const values = structured[key];
       for (const value of values) {
         items.push({
-          label: `${knownUiText(key)}: ${filterValueText(key, value)}`,
+          label: `${structuredLibraryFilterLabel(key)}: ${filterValueText(key, value)}`,
           onRemove: () =>
             setStructuredFilter(
               key,

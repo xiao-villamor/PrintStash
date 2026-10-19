@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The Model filters panel lists G-code below a divider, after the source formats
+  it is sliced from, and writes formats as STL, 3MF, OBJ, STEP, DXF and G-code.
+  Active-filter chips use the panel's names and values ("File type: G-code",
+  "Revision: Needs test"), and material or printer names show as written.
+
 - Bambu LAN printers reporting zero or missing task IDs reuse their external
   print job across status updates instead of adding a row on every tick.
   Repeated completion reports no longer queue duplicate notifications, while
