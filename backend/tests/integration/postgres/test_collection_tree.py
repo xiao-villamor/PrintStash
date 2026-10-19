@@ -14,20 +14,24 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.engine import make_url
-from sqlmodel import Session, create_engine
+from sqlmodel import Session, create_engine, select
 
+from app.core.time import utcnow
 from app.db.migrate import run_migrations
-from app.db.models import CollectionRole
+from app.db.models import Collection, CollectionRole
 from app.db.url import normalize_database_url
 from app.modules.library import collection_tree, library_search
 from tests.containers import postgres_url
 from tests.factories import (
     build_collection,
+    build_file,
     build_model,
     build_tag,
     build_user,
     grant_collection_role,
     tag_collection,
+    tag_file,
+    tag_model,
 )
 
 
@@ -143,6 +147,101 @@ class TestEffectiveTagsOnPostgres:
         )
 
         assert counts[tag.id] == 1
+
+    @pytest.mark.parametrize("association", ["model", "file", "collection"], ids=str)
+    def test_reads_newly_linked_tags_after_an_earlier_read(
+        self, pg_session: Session, association: str
+    ) -> None:
+        root = build_collection(pg_session, "Parent")
+        child = build_collection(pg_session, "Child", parent=root)
+        model = build_model(pg_session, "Part", collection=child)
+        artifact = build_file(pg_session, model)
+        tag = build_tag(pg_session, "New")
+        statement = library_search.effective_tag_pairs()
+        assert pg_session.exec(statement).all() == []
+
+        link, subject = {
+            "model": (tag_model, model),
+            "file": (tag_file, artifact),
+            "collection": (tag_collection, root),
+        }[association]
+        link(pg_session, subject, tag)
+
+        assert pg_session.exec(statement).all() == [(tag.id, model.id)]
+
+    def test_excludes_a_newly_trashed_tag_after_an_earlier_read(
+        self, pg_session: Session
+    ) -> None:
+        model = build_model(pg_session, "Part")
+        tag = build_tag(pg_session, "Live")
+        tag_model(pg_session, model, tag)
+        statement = library_search.effective_tag_pairs()
+        assert pg_session.exec(statement).all() == [(tag.id, model.id)]
+
+        tag.deleted_at = utcnow()
+        pg_session.add(tag)
+        pg_session.commit()
+
+        assert pg_session.exec(statement).all() == []
+
+    def test_includes_a_restored_tag_after_an_earlier_read(
+        self, pg_session: Session
+    ) -> None:
+        model = build_model(pg_session, "Part")
+        tag = build_tag(pg_session, "Restorable", deleted_at=utcnow())
+        tag_model(pg_session, model, tag)
+        statement = library_search.effective_tag_pairs()
+        assert pg_session.exec(statement).all() == []
+
+        tag.deleted_at = None
+        pg_session.add(tag)
+        pg_session.commit()
+
+        assert pg_session.exec(statement).all() == [(tag.id, model.id)]
+
+    def test_scopes_each_read_to_its_current_collection_selection(
+        self, pg_session: Session
+    ) -> None:
+        left = build_collection(pg_session, "Left")
+        right = build_collection(pg_session, "Right")
+        left_model = build_model(pg_session, "Left part", collection=left)
+        right_model = build_model(pg_session, "Right part", collection=right)
+        tag = build_tag(pg_session, "Shared")
+        tag_model(pg_session, left_model, tag)
+        tag_model(pg_session, right_model, tag)
+        expected = {(tag.id, left_model.id), (tag.id, right_model.id)}
+        assert (
+            set(pg_session.exec(library_search.effective_tag_pairs()).all()) == expected
+        )
+
+        left_scope = select(Collection.id).where(Collection.id == left.id)
+        assert pg_session.exec(
+            library_search.effective_tag_pairs(left_scope)
+        ).all() == [(tag.id, left_model.id)]
+        right_scope = select(Collection.id).where(Collection.id == right.id)
+        assert pg_session.exec(
+            library_search.effective_tag_pairs(right_scope)
+        ).all() == [(tag.id, right_model.id)]
+
+        assert (
+            set(pg_session.exec(library_search.effective_tag_pairs()).all()) == expected
+        )
+
+    def test_reads_rolled_back_association_state(self, pg_session: Session) -> None:
+        model = build_model(pg_session, "Part")
+        tag = build_tag(pg_session, "Durable")
+        tag_model(pg_session, model, tag)
+        expected = [(tag.id, model.id)]
+        statement = library_search.effective_tag_pairs()
+        assert pg_session.exec(statement).all() == expected
+        tag.deleted_at = utcnow()
+        pg_session.add(tag)
+        pg_session.flush()
+        assert pg_session.exec(statement).all() == []
+
+        pg_session.rollback()
+
+        assert pg_session.exec(statement).all() == expected
 
 
 class TestOutlinerOnPostgres:
