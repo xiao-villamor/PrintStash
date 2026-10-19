@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+- An idle server uses about half the CPU again: only the ingest lane, where an
+  upload or import waits to start, is still polled four times a second
+  (`VAULT_JOBS_INTERACTIVE_QUEUE_POLL_INTERVAL_SECONDS`, 0.25). Derive, network,
+  printing and reconcile lanes go back to once a second
+  (`VAULT_JOBS_QUEUE_POLL_INTERVAL_SECONDS`, now 1.0). On a 4-core test server
+  with 300 Models, idle CPU fell from 11.4% to 6.1% of one core (0.14.0: 6.1%),
+  and uploads start as soon as before.
+
+- Search projection waits for an import to finish, like thumbnails do. Its
+  writes competed with the import for SQLite's single writer. A 300-file ZIP
+  import on a 4-core test server took 60 s instead of 121 s (0.14.0: 55–67 s).
+  Library browsing and filters do not depend on it.
+
 - Library titles and controls adapt to the available pane width. Cards use the
   full grid width, collection tags and description actions share a compact row,
   and description editing stays visible and usable on phones.

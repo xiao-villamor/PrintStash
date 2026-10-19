@@ -101,8 +101,8 @@ pass is queued for it; the tick repairs what a crash left behind.
 
 **Additions first.** A definition that brings Models into the library (an
 upload, an import, a library scan) declares `adds_to_library`; derived outputs
-(thumbnails, measurements, G-code and toolpath previews) declare
-`waits_for_additions`. While any Job of an adding definition is active, a
+(thumbnails, measurements, G-code and toolpath previews) and search projection
+declare `waits_for_additions`. While any Job of an adding definition is active, a
 waiting definition's discovery finds nothing new, so a large import shows all
 its Models before their derived work starts competing with it. Jobs already
 created keep running. The last adding Job to settle stamps every waiting
@@ -287,7 +287,8 @@ both Compose files run the first with no setting.
 
 | Setting (`VAULT_…`) | Default | Meaning |
 | --- | --- | --- |
-| `JOBS_QUEUE_POLL_INTERVAL_SECONDS` | 0.25 | DBOS lane dispatch polling (0.05–5 seconds); lower values trade more local database polling for shorter queue handoffs |
+| `JOBS_QUEUE_POLL_INTERVAL_SECONDS` | 1.0 | DBOS lane dispatch polling (0.05–5 seconds) for derive, network, printing and reconcile lanes; lower values trade more local database polling for shorter queue handoffs |
+| `JOBS_INTERACTIVE_QUEUE_POLL_INTERVAL_SECONDS` | 0.25 | Polling of the ingest lane, where an accepted upload or import waits for its Job to start; never slower than the interval above |
 | `JOBS_RELAXED_QUEUE_POLL_INTERVAL_SECONDS` | 2.0 | Polling of lanes nobody waits on (search, maintenance, notify, similarity, captions, expansion); never faster than the interval above. Every look at a queue costs database statements whether or not work is there |
 | `JOBS_BOOSTED_QUEUE_POLL_INTERVAL_SECONDS` / `JOBS_QUEUE_BOOST_SECONDS` | 0.1 / 3.0 | A lane a request has just dispatched a Job to is polled at the first for the second, then returns to its own interval; a window of 0 disables it |
 | `JOBS_RECONCILE_INTERVAL_SECONDS` | 300 | Safety-net tick. Runs as a cron, so an interval that does not divide the minute, hour or day evenly is rounded down to one that does (90 runs every minute) |

@@ -753,3 +753,6 @@ class TestAdditionDeclarations:
         self, kind: JobKind, waits: bool
     ) -> None:
         assert self._declared()[kind].waits_for_additions is waits
+
+    def test_search_projection_waits_for_additions(self) -> None:
+        assert self._declared()[JobKind.SEARCH_PROJECT].waits_for_additions
