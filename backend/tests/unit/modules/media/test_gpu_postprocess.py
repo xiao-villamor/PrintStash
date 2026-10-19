@@ -30,3 +30,40 @@ class TestCoefficients:
 
     def test_accounts_for_postprocess_buffers(self):
         assert workspace_bytes(640, 480, 2) == 640 * 480 * 16 + 1120 * 60 + 16
+
+
+class TestNativeCanary:
+    @pytest.mark.parametrize("valid", [True, False])
+    def test_validates_postprocess_readback(self, monkeypatch, valid):
+        import sys
+        from types import SimpleNamespace
+
+        from app.modules.media.gpu_postprocess import Postprocessor
+        from tests.fakes.gpu_device import API, Buffer, Device
+
+        device = Device()
+        api = SimpleNamespace(
+            BufferUsage=API.BufferUsage,
+            MapMode=API.MapMode,
+            TextureUsage=SimpleNamespace(COPY_DST=2, TEXTURE_BINDING=4),
+        )
+        monkeypatch.setitem(sys.modules, "wgpu", api)
+        expected = []
+
+        def write_texture(target, pixels, layout, size):
+            from printstash_core.mesh.rasterizer import postprocess_rgba
+
+            expected.append(postprocess_rgba(pixels.tobytes(), *owner.size[:2]).rgba)
+
+        device.queue.write_texture = write_texture
+        monkeypatch.setattr(
+            Buffer, "read_mapped", lambda self: expected[-1] if valid else b"invalid"
+        )
+        owner = Postprocessor(device)
+        if valid:
+            assert owner.canary() is None
+        else:
+            with pytest.raises(ValueError, match="compute_postprocess_canary"):
+                owner.canary()
+            owner.close()
+        assert all(buffer.destroyed for buffer in device.buffers)

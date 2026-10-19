@@ -38,9 +38,21 @@ test.describe("Multipart manufacturing", () => {
     await part.getByLabel("Revision for the next jobs").selectOption(String(revision.id));
     await part.getByLabel("Pieces produced by this file").fill("4");
     await expect(part.getByLabel("Print jobs to queue")).toHaveValue("1");
-    await part.getByRole("button", { name: "Queue pieces" }).click();
-    await expect(part.getByRole("button", { name: "Queue pieces" })).toBeDisabled();
+    const [queued] = await Promise.all([
+      page.waitForResponse((response) => {
+        const path = new URL(response.url()).pathname;
+        return (
+          response.request().method() === "POST" &&
+          path.startsWith(`/api/v1/multipart-builds/${buildId}/parts/`) &&
+          path.endsWith("/queue")
+        );
+      }),
+      part.getByRole("button", { name: "Queue pieces" }).click(),
+    ]);
+    expect(queued.ok(), await queued.text()).toBe(true);
+    await expect(part.getByRole("form", { name: /Job #/ })).toHaveCount(1);
     const first = await (await page.request.get(`${API}/multipart-builds/${buildId}`)).json();
+    expect(first.parts[0].attempts).toHaveLength(1);
     const firstJob = first.parts[0].attempts[0].job_id;
     const cancelled = await page.request.delete(`${API}/fleet/queue/${firstJob}`);
     expect(cancelled.ok()).toBeTruthy();

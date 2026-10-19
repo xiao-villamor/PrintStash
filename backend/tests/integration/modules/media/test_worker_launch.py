@@ -13,10 +13,13 @@ or a forked worker escapes part of the containment a spawned one has.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
+import resource
 import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -41,6 +44,49 @@ def fresh_template():
     worker_launch.stop_template()
     yield
     worker_launch.stop_template()
+
+
+@pytest.fixture
+def high_descriptor():
+    """Keep a permit above the old template remapping boundary."""
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (max(soft, 2048), hard))
+    read_end, write_end = os.pipe()
+    descriptor = fcntl.fcntl(read_end, fcntl.F_DUPFD, 1100)
+    os.close(read_end)
+    os.write(write_end, b"permit")
+    os.close(write_end)
+    try:
+        yield descriptor
+    finally:
+        os.close(descriptor)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+
+
+@pytest.fixture
+def descriptor_pressure():
+    """Exercise real IPC descriptors beyond select's fixed-size fd set."""
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (max(soft, 2048), hard))
+    opened = []
+    try:
+        while not opened or opened[-1] < 1100:
+            opened.append(os.open(os.devnull, os.O_RDONLY))
+        yield
+    finally:
+        for descriptor in opened:
+            os.close(descriptor)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+
+
+def _polled_exit(worker) -> int:
+    deadline = time.monotonic() + 10
+    while (result := worker.poll()) is None:
+        if time.monotonic() >= deadline:
+            worker.kill()
+            worker.wait()
+            raise AssertionError("worker did not report its exit status")
+    return result
 
 
 def _launch(*arguments: str, budget: int = ROOMY, warm: bool = True, **options):
@@ -149,6 +195,43 @@ class TestLaunch:
 
         os.close(read_end)
         assert reply == "permit\n"
+
+    def test_a_forked_worker_inherits_a_high_descriptor_at_its_own_number(
+        self, forkable_probe, high_descriptor
+    ) -> None:
+        worker = _launch(
+            "descriptor", str(high_descriptor), descriptors=(high_descriptor,)
+        )
+
+        assert _reply(worker) == "permit\n"
+
+    def test_a_warm_launch_works_above_select_descriptor_limit(
+        self, forkable_probe, descriptor_pressure
+    ) -> None:
+        worker = _launch("priority")
+
+        assert (type(worker), _reply(worker)) == (
+            worker_launch.ForkedWorker,
+            "interactive\n",
+        )
+
+    def test_poll_reads_status_above_select_descriptor_limit(
+        self, forkable_probe, descriptor_pressure
+    ) -> None:
+        worker = _launch("exit", "7")
+
+        result = _polled_exit(worker)
+
+        assert worker.stdout is not None
+        worker.stdout.close()
+        assert result == 7
+
+    def test_a_forked_worker_closes_high_template_descriptors(
+        self, forkable_probe, descriptor_pressure
+    ) -> None:
+        reply = json.loads(_reply(_launch("descriptors")))
+
+        assert ({0, 1, 2} <= set(reply), len(set(reply) - {0, 1, 2})) == (True, 1)
 
     def test_a_forked_worker_holds_nothing_else_of_the_templates(
         self, forkable_probe

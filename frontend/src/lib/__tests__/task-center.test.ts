@@ -34,7 +34,7 @@ import type { SimilarityRun } from "@/types/similarity";
 
 // task-center holds module-private state, so each test gets a fresh module via
 // resetModules() + dynamic import. Fake timers (which also fake Date.now in
-// vitest) drive the TTL-based pruning of completed/failed tasks. The server's
+// vitest) verify that task summaries survive elapsed time until cleared. The server's
 // job list is injected through the module's own JobSource seam, and the events
 // socket through its factory seam, so no network (and no module mocking) is
 // involved.
@@ -62,10 +62,11 @@ let stopTaskScope: () => void = () => {};
 /** Fresh module instance, wired to the stubbed job source and events socket. */
 async function loadTaskCenter(): Promise<TaskCenter> {
   stopTaskScope();
-  // A reset module graph has no catalogs yet; the app loads one before it renders.
+  // Production imports task-center before awaiting locale activation. Restore
+  // persisted tasks in that same order so startup cannot lose interrupted work.
+  const taskCenter = await import("@/lib/task-center");
   const locale = await import("@/lib/locale");
   await Promise.all(locale.SUPPORTED_LOCALES.map(locale.ensureLocaleCatalog));
-  const taskCenter = await import("@/lib/task-center");
   stopTaskScope = taskCenter.startTaskCenterSessionScope();
   const events = await import("@/lib/events");
   socket = new FakeEventSocket();
@@ -351,16 +352,26 @@ describe("listTasks", () => {
     tc.createTask({ title: "second" });
     expect(tc.listTasks().map((t) => t.title)).toEqual(["second", "first"]);
   });
-});
 
-describe("pruneTasks", () => {
   it("keeps completed summaries until the user clears them", () => {
     const id = tc.createTask({ title: "done" });
     tc.updateTask(id, { status: "completed" });
     expect(tc.listTasks()).toHaveLength(1);
 
-    vi.advanceTimersByTime(12_000 + 1);
-    expect(tc.listTasks()).toHaveLength(1);
+    vi.advanceTimersByTime(30 * 24 * 60 * 60 * 1000);
+    expect(tc.listTasks()).toMatchObject([{ id, status: "completed" }]);
+  });
+
+  it("keeps a failed task after thirty days", () => {
+    const id = tc.createTask({
+      title: "Failed upload",
+      status: "failed",
+      detail: "invalid_source",
+    });
+
+    vi.advanceTimersByTime(30 * 24 * 60 * 60 * 1000);
+
+    expect(tc.listTasks()).toMatchObject([{ id, status: "failed", detail: "invalid_source" }]);
   });
 
   it("keeps running tasks indefinitely (no TTL)", () => {
@@ -1005,6 +1016,51 @@ describe("syncImportJobs", () => {
     expect(tc.taskDetail(tc.listTasks()[0])).toBe(
       "Archiving 3 of 8 files · continues in background",
     );
+  });
+
+  it.each([
+    { label: "waiting for a worker", stage: null, expected: "Waiting for backup worker" },
+    {
+      label: "snapshotting",
+      stage: "snapshotting",
+      expected: "Snapshotting database · continues in background",
+    },
+    {
+      label: "archiving an unknown total",
+      stage: "archiving",
+      expected: "Archiving files · continues in background",
+    },
+    {
+      label: "verifying",
+      stage: "verifying",
+      expected: "Verifying backup archive · continues in background",
+    },
+    {
+      label: "publishing locally",
+      stage: "publishing",
+      expected: "Publishing backup · continues in background",
+    },
+    {
+      label: "finalizing",
+      stage: "finalizing",
+      expected: "Finishing backup · continues in background",
+    },
+  ] as const)("describes backup progress while $label", async ({ stage, expected }) => {
+    tc.trackImportJob("backup-progress", "Backup");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "backup-progress",
+        kind: "backups.create",
+        state: "running",
+        stage,
+        total: null,
+        current_item: null,
+      }),
+    ]);
+
+    await tc.syncImportJobs();
+
+    expect(tc.taskDetail(tc.listTasks()[0])).toBe(expected);
   });
 
   it("describes the scheduled backup publication destination", async () => {
@@ -1920,6 +1976,19 @@ describe("private task scope", () => {
     }
     vi.resetModules();
     tc = await loadTaskCenter();
+    expect(tc.listTasks()).toEqual([]);
+  });
+});
+
+/** Truncated persisted metadata cannot prevent the application from starting. */
+describe("task snapshot recovery", () => {
+  it("discards an unreadable task snapshot", async () => {
+    tc.createTask({ title: "Interrupted snapshot" });
+    localStorage.setItem("printstash:import-tasks:v1", '[{"id":');
+    vi.resetModules();
+
+    tc = await loadTaskCenter();
+
     expect(tc.listTasks()).toEqual([]);
   });
 });

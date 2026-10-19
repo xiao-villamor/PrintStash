@@ -233,3 +233,65 @@ class TestRenderBatchFits:
         bound = workspace + 128 + normal_staging + 2048 + 4
         assert not render_batch_fits([request] * 2, device_bytes=bound - 1)
         assert render_batch_fits([request] * 2, device_bytes=bound)
+
+
+class TestBatchRefusals:
+    def test_leaves_empty_queue_unbatched(self):
+        assert merge([]) is None
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            {"sparse_texts": ["already batched"]},
+            {"inputs": []},
+            {"config_hash": "b" * 64},
+        ],
+    )
+    def test_leaves_incompatible_payloads_independent(self, change):
+        first = request("a")
+        message = json.loads(base64.b64decode(first.payload))
+        second = first.model_copy(
+            update={
+                "payload": base64.b64encode(
+                    json.dumps({**message, **change}).encode()
+                ).decode()
+            }
+        )
+        assert merge([first, second]) is None
+
+    def test_refuses_oversized_encoded_request(self, monkeypatch):
+        from app.runtime.compute import batching
+
+        monkeypatch.setattr(batching, "MAX_INPUT_BYTES", 1)
+        with pytest.raises(ValueError, match="compute_input_budget"):
+            merge([request("a")])
+
+    @pytest.mark.parametrize(
+        "change", [{"config_hash": "b" * 64}, {"vectors": []}, {"truncated": []}]
+    )
+    def test_rejects_inconsistent_dense_results(self, change):
+        batch = merge([request("a")])
+        result = {"config_hash": "a" * 64, "vectors": [[1.0]], "truncated": [False]}
+        with pytest.raises(
+            ValueError, match="compute_batch_(identity|output)_mismatch"
+        ):
+            batch.split(json.dumps({**result, **change}).encode())
+
+    def test_rejects_inconsistent_sparse_results(self):
+        from app.runtime.compute.batching import Batch
+
+        batch = Batch(request("a"), (1,), "a" * 64, True)
+        with pytest.raises(ValueError, match="compute_batch_output_mismatch"):
+            batch.split(b'{"sparse_results":[]}')
+
+    def test_keeps_mixed_modalities_independent(self):
+        first = request("a")
+        sparse = first.model_copy(
+            update={
+                "payload": base64.b64encode(
+                    json.dumps({"config_hash": "a" * 64, "sparse_text": "a"}).encode()
+                ).decode()
+            }
+        )
+        assert merge([sparse, first]) is None
+        assert merge([first, sparse]) is None

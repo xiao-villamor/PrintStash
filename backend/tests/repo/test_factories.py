@@ -39,7 +39,7 @@ from printstash_core.mesh.measurements import (
 from printstash_core.search.passages import SearchSubject, SubjectType
 from sqlmodel import Session, select
 
-from app.core.time import utcnow
+from app.core.time import ensure_utc, utcnow
 from app.db.models import (
     Collection,
     CollectionTagLink,
@@ -1098,3 +1098,56 @@ class TestSpoolmanEditingFactory:
 
         config = build_system_config(db_session)
         assert config.spoolman_edit_version == 1
+
+
+class TestPrinterPurgeFactories:
+    def test_printer_retains_requested_trash_instant(self, db_session):
+        from datetime import datetime, timezone
+
+        from app.db.models import Printer
+
+        instant = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+        printer = factories.build_printer(db_session, trashed=instant)
+
+        found = db_session.exec(select(Printer).where(trashed(Printer))).one()
+        assert found.id == printer.id
+        assert ensure_utc(found.deleted_at) == instant
+
+    def test_maintenance_window_links_printer(self, db_session):
+        printer = factories.build_printer(db_session)
+
+        window = factories.build_printer_maintenance_window(db_session, printer)
+
+        assert window.printer_id == printer.id
+        assert window.ends_at - window.starts_at == timedelta(hours=1)
+
+    def test_maintenance_log_links_printer(self, db_session):
+        printer = factories.build_printer(db_session)
+
+        log = factories.build_printer_maintenance_log(db_session, printer)
+
+        assert log.printer_id == printer.id
+        assert log.category == "service"
+        assert log.note == "Test maintenance"
+
+    def test_notification_delivery_links_channel(self, db_session):
+        from app.db.models import NotificationEventType
+
+        channel = factories.build_notification_channel(db_session)
+
+        delivery = factories.build_notification_delivery(db_session, channel)
+
+        assert delivery.channel_id == channel.id
+        assert delivery.printer_id is None
+        assert delivery.event_type is NotificationEventType.PRINT_COMPLETED
+
+    def test_notification_delivery_links_printer(self, db_session):
+        printer = factories.build_printer(db_session)
+        channel = factories.build_notification_channel(db_session)
+
+        delivery = factories.build_notification_delivery(
+            db_session, channel, printer=printer
+        )
+
+        assert delivery.printer_id == printer.id

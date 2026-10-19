@@ -243,6 +243,7 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
     const tagInput = page.getByPlaceholder("Search or create — press Enter");
     await tagInput.fill(tag);
     await tagInput.press("Enter");
+    await expect(dialog.getByRole("button", { name: `Remove ${tag}`, exact: true })).toBeVisible();
   }
 
   await page.getByRole("button", { name: /upload to vault/i }).click();
@@ -263,6 +264,7 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
   await expect(async () => {
     await page.goto(view);
     await expect(modelCard(page, name)).toBeVisible();
+    if (tag) await expect(modelCard(page, name)).toContainText(tag);
   }).toPass({ timeout: 60_000 });
 }
 

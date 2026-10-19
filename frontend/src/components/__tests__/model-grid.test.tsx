@@ -478,7 +478,9 @@ describe("ModelBrowser", () => {
       });
       // jsdom does not apply responsive CSS; target the desktop disclosure,
       // not an earlier hidden mobile trigger whose catalogs are viewport-gated.
-      await userEvent.click(screen.getByRole("button", { name: "Filters", expanded: false }));
+      await userEvent.click(
+        screen.getAllByRole("button", { name: "Filters", expanded: false }).at(-1)!,
+      );
       await waitFor(() =>
         expect(requests().some((request) => request.url.startsWith("/api/v1/models/facets"))).toBe(
           true,

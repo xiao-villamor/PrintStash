@@ -78,4 +78,80 @@ describe("parseStl", () => {
     );
     expect(createWorker).not.toHaveBeenCalled();
   });
+  it("rejects a worker parser refusal after releasing its worker", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([1]))),
+    );
+    const worker = new ParserWorker();
+    const promise = parseStl("blob:source", new AbortController().signal, () => worker);
+    await vi.waitFor(() => expect(worker.buffer).not.toBeNull());
+
+    worker.onmessage?.(
+      new MessageEvent("message", { data: { state: "failed", reason: "invalid_stl" } }),
+    );
+
+    await expect(promise).rejects.toThrow("invalid_stl");
+    expect(worker.terminated).toBe(1);
+    expect(worker.onmessage).toBeNull();
+  });
+  it("releases its worker when transfer dispatch fails", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([1]))),
+    );
+    const worker = new ParserWorker();
+    const failure = new DOMException("Transfer refused", "DataCloneError");
+    worker.postMessage = () => {
+      throw failure;
+    };
+
+    await expect(parseStl("blob:source", new AbortController().signal, () => worker)).rejects.toBe(
+      failure,
+    );
+    expect(worker.terminated).toBe(1);
+    expect(worker.onerror).toBeNull();
+  });
+  it("does not fetch an already cancelled source", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetcher);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(parseStl("blob:source", controller.signal)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("never creates a parser after cancellation during download", async () => {
+    const download = Promise.withResolvers<Response>();
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockReturnValue(download.promise));
+    const create = vi.fn<() => StlParserWorker>();
+    const controller = new AbortController();
+    const parsing = parseStl("blob:source", controller.signal, create);
+
+    controller.abort();
+    download.resolve(new Response(new Uint8Array([1])));
+
+    await expect(parsing).rejects.toMatchObject({ name: "AbortError" });
+    expect(create).not.toHaveBeenCalled();
+  });
+  it("retires a parser when cancellation races its construction", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([1]))),
+    );
+    const worker = new ParserWorker();
+    const controller = new AbortController();
+    const create = () => {
+      controller.abort();
+      return worker;
+    };
+
+    await expect(parseStl("blob:source", controller.signal, create)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(worker.buffer).toBeNull();
+    expect(worker.terminated).toBe(1);
+  });
 });

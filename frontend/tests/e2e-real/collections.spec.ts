@@ -34,7 +34,7 @@ test.describe("collections", () => {
     await expect(collection).toHaveCount(0);
   });
 
-  test("nest a subcollection and delete the child", async ({ page }) => {
+  test("deletes an emptied parent collection after its child", async ({ page }) => {
     const parent = `e2e-parent-${Date.now()}`;
     const child = `e2e-child-${Date.now()}`;
 
@@ -55,7 +55,9 @@ test.describe("collections", () => {
 
     // The parent deletes cleanly even though it once had a (now soft-deleted)
     // child — regression guard for the has-children check ignoring trashed rows.
-    await parentRow.hover();
+    // Refetching the emptied branch can move the pointer off its row. Keyboard
+    // focus reveals the same action and survives that layout change.
+    await parentRow.focus();
     await parentRow
       .locator("..")
       .getByRole("button", { name: "Delete collection", exact: true })

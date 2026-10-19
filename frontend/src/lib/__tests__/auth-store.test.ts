@@ -17,7 +17,7 @@
  * regression guard, not a hypothetical.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   consumeSessionExpired,
@@ -160,5 +160,39 @@ describe("session retirement", () => {
     } finally {
       off();
     }
+  });
+});
+
+/** Persisted browser metadata is a foreign document, never proof of identity. */
+describe("persisted identity", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    { label: "null", raw: "null" },
+    { label: "array", raw: "[]" },
+    { label: "missing id", raw: '{"username":"maker"}' },
+    { label: "missing username", raw: '{"id":7}' },
+    { label: "fractional id", raw: '{"id":7.5,"username":"maker"}' },
+    { label: "truncated JSON", raw: '{"id":7' },
+  ])("rejects invalid persisted identity: $label", ({ raw }) => {
+    localStorage.setItem("printstash.user", raw);
+
+    expect(getUser()).toBeNull();
+  });
+
+  it("continues anonymously when identity storage is blocked", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("Blocked", "SecurityError");
+    });
+
+    expect(getUser()).toBeNull();
+  });
+
+  it("ignores an inaccessible session expiry notice", () => {
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("Blocked", "SecurityError");
+    });
+
+    expect(consumeSessionExpired()).toBe(false);
   });
 });

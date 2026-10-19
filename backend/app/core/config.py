@@ -220,8 +220,14 @@ class Settings(BaseSettings):
     executor_id: str | None = Field(default=None, min_length=1, max_length=128)
     shared_storage: bool = False
     # DBOS polls each lane. This is dispatch latency, separate from the
-    # recovery tick; chained ingest/reconcile/derive queues used to each wait 1s.
-    jobs_queue_poll_interval_seconds: float = Field(default=0.25, ge=0.05, le=5)
+    # recovery tick. Every look is a transaction on the engine database whether
+    # or not work is there, so an idle server pays each lane's cadence all day.
+    jobs_queue_poll_interval_seconds: float = Field(default=1.0, ge=0.05, le=5)
+    # The ingest lane, where an accepted upload or import waits for its Job to
+    # start. Never slower than the interval above.
+    jobs_interactive_queue_poll_interval_seconds: float = Field(
+        default=0.25, ge=0.05, le=5
+    )
     # Lanes nobody waits on (search, upkeep, notifications). Every look at a
     # queue costs database statements whether or not work is there.
     jobs_relaxed_queue_poll_interval_seconds: float = Field(default=2.0, ge=0.05, le=60)

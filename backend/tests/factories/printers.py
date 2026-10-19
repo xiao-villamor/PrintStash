@@ -15,6 +15,7 @@ credential — nothing here may resemble one.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlmodel import Session
@@ -23,8 +24,13 @@ from app.db.models import (
     ArtifactMaterialRequirement,
     File,
     MaterialSource,
+    NotificationChannel,
+    NotificationDelivery,
+    NotificationEventType,
     Printer,
     PrinterFile,
+    PrinterMaintenanceLog,
+    PrinterMaintenanceWindow,
     PrinterMaterialSlot,
     PrinterProvider,
     PrinterStatus,
@@ -108,7 +114,7 @@ def build_printer(
     *,
     provider: PrinterProvider = PrinterProvider.MOONRAKER,
     status: PrinterStatus = PrinterStatus.READY,
-    trashed: bool = False,
+    trashed: bool | datetime = False,
     **overrides: Any,
 ) -> Printer:
     """A configured printer of *provider*, ready to accept a job.
@@ -128,7 +134,9 @@ def build_printer(
     if trashed:
         from app.core.time import utcnow
 
-        overrides.setdefault("deleted_at", utcnow())
+        overrides.setdefault(
+            "deleted_at", trashed if isinstance(trashed, datetime) else utcnow()
+        )
     return save(
         session,
         printer_config(name, provider=provider, status=status, **overrides),
@@ -303,6 +311,45 @@ def build_material_requirement(
             tool_index=tool_index,
             material_type=material_type,
             color_hex=color_hex,
+            **overrides,
+        ),
+    )
+
+
+def build_printer_maintenance_window(
+    session: Session, printer: Printer, **overrides: Any
+) -> PrinterMaintenanceWindow:
+    """A maintenance window owned by one printer."""
+    from app.core.time import utcnow
+
+    overrides.setdefault("starts_at", utcnow())
+    overrides.setdefault("ends_at", overrides["starts_at"] + timedelta(hours=1))
+    return save(session, PrinterMaintenanceWindow(printer_id=printer.id, **overrides))
+
+
+def build_printer_maintenance_log(
+    session: Session, printer: Printer, **overrides: Any
+) -> PrinterMaintenanceLog:
+    """A printer-owned maintenance record."""
+    overrides.setdefault("category", "service")
+    overrides.setdefault("note", "Test maintenance")
+    return save(session, PrinterMaintenanceLog(printer_id=printer.id, **overrides))
+
+
+def build_notification_delivery(
+    session: Session,
+    channel: NotificationChannel,
+    *,
+    printer: Printer | None = None,
+    **overrides: Any,
+) -> NotificationDelivery:
+    """A notification with its channel and optional printer reference."""
+    overrides.setdefault("event_type", NotificationEventType.PRINT_COMPLETED)
+    return save(
+        session,
+        NotificationDelivery(
+            channel_id=channel.id,
+            printer_id=printer.id if printer is not None else None,
             **overrides,
         ),
     )

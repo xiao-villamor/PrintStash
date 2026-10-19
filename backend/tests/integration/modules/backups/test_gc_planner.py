@@ -1429,3 +1429,162 @@ class TestOpenDalS3Witness:
 
         monkeypatch.setattr(backup_verification, "verify_backup", verify)
         assert gc_planner.find_backup_witness() is None
+
+
+class TestPrinterGcPlan:
+    def test_expired_printer_enters_preview(self, db_session, make_printer):
+        from sqlmodel import select
+
+        from app.db.models import GcItem, Printer
+
+        printer = make_printer(trashed=utcnow() - timedelta(days=60))
+        result = gc_planner.run_scheduled_gc(retention_days=30)
+        assert result["gc_candidates"] == 1
+        assert db_session.exec(select(GcItem)).one().resource_kind == "printer"
+        assert db_session.get(Printer, printer.id) is not None
+
+    @pytest.mark.parametrize("age", [None, 1], ids=["live", "within-retention"])
+    def test_ineligible_printer_stays_out_of_preview(
+        self, db_session, make_printer, age
+    ):
+        printer = make_printer(
+            trashed=False if age is None else utcnow() - timedelta(days=age)
+        )
+        result = gc_planner.run_scheduled_gc(retention_days=30)
+        assert result["gc_candidates"] == 0
+        assert db_session.get(type(printer), printer.id) is not None
+
+    def test_finalizes_approved_printer_after_quarantine(
+        self, db_session, make_printer, make_user, grant_printer_role, monkeypatch
+    ):
+        from app.db.models import Printer
+
+        printer = make_printer(trashed=utcnow() - timedelta(days=60))
+        printer_id = printer.id
+        admin = make_user(superuser=True)
+        grant_printer_role(admin, printer)
+        run = gc_planner.create_plan(
+            db_session, retention_days=30, requested_by=admin.id
+        )
+        monkeypatch.setattr(gc_planner, "find_backup_witness", _witness)
+        gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
+        run.quarantine_until = utcnow() - timedelta(seconds=1)
+        db_session.add(run)
+        db_session.commit()
+        monkeypatch.setattr(gc_planner, "_reverify_backup", lambda _run: None)
+        finalized = gc_planner.finalize_plan(db_session, run.id)
+        assert finalized.state is GcRunState.COMPLETED
+        assert db_session.get(Printer, printer_id) is None
+
+    def test_restored_printer_invalidates_preview(
+        self, db_session, make_printer, make_user, monkeypatch
+    ):
+        printer = make_printer(trashed=utcnow() - timedelta(days=60))
+        admin = make_user(superuser=True)
+        run = gc_planner.create_plan(
+            db_session, retention_days=30, requested_by=admin.id
+        )
+        printer.deleted_at = None
+        db_session.add(printer)
+        db_session.commit()
+        monkeypatch.setattr(gc_planner, "find_backup_witness", _witness)
+        with pytest.raises(gc_planner.GcSafetyError, match="gc_candidate_changed"):
+            gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
+        assert db_session.get(type(printer), printer.id) is not None
+
+
+class TestScheduledGcPublicationRecovery:
+    @pytest.mark.parametrize(
+        "retention_days", [30, -1], ids=["expiry-enabled", "expiry-disabled"]
+    )
+    def test_retires_stale_absent_publication(
+        self, db_session, local_storage, make_owned_storage_object, retention_days
+    ):
+        from app.db.models import StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from app.modules.storage.storage_ownership import prepare_bytes
+
+        backend = get_backend()
+        key = backend.thumbnail_key(905)
+        row = make_owned_storage_object(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(key),
+            key=key,
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            token=None,
+            created_at=utcnow() - timedelta(days=3),
+        )
+        gc_planner.run_scheduled_gc(retention_days=retention_days)
+        db_session.refresh(row)
+        assert row.state is StorageObjectState.RETIRING
+        retry = prepare_bytes(
+            db_session, backend, key, b"thumbnail", object_kind="thumbnail"
+        )
+        assert backend.read_bytes(retry.receipt.key) == b"thumbnail"
+
+    def test_preserves_fresh_publication(
+        self, db_session, local_storage, make_owned_storage_object
+    ):
+        from app.db.models import StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        backend = get_backend()
+        row = make_owned_storage_object(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(backend.thumbnail_key(906)),
+            key=backend.thumbnail_key(906),
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            token=None,
+        )
+        gc_planner.run_scheduled_gc()
+        db_session.refresh(row)
+        assert row.state is StorageObjectState.PENDING
+
+    def test_preserves_reservations_during_restore(
+        self, db_session, local_storage, make_owned_storage_object, monkeypatch
+    ):
+        from app.db.models import StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        backend = get_backend()
+        row = make_owned_storage_object(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(backend.thumbnail_key(907)),
+            key=backend.thumbnail_key(907),
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            token=None,
+            created_at=utcnow() - timedelta(days=3),
+        )
+        monkeypatch.setattr(backup_maintenance, "restore_in_progress", lambda: True)
+        gc_planner.run_scheduled_gc()
+        db_session.refresh(row)
+        assert row.state is StorageObjectState.PENDING
+
+    def test_recovers_publications_while_preview_waits(
+        self, db_session, local_storage, make_owned_storage_object, make_model
+    ):
+        from app.db.models import StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        backend = get_backend()
+        make_model(trashed=utcnow() - timedelta(days=60))
+        preview = gc_planner.create_plan(
+            db_session, retention_days=30, requested_by=None, scheduled=True
+        )
+        row = make_owned_storage_object(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(backend.thumbnail_key(908)),
+            key=backend.thumbnail_key(908),
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            token=None,
+            created_at=utcnow() - timedelta(days=3),
+        )
+        gc_planner.run_scheduled_gc()
+        db_session.refresh(row)
+        db_session.refresh(preview)
+        assert row.state is StorageObjectState.RETIRING
+        assert preview.state is GcRunState.PREVIEW

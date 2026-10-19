@@ -25,7 +25,17 @@ export default defineConfig(({ mode }) => ({
   // reload — a one-off ~30s stall on the first viewer open (worse on WSL2).
   // Listing them here pre-bundles at dev-server startup instead.
   optimizeDeps: {
-    include: ["three", "three-stdlib", "@react-three/fiber", "@react-three/drei"],
+    // Scan the application only. Standalone HTML experiments have their own
+    // build roots and cannot resolve the app's TypeScript-scoped aliases.
+    entries: ["index.html"],
+    include: [
+      "three",
+      "three/webgpu",
+      "three/addons/loaders/STLLoader.js",
+      "three-stdlib",
+      "@react-three/fiber",
+      "@react-three/drei",
+    ],
   },
   server: {
     port: 3000,

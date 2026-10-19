@@ -154,7 +154,7 @@ AI Search settings: the Settings browser flow waits for loaded AI data, visits g
 
 - ZIP uploads: a failed preparation retains input capacity; Tasks confirms and discards it safely.
 
-`viewer-stl.spec.ts`: an adversarial 3MF displays a persisted memory refusal across browser reloads while its original remains downloadable. A 17 MB STL opens on its thumbnail with no mesh request until the viewer asks for the 3D preview.
+`viewer-stl.spec.ts`: an adversarial 3MF displays a persisted memory refusal across browser reloads while its original remains downloadable. A 17 MB STL opens its 3D view automatically, with a visible canvas and enabled screenshot control.
 
 `provenance.spec.ts` imports an actual browser capture, edits its Source metadata,
 creates a competing conditional edit, and verifies that the retained draft is
@@ -172,6 +172,10 @@ sends no further setup probe.
 
 - `external-libraries.spec.ts`: conditional source activation detects a competing
   configuration edit and requires explicit review before the revised command.
+  The main Deep CI browser lane supplies a disposable mounted root, so exact-name
+  upload, scanned-STL preview and root re-enrollment contracts all execute. For a
+  selected local run, set `PLAYWRIGHT_EXTERNAL_LIBRARY_ROOT` to an existing
+  test-owned directory; each case cleans only its own child root.
 
 - `onboarding/first-model.spec.ts`: first-folder activation sends the reviewed
   configuration precondition before source creation and scan.

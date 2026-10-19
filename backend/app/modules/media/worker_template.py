@@ -58,9 +58,6 @@ PID = struct.Struct("!q")
 STATUS = struct.Struct("!q")
 MAX_REQUEST_BYTES = 4 * 1024 * 1024
 MAX_DESCRIPTORS = 8
-# Above anything a worker is handed, so moving descriptors into place cannot
-# overwrite one that has not been moved yet.
-_PARKED_FROM = 512
 
 # What a mesh worker imports on its way to its first byte of geometry. Kept to
 # modules that load code only: nothing here may start a thread or open a device.
@@ -88,17 +85,19 @@ def _become_worker(request: dict, descriptors: list[int]) -> None:
             signal.signal(handler, signal.SIG_DFL)
         output, *inherited = descriptors
         numbers = [int(number) for number in request["descriptors"]]
-        if len(numbers) != len(inherited) or any(
-            not 3 <= number < _PARKED_FROM for number in numbers
-        ):
+        if len(numbers) != len(inherited) or any(number < 3 for number in numbers):
             raise ValueError("invalid worker descriptors")
+        # Park above both the destination numbers and every template-owned fd.
+        # A busy supervisor can hand us permits and control sockets above 1024.
+        # Closing the whole lower range also removes other jobs' high pidfds.
+        parked_from = max(numbers + [int(fd) for fd in os.listdir("/proc/self/fd")]) + 1
         parked = [
-            fcntl.fcntl(descriptor, fcntl.F_DUPFD, _PARKED_FROM)
+            fcntl.fcntl(descriptor, fcntl.F_DUPFD, parked_from)
             for descriptor in (output, *inherited)
         ]
         # Everything the template had open goes: its listening socket, other
         # jobs' connections, and the descriptors just parked.
-        os.closerange(3, _PARKED_FROM)
+        os.closerange(3, parked_from)
         os.dup2(parked[0], 1)
         for source, number in zip(parked[1:], numbers, strict=True):
             os.dup2(source, number, inheritable=True)

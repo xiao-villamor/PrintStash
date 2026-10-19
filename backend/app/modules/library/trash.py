@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
-from sqlalchemy import update
+from sqlalchemy import func, update
 from sqlmodel import Session, col, delete, select
 
 from app.core.config import settings
@@ -38,10 +38,16 @@ from app.db.models import (
     ModelStar,
     MultipartModelChoice,
     MultipartPart,
+    NotificationDelivery,
     OwnedStorageObject,
     PrintBatch,
     Printer,
     PrinterFile,
+    PrinterMaintenanceLog,
+    PrinterMaintenanceWindow,
+    PrinterMaterialSlot,
+    PrinterPermission,
+    PrinterTool,
     PrintJob,
     ShareLink,
     StorageObjectState,
@@ -300,7 +306,7 @@ def _prepare_primary_artifact(
 
 def prepare_purge_deletions(
     session: Session,
-    resources: Iterable[Model | File | Document | Collection],
+    resources: Iterable[Model | File | Document | Collection | Printer],
     *,
     confirm_storage_risk: bool = False,
 ) -> list[PurgeDeletion]:
@@ -363,6 +369,9 @@ def prepare_purge_deletions(
                 )
                 if int(identifier) == resource.id
             )
+        elif isinstance(resource, Printer):
+            # Printer inventory names remote files; it owns no Vault bytes.
+            continue
         else:
             raise ValueError("purge_resource_unsupported")
     prepared: list[PurgeDeletion] = []
@@ -690,6 +699,53 @@ def hard_delete_file(
 
     if own_deletions:
         enqueue_purge_deletions(session, deletions)
+
+
+@guarded_destructive_operation
+def hard_delete_printer(session: Session, printer: Printer) -> None:
+    """Purge an expired printer's configuration while retaining event history.
+
+    The conditional write locks the exact deletion snapshot until the caller
+    commits. A concurrent restore wins before this claim or waits until the
+    deletion completes; it cannot silently turn a live printer into a purge.
+    No command is sent to the physical printer and no Artifact bytes are owned
+    by these inventory rows.
+    """
+    if printer.id is None or printer.deleted_at is None:
+        raise PurgeConflictError("storage_cleanup_blocked")
+    _require_destructive_maintenance_safe(session)
+    claimed = session.execute(
+        update(Printer)
+        .where(Printer.id == printer.id, Printer.deleted_at == printer.deleted_at)
+        .values(deleted_at=printer.deleted_at)
+        .execution_options(synchronize_session=False)
+        .returning(Printer.id)
+    ).scalar_one_or_none()
+    if claimed is None:
+        raise PurgeConflictError("storage_cleanup_blocked")
+    session.exec(
+        update(PrintJob)
+        .where(PrintJob.printer_id == printer.id)
+        .values(
+            printer_id=None,
+            printer_name=func.coalesce(PrintJob.printer_name, printer.name),
+        )
+    )
+    session.exec(
+        update(NotificationDelivery)
+        .where(NotificationDelivery.printer_id == printer.id)
+        .values(printer_id=None)
+    )
+    for child in (
+        PrinterTool,
+        PrinterMaterialSlot,
+        PrinterPermission,
+        PrinterMaintenanceWindow,
+        PrinterMaintenanceLog,
+        PrinterFile,
+    ):
+        session.exec(delete(child).where(child.printer_id == printer.id))
+    session.delete(printer)
 
 
 @guarded_destructive_operation
@@ -1052,7 +1108,12 @@ def gc_soft_deleted(
                     "gc skipped blocked collection",
                     extra={"collection_id": collection.id},
                 )
-        for model in (Tag, Printer, User):
+        for printer in session.exec(
+            select(Printer).where(trashed(Printer), Printer.deleted_at < cutoff)
+        ).all():
+            hard_delete_printer(session, printer)
+            purged["rows"] += 1
+        for model in (Tag, User):
             result = session.exec(
                 delete(model).where(
                     trashed(model),

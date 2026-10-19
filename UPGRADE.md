@@ -71,14 +71,21 @@ The periodic reconciler now uses a persistent schedule, recreated after restore.
   application version against the shared engine database. The default Compose
   deployment should use `docker compose down` followed by the new image's
   `docker compose up -d`; never use `down -v`.
-- **Keep a pre-upgrade backup for rollback.** DBOS 2 cannot read workflow inputs
-  or results written by DBOS 3. Before starting the previous image, stop every
-  process and discard only the disposable engine state: the SQLite sibling
-  whose filename adds `-dbos` before the application database's suffix (including
-  its `-wal` and `-shm` sidecars), or the PostgreSQL `dbos` schema. Keep the
-  application database and managed files. The reconciler rebuilds active Jobs;
-  engine history and step checkpoints are lost, so unfinished steps may rerun.
-  A backup restore also discards and rebuilds engine state.
+- **Roll back by restoring the pre-upgrade copy.** This release migrates the
+  application database too, and an older image refuses to start on it
+  (`Can't locate revision identified by …`); DBOS 2 also cannot read what
+  DBOS 3 wrote. Discarding only the engine state is therefore not enough. To
+  go back, stop every process, restore the application database and managed
+  files from the copy taken before the upgrade, discard the engine state (the
+  SQLite sibling whose filename adds `-dbos` before the application database's
+  suffix, with its `-wal` and `-shm` sidecars, or the PostgreSQL `dbos`
+  schema), then start the previous image. Anything added after the upgrade is
+  not in that copy. A backup restore discards and rebuilds engine state the
+  same way.
+- **Previews are prepared again after the upgrade.** New thumbnail and
+  metadata recipes re-derive every model file in the background. Browsing and
+  imports keep working meanwhile; on a 4-core server it took about 2 seconds of
+  CPU per file, so a large library keeps the server busy for hours.
 
 See the [DBOS upgrade guide](https://docs.dbos.dev/python/upgrading).
 

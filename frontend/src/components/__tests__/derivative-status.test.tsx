@@ -106,6 +106,7 @@ describe("DerivativeStatus", () => {
     ["invalid_3mf", /could not be read as a valid 3D model/],
     ["tessellation_failed", /could not be converted to a mesh/],
     ["source_unavailable", /storage is reachable/],
+    ["invalid_source", /may be damaged or incomplete/],
   ])("explains the %s failure", async (reason, message) => {
     renderStatus(
       stubApi([

@@ -150,3 +150,70 @@ class TestProcessIdentity:
         _overlay["compute_memory_mb"] = 1537
 
         assert identity() != original
+
+
+class TestNativeDiscoveryBoundary:
+    @pytest.mark.parametrize(
+        "failure", [None, "selector", "canary", "native", "missing"]
+    )
+    def test_preserves_adapter_admission_outcome(self, monkeypatch, failure):
+        import struct
+        import sys
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        from app.runtime.compute import discovery
+        from app.runtime.compute.contracts import ComputeUnavailable, Reason
+        from tests.fakes.gpu_device import API, Device
+
+        device = Device()
+        device.destroy = Mock()
+        device.queue.read_buffer = lambda buffer: struct.pack(
+            "<I", 0 if failure == "canary" else 42
+        )
+        info = {
+            "adapter_type": "DiscreteGPU",
+            "device": "contract",
+            "vendor_id": 1,
+            "device_id": 2,
+            "description": "driver",
+            "backend_type": "Vulkan",
+        }
+        adapter = SimpleNamespace(info=info, request_device_sync=lambda: device)
+        api = SimpleNamespace(
+            BufferUsage=API.BufferUsage,
+            gpu=SimpleNamespace(enumerate_adapters_sync=Mock(return_value=[adapter])),
+        )
+        if failure == "native":
+            api.gpu.enumerate_adapters_sync.side_effect = OSError("device lost")
+        monkeypatch.setattr(discovery, "configure_backend", lambda: None)
+        monkeypatch.setitem(sys.modules, "wgpu", None if failure == "missing" else api)
+        if failure is None:
+            identified, selected = discovery.discover("contract")
+            assert selected is device
+            assert identified.name == "contract"
+            assert all(buffer.destroyed for buffer in device.buffers)
+        else:
+            with pytest.raises(ComputeUnavailable) as exc:
+                discovery.discover("absent" if failure == "selector" else None)
+            assert (
+                exc.value.reason
+                is {
+                    "selector": Reason.ADAPTER_MISSING,
+                    "canary": Reason.DEVICE_FAILED,
+                    "native": Reason.DEVICE_FAILED,
+                    "missing": Reason.RUNTIME_MISSING,
+                }[failure]
+            )
+            assert device.destroy.called is (failure == "canary")
+
+    def test_uses_independent_wsl_hardware_evidence(self, monkeypatch):
+        from app.runtime.compute import discovery, dxcore
+
+        info = {"adapter_type": "Unknown", "backend_type": "OpenGL"}
+        monkeypatch.setattr(discovery.Path, "exists", lambda path: True)
+        monkeypatch.setattr(dxcore, "hardware", lambda: ("host evidence",))
+        monkeypatch.setattr(
+            dxcore, "identify", lambda value, records: {**value, "evidence": records}
+        )
+        assert discovery.adapter_evidence(info)["evidence"] == ("host evidence",)

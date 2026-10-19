@@ -605,3 +605,67 @@ class TestMeshMeasurementContract:
                     {"value": value, "id": metadata.id},
                 )
             session.rollback()
+
+
+class TestPrinterPurge:
+    def test_purges_referenced_printer(self, postgres_engine):
+        from datetime import datetime, timezone
+
+        from app.db.models import NotificationDelivery, Printer, PrintJob
+        from app.modules.library.trash import hard_delete_printer
+        from tests import factories
+
+        with Session(postgres_engine) as session:
+            printer = factories.build_printer(
+                session, trashed=datetime(2026, 1, 1, tzinfo=timezone.utc)
+            )
+            printer_id = printer.id
+            factories.build_printer_tool(session, printer)
+            factories.build_material_slot(session, printer)
+            factories.grant_printer_role(
+                session, factories.build_user(session), printer
+            )
+            factories.build_printer_maintenance_window(session, printer)
+            factories.build_printer_maintenance_log(session, printer)
+            factories.build_printer_file(session, printer)
+            job = factories.build_print_job(
+                session,
+                factories.build_file(session, factories.build_model(session)),
+                printer=printer,
+            )
+            delivery = factories.build_notification_delivery(
+                session, factories.build_notification_channel(session), printer=printer
+            )
+            job_id, delivery_id = job.id, delivery.id
+
+            hard_delete_printer(session, printer)
+            session.commit()
+            session.expire_all()
+
+            assert session.get(Printer, printer_id) is None
+            assert session.get(PrintJob, job_id).printer_id is None
+            assert session.get(NotificationDelivery, delivery_id).printer_id is None
+
+    def test_refuses_restored_snapshot(self, postgres_engine):
+        from datetime import datetime, timezone
+
+        from app.db.models import Printer
+        from app.modules.library.trash import PurgeConflictError, hard_delete_printer
+        from tests import factories
+
+        with Session(postgres_engine) as session:
+            printer = factories.build_printer(
+                session, trashed=datetime(2026, 1, 1, tzinfo=timezone.utc)
+            )
+            printer_id = printer.id
+            session.expunge(printer)
+            with Session(postgres_engine) as other:
+                restored = other.get(Printer, printer_id)
+                restored.deleted_at = None
+                other.add(restored)
+                other.commit()
+
+            with pytest.raises(PurgeConflictError, match="storage_cleanup_blocked"):
+                hard_delete_printer(session, printer)
+
+            assert session.get(Printer, printer_id).deleted_at is None

@@ -225,3 +225,42 @@ class TestPointAt:
 
         db_session.refresh(model)
         assert model.thumbnail_file_id == gcode.id
+
+
+class TestPublicationEnrollment:
+    def test_same_thumbnail_can_retry_after_enrollment(
+        self, db_session, make_model, make_file, local_storage
+    ):
+        from sqlmodel import select
+
+        from app.db.models import OwnedStorageObject, StorageObjectState
+        from app.modules.storage.storage_backend.contracts import (
+            StorageConfigurationError,
+        )
+        from app.modules.storage.storage_backend.local import enroll_legacy_local_root
+
+        artifact = make_file(make_model(), file_type=FileType.STL)
+        backend = get_backend()
+        (local_storage / "thumbs" / ".printstash-storage-root.json").unlink()
+        backend.ensure_setup()
+        with pytest.raises(StorageConfigurationError, match="storage_write_unverified"):
+            publish_thumbnail(
+                db_session, backend, artifact, WEBP, recipe_tag="thumbnail:1"
+            )
+        assert enroll_legacy_local_root(
+            local_storage / "thumbs",
+            role="thumb",
+            installation=backend.storage_target.endpoint,
+            proofs=[],
+            allow_empty=True,
+        )
+        backend.ensure_setup()
+        result = publish_thumbnail(
+            db_session, backend, artifact, WEBP, recipe_tag="thumbnail:1"
+        )
+        db_session.commit()
+        assert Path(result.key).read_bytes() == WEBP
+        assert (
+            db_session.exec(select(OwnedStorageObject)).one().state
+            is StorageObjectState.COMMITTED
+        )

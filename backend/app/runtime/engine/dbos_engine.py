@@ -448,11 +448,13 @@ class DbosJobEngine(JobEngine):
 
     def _interval(self, lane: Lane) -> float:
         """How often ``lane`` is polled when nothing has just been handed to it."""
-        return (
-            self.polling
-            if lane.pace is LanePace.PROMPT
-            else max(self.polling, settings.jobs_relaxed_queue_poll_interval_seconds)
-        )
+        if lane.pace is LanePace.INTERACTIVE:
+            return min(
+                self.polling, settings.jobs_interactive_queue_poll_interval_seconds
+            )
+        if lane.pace is LanePace.PROMPT:
+            return self.polling
+        return max(self.polling, settings.jobs_relaxed_queue_poll_interval_seconds)
 
     def _boost(self, name: LaneName) -> None:
         """Poll ``name`` faster for a short while. Never raises into a submission.

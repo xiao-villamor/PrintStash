@@ -12,7 +12,7 @@ from __future__ import annotations
 import atexit
 import json
 import os
-import select
+import selectors
 import signal
 import socket
 import subprocess  # nosec B404 - fixed interpreter/module invocation only
@@ -53,6 +53,13 @@ class Worker(Protocol):
     def kill(self) -> None: ...
 
 
+def _readable(stream: BinaryIO | socket.socket, timeout: float) -> bool:
+    # select() has a fixed fd-set ceiling even when RLIMIT_NOFILE is higher.
+    with selectors.DefaultSelector() as selector:
+        selector.register(stream, selectors.EVENT_READ)
+        return bool(selector.select(timeout))
+
+
 class ForkedWorker:
     """A worker forked from the template, known by pid and status connection.
 
@@ -70,7 +77,7 @@ class ForkedWorker:
 
     def _read(self, *, block: bool) -> None:
         while self.returncode is None:
-            if not block and not select.select([self._connection], [], [], 0)[0]:
+            if not block and not _readable(self._connection, 0):
                 return
             chunk = self._connection.recv(
                 worker_template.STATUS.size - len(self._received)
@@ -177,7 +184,7 @@ def _start(cwd: Path, environment: dict[str, str]) -> _Template:
     line = b""
     while not line.endswith(b"\n"):
         remaining = deadline - time.monotonic()
-        if remaining <= 0 or not select.select([process.stdout], [], [], remaining)[0]:
+        if remaining <= 0 or not _readable(process.stdout, remaining):
             break
         chunk = os.read(process.stdout.fileno(), 64)
         if not chunk:

@@ -115,6 +115,29 @@ class TestQueues:
 
         assert registered["ingest"]["polling_interval_sec"] == 0.05
 
+    def test_a_prompt_lane_is_polled_once_a_second_by_default(self, registered):
+        _engine()._register_queue(Lane(LaneName.DERIVE_NATIVE, 4))
+
+        assert registered["derive.native"]["polling_interval_sec"] == 1.0
+
+    def test_an_interactive_lane_is_polled_at_the_interactive_cadence(self, registered):
+        _engine()._register_queue(Lane(LaneName.INGEST, 2, pace=LanePace.INTERACTIVE))
+
+        assert registered["ingest"]["polling_interval_sec"] == 0.25
+
+    def test_an_interactive_lane_is_never_polled_slower_than_a_prompt_one(
+        self, registered, monkeypatch
+    ):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "jobs_queue_poll_interval_seconds", 0.1)
+        monkeypatch.setitem(
+            _overlay, "jobs_interactive_queue_poll_interval_seconds", 0.5
+        )
+        _engine()._register_queue(Lane(LaneName.INGEST, 2, pace=LanePace.INTERACTIVE))
+
+        assert registered["ingest"]["polling_interval_sec"] == 0.1
+
     def test_a_relaxed_lane_is_polled_at_the_relaxed_cadence(
         self, registered, monkeypatch
     ):

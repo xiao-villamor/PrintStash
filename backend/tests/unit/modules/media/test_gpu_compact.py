@@ -235,3 +235,27 @@ class TestNativeBatch:
         )
         assert device.queue.writes == 0
         renderer.close()
+
+
+class TestDeferredNormalOwnership:
+    def test_releases_csr_staging_after_deferred_normal_encoding(
+        self, device, prepared
+    ):
+        from app.modules.media.gpu_normals import defer
+
+        geometry = PreparedRenderGeometry(prepared.vertices, 1, prepared.face_chunks)
+        memory = Residency(1024**2)
+        owner = CompactGeometry(device, memory, ViewPipeline(device))
+        uploaded = owner.acquire(defer(geometry), "geometry:deferred")
+        configs = device.create_buffer(size=256, usage=64)
+        encoder = device.create_command_encoder()
+        owner.encode(encoder, configs, frame_config(None, 64, 48, False))
+        assert owner.gpu_normal_uploads == 1
+        assert owner.upload_calls == 3
+        assert set(owner.normal_statuses()) == {"geometry:deferred"}
+        device.queue.submit([encoder.finish()])
+        owner.release_completed(fence_complete=True)
+        owner.close()
+        memory.evict_idle()
+        assert memory.used == 0
+        assert uploaded.positions.destroyed

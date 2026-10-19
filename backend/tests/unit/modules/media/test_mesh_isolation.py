@@ -190,19 +190,30 @@ class TestSupervise:
 
 
 class TestExitDescriptor:
-    def test_becomes_readable_when_the_process_exits(self) -> None:
-        import select
+    @pytest.mark.parametrize(
+        "high_descriptor", [False, True], ids=["normal-fd", "high-fd"]
+    )
+    def test_becomes_readable_when_the_process_exits(self, high_descriptor) -> None:
+        import fcntl
+        import selectors
         import subprocess
 
         child = subprocess.Popen([sys.executable, "-c", "pass"])
         descriptor = mesh_isolation._exit_descriptor(child.pid)
         assert descriptor is not None
-
-        readable, _, _ = select.select([descriptor], [], [], 10)
-
-        os.close(descriptor)
-        child.wait()
-        assert readable == [descriptor]
+        try:
+            if high_descriptor:
+                duplicate = fcntl.fcntl(descriptor, fcntl.F_DUPFD_CLOEXEC, 2048)
+                os.close(descriptor)
+                descriptor = duplicate
+                assert descriptor >= 2048
+            with selectors.DefaultSelector() as selector:
+                selector.register(descriptor, selectors.EVENT_READ)
+                readable = selector.select(timeout=10)
+            assert [key.fd for key, _ in readable] == [descriptor]
+        finally:
+            os.close(descriptor)
+            child.wait(timeout=10)
 
     def test_a_process_that_is_gone_has_none(self) -> None:
         import subprocess

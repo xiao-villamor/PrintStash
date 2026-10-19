@@ -126,7 +126,9 @@ test.describe("mounted library source root recovery", () => {
       const title = page.getByRole("heading", { name: sourceName });
       await expect(title).toBeVisible({ timeout: 30_000 });
       await expect(title).toHaveCSS("text-transform", "none");
-      await expect(page.getByText(`${parentName}/${childName}`, { exact: true })).toBeVisible();
+      const library = page.getByRole("main");
+      await expect(library.getByRole("button", { name: parentName, exact: true })).toBeVisible();
+      await expect(library.getByRole("button", { name: childName, exact: true })).toBeVisible();
 
       await page.getByRole("button", { name: "Upload", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Upload model" });

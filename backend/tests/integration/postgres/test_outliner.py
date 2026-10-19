@@ -1,18 +1,30 @@
 """Restoration window pages preserve the cursor contract on PostgreSQL."""
 
+import pytest
 from sqlmodel import Session
 
+from app.db.models import CollectionRole
 from app.modules.library import outliner
 from app.schemas.outliner import OutlinerQuery, OutlinerRestoreQuery
-from tests.factories import build_collection, build_model, build_user
+from tests.factories import (
+    build_collection,
+    build_model,
+    build_user,
+    grant_collection_role,
+)
 
 from .test_collection_tree import pg_session as pg_session
 
 
 class TestRestore:
-    def test_restores_with_postgresql(self, pg_session: Session):
-        user = build_user(pg_session, superuser=True)
+    @pytest.mark.parametrize(
+        "viewer", [False, True], ids=["administrator", "granted-viewer"]
+    )
+    def test_restores_with_postgresql(self, pg_session: Session, viewer: bool):
+        user = build_user(pg_session, superuser=not viewer)
         root = build_collection(pg_session, "Root")
+        if viewer:
+            grant_collection_role(pg_session, user, root, CollectionRole.VIEW)
         child = build_collection(pg_session, "Child", parent=root)
         first = build_model(pg_session, "A", collection=child)
         second = build_model(pg_session, "B", collection=child)

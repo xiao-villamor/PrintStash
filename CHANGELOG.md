@@ -2,6 +2,69 @@
 
 ## Unreleased
 
+- An upload into a library folder on a network or automounted share no longer
+  fails with `storage_root_changed` when the share briefly reports a different
+  identity while it reconnects. PrintStash re-checks the folder and retries the
+  write once; a folder that was really replaced, or that disagrees again, is
+  still refused (#210).
+
+- Bambu LAN printers reporting zero or missing task IDs reuse their external
+  print job across status updates instead of adding a row on every tick.
+  Repeated completion reports no longer queue duplicate notifications, while
+  an observed new run of the same file still creates a separate history row.
+
+- An idle server uses about half the CPU again: only the ingest lane, where an
+  upload or import waits to start, is still polled four times a second
+  (`VAULT_JOBS_INTERACTIVE_QUEUE_POLL_INTERVAL_SECONDS`, 0.25). Derive, network,
+  printing and reconcile lanes go back to once a second
+  (`VAULT_JOBS_QUEUE_POLL_INTERVAL_SECONDS`, now 1.0). On a 4-core test server
+  with 300 Models, idle CPU fell from 11.4% to 6.1% of one core (0.14.0: 6.1%),
+  and uploads start as soon as before.
+
+- Search projection waits for an import to finish, like thumbnails do. Its
+  writes competed with the import for SQLite's single writer. A 300-file ZIP
+  import on a 4-core test server took 60 s instead of 121 s (0.14.0: 55–67 s).
+  Library browsing and filters do not depend on it.
+
+- A valid 3MF too large to read within the preview memory budget is reported
+  as too large to preview, not as a damaged file. Its XML parser running out
+  of memory was recorded as `invalid_source`. The `invalid_source` message now
+  says the file may be damaged or incomplete instead of asking you to check
+  its storage.
+
+- A ZIP over the upload limit says so, with its size and the settings that
+  raise the limit, and the message stays in Tasks. The image's proxy refused it
+  with its own page, which the app reported as a server it could not reach.
+
+- Library titles and controls adapt to the available pane width. Cards use the
+  full grid width, collection tags and description actions share a compact row,
+  and description editing stays visible and usable on phones.
+
+- Library filters keep their position while facet counts load, so a response
+  arriving during a click does not lose the selected filter.
+
+- Uploads wait for newly created tags to be saved, so a quick submission keeps
+  every selected tag. Cancelling a draft ignores late tag acknowledgements.
+
+- Restoring large unfiltered collection trees reuses subtree counts instead of
+  repeating the same lookup for every descendant.
+
+- Model metadata stays current when derivative updates arrive during an in-flight
+  detail read, including revision comparison fields. Confirmed edit receipts
+  with a different derivative snapshot trigger a fresh authorized read.
+
+- Preparing-preview activity waits until the Library is ready before reading
+  the background queue. Opening Notifications can still request activity early.
+
+- Interrupted uploads remain in Notifications after reloading the page, so you
+  can select the same file and resume the existing upload session.
+
+- Mesh previews and geometry processing continue to work when a busy server has
+  more than 1,024 files open. Compute connections also wait for replies and detect
+  disconnected peers without the same descriptor limit. Warm workers preserve
+  high-numbered resource permits and close every unrelated descriptor before
+  processing a model.
+
 - An idle server on SQLite no longer uses more CPU the longer it runs. Each
   background-work lane keeps checking for queued work on a short interval, and on
   SQLite every check read the engine's entire workflow history, which the
@@ -677,8 +740,11 @@
 
 
 **Upgrade note:** The background engine now uses DBOS 3.0. Stop all API and
-worker processes before upgrading together. Engine state migrates on startup;
-rolling back requires discarding the upgraded, disposable engine state first.
+worker processes before upgrading together. Engine state migrates on startup.
+Rolling back means restoring the application database and managed files from
+the copy taken before the upgrade: 0.14.0 does not start on the migrated
+database, so discarding the engine state alone is not enough. Every model file
+is re-derived in the background after the upgrade.
 See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 ### Added
@@ -719,6 +785,15 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
   will be removed in 0.16.
 
 ### Fixed
+
+- Expired printers now appear in garbage-collection previews and can be purged
+  after backup verification, approval and quarantine. Printer configuration is
+  removed without foreign-key failures; print and notification history survives.
+
+
+- Refused storage writes no longer strand thumbnail reservations. Hourly cleanup
+  recovers stale failed publications even when trash expiry is disabled or a GC
+  preview awaits approval, so thumbnails can be generated again after enrollment.
 
 - Preserve remote scan deadlines when native metadata or streaming reads time out, so bounded imports continue instead of entering provider-error backoff.
 

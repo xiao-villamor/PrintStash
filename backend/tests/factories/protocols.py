@@ -66,10 +66,14 @@ from app.db.models import (
     MultipartModel,
     MultipartModelStar,
     MultipartPart,
+    NotificationChannel,
+    NotificationDelivery,
     OwnedStorageObject,
     PassageVector,
     Printer,
     PrinterFile,
+    PrinterMaintenanceLog,
+    PrinterMaintenanceWindow,
     PrinterProfile,
     PrinterProvider,
     PrinterStatus,
@@ -254,7 +258,7 @@ class MakePrinter(Protocol):
         *,
         provider: PrinterProvider = ...,
         status: PrinterStatus = ...,
-        trashed: bool = False,
+        trashed: bool | datetime = False,
         **overrides: Any,
     ) -> Printer: ...
 
@@ -745,3 +749,23 @@ class MakeFilamentProfile(Protocol):
 
 class MakePrinterProfile(Protocol):
     def __call__(self, name: str | None = None, **overrides: Any) -> PrinterProfile: ...
+
+
+class MakePrinterMaintenanceWindow(Protocol):
+    def __call__(
+        self, printer: Printer, **overrides: Any
+    ) -> PrinterMaintenanceWindow: ...
+
+
+class MakePrinterMaintenanceLog(Protocol):
+    def __call__(self, printer: Printer, **overrides: Any) -> PrinterMaintenanceLog: ...
+
+
+class MakeNotificationDelivery(Protocol):
+    def __call__(
+        self,
+        channel: NotificationChannel,
+        *,
+        printer: Printer | None = None,
+        **overrides: Any,
+    ) -> NotificationDelivery: ...

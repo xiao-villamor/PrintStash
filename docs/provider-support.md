@@ -82,6 +82,15 @@ Not supported:
 - measured filament consumption
 - cloud printer control
 
+When a Bambu report has no usable task, subtask or project ID (missing or `0`),
+PrintStash matches the filename to an identityless external job on that printer.
+Repeated terminal reports reuse the recorded history, including after restart.
+An observed new printing or paused run creates a new row after the previous run
+finished. If an entire reprint happens while PrintStash is disconnected and only
+the same identityless terminal report is observed, it cannot be distinguished
+from the previous completion. Typed external-job identities are never replaced
+by this filename fallback. Existing duplicate history is not automatically merged.
+
 External-job recovery is deliberately evidence-based. MQTT does not provide a
 complete slicer profile, so PrintStash never invents scale, orientation, wall,
 infill, or support settings. Cache entries can disappear before retrieval, and

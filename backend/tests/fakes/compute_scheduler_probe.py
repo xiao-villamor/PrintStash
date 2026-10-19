@@ -18,6 +18,7 @@ from app.runtime.compute.protocol import InferenceRequest, Priority, StatusReque
 
 
 def main():
+    scenario = sys.argv[2] if len(sys.argv) > 2 else "bad"
     root = Path(sys.argv[1])
     client.bind(root)
     address = client.directory()
@@ -79,8 +80,14 @@ def main():
             threads=1,
             payload=base64.b64encode(payload).decode(),
         )
+        if value == "invalid":
+            message.payload = "?"
         response = json.loads(client.exchange(message))
-        return json.loads(base64.b64decode(response["result"]))
+        return (
+            response
+            if "error" in response
+            else json.loads(base64.b64decode(response["result"]))
+        )
 
     try:
         # Queue all four READY requests behind an executing item. This tests
@@ -90,7 +97,14 @@ def main():
             if not gate_started.wait(timeout=3):
                 raise RuntimeError("probe_gate_start")
             futures = [
-                workers.submit(request, value) for value in ["0", "1", "bad", "3"]
+                workers.submit(request, value)
+                for value in (
+                    ["0", "1", "2", "3"]
+                    if scenario == "healthy"
+                    else ["0", "invalid", "2", "3"]
+                    if scenario == "invalid"
+                    else ["0", "1", "bad", "3"]
+                )
             ]
             until = time.monotonic() + 2
             while json.loads(client.exchange(StatusRequest()))["queue_depth"] < 4:
