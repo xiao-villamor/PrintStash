@@ -35,6 +35,7 @@ from app.db.models import (
     ModelProvenanceSource,
     ModelSourceCover,
     OwnedStorageObject,
+    Printer,
     RestoreMarker,
     StorageObjectState,
 )
@@ -201,6 +202,9 @@ def _candidate_pool(session: Session, cutoff: datetime) -> list[_Candidate]:
             Collection.deleted_at <= cutoff,  # type: ignore[operator]
         )
     ).all()
+    printers = session.exec(
+        select(Printer).where(trashed(Printer), Printer.deleted_at <= cutoff)
+    ).all()
     candidates = [_model_candidate(session, row) for row in models]
     candidates.extend(_document_candidate(row) for row in documents)
     candidates.extend(
@@ -215,6 +219,16 @@ def _candidate_pool(session: Session, cutoff: datetime) -> list[_Candidate]:
         if row.model_id not in model_ids
     )
     candidates.extend(_collection_candidate(row) for row in collections)
+    candidates.extend(
+        _Candidate(
+            kind="printer",
+            resource_id=int(row.id),
+            deleted_at=row.deleted_at,
+            key_count=0,
+            size_bytes=0,
+        )
+        for row in printers
+    )
     return sorted(
         candidates, key=lambda item: (item.deleted_at, item.kind, item.resource_id)
     )
@@ -325,7 +339,7 @@ def create_plan(
 def _parse_created_at(value: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
@@ -432,6 +446,7 @@ def _resource(session: Session, item: GcItem):
         "document": Document,
         "file": File,
         "collection": Collection,
+        "printer": Printer,
     }.get(item.resource_kind)
     return session.get(resource_type, item.resource_id) if resource_type else None
 
@@ -450,7 +465,7 @@ def _revalidate_plan(session: Session, run: GcRun) -> list[GcItem]:
             resource is None
             or resource.deleted_at is None
             or resource.deleted_at != item.deleted_at_snapshot
-            or resource.purge_token is not None
+            or (not isinstance(resource, Printer) and resource.purge_token is not None)
         ):
             raise GcSafetyError("gc_candidate_changed")
     return items
@@ -553,6 +568,7 @@ def finalize_plan(session: Session, run_id: int) -> GcRun:
         hard_delete_document,
         hard_delete_file,
         hard_delete_model,
+        hard_delete_printer,
         prepare_purge_deletions,
     )
     from app.modules.storage.storage_deletion import process_storage_delete_intents
@@ -590,6 +606,8 @@ def finalize_plan(session: Session, run_id: int) -> GcRun:
                 hard_delete_file(session, resource, prepared_deletions=prepared)
             elif isinstance(resource, Collection):
                 hard_delete_collection(session, resource, prepared_deletions=prepared)
+            elif isinstance(resource, Printer):
+                hard_delete_printer(session, resource)
             else:
                 raise GcSafetyError("gc_candidate_changed")
         enqueue_purge_deletions(session, prepared)

@@ -72,6 +72,13 @@ resource ids, Trash timestamps, key counts and byte counts. The approval API
 accepts only that exact 64-character digest. A restored, edited or concurrently
 purged candidate invalidates the plan.
 
+Expired printers participate in the same preview, backup, approval and quarantine
+protocol. Finalization removes their tools, material slots, permissions,
+maintenance records and remote-file inventory. Print jobs and notification
+history remain, with the deleted printer reference detached; saved print-job
+names are retained. Removing inventory never sends a command to the physical
+printer or deletes its remote files.
+
 ## Backup Gate
 
 Approval requires a backup witness with all of these properties:

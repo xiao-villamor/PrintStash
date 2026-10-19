@@ -1429,3 +1429,65 @@ class TestOpenDalS3Witness:
 
         monkeypatch.setattr(backup_verification, "verify_backup", verify)
         assert gc_planner.find_backup_witness() is None
+
+
+class TestPrinterGcPlan:
+    def test_expired_printer_enters_preview(self, db_session, make_printer):
+        from sqlmodel import select
+
+        from app.db.models import GcItem, Printer
+
+        printer = make_printer(trashed=utcnow() - timedelta(days=60))
+        result = gc_planner.run_scheduled_gc(retention_days=30)
+        assert result["gc_candidates"] == 1
+        assert db_session.exec(select(GcItem)).one().resource_kind == "printer"
+        assert db_session.get(Printer, printer.id) is not None
+
+    @pytest.mark.parametrize("age", [None, 1], ids=["live", "within-retention"])
+    def test_ineligible_printer_stays_out_of_preview(
+        self, db_session, make_printer, age
+    ):
+        printer = make_printer(
+            trashed=False if age is None else utcnow() - timedelta(days=age)
+        )
+        result = gc_planner.run_scheduled_gc(retention_days=30)
+        assert result["gc_candidates"] == 0
+        assert db_session.get(type(printer), printer.id) is not None
+
+    def test_finalizes_approved_printer_after_quarantine(
+        self, db_session, make_printer, make_user, grant_printer_role, monkeypatch
+    ):
+        from app.db.models import Printer
+
+        printer = make_printer(trashed=utcnow() - timedelta(days=60))
+        printer_id = printer.id
+        admin = make_user(superuser=True)
+        grant_printer_role(admin, printer)
+        run = gc_planner.create_plan(
+            db_session, retention_days=30, requested_by=admin.id
+        )
+        monkeypatch.setattr(gc_planner, "find_backup_witness", _witness)
+        gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
+        run.quarantine_until = utcnow() - timedelta(seconds=1)
+        db_session.add(run)
+        db_session.commit()
+        monkeypatch.setattr(gc_planner, "_reverify_backup", lambda _run: None)
+        finalized = gc_planner.finalize_plan(db_session, run.id)
+        assert finalized.state is GcRunState.COMPLETED
+        assert db_session.get(Printer, printer_id) is None
+
+    def test_restored_printer_invalidates_preview(
+        self, db_session, make_printer, make_user, monkeypatch
+    ):
+        printer = make_printer(trashed=utcnow() - timedelta(days=60))
+        admin = make_user(superuser=True)
+        run = gc_planner.create_plan(
+            db_session, retention_days=30, requested_by=admin.id
+        )
+        printer.deleted_at = None
+        db_session.add(printer)
+        db_session.commit()
+        monkeypatch.setattr(gc_planner, "find_backup_witness", _witness)
+        with pytest.raises(gc_planner.GcSafetyError, match="gc_candidate_changed"):
+            gc_planner.approve_plan(db_session, run.id, run.digest, admin.id)
+        assert db_session.get(type(printer), printer.id) is not None

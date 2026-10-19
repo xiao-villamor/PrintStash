@@ -775,6 +775,10 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 ### Fixed
 
+- Expired printers now appear in garbage-collection previews and can be purged
+  after backup verification, approval and quarantine. Printer configuration is
+  removed without foreign-key failures; print and notification history survives.
+
 - Preserve remote scan deadlines when native metadata or streaming reads time out, so bounded imports continue instead of entering provider-error backoff.
 
 - Continue manual remote-library scans across bounded pages and time slices using durable requests committed with the saved cursor. Cancellation and provider backoff remain distinct from normal continuation.
