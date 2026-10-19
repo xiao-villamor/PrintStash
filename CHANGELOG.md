@@ -7,6 +7,12 @@
   Active-filter chips use the panel's names and values ("File type: G-code",
   "Revision: Needs test"), and material or printer names show as written.
 
+- An upload into a library folder on a network or automounted share no longer
+  fails with `storage_root_changed` when the share briefly reports a different
+  identity while it reconnects. PrintStash re-checks the folder and retries the
+  write once; a folder that was really replaced, or that disagrees again, is
+  still refused (#210).
+
 - Bambu LAN printers reporting zero or missing task IDs reuse their external
   print job across status updates instead of adding a row on every tick.
   Repeated completion reports no longer queue duplicate notifications, while
