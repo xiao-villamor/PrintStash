@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "./helpers";
 import { scrollToEnd } from "../e2e/_scroll";
+import { settleLibraryRead } from "../e2e/_library";
 import { loadNextLibraryPage, modelCard, uploadGcodeModel } from "./util";
 
 test.describe("Library navigation", () => {
@@ -20,7 +21,7 @@ test.describe("Library navigation", () => {
     try {
       // ── A fresh page load opens the connection and is admitted ─────────────
       await page.goto("/");
-      await expect(modelCard(page, name)).toBeVisible();
+      await settleLibraryRead(page, modelCard(page, name));
       await expect.poll(() => sockets).toBeGreaterThan(0);
       await page.waitForLoadState("networkidle");
       const admitted = probes;
@@ -67,7 +68,7 @@ test.describe("Library navigation", () => {
       try {
         await page.goto(`/?c=${encodeURIComponent(seeded.folder.path)}&type=all&sort=name-asc`);
         const entries = page.locator("main [data-library-entry]");
-        await expect(entries.first()).toBeVisible();
+        await settleLibraryRead(page, entries.first());
         const firstPageCount = await entries.count();
         await loadNextLibraryPage(page, firstPageCount + 10);
         const target = entries.nth(firstPageCount + 10);
@@ -136,7 +137,7 @@ test.describe("Library navigation", () => {
       try {
         await page.goto(`/?c=${encodeURIComponent(seeded.folder.path)}&type=all&sort=name-asc`);
         const entries = page.locator("main [data-library-entry]");
-        await expect(entries.first()).toBeVisible();
+        await settleLibraryRead(page, entries.first());
         const firstPageCount = await entries.count();
         const changed = await page.request.post("/api/v1/collections", {
           data: { name: `Revision change ${Date.now()}`, parent_id: seeded.root.id },

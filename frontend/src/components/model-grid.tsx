@@ -1095,6 +1095,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     currentRefresh?.status === "pending" ||
     (!loading &&
       !error &&
+      !modelQuery.refreshRequired &&
       (!browseReady || (modelQuery.isFetching && !modelQuery.isFetchingNextPage)));
   const loadingMore = modelQuery.isFetchingNextPage || !browseReady;
   const hasMore = snapshot?.hasMore ?? false;
@@ -2842,8 +2843,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     size="sm"
                     loading={refreshing}
                     onClick={() =>
-                      void (currentRefresh
-                        ? snapshot
+                      void (currentRefresh || modelQuery.refreshRequired
+                        ? snapshot?.entry === entry
                           ? reading.refresh(refresh)
                           : refresh()
                         : authority.refresh())

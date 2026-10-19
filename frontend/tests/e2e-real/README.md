@@ -30,7 +30,9 @@ Artifact bytes. Historical release archives are checked separately by the
 Library navigation covers desktop grid and phone list reading positions through
 detail, Back and Forward. A controlled real revision change checks explicit
 refresh recovery before continuation; returns assert the visible anchor because
-a late revision notice can change the document height.
+a late revision notice can change the document height. Upload setup and fresh
+Library reads follow at most one visible refresh action if initial read contention
+requires it, then await its HTTP 200 acknowledgement. They do not loop page reloads.
 
 Storage-provider setup is deliberately isolated because it must begin with an
 unconfigured instance and restart after changing transports:

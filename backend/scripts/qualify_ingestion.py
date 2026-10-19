@@ -656,6 +656,18 @@ def resource_snapshot(root: Path, db: Path) -> ResourceSnapshot:
     }
 
 
+def drain_resources(root: Path, db: Path) -> ResourceSnapshot:
+    """Return idle process credits before observing the bounded natural drain."""
+    from app.db.session import get_session_factory
+    from app.modules.storage.capacity import CapacityManager
+
+    # The heartbeat normally trims this high-water lease over two beats.
+    # Advance the same owner here so the finite drain does not race its phase;
+    # trim_lease keeps every active claim and leaves durable reservations alone.
+    CapacityManager(get_session_factory()).trim_lease()
+    return resource_snapshot(root, db)
+
+
 def wait_job(client: TestClient, job_id: str, deadline: float):
     from app.schemas.jobs import JobStatus
 
@@ -1498,7 +1510,7 @@ def run_worker(args: argparse.Namespace) -> int:
                         started + args.deadline_seconds - 15,
                     )
                     while True:
-                        drained = resource_snapshot(vault, db)
+                        drained = drain_resources(vault, db)
                         journal(output / "drain-resources.jsonl", dict(drained))
                         if all(
                             drained["database_counts"][name] == 0

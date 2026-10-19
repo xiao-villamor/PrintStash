@@ -6,10 +6,16 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests.paths import BACKEND_DIR
+
+if TYPE_CHECKING:
+    from app.modules.storage.capacity import CapacityManager
 
 
 class TestMain:
@@ -110,7 +116,9 @@ class TestMain:
         )
 
         assert completed.returncode == 0, (
-            completed.stderr + (output / "child.stderr.log").read_text()
+            completed.stderr
+            + (output / "child.stderr.log").read_text()
+            + (output / "report.json").read_text()
         )
         report = json.loads((output / "report.json").read_text())
         samples = [
@@ -251,7 +259,9 @@ class TestMain:
         )
 
         assert completed.returncode == 0, (
-            completed.stderr + (output / "child.stderr.log").read_text()
+            completed.stderr
+            + (output / "child.stderr.log").read_text()
+            + (output / "report.json").read_text()
         )
         report = json.loads((output / "report.json").read_text())
         results = report["archive"]["entries"]
@@ -308,7 +318,9 @@ class TestMain:
         )
 
         assert completed.returncode == 0, (
-            completed.stderr + (output / "child.stderr.log").read_text()
+            completed.stderr
+            + (output / "child.stderr.log").read_text()
+            + (output / "report.json").read_text()
         )
         report = json.loads((output / "report.json").read_text())
         assert [cell["concurrency"] for cell in report["load_cells"]] == [1, 2, 4, 8]
@@ -407,7 +419,9 @@ class TestMain:
         )
 
         assert completed.returncode == 0, (
-            completed.stderr + (output / "child.stderr.log").read_text()
+            completed.stderr
+            + (output / "child.stderr.log").read_text()
+            + (output / "report.json").read_text()
         )
         report = json.loads((output / "report.json").read_text())
         assert [cell["concurrency"] for cell in report["load_cells"]] == selection
@@ -595,6 +609,82 @@ def resource_vault(tmp_path):
     SQLModel.metadata.create_all(engine)
     engine.dispose()
     yield root, db
+
+
+@pytest.fixture
+def capacity_vault(
+    resource_vault: tuple[Path, Path],
+) -> Iterator[tuple[Path, Path, CapacityManager]]:
+    from sqlalchemy import create_engine
+
+    from app.db.session import (
+        SQLiteSessionFactory,
+        get_session_factory,
+        override_session_factory,
+    )
+    from app.modules.storage.capacity import CapacityManager
+
+    root, db = resource_vault
+    engine = create_engine(f"sqlite:///{db}")
+    previous = get_session_factory()
+    factory = SQLiteSessionFactory(engine)
+    override_session_factory(factory)
+    try:
+        yield root, db, CapacityManager(factory, headroom_bytes=0)
+    finally:
+        override_session_factory(previous)
+        engine.dispose()
+
+
+class TestDrainResources:
+    def test_drains_released_capacity_without_a_work_heartbeat(self, capacity_vault):
+        from app.modules.storage.capacity import CapacityResource
+        from scripts.qualify_ingestion import drain_resources, resource_snapshot
+
+        root, db, manager = capacity_vault
+        manager.reserve(
+            "finished-thumbnail",
+            [CapacityResource.for_budget("test", 60, 100, role="test limit")],
+            transient=True,
+        ).release()
+        assert (
+            resource_snapshot(root, db)["database_counts"]["capacity_reservations"] == 1
+        )
+
+        drain_resources(root, db)
+        drained = drain_resources(root, db)
+
+        assert drained["database_counts"]["capacity_reservations"] == 0
+        assert drained["capacity_resources"] == []
+
+    def test_preserves_held_capacity_during_drain(self, capacity_vault):
+        from app.modules.storage.capacity import CapacityResource
+        from scripts.qualify_ingestion import drain_resources
+
+        root, db, manager = capacity_vault
+        active = manager.reserve(
+            "active-thumbnail",
+            [CapacityResource.for_budget("test", 40, 100, role="test limit")],
+            transient=True,
+        )
+        durable = manager.reserve(
+            "durable-upload",
+            [CapacityResource.for_budget("test", 30, 100, role="test limit")],
+            durable=True,
+        )
+        try:
+            drain_resources(root, db)
+            drained = drain_resources(root, db)
+
+            assert drained["database_counts"]["capacity_reservations"] == 2
+            assert manager.reserved_bytes()["budget:test"] >= 70
+            assert manager.transient_claims() == {
+                "active-thumbnail": {"budget:test": 40}
+            }
+            assert manager.operation_reservations() == ["durable-upload"]
+        finally:
+            active.release()
+            durable.release()
 
 
 class TestResourceSnapshot:

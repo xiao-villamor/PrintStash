@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { scrollToEnd } from "../e2e/_scroll";
+import { refreshLibrary, settleLibraryRead } from "../e2e/_library";
 
 /** The new backup, as the finished `backups.create` Job reports it. */
 export interface CreatedBackup {
@@ -262,11 +263,9 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
   }
 
   const view = collection ? `/?c=${encodeURIComponent(collection)}` : "/";
-  await expect(async () => {
-    await page.goto(view);
-    await expect(modelCard(page, name)).toBeVisible();
-    if (tag) await expect(modelCard(page, name)).toContainText(tag);
-  }).toPass({ timeout: 60_000 });
+  await page.goto(view);
+  await settleLibraryRead(page, modelCard(page, name));
+  if (tag) await expect(modelCard(page, name)).toContainText(tag);
 }
 
 export function uploadGcodeModel(page: Page, name: string): Promise<void> {
@@ -289,14 +288,7 @@ export async function loadNextLibraryPage(page: Page, beyond: number): Promise<v
   await scrollToEnd(page);
   await expect(entries.nth(beyond).or(refresh).first()).toBeAttached();
   if (await refresh.isVisible()) {
-    const acknowledged = page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return url.pathname === "/api/v1/models/browse" && !url.searchParams.has("cursor");
-    });
-    await refresh.click();
-    expect((await acknowledged).status()).toBe(200);
-    await expect(refresh).toBeHidden();
-    await expect(main).toHaveAttribute("aria-busy", "false");
+    await refreshLibrary(page);
     await scrollToEnd(page);
   }
   await expect.poll(() => entries.count()).toBeGreaterThan(beyond);
