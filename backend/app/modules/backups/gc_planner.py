@@ -43,7 +43,10 @@ from app.db.session import get_session_factory
 from app.modules.storage.storage_backend.contracts import StorageTier
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_identity import independent_evidence
-from app.modules.storage.storage_ownership import provider_ref_for_backend
+from app.modules.storage.storage_ownership import (
+    provider_ref_for_backend,
+    sweep_orphaned_publications,
+)
 from app.runtime.maintenance import guarded_destructive_operation
 
 _DOCUMENT_IMAGE_RE = re.compile(
@@ -325,7 +328,7 @@ def create_plan(
 def _parse_created_at(value: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
@@ -677,6 +680,11 @@ def run_scheduled_gc(retention_days: int | None = None) -> dict[str, int]:
 
     if restore_in_progress():
         return {"rows": 0, "orphan_blobs": 0, "gc_candidates": 0}
+    # Failed publications have no catalog owner and recover independently of
+    # trash retention or a plan awaiting approval. The bounded sweep preserves
+    # generation evidence and only reclaims exact, proven creations.
+    with get_session_factory().scoped_session() as recovery_session:
+        sweep_orphaned_publications(recovery_session, get_backend())
     effective_retention = (
         int(settings.trash_retention_days) if retention_days is None else retention_days
     )

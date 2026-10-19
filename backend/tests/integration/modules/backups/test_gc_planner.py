@@ -1429,3 +1429,100 @@ class TestOpenDalS3Witness:
 
         monkeypatch.setattr(backup_verification, "verify_backup", verify)
         assert gc_planner.find_backup_witness() is None
+
+
+class TestScheduledGcPublicationRecovery:
+    @pytest.mark.parametrize(
+        "retention_days", [30, -1], ids=["expiry-enabled", "expiry-disabled"]
+    )
+    def test_retires_stale_absent_publication(
+        self, db_session, local_storage, make_owned_storage_object, retention_days
+    ):
+        from app.db.models import StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+        from app.modules.storage.storage_ownership import prepare_bytes
+
+        backend = get_backend()
+        key = backend.thumbnail_key(905)
+        row = make_owned_storage_object(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(key),
+            key=key,
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            token=None,
+            created_at=utcnow() - timedelta(days=3),
+        )
+        gc_planner.run_scheduled_gc(retention_days=retention_days)
+        db_session.refresh(row)
+        assert row.state is StorageObjectState.RETIRING
+        retry = prepare_bytes(
+            db_session, backend, key, b"thumbnail", object_kind="thumbnail"
+        )
+        assert backend.read_bytes(retry.receipt.key) == b"thumbnail"
+
+    def test_preserves_fresh_publication(
+        self, db_session, local_storage, make_owned_storage_object
+    ):
+        from app.db.models import StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        backend = get_backend()
+        row = make_owned_storage_object(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(backend.thumbnail_key(906)),
+            key=backend.thumbnail_key(906),
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            token=None,
+        )
+        gc_planner.run_scheduled_gc()
+        db_session.refresh(row)
+        assert row.state is StorageObjectState.PENDING
+
+    def test_preserves_reservations_during_restore(
+        self, db_session, local_storage, make_owned_storage_object, monkeypatch
+    ):
+        from app.db.models import StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        backend = get_backend()
+        row = make_owned_storage_object(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(backend.thumbnail_key(907)),
+            key=backend.thumbnail_key(907),
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            token=None,
+            created_at=utcnow() - timedelta(days=3),
+        )
+        monkeypatch.setattr(backup_maintenance, "restore_in_progress", lambda: True)
+        gc_planner.run_scheduled_gc()
+        db_session.refresh(row)
+        assert row.state is StorageObjectState.PENDING
+
+    def test_recovers_publications_while_preview_waits(
+        self, db_session, local_storage, make_owned_storage_object, make_model
+    ):
+        from app.db.models import StorageObjectState
+        from app.modules.storage.storage_backend.runtime import get_backend
+
+        backend = get_backend()
+        make_model(trashed=utcnow() - timedelta(days=60))
+        preview = gc_planner.create_plan(
+            db_session, retention_days=30, requested_by=None, scheduled=True
+        )
+        row = make_owned_storage_object(
+            backend=backend.backend_name,
+            namespace=backend.namespace_for(backend.thumbnail_key(908)),
+            key=backend.thumbnail_key(908),
+            object_kind="thumbnail",
+            state=StorageObjectState.PENDING,
+            token=None,
+            created_at=utcnow() - timedelta(days=3),
+        )
+        gc_planner.run_scheduled_gc()
+        db_session.refresh(row)
+        db_session.refresh(preview)
+        assert row.state is StorageObjectState.RETIRING
+        assert preview.state is GcRunState.PREVIEW
