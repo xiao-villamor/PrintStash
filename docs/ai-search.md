@@ -112,7 +112,7 @@ candidate and result bounds. New consumers need no SimilarityRun or model files
 to use these contracts. A source hash change invalidates that unit's old vector.
 
 Native indexes are optional (`VAULT_SEARCH_NATIVE_VECTORS_ENABLED`, default false).
-SQLite uses pinned sqlite-vec 0.1.6 from the `ai`/`full` extra; PostgreSQL probes
+SQLite uses pinned sqlite-vec 0.1.9 from the `ai`/`full` extra; PostgreSQL probes
 the actual vector type and HNSW DDL. Failed capabilities retain NumPy retrieval
 over durable floats. SQLite extension loading closes after both successful and
 failed sync/async connection setup. Only exact, generation-registered derivative

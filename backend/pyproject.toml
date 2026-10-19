@@ -34,7 +34,9 @@ dependencies = [
     "psycopg[binary]>=3.3,<4",
     "scipy>=1.18.1,<2",
     "SQLAlchemy>=2.0.52,<2.1",
-    "sqlmodel>=0.0.39,<0.1",
+    # 0.0.45 stores every datetime as DateTime(timezone=True) and rejects naive
+    # values: adopting it needs a TIMESTAMPTZ migration, not a version bump.
+    "sqlmodel>=0.0.39,<0.0.45",
     "starlette>=1.6,<2",
     "trimesh>=5.1.1,<6",
     "uvicorn[standard]>=0.52,<1",
