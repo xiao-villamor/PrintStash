@@ -47,6 +47,12 @@ manufacturing platform.
 
 ## Deployment
 
+- Connection-pool exhaustion reported in [#495](https://github.com/xiao-villamor/PrintStash/issues/495)
+  has not been reproduced. The 0.15.0 import scheduling and SQLite pool changes
+  mitigate likely contention, but do not establish a confirmed fix. Confirmation
+  requires the affected user's workload after upgrading; PostgreSQL keeps its
+  separate pool defaults.
+
 - Docker Compose is the recommended install path.
 - SQLite and local disk are the default path and the best-tested path for home
   installs.

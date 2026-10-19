@@ -49,6 +49,16 @@ POSTGRES = "postgresql://printstash:secret@db/printstash"
 _BUILD_ENGINE = work_bootstrap.build_engine
 
 
+def _findable(catalog: WorkCatalog) -> set[JobKind]:
+    """Definitions a startup pass could find work for, with no Job active:
+    those with a source (requested work has nothing to repair)."""
+    return {
+        name
+        for name, definition in catalog.definitions.items()
+        if definition.source is not None
+    }
+
+
 def _passes(engine) -> set[JobKind]:
     return {
         execution.submission.source
@@ -247,8 +257,28 @@ class TestStart:
         assert row.role == settings.process_role
         assert set(row.lanes.split(",")) == set(started.catalog.lanes)
 
-    def test_reconciles_every_definition_once(self, started, work_engine) -> None:
-        assert _passes(work_engine) == set(started.catalog.definitions)
+    def test_is_a_live_executor_before_its_engine_takes_work(
+        self, work_engine, work_catalog, monkeypatch
+    ) -> None:
+        # Other processes rerun an execution whose executor is not proven
+        # alive, and the engine dequeues as soon as it launches.
+        seen_at_launch: list[set[str]] = []
+        launch = work_engine.launch
+
+        def observed(*, listen_lanes):
+            seen_at_launch.append(executors.live_ids())
+            launch(listen_lanes=listen_lanes)
+
+        monkeypatch.setattr(work_engine, "launch", observed)
+
+        work_bootstrap.start(engine=work_engine, catalog=work_catalog)
+        try:
+            assert executors.executor_id() in seen_at_launch[0]
+        finally:
+            work_bootstrap.stop()
+
+    def test_reconciles_every_definition_with_work_to_find_once(self, started, work_engine) -> None:
+        assert _passes(work_engine) == _findable(started.catalog)
 
     def test_startup_passes_are_backfill(self, started, work_engine) -> None:
         # So an upload arriving during startup is not queued behind them.
@@ -455,6 +485,23 @@ class TestStart:
         finally:
             work_bootstrap.stop()
 
+    def test_registers_again_when_its_row_is_gone(
+        self, work_engine, work_catalog, db_session: Session
+    ) -> None:
+        # A restored snapshot that never held this worker drops its row; other
+        # processes would rerun the work of an executor they cannot see.
+        _overlay["fence_heartbeat_seconds"] = 1
+        work_bootstrap.start(engine=work_engine, catalog=work_catalog)
+        try:
+            db_session.delete(db_session.get(WorkExecutor, executors.executor_id()))
+            db_session.commit()
+            deadline = time.monotonic() + 5
+            while executors.executor_id() not in executors.live_ids():
+                assert time.monotonic() < deadline, "never registered again"
+                time.sleep(0.1)
+        finally:
+            work_bootstrap.stop()
+
 
 class TestStop:
     def test_releases_the_fences_this_executor_held(
@@ -515,8 +562,27 @@ class TestAfterRestore:
 
         # The restored database is authoritative; what it owes is resubmitted.
         assert not before & set(work_engine.executions)
-        assert _passes(work_engine) == set(started.catalog.definitions)
+        assert _passes(work_engine) == _findable(started.catalog)
         assert db_session.get(WorkExecutor, executors.executor_id()) is not None
+
+    def test_is_a_live_executor_before_its_engine_relaunches(
+        self, started, work_engine, db_session: Session, monkeypatch
+    ) -> None:
+        # The restored snapshot need not hold this executor's row.
+        db_session.delete(db_session.get(WorkExecutor, executors.executor_id()))
+        db_session.commit()
+        seen_at_launch: list[set[str]] = []
+        launch = work_engine.launch
+
+        def observed(*, listen_lanes):
+            seen_at_launch.append(executors.live_ids())
+            launch(listen_lanes=listen_lanes)
+
+        monkeypatch.setattr(work_engine, "launch", observed)
+
+        work_bootstrap.after_restore()
+
+        assert executors.executor_id() in seen_at_launch[0]
 
     def test_a_pass_the_snapshot_shows_queued_does_not_suppress_reconciling(
         self, started, work_engine, db_session: Session
@@ -553,7 +619,7 @@ class TestAfterRestore:
             work_bootstrap.after_restore()
 
             assert work_bootstrap.current() is not None
-            assert _passes(work_engine) == set(work_catalog.definitions)
+            assert _passes(work_engine) == _findable(work_catalog)
         finally:
             work_bootstrap.stop()
 
@@ -587,7 +653,7 @@ class TestHeldWork:
             assert work_bootstrap.release_held() is True
 
             assert work_bootstrap.current() is not None
-            assert _passes(work_engine) == set(work_catalog.definitions)
+            assert _passes(work_engine) == _findable(work_catalog)
         finally:
             work_bootstrap.stop()
 
@@ -687,3 +753,6 @@ class TestAdditionDeclarations:
         self, kind: JobKind, waits: bool
     ) -> None:
         assert self._declared()[kind].waits_for_additions is waits
+
+    def test_search_projection_waits_for_additions(self) -> None:
+        assert self._declared()[JobKind.SEARCH_PROJECT].waits_for_additions

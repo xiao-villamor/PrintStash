@@ -12,6 +12,7 @@ Applications reads directly.
 | Runtipi | `runtipi/printstash/` | `environment`, with required install-form fields, so the owner exists before the app serves a request |
 | Umbrel | `umbrel/printstash/` | `environment`, with Umbrel's per-app credentials (`defaultUsername`, `deterministicPassword`) shown on the app's page |
 | CasaOS / ZimaOS | `casaos/PrintStash/` | `trusted_network` by default; set `VAULT_SETUP_MODE=environment` and fill the fields to provision instead |
+| Cosmos Cloud | `cosmos/PrintStash/` | `environment`, from required install-dialog fields: Cosmos terminates TLS and proxies every app, so browser registration through it is refused |
 
 All of them map the store's form or credentials to `VAULT_SETUP_ADMIN_*`, which
 creates the administrator once at first start (see
@@ -21,7 +22,7 @@ administrator then signs in and chooses storage in the browser.
 `VAULT_SETUP_MODE` names which door each store uses, and PrintStash checks the mode
 and the credentials together (see
 [first use](../docs/first-run.md#an-administrator-from-the-deployment)). Where
-the store always supplies the credentials (Runtipi, Umbrel) the mode is
+the store always supplies the credentials (Runtipi, Umbrel, Cosmos) the mode is
 `environment`: the owner exists before the first request and the browser has no
 door. Where the fields may be blank (CasaOS, Unraid) the default is
 `trusted_network`, browser registration from the local network; switching to
@@ -94,6 +95,46 @@ in a checkout of the fork; they are the store's own contract.
    whether it is a new app or an update and how it was validated. The store's CI
    validates compose files too.
 
+### Cosmos Cloud: pull request to `azukaar/cosmos-servapps-official`
+
+The Cosmos market is a repository, and an app is a folder under `servapps/<AppName>/`
+holding `description.json`, `cosmos-compose.json`, `icon.png` and a `screenshots/`
+directory (the store's build crashes without one). `catalogues/cosmos/PrintStash/` is
+that folder, so a submission is a copy and, on each release, a version bump.
+
+1. Fork and branch: `gh repo fork azukaar/cosmos-servapps-official --clone`, then
+   `git switch -c printstash-X.Y.Z`.
+2. Copy the package: `cp -r catalogues/cosmos/PrintStash <checkout>/servapps/PrintStash`.
+3. **Every release:** bump `image` in `cosmos-compose.json` to the new tag. The
+   manifest carries no version of its own; the image tag is what the store's CI
+   reads.
+4. **When the shots change:** refresh `screenshots/` from the repository's own
+   `screenshots/` (the package ships `1.png`, `2.png` and `3.png`, copied from
+   `01-vault-overview.png`, `03-gcode-viewer.png` and `02-model-detail.png`), and
+   re-render `icon.png` from [`icon.svg`](../icon.svg) at 256×256.
+5. Validate with the store's own validator before opening the PR:
+   `npm install && node .github/scripts/validate-servapps.js PrintStash`. It renders
+   the template with whiskers, the engine Cosmos installs with, checks the schema,
+   fetches the image to confirm the announced architectures, and rejects a
+   `minVersion` lower than the fields the template uses.
+6. Open the PR saying whether it is a new app or an update and how it was validated.
+   The store's CI runs the same validator on the diff, and a merge to `master`
+   rebuilds the store that the Cosmos marketplace reads.
+
+The manifest is deliberately plain JSON: it uses no whiskers conditionals, so the
+file in this repository is the template the store renders, with placeholders only
+ever replacing whole string values. `minVersion` is `0.8.0`, the version that covers
+the install form, `post-install` messages and `{Passwords.N}`; nothing in the
+template needs a newer Cosmos. The route carries no Cosmos auth because PrintStash
+has its own accounts and the install dialog creates the first one, the same choice
+Umbrel records as `PROXY_AUTH_ADD: "false"`.
+
+The image stays pinned to a release tag and `cosmos-auto-update` is `false` on
+purpose. Cosmos can only check for updates on a moving tag such as `latest`, and a
+PrintStash release can require an upgrade step (see [`UPGRADE.md`](../UPGRADE.md)),
+so the store listing follows releases the same way the Umbrel and CasaOS listings
+do: the image moves when the manifest is updated here and a store PR lands.
+
 ### Runtipi: the PrintStash app store
 
 Runtipi's official store no longer accepts new applications, so PrintStash
@@ -117,11 +158,12 @@ app.
 ### Before a first submission
 
 Install each manifest on a real host from your own fork or store first: Runtipi
-custom app stores, Umbrel community app stores and CasaOS custom store URLs all
-accept one. Confirm the whole first run: the owner signs in, is sent to the storage
-step, chooses storage and uploads a model. Behind each store's proxy is where
-`Host` handling is decided, and CI cannot see it.
+custom app stores, Umbrel community app stores, CasaOS custom store URLs and
+Cosmos third-party stores all accept one. Confirm the whole first run: the owner
+signs in, is sent to the storage step, chooses storage and uploads a model. Behind
+each store's proxy is where `Host` handling is decided, and CI cannot see it.
 
 The ports in `config.json` (Runtipi), `umbrel-app.yml` (Umbrel) and the published
 port in the CasaOS compose file are host ports that must be unique within each
-store; a store reviewer may assign different ones.
+store; a store reviewer may assign different ones. Cosmos publishes no host port:
+its route proxies to container port `3000`.

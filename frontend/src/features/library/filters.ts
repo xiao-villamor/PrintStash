@@ -1,3 +1,4 @@
+import { uiText, type MessageKey } from "@/lib/locale";
 import { historyFilters, historyKeys } from "@/lib/search-filters";
 import type { ListModelsParams, SavedViewFilters } from "@/types";
 import { readLibraryLocation, type LibraryLocation } from "./url";
@@ -14,6 +15,23 @@ export const structuredLibraryFilterKeys = [
   "has_similar_candidates",
 ] as const;
 export type StructuredLibraryFilterKey = (typeof structuredLibraryFilterKeys)[number];
+
+/** The name a filter goes by, in the Model filters panel and on its active chip alike. */
+const structuredLibraryFilterLabels = {
+  file_type: "File type",
+  material_type: "Material",
+  slicer_name: "Slicer",
+  printer_model: "Printer model",
+  revision_status: "Revision",
+  print_outcome: "Print outcome",
+  storage: "Storage",
+  printed: "Printed",
+  has_similar_candidates: "similarity.hasCandidates",
+} as const satisfies Record<StructuredLibraryFilterKey, MessageKey>;
+
+export function structuredLibraryFilterLabel(key: StructuredLibraryFilterKey): string {
+  return uiText(structuredLibraryFilterLabels[key]);
+}
 
 const arrayKeys = [
   "file_type",

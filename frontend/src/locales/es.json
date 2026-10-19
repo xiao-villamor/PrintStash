@@ -2572,6 +2572,7 @@
   "Resume upload": "Reanudar carga",
   "Cancel upload": "Cancelar carga",
   "Upload cancelled": "Carga cancelada",
+  "{value1} is {value2}, more than this server accepts in one upload. An administrator can raise the limit with VAULT_MAX_UPLOAD_MB and NGINX_CLIENT_MAX_BODY_SIZE.": "{value1} ocupa {value2}, más de lo que este servidor acepta en una carga. Un administrador puede aumentar el límite con VAULT_MAX_UPLOAD_MB y NGINX_CLIENT_MAX_BODY_SIZE.",
   "Choose the same file that started this upload.": "Elige el mismo archivo con el que inició esta carga.",
   "This upload expired. Start it again.": "Esta carga ha caducado. Iníciala de nuevo.",
   "This upload changed elsewhere. Refresh and try again.": "Esta carga cambió en otro lugar. Actualiza e inténtalo de nuevo.",
@@ -4433,7 +4434,7 @@
   "tessellation_incomplete": "Este archivo STEP no se pudo convertir a una malla.",
   "source_unavailable": "No se pudo leer el archivo de origen. Comprueba que su almacenamiento es accesible.",
   "component_unavailable": "No se pudo leer el archivo de origen. Comprueba que su almacenamiento es accesible.",
-  "invalid_source": "No se pudo leer el archivo de origen. Comprueba que su almacenamiento es accesible.",
+  "invalid_source": "Este archivo no se pudo leer como un modelo 3D válido. Puede estar dañado o incompleto.",
   "Listing the remote source · {found} files found · {where} · continues in background": "Listando el origen remoto · {found} archivos encontrados · {where} · continúa en segundo plano",
   "discovering": "listando",
   "Preparing previews": "Preparando vistas previas",
@@ -4459,5 +4460,5 @@
   "Mesh measurements, thumbnails, viewer conversion, and similarity work run with bounded native workers and durable cancellation, retry, and publication authority": "Las mediciones de mallas, las miniaturas, la conversión para el visor y el análisis de similitud usan workers nativos limitados, con cancelación persistente, reintentos y control de publicación",
   "Library, search, thumbnails, and uploads use fewer repeated reads and writes, with bounded caches and explicit recovery from competing edits": "La biblioteca, las búsquedas, las miniaturas y las subidas repiten menos lecturas y escrituras, usan cachés limitadas y permiten recuperarse explícitamente de ediciones simultáneas",
   "Storage insights separate local and remote locations, while Trash supports selecting several Models to restore or permanently delete": "La información del almacenamiento distingue las ubicaciones locales de las remotas, y la papelera permite seleccionar varios Modelos para restaurarlos o eliminarlos definitivamente",
-  "Upgrade all API and worker processes together: DBOS moves to 3.0, and source installs require Python 3.14 or newer; see UPGRADE.md": "Actualiza juntos todos los procesos de API y workers: DBOS pasa a 3.0 y las instalaciones desde el código fuente requieren Python 3.14 o posterior. Consulta UPGRADE.md"
+  "Back up before upgrading: every model file is re-derived, which can keep a 4 GB NAS busy for hours; rollback requires restoring the pre-upgrade backup. Upgrade all API and workers together for DBOS 3.0; source installs require Python 3.14 or newer. See UPGRADE.md": "Haz una copia de seguridad antes de actualizar: se vuelven a procesar todos los archivos de modelos, lo que puede mantener ocupado un NAS de 4 GB durante horas; para volver atrás hay que restaurar la copia anterior. Actualiza juntos la API y todos los workers para DBOS 3.0; las instalaciones desde el código fuente requieren Python 3.14 o posterior. Consulta UPGRADE.md"
 }

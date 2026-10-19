@@ -42,12 +42,13 @@ import {
   narrowsLibrary,
   sameLibraryFilters,
   structuredLibraryFilterKeys as STRUCTURED_FILTER_KEYS,
+  structuredLibraryFilterLabel,
   type StructuredLibraryFilterKey as StructuredFilterKey,
 } from "@/features/library/filters";
 
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
 
-import { knownUiText, uiText, type MessageKey } from "@/lib/locale";
+import { uiText, type MessageKey } from "@/lib/locale";
 import { getErrorMessage, parseApiError, userMessage } from "@/lib/errors";
 import { filterValueText } from "@/lib/filter-labels";
 
@@ -1292,6 +1293,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   // survives load-more and search; backend per-model RBAC makes cross-collection
   // selections safe. We clear it when navigating folders (see below) so a hidden
   // off-screen selection doesn't linger.
+
+  function toggleStructuredFilters() {
+    startup.request("filters");
+    setFiltersExpanded(
+      (current) => !(current ?? activeFilterItems.length > Number(!!query.trim())),
+    );
+  }
+
   const showLibraryTools = libraryToolsOpen;
 
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -1955,7 +1964,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
       const values = structured[key];
       for (const value of values) {
         items.push({
-          label: `${knownUiText(key)}: ${filterValueText(key, value)}`,
+          label: `${structuredLibraryFilterLabel(key)}: ${filterValueText(key, value)}`,
           onRemove: () =>
             setStructuredFilter(
               key,
@@ -1982,7 +1991,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   if (authority.authorizationChanged || thumbnails.authorizationChanged)
     return (
       <div aria-busy="true">
-        <ModelGridSkeleton />
+        <ModelGridSkeleton compact={compact} />
       </div>
     );
 
@@ -2160,7 +2169,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
         <main
           ref={startupContent}
           aria-busy={reading.status === "restoring"}
-          className="flex-1 overflow-y-auto bg-background flex flex-col relative pb-24 md:pb-0"
+          className="@container/library relative flex min-w-0 flex-1 flex-col overflow-y-auto bg-background pb-24 md:pb-0"
           onDragEnter={onMainDragEnter}
           onDragOver={onMainDragOver}
           onDragLeave={onMainDragLeave}
@@ -2174,21 +2183,22 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             </div>
           )}
           {/* Breadcrumb */}
-          <nav className="px-4 sm:px-6 py-3 bg-background border-b border-border flex items-center space-x-2 text-sm tracking-tight">
+          <nav className="flex min-w-0 items-center gap-2 border-b border-border bg-background px-4 py-2.5 text-sm tracking-tight sm:px-6">
             {breadcrumbs.length > 0 ? (
               <>
                 <button
                   onClick={() => handleCollectionChange(null)}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
+                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
                 >
                   {uiText("All Models")}
                 </button>
                 {breadcrumbs.map((crumb) => (
-                  <span key={crumb.id} className="flex items-center space-x-2">
-                    <ChevronRight className="h-3 w-3 text-muted-foreground/40" />
+                  <span key={crumb.id} className="flex min-w-0 items-center gap-2">
+                    <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground/40" />
                     <button
                       onClick={() => handleCollectionChange(crumb.path)}
-                      className="text-foreground font-medium"
+                      className="min-w-0 truncate font-medium text-foreground"
+                      title={crumb.name}
                     >
                       {crumb.name}
                     </button>
@@ -2205,6 +2215,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             )}
             {availableRecentFolders.length > 0 && (
               <DropdownMenu
+                className="ml-auto shrink-0"
                 open={recentFoldersOpen}
                 onOpenChange={setRecentFoldersOpen}
                 align="start"
@@ -2214,10 +2225,12 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     data-menu-trigger
                     aria-haspopup="menu"
                     aria-expanded={recentFoldersOpen}
+                    aria-label={uiText("Recent")}
                     onClick={() => setRecentFoldersOpen(!recentFoldersOpen)}
                     className="ml-auto flex items-center gap-1.5 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                   >
-                    <History className="h-3.5 w-3.5" /> {ui("Recent")}
+                    <History className="h-3.5 w-3.5" aria-hidden />
+                    <span className="hidden sm:inline">{ui("Recent")}</span>
                   </button>
                 }
                 contentClassName="w-64 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
@@ -2255,325 +2268,293 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             )}
           </nav>
 
-          {/* Content Top Bar */}
-          <div className="sticky top-0 z-40 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6 sm:py-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <div className="flex min-w-0 items-start justify-between gap-3 sm:block">
-                <div className="min-w-0 flex-1 space-y-1">
-                  <h1 className="break-words text-lg font-bold tracking-tight text-foreground sm:truncate sm:text-2xl">
-                    {selectedName ?? uiText("All Models")}
-                  </h1>
-                  <p className="text-sm text-muted-foreground">
-                    {loading
-                      ? uiText("Loading...")
-                      : uiText(selectedName ? "counts.collectionItems" : "counts.items", {
-                          count: displayCount,
-                        })}
-                    {refreshing && (
-                      <span className="ml-2 font-mono text-xs text-muted-foreground">
-                        {uiText("Updating...")}
-                      </span>
-                    )}
-                  </p>
-                </div>
-                <Button
-                  onClick={() => {
-                    setDropPreload(null);
-                    setDropCollection(null);
-                    setUploadOpen(true);
-                  }}
-                  disabled={!canUploadToVault}
-                  title={
-                    canUploadToVault
-                      ? uiText("Upload artifacts")
-                      : uiText("Sign in and get edit access to upload")
-                  }
-                  className="shrink-0 sm:hidden"
-                >
-                  {uiText("Upload")}
-                </Button>
+          {/* The pane owns breakpoints: an open outliner also consumes horizontal room. */}
+          <div className="sticky top-0 z-40 flex flex-col gap-3 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:px-6">
+            <div className="flex min-w-0 items-start justify-between gap-4">
+              <div className="min-w-0 flex-1 space-y-1">
+                <h1 className="break-words text-lg font-bold tracking-tight text-foreground sm:text-2xl">
+                  {selectedName ?? uiText("All Models")}
+                </h1>
+                <p className="text-sm text-muted-foreground">
+                  {loading
+                    ? uiText("Loading...")
+                    : uiText(selectedName ? "counts.collectionItems" : "counts.items", {
+                        count: displayCount,
+                      })}
+                  {refreshing && (
+                    <span className="ml-2 font-mono text-xs text-muted-foreground">
+                      {uiText("Updating...")}
+                    </span>
+                  )}
+                </p>
               </div>
-
-              <div className="flex w-full min-w-0 flex-col gap-3 sm:w-auto sm:flex-row sm:items-center sm:justify-end">
-                <div className="grid w-full min-w-0 grid-cols-3 gap-2 sm:hidden">
+              <Button
+                onClick={() => {
+                  setDropPreload(null);
+                  setDropCollection(null);
+                  setUploadOpen(true);
+                }}
+                disabled={!canUploadToVault}
+                title={
+                  canUploadToVault
+                    ? uiText("Upload artifacts")
+                    : uiText("Sign in and get edit access to upload")
+                }
+                className="shrink-0 @3xl/library:h-8 @3xl/library:text-xs"
+              >
+                {uiText("Upload")}
+              </Button>
+            </div>
+            <div className="grid w-full min-w-0 grid-cols-3 gap-2 @3xl/library:hidden">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={openDrawer}
+                className="w-full min-w-0 px-2 md:hidden"
+              >
+                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+                <span className="min-w-0 truncate">{uiText("Filters")}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={toggleStructuredFilters}
+                aria-expanded={filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())}
+                className="hidden w-full min-w-0 px-2 md:inline-flex"
+              >
+                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+                <span className="min-w-0 truncate">{uiText("Filters")}</span>
+              </Button>
+              <SortMenu
+                open={sortOpen}
+                onOpenChange={setSortOpen}
+                sortKey={sortKey}
+                onSelect={selectSort}
+                labelFor={ui}
+                triggerSize="sm"
+                triggerClassName="h-10 w-full min-w-0 px-2 text-xs"
+                wrapperClassName="min-w-0"
+              />
+              <DropdownMenu
+                open={moreOpen}
+                onOpenChange={setMoreOpen}
+                align="end"
+                className="min-w-0"
+                trigger={
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={openDrawer}
+                    data-menu-trigger
+                    aria-haspopup="menu"
+                    aria-expanded={moreOpen}
+                    aria-label={t("nav.more")}
+                    onClick={() => setMoreOpen(!moreOpen)}
                     className="w-full min-w-0 px-2"
                   >
-                    <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                    <span className="min-w-0 truncate">{uiText("Filters")}</span>
+                    <MoreHorizontal className="h-4 w-4 shrink-0" />
+                    <span className="min-w-0 flex-1 truncate">{t("nav.more")}</span>
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   </Button>
-                  <SortMenu
-                    open={sortOpen}
-                    onOpenChange={setSortOpen}
-                    sortKey={sortKey}
-                    onSelect={selectSort}
-                    labelFor={ui}
-                    triggerSize="sm"
-                    triggerClassName="h-10 w-full min-w-0 px-2 text-xs"
-                    wrapperClassName="min-w-0"
-                  />
-                  <DropdownMenu
-                    open={moreOpen}
-                    onOpenChange={setMoreOpen}
-                    align="end"
-                    className="min-w-0"
-                    trigger={
-                      <Button
-                        type="button"
-                        variant="outline"
-                        data-menu-trigger
-                        aria-haspopup="menu"
-                        aria-expanded={moreOpen}
-                        aria-label={t("nav.more")}
-                        onClick={() => setMoreOpen(!moreOpen)}
-                        className="w-full min-w-0 px-2"
-                      >
-                        <MoreHorizontal className="h-4 w-4 shrink-0" />
-                        <span className="min-w-0 flex-1 truncate">{t("nav.more")}</span>
-                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      </Button>
-                    }
-                    contentClassName="w-64 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-                  >
-                    <Button
-                      variant="ghost"
-                      role="menuitem"
-                      className="w-full justify-start"
-                      onClick={() => {
-                        setLibraryToolsOpen(!showLibraryTools);
-                        setMoreOpen(false);
-                      }}
-                    >
-                      <SlidersHorizontal className="h-4 w-4" aria-hidden />
-                      {t("vault.libraryTools")}
-                    </Button>
-                    {docView === "models" && (
-                      <Button
-                        variant="ghost"
-                        role="menuitem"
-                        className="w-full justify-start"
-                        disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
-                        onClick={() => {
-                          setMoreOpen(false);
-                          setMultipartCreateOpen(true);
-                        }}
-                      >
-                        <Plus className="h-4 w-4" aria-hidden />
-                        {t("multipart.new")}
-                      </Button>
-                    )}
-                    {auth.isAuthenticated && (
-                      <>
-                        <button
-                          type="button"
-                          role="menuitemcheckbox"
-                          aria-checked={favoritesOnly}
-                          onClick={() => {
-                            toggleFavorites();
-                            setMoreOpen(false);
-                          }}
-                          className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${favoritesOnly ? "bg-accent text-accent-foreground" : ""}`}
-                        >
-                          <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />
-                          <span className="flex-1">{uiText("Favorites")}</span>
-                          {favoritesOnly && <Check className="h-3.5 w-3.5" />}
-                        </button>
-                        <SavedViewSelector
-                          key={savedViewsOwner.session}
-                          readState={savedViewReadState}
-                          views={savedViews}
-                          activeId={activeSavedViewId}
-                          modified={savedViewModified}
-                          onSelect={(view) => {
-                            applySavedView(view);
-                            setMoreOpen(false);
-                          }}
-                          onCreate={() => {
-                            setMoreOpen(false);
-                            openSaveView();
-                          }}
-                          onUpdate={(view) =>
-                            manageSavedView(
-                              {
-                                kind: "update",
-                                id: view.id,
-                                payload: { filters: currentFilters },
-                              },
-                              "savedView.updateSuccess",
-                            )
-                          }
-                          onRename={(view, name) =>
-                            manageSavedView(
-                              { kind: "update", id: view.id, payload: { name } },
-                              "savedView.renameSuccess",
-                            )
-                          }
-                          onDuplicate={(view) =>
-                            manageSavedView(
-                              {
-                                kind: "create",
-                                name: duplicateViewName(view.name),
-                                filters: effectiveLibraryView(view.filters, canViewPrinters),
-                              },
-                              "savedView.duplicateSuccess",
-                            )
-                          }
-                          onDelete={(view) =>
-                            manageSavedView(
-                              { kind: "delete", id: view.id },
-                              "savedView.deleteSuccess",
-                            )
-                          }
-                          triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
-                          triggerRole="menuitem"
-                          triggerSize="sm"
-                          triggerVariant="ghost"
-                        />
-                        <button
-                          type="button"
-                          role="menuitemcheckbox"
-                          aria-checked={selectMode}
-                          title={uiText("Select Models and folders (S)")}
-                          onClick={() => {
-                            toggleSelectMode();
-                            setMoreOpen(false);
-                          }}
-                          className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectMode ? "bg-accent text-accent-foreground" : ""}`}
-                        >
-                          <CheckSquare className="h-4 w-4" />
-                          <span className="flex-1">
-                            {selectMode ? uiText("Done") : uiText("Select")}
-                          </span>
-                          {selectMode && <Check className="h-3.5 w-3.5" />}
-                        </button>
-                      </>
-                    )}
-                    <DisplayMenu
-                      open={displayOpen}
-                      onOpenChange={setDisplayOpen}
-                      viewMode={viewMode}
-                      compact={compact}
-                      onSelectMode={selectViewMode}
-                      onSelectDensity={selectDensity}
-                      labelFor={ui}
-                      triggerSize="sm"
-                      triggerVariant="ghost"
-                      triggerRole="menuitem"
-                      triggerClassName="w-full justify-start"
-                      onSelectComplete={() => setMoreOpen(false)}
-                    />
-                  </DropdownMenu>
-                </div>
-
-                <div className="hidden w-full flex-wrap items-center gap-2 sm:flex sm:w-auto">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={openDrawer}
-                    className="h-10 md:hidden sm:h-8"
-                  >
-                    <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                    {uiText("Filters")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    className="hidden h-8 md:inline-flex"
-                    aria-label={uiText("Filters")}
-                    aria-expanded={
-                      filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())
-                    }
-                    onClick={() => {
-                      startup.request("filters");
-                      setFiltersExpanded(
-                        !(filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())),
-                      );
-                    }}
-                  >
-                    <SlidersHorizontal className="h-4 w-4" aria-hidden />
-                    {uiText("Filters")}
-                    {activeFilterItems.length > Number(!!query.trim()) && (
-                      <span className="font-mono tabular-nums">
-                        {activeFilterItems.length - Number(!!query.trim())}
-                      </span>
-                    )}
-                  </Button>
-                  <Button
-                    size="xs"
-                    onClick={() => {
-                      setDropPreload(null);
-                      setDropCollection(null);
-                      setUploadOpen(true);
-                    }}
-                    disabled={!canUploadToVault}
-                    title={
-                      canUploadToVault
-                        ? uiText("Upload artifacts")
-                        : uiText("Sign in and get edit access to upload")
-                    }
-                    className="h-10 sm:h-8"
-                  >
-                    {uiText("Upload")}
-                  </Button>
-                  {docView === "models" && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="xs"
-                      onClick={() => setMultipartCreateOpen(true)}
-                      disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
-                      title={
-                        user?.is_superuser || canWriteCollection(selectedCollectionRow)
-                          ? undefined
-                          : t("multipart.editAccess")
-                      }
-                      className="h-10 sm:h-8"
-                    >
-                      <Plus className="h-4 w-4" aria-hidden />
-                      {t("multipart.new")}
-                    </Button>
-                  )}
-                </div>
+                }
+                contentClassName="w-64 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+              >
                 <Button
-                  variant={showLibraryTools ? "secondary" : "outline"}
-                  size="xs"
-                  className="hidden h-8 sm:inline-flex"
-                  aria-expanded={showLibraryTools}
-                  aria-controls="library-tools"
-                  aria-label={t("vault.libraryTools")}
-                  onClick={() => setLibraryToolsOpen(!showLibraryTools)}
+                  variant="ghost"
+                  role="menuitem"
+                  className="w-full justify-start"
+                  onClick={() => {
+                    setLibraryToolsOpen(!showLibraryTools);
+                    setMoreOpen(false);
+                  }}
                 >
                   <SlidersHorizontal className="h-4 w-4" aria-hidden />
                   {t("vault.libraryTools")}
                 </Button>
-                <div className="hidden h-6 w-px bg-muted mx-1 md:block" />
-                <div className="hidden w-full flex-wrap items-center gap-2 border-t border-border pt-3 sm:flex sm:w-auto sm:border-t-0 sm:pt-0">
-                  <SortMenu
-                    open={sortOpen}
-                    onOpenChange={setSortOpen}
-                    sortKey={sortKey}
-                    onSelect={selectSort}
-                    labelFor={ui}
-                    triggerSize="xs"
-                    triggerClassName="h-10 sm:h-8"
-                  />
-                  <DisplayMenu
-                    open={displayOpen}
-                    onOpenChange={setDisplayOpen}
-                    viewMode={viewMode}
-                    compact={compact}
-                    onSelectMode={selectViewMode}
-                    onSelectDensity={selectDensity}
-                    labelFor={ui}
-                    triggerSize="xs"
-                    triggerClassName="h-10 sm:h-8"
-                  />
-                </div>
+                {docView === "models" && (
+                  <Button
+                    variant="ghost"
+                    role="menuitem"
+                    className="w-full justify-start"
+                    disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+                    onClick={() => {
+                      setMoreOpen(false);
+                      setMultipartCreateOpen(true);
+                    }}
+                  >
+                    <Plus className="h-4 w-4" aria-hidden />
+                    {t("multipart.new")}
+                  </Button>
+                )}
+                {auth.isAuthenticated && (
+                  <>
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={favoritesOnly}
+                      onClick={() => {
+                        toggleFavorites();
+                        setMoreOpen(false);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${favoritesOnly ? "bg-accent text-accent-foreground" : ""}`}
+                    >
+                      <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />
+                      <span className="flex-1">{uiText("Favorites")}</span>
+                      {favoritesOnly && <Check className="h-3.5 w-3.5" />}
+                    </button>
+                    <SavedViewSelector
+                      key={savedViewsOwner.session}
+                      readState={savedViewReadState}
+                      views={savedViews}
+                      activeId={activeSavedViewId}
+                      modified={savedViewModified}
+                      onSelect={(view) => {
+                        applySavedView(view);
+                        setMoreOpen(false);
+                      }}
+                      onCreate={() => {
+                        setMoreOpen(false);
+                        openSaveView();
+                      }}
+                      onUpdate={(view) =>
+                        manageSavedView(
+                          {
+                            kind: "update",
+                            id: view.id,
+                            payload: { filters: currentFilters },
+                          },
+                          "savedView.updateSuccess",
+                        )
+                      }
+                      onRename={(view, name) =>
+                        manageSavedView(
+                          { kind: "update", id: view.id, payload: { name } },
+                          "savedView.renameSuccess",
+                        )
+                      }
+                      onDuplicate={(view) =>
+                        manageSavedView(
+                          {
+                            kind: "create",
+                            name: duplicateViewName(view.name),
+                            filters: effectiveLibraryView(view.filters, canViewPrinters),
+                          },
+                          "savedView.duplicateSuccess",
+                        )
+                      }
+                      onDelete={(view) =>
+                        manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
+                      }
+                      triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
+                      triggerRole="menuitem"
+                      triggerSize="sm"
+                      triggerVariant="ghost"
+                    />
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      aria-checked={selectMode}
+                      title={uiText("Select Models and folders (S)")}
+                      onClick={() => {
+                        toggleSelectMode();
+                        setMoreOpen(false);
+                      }}
+                      className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${selectMode ? "bg-accent text-accent-foreground" : ""}`}
+                    >
+                      <CheckSquare className="h-4 w-4" />
+                      <span className="flex-1">
+                        {selectMode ? uiText("Done") : uiText("Select")}
+                      </span>
+                      {selectMode && <Check className="h-3.5 w-3.5" />}
+                    </button>
+                  </>
+                )}
+                <DisplayMenu
+                  open={displayOpen}
+                  onOpenChange={setDisplayOpen}
+                  viewMode={viewMode}
+                  compact={compact}
+                  onSelectMode={selectViewMode}
+                  onSelectDensity={selectDensity}
+                  labelFor={ui}
+                  triggerSize="sm"
+                  triggerVariant="ghost"
+                  triggerRole="menuitem"
+                  triggerClassName="w-full justify-start"
+                  onSelectComplete={() => setMoreOpen(false)}
+                />
+              </DropdownMenu>
+            </div>
+            <div className="hidden min-w-0 flex-wrap items-center gap-2 @3xl/library:flex">
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="hidden h-8 md:inline-flex"
+                aria-label={uiText("Filters")}
+                aria-expanded={filtersExpanded ?? activeFilterItems.length > Number(!!query.trim())}
+                onClick={toggleStructuredFilters}
+              >
+                <SlidersHorizontal className="h-4 w-4" aria-hidden />
+                {uiText("Filters")}
+                {activeFilterItems.length > Number(!!query.trim()) && (
+                  <span className="font-mono tabular-nums">
+                    {activeFilterItems.length - Number(!!query.trim())}
+                  </span>
+                )}
+              </Button>
+
+              {docView === "models" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => setMultipartCreateOpen(true)}
+                  disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+                  title={
+                    user?.is_superuser || canWriteCollection(selectedCollectionRow)
+                      ? undefined
+                      : t("multipart.editAccess")
+                  }
+                  className="h-8"
+                >
+                  <Plus className="h-4 w-4" aria-hidden />
+                  {t("multipart.new")}
+                </Button>
+              )}
+
+              <Button
+                variant={showLibraryTools ? "secondary" : "outline"}
+                size="xs"
+                className="h-8"
+                aria-expanded={showLibraryTools}
+                aria-controls="library-tools"
+                aria-label={t("vault.libraryTools")}
+                onClick={() => setLibraryToolsOpen(!showLibraryTools)}
+              >
+                <SlidersHorizontal className="h-4 w-4" aria-hidden />
+                {t("vault.libraryTools")}
+              </Button>
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                <SortMenu
+                  open={sortOpen}
+                  onOpenChange={setSortOpen}
+                  sortKey={sortKey}
+                  onSelect={selectSort}
+                  labelFor={ui}
+                  triggerSize="xs"
+                  triggerClassName="h-8"
+                />
+                <DisplayMenu
+                  open={displayOpen}
+                  onOpenChange={setDisplayOpen}
+                  viewMode={viewMode}
+                  compact={compact}
+                  onSelectMode={selectViewMode}
+                  onSelectDensity={selectDensity}
+                  labelFor={ui}
+                  triggerSize="xs"
+                  triggerClassName="h-8"
+                />
               </div>
             </div>
           </div>
@@ -2582,7 +2563,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             <CollectionHeaderSkeleton />
           ) : (
             displayedCollection && (
-              <div className="space-y-3 border-b border-border px-4 py-3 sm:px-6">
+              <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-border px-4 py-2 sm:px-6">
                 <EntityTagsDialog
                   entityLabel={displayedCollection.name}
                   tags={displayedCollection.tags}
@@ -2905,7 +2886,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
 
               {loading ? (
                 viewMode === "grid" ? (
-                  <ModelGridSkeleton />
+                  <ModelGridSkeleton compact={compact} />
                 ) : (
                   <ModelListSkeleton />
                 )
@@ -2973,7 +2954,11 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   className={compact ? "p-3" : "p-4 sm:p-6"}
                 >
                   <div
-                    className={`${folderEntrance.move ? FOLDER_CARDS_CLASS[folderEntrance.move] : ""} grid grid-cols-1 ${compact ? "gap-2 sm:grid-cols-[repeat(auto-fill,minmax(260px,260px))]" : "gap-4 sm:grid-cols-[repeat(auto-fill,minmax(340px,340px))]"}`}
+                    className={cn(
+                      folderEntrance.move && FOLDER_CARDS_CLASS[folderEntrance.move],
+                      "grid",
+                      compact ? MODEL_GRID_LAYOUT.compact : MODEL_GRID_LAYOUT.comfortable,
+                    )}
                   >
                     {visibleCollections.map((collection) => (
                       <CollectionFolderCard
@@ -3582,21 +3567,26 @@ export function CollectionHeaderSkeleton() {
     <div
       role="status"
       aria-label={uiText("Loading…")}
-      className="space-y-3 border-b border-border px-4 py-3 sm:px-6"
+      className="flex flex-wrap items-center gap-4 border-b border-border px-4 py-2 sm:px-6"
     >
       <Skeleton className="h-8 w-28" />
-      <div className="border-b border-border px-4 py-4 sm:px-6">
-        <Skeleton className="h-5 w-72 max-w-full" />
-      </div>
+      <Skeleton className="h-8 w-60 max-w-full" />
     </div>
   );
 }
 
-export function ModelGridSkeleton() {
+const MODEL_GRID_LAYOUT = {
+  comfortable: "grid-cols-[repeat(auto-fill,minmax(min(100%,260px),1fr))] gap-4",
+  compact: "grid-cols-[repeat(auto-fill,minmax(min(100%,200px),1fr))] gap-2",
+};
+
+export function ModelGridSkeleton({ compact = false }: { compact?: boolean }) {
   useUiLocale();
   return (
-    <div className="p-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    <div role="status" aria-label={uiText("Loading...")} className={compact ? "p-3" : "p-4 sm:p-6"}>
+      <div
+        className={cn("grid", compact ? MODEL_GRID_LAYOUT.compact : MODEL_GRID_LAYOUT.comfortable)}
+      >
         {Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="space-y-3 rounded-lg border border-border p-3 bg-card">
             <Skeleton className="h-40 w-full rounded" />

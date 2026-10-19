@@ -392,58 +392,74 @@ class TestSearchPassages:
             assert session.get(SearchLexicalState, 1).document_count == 1
 
 
+@pytest.fixture
+def printed_history(passage_engine):
+    from datetime import datetime, timezone
+
+    from app.db.models import PrintJobState
+    from app.schemas.models import ModelFilters
+    from tests.factories import build_file, build_print_job, build_user
+
+    engine, config = passage_engine
+    command.upgrade(config, "head")
+    with Session(engine) as session:
+        actor = build_user(session, superuser=True)
+        same = build_model(session, "same job")
+        split = build_model(session, "split jobs")
+        for model, jobs in (
+            (same, [("2026-08-12", 100, PrintJobState.COMPLETED)]),
+            (
+                split,
+                [
+                    ("2026-08-12", 100, PrintJobState.FAILED),
+                    ("2026-08-13", 10800, PrintJobState.COMPLETED),
+                    ("2026-07-12", 100, PrintJobState.COMPLETED),
+                ],
+            ),
+        ):
+            file = build_file(session, model)
+            for date, duration, state in jobs:
+                build_print_job(
+                    session,
+                    file,
+                    state=state,
+                    finished_at=datetime.fromisoformat(date).replace(
+                        tzinfo=timezone.utc
+                    ),
+                    actual_duration_s=duration,
+                )
+        filters = ModelFilters(
+            printed_after="2026-08-01T00:00:00Z",
+            printed_before="2026-09-01T00:00:00Z",
+            print_duration_max_s=10800,
+            print_outcome=["completed"],
+        )
+        yield session, actor, same, filters
+
+
 class TestStructuredHistory:
-    def test_applies_joint_print_predicates_on_postgres(self, passage_engine):
-        from datetime import datetime, timezone
-
-        from app.db.models import Model, PrintJobState
-        from app.modules.library.model_views.facets import facets
+    def test_applies_joint_print_predicates_on_postgres(self, printed_history):
+        from app.db.models import Model
         from app.modules.library.model_views.filters import filtered_with_rank
-        from app.schemas.models import ModelFilters
-        from tests.factories import build_file, build_print_job, build_user
 
-        engine, config = passage_engine
-        command.upgrade(config, "head")
-        with Session(engine) as session:
-            actor = build_user(session, superuser=True)
-            same = build_model(session, "same job")
-            split = build_model(session, "split jobs")
-            for model, jobs in (
-                (same, [("2026-08-12", 100, PrintJobState.COMPLETED)]),
-                (
-                    split,
-                    [
-                        ("2026-08-12", 100, PrintJobState.FAILED),
-                        ("2026-08-13", 10800, PrintJobState.COMPLETED),
-                        ("2026-07-12", 100, PrintJobState.COMPLETED),
-                    ],
-                ),
-            ):
-                file = build_file(session, model)
-                for date, duration, state in jobs:
-                    build_print_job(
-                        session,
-                        file,
-                        state=state,
-                        finished_at=datetime.fromisoformat(date).replace(
-                            tzinfo=timezone.utc
-                        ),
-                        actual_duration_s=duration,
-                    )
-            filters = ModelFilters(
-                printed_after="2026-08-01T00:00:00Z",
-                printed_before="2026-09-01T00:00:00Z",
-                print_duration_max_s=10800,
-                print_outcome=["completed"],
-            )
-            statement, _ = filtered_with_rank(session, actor, filters)
-            assert session.exec(statement.with_only_columns(Model.id)).all() == [
-                same.id
-            ]
-            result = facets(session, actor, filters)
-            assert [(item.value, item.count) for item in result.print_outcome] == [
-                ("completed", 1)
-            ]
+        session, actor, same, filters = printed_history
+
+        statement, _ = filtered_with_rank(session, actor, filters)
+
+        assert session.exec(statement.with_only_columns(Model.id)).all() == [same.id]
+
+    def test_offers_sibling_print_outcomes_on_postgres(self, printed_history):
+        from app.modules.library.model_views.facets import facets
+
+        session, actor, _same, filters = printed_history
+
+        result = facets(session, actor, filters)
+
+        # Outcome selection widens its own group; time and duration remain joint.
+        assert [(item.value, item.count) for item in result.print_outcome] == [
+            ("completed", 1),
+            ("failed", 1),
+        ]
 
     def test_ranks_separate_sparse_postings_on_postgres(self, passage_engine):
         from app.modules.search import configuration
@@ -576,7 +592,9 @@ class TestProjectionLockOrder:
     and PostgreSQL aborts one of them: that was a failed upload.
     """
 
-    def test_a_concurrent_upload_commits_beside_a_projection_page(self, passage_engine, monkeypatch):
+    def test_a_concurrent_upload_commits_beside_a_projection_page(
+        self, passage_engine, monkeypatch
+    ):
         import threading
 
         from sqlalchemy import text

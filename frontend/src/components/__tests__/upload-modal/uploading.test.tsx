@@ -21,7 +21,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,6 +35,7 @@ import {
   listTasks,
   setJobSource,
   syncImportJobs,
+  taskDetail,
   startTaskCenterSessionScope,
 } from "@/lib/task-center";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
@@ -774,8 +775,34 @@ describe("UploadModal ingestion", () => {
           "failed",
         ),
       );
-      expect(listTasks().find((task) => task.title === "Upload oversized.zip")?.detail).toBe(
-        "upload_too_large",
+      expect(
+        taskDetail(listTasks().find((task) => task.title === "Upload oversized.zip")!),
+      ).toMatch(
+        /^oversized\.zip is .+, more than this server accepts in one upload\. .*VAULT_MAX_UPLOAD_MB/,
+      );
+    });
+
+    it("names the size limit when the proxy refuses the ZIP with its own page", async () => {
+      const user = userEvent.setup();
+      const { container } = renderUpload({
+        routes: {
+          "POST /api/v1/ingest/archive/inspect": () =>
+            new Response("<html><h1>413 Request Entity Too Large</h1></html>", {
+              status: 413,
+              headers: { "Content-Type": "text/html" },
+            }),
+        },
+      });
+      await user.click(screen.getByRole("button", { name: /\s*From ZIP\s*/ }));
+      await user.upload(fileInputs(container)[0], new File(["x"], "huge.zip"));
+
+      await user.click(screen.getByRole("button", { name: "Prepare ZIP" }));
+
+      await waitFor(() =>
+        expect(listTasks().find((task) => task.title === "Upload huge.zip")?.status).toBe("failed"),
+      );
+      expect(taskDetail(listTasks().find((task) => task.title === "Upload huge.zip")!)).toMatch(
+        /^huge\.zip is .+, more than this server accepts in one upload\./,
       );
     });
 
@@ -869,5 +896,141 @@ describe("UploadModal ingestion", () => {
         archiveTags: ["functional"],
       });
     });
+  });
+});
+
+describe("pending upload tags", () => {
+  async function beginTag(user: ReturnType<typeof userEvent.setup>, name = "spares") {
+    await user.type(
+      screen.getByPlaceholderText("Search or create — press Enter"),
+      `${name}{Enter}`,
+    );
+  }
+
+  it.each(["Files", "Bulk", "From URL", "From ZIP"])(
+    "waits for a new tag before submitting %s",
+    async (mode) => {
+      const user = userEvent.setup();
+      const pending = Promise.withResolvers<Response>();
+      const view = renderUpload({ routes: { "POST /api/v1/tags": () => pending.promise } });
+      if (mode !== "Files")
+        await user.click(screen.getByRole("button", { name: new RegExp(`^\\s*${mode}\\s*$`) }));
+      if (mode === "From URL")
+        await user.type(
+          screen.getByPlaceholderText(/Model page, collection/),
+          "https://example.test/model",
+        );
+      else
+        await user.upload(
+          fileInputs(view.container)[0],
+          new File(["x"], mode === "From ZIP" ? "parts.zip" : "cube.stl"),
+        );
+      const submit = screen.getByRole("button", {
+        name: /^(Upload to vault|Upload \d+ models?|Review URL|Prepare ZIP)$/,
+      });
+      await waitFor(() => expect(submit).toBeEnabled());
+      try {
+        await beginTag(user);
+        expect(submit).toBeDisabled();
+        await act(async () =>
+          pending.resolve(json(aTag({ id: 9, name: "spares", slug: "spares" }))),
+        );
+        expect(await screen.findByRole("button", { name: "Remove spares" })).toBeVisible();
+        await waitFor(() => expect(submit).toBeEnabled());
+      } finally {
+        pending.resolve(json(aTag({ id: 9, name: "spares", slug: "spares" })));
+      }
+    },
+  );
+
+  it("includes an acknowledged new tag in the upload intent", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<Response>();
+    const view = renderUpload({ routes: { "POST /api/v1/tags": () => pending.promise } });
+    await user.upload(fileInputs(view.container)[0], new File(["x"], "cube.stl"));
+    try {
+      await beginTag(user);
+      const submit = screen.getByRole("button", { name: "Upload to vault" });
+      expect(submit).toBeDisabled();
+      await act(async () => pending.resolve(json(aTag({ id: 9, name: "spares", slug: "spares" }))));
+      await waitFor(() => expect(submit).toBeEnabled());
+      await user.click(submit);
+      await waitFor(() => expect(view.uploadRequests()).toHaveLength(1));
+      expect(view.uploadRequests()[0].tags).toBe("spares");
+    } finally {
+      pending.resolve(json(aTag({ id: 9, name: "spares", slug: "spares" })));
+    }
+  });
+
+  it("rejects a direct form submission while tag creation is pending", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<Response>();
+    const view = renderUpload({ routes: { "POST /api/v1/tags": () => pending.promise } });
+    await user.upload(fileInputs(view.container)[0], new File(["x"], "cube.stl"));
+    try {
+      await beginTag(user);
+      const form = screen.getByRole("button", { name: "Upload to vault" }).closest("form");
+      if (!form) throw new Error("Upload form is absent");
+      fireEvent.submit(form);
+      expect(view.onClose).not.toHaveBeenCalled();
+      expect(view.uploadRequests()).toEqual([]);
+    } finally {
+      await act(async () => pending.resolve(json(aTag({ id: 9, name: "spares", slug: "spares" }))));
+    }
+  });
+
+  it.each([409, 503])("reopens submission after tag creation fails with %s", async (status) => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<Response>();
+    const view = renderUpload({ routes: { "POST /api/v1/tags": () => pending.promise } });
+    await user.upload(fileInputs(view.container)[0], new File(["x"], "cube.stl"));
+    await beginTag(user);
+    await act(async () => pending.resolve(json({ detail: "tag_refused" }, status)));
+    expect(screen.queryByRole("button", { name: "Remove spares" })).toBeNull();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Upload to vault" })).toBeEnabled(),
+    );
+  });
+
+  it("waits for every concurrent tag acknowledgement", async () => {
+    const user = userEvent.setup();
+    const first = Promise.withResolvers<Response>();
+    const second = Promise.withResolvers<Response>();
+    const view = renderUpload({
+      routes: {
+        "POST /api/v1/tags": (_url, init) =>
+          JSON.parse(String(init?.body)).name === "red" ? first.promise : second.promise,
+      },
+    });
+    await user.upload(fileInputs(view.container)[0], new File(["x"], "cube.stl"));
+    try {
+      await beginTag(user, "red");
+      await beginTag(user, "blue");
+      await act(async () => second.resolve(json(aTag({ id: 10, name: "blue", slug: "blue" }))));
+      expect(await screen.findByRole("button", { name: "Remove blue" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Upload to vault" })).toBeDisabled();
+      await act(async () => first.resolve(json(aTag({ id: 9, name: "red", slug: "red" }))));
+      await user.click(screen.getByRole("button", { name: "Upload to vault" }));
+      await waitFor(() => expect(view.uploadRequests()).toHaveLength(1));
+      expect(view.uploadRequests()[0].tags?.split(",").sort()).toEqual(["blue", "red"]);
+    } finally {
+      first.resolve(json(aTag({ id: 9, name: "red", slug: "red" })));
+      second.resolve(json(aTag({ id: 10, name: "blue", slug: "blue" })));
+    }
+  });
+
+  it("forgets a tag receipt from a cancelled upload draft", async () => {
+    const user = userEvent.setup();
+    const pending = Promise.withResolvers<Response>();
+    const view = renderUpload({ routes: { "POST /api/v1/tags": () => pending.promise } });
+    await user.upload(fileInputs(view.container)[0], new File(["x"], "old.stl"));
+    await beginTag(user);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await user.upload(fileInputs(view.container)[0], new File(["y"], "new.stl"));
+    await act(async () => pending.resolve(json(aTag({ id: 9, name: "spares", slug: "spares" }))));
+    expect(screen.queryByRole("button", { name: "Remove spares" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Upload to vault" }));
+    await waitFor(() => expect(view.uploadRequests()).toHaveLength(1));
+    expect(view.uploadRequests()[0].tags).toBeUndefined();
   });
 });

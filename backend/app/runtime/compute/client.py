@@ -6,6 +6,7 @@ import importlib.util
 import json
 import math
 import os
+import selectors
 import socket
 import struct
 import subprocess
@@ -271,14 +272,14 @@ def exchange(
                 checkpoint=checkpoint,
             )
             # Poll readiness so cancellation is checked while the device executes.
-            import select
-
-            while not select.select(
-                [connection], [], [], max(0, min(0.05, deadline - time.monotonic()))
-            )[0]:
-                checkpoint()
-                if time.monotonic() >= deadline:
-                    raise ComputeUnavailable(Reason.DEADLINE)
+            with selectors.DefaultSelector() as selector:
+                selector.register(connection, selectors.EVENT_READ)
+                while not selector.select(
+                    timeout=max(0, min(0.05, deadline - time.monotonic()))
+                ):
+                    checkpoint()
+                    if time.monotonic() >= deadline:
+                        raise ComputeUnavailable(Reason.DEADLINE)
             result = receive(connection, deadline, checkpoint=checkpoint)
             checkpoint()
             return result

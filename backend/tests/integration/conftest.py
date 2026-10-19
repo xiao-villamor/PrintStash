@@ -61,10 +61,13 @@ from tests.factories.protocols import (
     MakeMultipartModel,
     MakeMultipartModelStar,
     MakeMultipartPart,
+    MakeNotificationDelivery,
     MakeOwnedStorageObject,
     MakePassageVector,
     MakePrinter,
     MakePrinterFile,
+    MakePrinterMaintenanceLog,
+    MakePrinterMaintenanceWindow,
     MakePrinterProfile,
     MakePrintJob,
     MakeProvenanceSource,
@@ -793,3 +796,20 @@ def make_mesh_continuation(db_session: Session) -> MakeMeshContinuation:
 @pytest.fixture
 def make_ingestion_scratch_window(db_session: Session) -> MakeIngestionScratchWindow:
     return _bound(factories.build_ingestion_scratch_window, db_session)
+
+
+@pytest.fixture
+def make_printer_maintenance_window(
+    db_session: Session,
+) -> MakePrinterMaintenanceWindow:
+    return _bound(factories.build_printer_maintenance_window, db_session)
+
+
+@pytest.fixture
+def make_printer_maintenance_log(db_session: Session) -> MakePrinterMaintenanceLog:
+    return _bound(factories.build_printer_maintenance_log, db_session)
+
+
+@pytest.fixture
+def make_notification_delivery(db_session: Session) -> MakeNotificationDelivery:
+    return _bound(factories.build_notification_delivery, db_session)

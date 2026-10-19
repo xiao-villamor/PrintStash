@@ -2572,6 +2572,7 @@
   "Resume upload": "Resume upload",
   "Cancel upload": "Cancel upload",
   "Upload cancelled": "Upload cancelled",
+  "{value1} is {value2}, more than this server accepts in one upload. An administrator can raise the limit with VAULT_MAX_UPLOAD_MB and NGINX_CLIENT_MAX_BODY_SIZE.": "{value1} is {value2}, more than this server accepts in one upload. An administrator can raise the limit with VAULT_MAX_UPLOAD_MB and NGINX_CLIENT_MAX_BODY_SIZE.",
   "Choose the same file that started this upload.": "Choose the same file that started this upload.",
   "This upload expired. Start it again.": "This upload expired. Start it again.",
   "This upload changed elsewhere. Refresh and try again.": "This upload changed elsewhere. Refresh and try again.",
@@ -4038,7 +4039,7 @@
   "aiSearch.filter.printed": "Has print history",
   "aiSearch.filter.print_outcome": "Print outcome",
   "aiSearch.filter.material_type": "Material",
-  "aiSearch.filter.file_type": "Artifact type",
+  "aiSearch.filter.file_type": "File type",
   "aiSearch.filter.revision_status": "Revision status",
   "aiSearch.filter.storage": "Storage",
   "aiSearch.filter.slicer_name": "Slicer",
@@ -4433,7 +4434,7 @@
   "tessellation_incomplete": "This STEP file could not be converted to a mesh.",
   "source_unavailable": "The source file could not be read. Check that its storage is reachable.",
   "component_unavailable": "The source file could not be read. Check that its storage is reachable.",
-  "invalid_source": "The source file could not be read. Check that its storage is reachable.",
+  "invalid_source": "This file could not be read as a valid 3D model. It may be damaged or incomplete.",
   "Listing the remote source · {found} files found · {where} · continues in background": "Listing the remote source · {found} files found · {where} · continues in background",
   "discovering": "discovering",
   "Preparing previews": "Preparing previews",
@@ -4459,5 +4460,5 @@
   "Mesh measurements, thumbnails, viewer conversion, and similarity work run with bounded native workers and durable cancellation, retry, and publication authority": "Mesh measurements, thumbnails, viewer conversion, and similarity work run with bounded native workers and durable cancellation, retry, and publication authority",
   "Library, search, thumbnails, and uploads use fewer repeated reads and writes, with bounded caches and explicit recovery from competing edits": "Library, search, thumbnails, and uploads use fewer repeated reads and writes, with bounded caches and explicit recovery from competing edits",
   "Storage insights separate local and remote locations, while Trash supports selecting several Models to restore or permanently delete": "Storage insights separate local and remote locations, while Trash supports selecting several Models to restore or permanently delete",
-  "Upgrade all API and worker processes together: DBOS moves to 3.0, and source installs require Python 3.14 or newer; see UPGRADE.md": "Upgrade all API and worker processes together: DBOS moves to 3.0, and source installs require Python 3.14 or newer; see UPGRADE.md"
+  "Back up before upgrading: every model file is re-derived, which can keep a 4 GB NAS busy for hours; rollback requires restoring the pre-upgrade backup. Upgrade all API and workers together for DBOS 3.0; source installs require Python 3.14 or newer. See UPGRADE.md": "Back up before upgrading: every model file is re-derived, which can keep a 4 GB NAS busy for hours; rollback requires restoring the pre-upgrade backup. Upgrade all API and workers together for DBOS 3.0; source installs require Python 3.14 or newer. See UPGRADE.md"
 }

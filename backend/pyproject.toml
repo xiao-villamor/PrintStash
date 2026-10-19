@@ -34,13 +34,15 @@ dependencies = [
     "psycopg[binary]>=3.3,<4",
     "scipy>=1.18.1,<2",
     "SQLAlchemy>=2.0.52,<2.1",
-    "sqlmodel>=0.0.39,<0.1",
+    # 0.0.45 stores every datetime as DateTime(timezone=True) and rejects naive
+    # values: adopting it needs a TIMESTAMPTZ migration, not a version bump.
+    "sqlmodel>=0.0.39,<0.0.45",
     "starlette>=1.6,<2",
     "trimesh>=5.1.1,<6",
     "uvicorn[standard]>=0.52,<1",
     "watchfiles>=1.2,<2",
     "pycentauri==0.9.1",
-    "dbos>=3.0,<4",
+    "dbos>=3.3,<4",
     "jsonschema>=4.26,<5",
 ]
 
@@ -54,18 +56,18 @@ step = [
     "cadquery-ocp-novtk==7.9.3.1.1",
 ]
 full = [
-    "sqlite-vec==0.1.6",
+    "sqlite-vec==0.1.9",
     "onnx>=1.22,<2",
     "onnxruntime>=1.30,<2",
     "tokenizers>=0.23,<0.24",
     "asyncssh>=2.21,<3",
     "cascadio>=0.1.1,<0.2",
     "cadquery-ocp-novtk==7.9.3.1.1",
-    "opendal==0.47.9",
+    "opendal==0.47.10",
 ]
 storage-opendal = [
     "asyncssh>=2.21,<3",
-    "opendal==0.47.9",
+    "opendal==0.47.10",
 ]
 dev = [
     # Builds tiny licensed ONNX contract fixtures; never downloads model weights.
@@ -102,7 +104,7 @@ dev = [
     "fast-simplification>=0.2.0,<0.3",
 ]
 ai = [
-    "sqlite-vec==0.1.6",
+    "sqlite-vec==0.1.9",
     "onnx>=1.22,<2",
     "onnxruntime>=1.30,<2",
     "tokenizers>=0.23,<0.24",

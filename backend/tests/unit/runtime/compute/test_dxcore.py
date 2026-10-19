@@ -64,3 +64,70 @@ class TestUnavailableLibrary:
 
         monkeypatch.setattr(dxcore.c, "CDLL", missing)
         assert dxcore.hardware() == ()
+
+
+class TestHostLibraryBoundary:
+    @pytest.mark.parametrize(
+        "fault", [None, "unsupported", "software", "oversized", "name", "hresult"]
+    )
+    def test_reads_bounded_hardware_evidence(self, monkeypatch, fault):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        from app.runtime.compute import dxcore
+
+        c = dxcore.c
+        released = []
+
+        def pointer(destination, value):
+            c.cast(destination, c.POINTER(c.c_void_p))[0] = value
+
+        create = Mock(
+            side_effect=lambda guid, out: (
+                pointer(out, 1),
+                -1 if fault == "hresult" else 0,
+            )[1]
+        )
+        monkeypatch.setattr(
+            c, "CDLL", lambda name: SimpleNamespace(DXCoreCreateAdapterFactory=create)
+        )
+
+        def method(owner, slot, result, *arguments):
+            if slot == 2:
+                return lambda owner: released.append(owner.value)
+            if owner.value == 1:
+                return lambda owner, count, attr, iid, out: (pointer(out, 2), 0)[1]
+            if owner.value == 2 and slot == 4:
+                return lambda owner: 65 if fault == "oversized" else 1
+            if owner.value == 2:
+                return lambda owner, index, iid, out: (pointer(out, 3), 0)[1]
+            if slot == 3:
+                return lambda owner: fault != "unsupported"
+            if slot == 7:
+
+                def length(owner, key, out):
+                    c.cast(out, c.POINTER(c.c_size_t))[0] = 0 if fault == "name" else 9
+                    return 0
+
+                return length
+
+            def property_value(owner, key, size, out):
+                if key == 2:
+                    c.memmove(out, b"Hardware\0", 9)
+                elif key == 3:
+                    values = c.cast(out, c.POINTER(c.c_uint32))
+                    values[0], values[1] = 123, 456
+                elif key in (11, 12):
+                    c.cast(out, c.POINTER(c.c_bool))[0] = fault != "software"
+                elif key == 1:
+                    c.cast(out, c.POINTER(c.c_uint64))[0] = 789
+                return 0
+
+            return property_value
+
+        monkeypatch.setattr(dxcore, "_method", method)
+        result = dxcore.hardware()
+        assert result == (() if fault else (Hardware("Hardware", 123, 456, 789, True),))
+        assert 1 in released
+        if fault is None:
+            assert released == [3, 2, 1]

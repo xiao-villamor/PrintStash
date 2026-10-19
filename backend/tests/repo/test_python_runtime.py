@@ -118,7 +118,10 @@ class TestPythonRuntime:
         assert len(suites) == len(cleanups) == 1
         suite_index, suite = suites[0]
         cleanup_index, cleanup = cleanups[0]
-        assert suite["run"] == "./scripts/test.sh ${{ matrix.phase }} -q"
+        assert (
+            suite["run"]
+            == "./scripts/test.sh ${{ matrix.phase }} ${{ matrix.paths }} -q"
+        )
         assert cleanup_index > suite_index
         assert cleanup["if"] == "always()"
         assert cleanup["run"] == "bash ../scripts/prepare-ci-pid-namespace.sh cleanup"

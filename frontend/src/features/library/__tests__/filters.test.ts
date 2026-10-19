@@ -3,13 +3,15 @@
  * examples exercise URL normalization and capability projection directly so
  * malformed bookmarks cannot invent constraints or leak printer-only state.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   narrowsLibrary,
   readLibraryFilters,
   writeLibraryFilters,
   sameLibraryFilters,
+  structuredLibraryFilterLabel,
 } from "../filters";
+import { setLocale } from "@/lib/locale";
 import { readLibraryLocation } from "../url";
 import type { SavedViewFilters } from "@/types";
 
@@ -226,5 +228,18 @@ describe("narrowsLibrary", () => {
     ["a storage source", "storage=vault"],
   ])("is true with %s, so the filter spans the subtree", (_name, query) => {
     expect(narrowsLibrary(read(`c=maraio&${query}`).baseFilters)).toBe(true);
+  });
+});
+
+describe("structuredLibraryFilterLabel", () => {
+  afterEach(() => setLocale("en"));
+
+  it("names a filter as the Model filters panel heads it", () => {
+    expect(structuredLibraryFilterLabel("revision_status")).toBe("Revision");
+  });
+
+  it("names a filter in the selected language", () => {
+    setLocale("es");
+    expect(structuredLibraryFilterLabel("file_type")).toBe("Tipo de archivo");
   });
 });

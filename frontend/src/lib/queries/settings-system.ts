@@ -23,13 +23,17 @@ export function settingsReleaseOptions(refresh = false) {
     retry: false,
   });
 }
-/** Read on demand: the server may start its compute broker to answer. */
+/**
+ * Read on demand: the server may start its compute broker to answer, which
+ * takes seconds. The answer is kept until the administrator checks again.
+ */
 export function settingsComputeOptions() {
   return queryOptions({
     queryKey: settingsSystemKeys.compute,
     queryFn: ({ signal }) => getComputeStatus({ signal }),
     retry: false,
-    staleTime: 30_000,
+    staleTime: Infinity,
+    gcTime: Infinity,
     refetchOnWindowFocus: false,
   });
 }

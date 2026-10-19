@@ -138,6 +138,24 @@ describe("sendFormWithProgress", () => {
     ).rejects.toMatchObject({ status: 413, code: "upload_too_large" });
   });
 
+  it("reads a proxy's HTML 413 page as a file over the upload limit", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response("<html><center><h1>413 Request Entity Too Large</h1></center></html>", {
+        status: 413,
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+
+    await expect(
+      sendFormWithProgress(
+        "/api/v1/ingest/archive/inspect",
+        new FormData(),
+        new AbortController().signal,
+        () => {},
+      ),
+    ).rejects.toMatchObject({ status: 413, code: "upload_too_large" });
+  });
+
   it("aborts the pending browser transfer", async () => {
     fetchMock.mockImplementation(() => new Promise<Response>(() => {}));
     const controller = new AbortController();

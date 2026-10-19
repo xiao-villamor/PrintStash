@@ -77,6 +77,10 @@ test.describe("tags", () => {
     const model = `e2e-tagged-${Date.now()}`;
 
     await uploadModel(page, model, { tag });
+    const href = await modelCard(page, model).getAttribute("href");
+    expect(href).toMatch(/^\/models\/\d+/);
+    const id = Number(href?.match(/^\/models\/(\d+)/)?.[1]);
+    expect(Number.isSafeInteger(id)).toBe(true);
     await modelCard(page, model).click();
     await clickModelAction(page, "Edit details");
     await page.getByRole("button", { name: `Remove ${tag}` }).click();
@@ -85,7 +89,15 @@ test.describe("tags", () => {
     await expect(del).toBeVisible();
 
     await del.click();
+    const deleted = page.waitForResponse(
+      (response) => /\/tags\/\d+$/.test(response.url()) && response.request().method() === "DELETE",
+    );
     await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
+    expect((await deleted).ok()).toBe(true);
     await expect(del).toHaveCount(0);
+    const persisted = await (await page.request.get(`/api/v1/models/${id}`)).json();
+    expect(persisted.tags).toEqual([]);
+    const catalog = await (await page.request.get("/api/v1/tags")).json();
+    expect(catalog.some((item: { name: string }) => item.name === tag)).toBe(false);
   });
 });

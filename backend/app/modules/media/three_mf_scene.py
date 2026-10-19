@@ -304,13 +304,20 @@ def read_scene(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> ExpandedSc
             return expand_scene(tuple(admitted.values()), build, max_faces=max_faces)
     except GeometryError:
         raise
+    except etree.XMLSyntaxError as exc:
+        # libxml2 reports running out of memory as a syntax error. Under the
+        # worker's memory ceiling that is a valid model too large to read
+        # here, not a damaged file. The exception's own code, not the shared
+        # error log, which keeps entries from earlier parses.
+        if exc.code == etree.ErrorTypes.ERR_NO_MEMORY:
+            raise GeometryError("resource_limit") from exc
+        raise GeometryError("invalid_3mf") from exc
     except (
         OSError,
         ValueError,
         KeyError,
         OverflowError,
         zipfile.BadZipFile,
-        etree.XMLSyntaxError,
     ) as exc:
         raise GeometryError("invalid_3mf") from exc
 

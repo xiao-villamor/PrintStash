@@ -7,7 +7,6 @@ import pytest
 from sqlmodel import select
 
 from app.db.models import (
-    CapacityReservation,
     FileType,
     GeometryFingerprint,
 )
@@ -15,6 +14,7 @@ from app.db.session import get_session_factory
 from app.modules.media import mesh_isolation
 from app.modules.similarity import configuration, runs
 from app.modules.similarity.processing import SimilarityProcessor
+from app.modules.storage.capacity import CapacityManager
 from app.modules.storage.storage_backend.s3 import S3StorageBackend
 from app.modules.storage.storage_providers import (
     parse_provider_config,
@@ -68,7 +68,9 @@ class TestRemoteProcessing:
             assert db_session.exec(select(GeometryFingerprint)).one().state == "failed"
             assert len(materialized) == 1
             assert not materialized[0].exists()
-            assert db_session.exec(select(CapacityReservation)).all() == []
+            capacity = CapacityManager(get_session_factory())
+            assert capacity.operation_reservations() == []
+            assert capacity.transient_claims() == {}
             assert backend.read_bytes(file.path) == content
         finally:
             backend._client.delete_object(Bucket=backend._bucket, Key=file.path)

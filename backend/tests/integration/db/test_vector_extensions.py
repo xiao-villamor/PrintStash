@@ -15,7 +15,7 @@ class TestVectorExtensions:
     def test_disables_sqlite_extension_loading_after_connect(self):
         with sqlite3.connect(":memory:") as connection:
             assert load_sqlite_vector_extension(connection)
-            assert connection.execute("SELECT vec_version()").fetchone()[0] == "v0.1.6"
+            assert connection.execute("SELECT vec_version()").fetchone()[0] == "v0.1.9"
             with pytest.raises(sqlite3.OperationalError, match="not authorized"):
                 connection.execute("SELECT load_extension('untrusted')")
 
@@ -40,7 +40,7 @@ class TestVectorExtensions:
             async with engine.connect() as connection:
                 assert (
                     await connection.execute(text("SELECT vec_version()"))
-                ).scalar_one() == "v0.1.6"
+                ).scalar_one() == "v0.1.9"
                 with pytest.raises(DBAPIError, match="not authorized"):
                     await connection.execute(text("SELECT load_extension('untrusted')"))
         finally:

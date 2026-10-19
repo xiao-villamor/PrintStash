@@ -115,6 +115,29 @@ class TestQueues:
 
         assert registered["ingest"]["polling_interval_sec"] == 0.05
 
+    def test_a_prompt_lane_is_polled_once_a_second_by_default(self, registered):
+        _engine()._register_queue(Lane(LaneName.DERIVE_NATIVE, 4))
+
+        assert registered["derive.native"]["polling_interval_sec"] == 1.0
+
+    def test_an_interactive_lane_is_polled_at_the_interactive_cadence(self, registered):
+        _engine()._register_queue(Lane(LaneName.INGEST, 2, pace=LanePace.INTERACTIVE))
+
+        assert registered["ingest"]["polling_interval_sec"] == 0.25
+
+    def test_an_interactive_lane_is_never_polled_slower_than_a_prompt_one(
+        self, registered, monkeypatch
+    ):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "jobs_queue_poll_interval_seconds", 0.1)
+        monkeypatch.setitem(
+            _overlay, "jobs_interactive_queue_poll_interval_seconds", 0.5
+        )
+        _engine()._register_queue(Lane(LaneName.INGEST, 2, pace=LanePace.INTERACTIVE))
+
+        assert registered["ingest"]["polling_interval_sec"] == 0.1
+
     def test_a_relaxed_lane_is_polled_at_the_relaxed_cadence(
         self, registered, monkeypatch
     ):
@@ -209,6 +232,13 @@ class TestLaneConcurrency:
             _engine().set_lane_concurrency(LaneName.INGEST, 5)
 
 
+class TestLaneDepth:
+    def test_reading_before_launch_is_a_bug(self) -> None:
+        # Its reads go through a connection the launch opens.
+        with pytest.raises(RuntimeError, match="engine_not_launched"):
+            _engine()._lane_depth(LaneName.INGEST)
+
+
 class TestTickCron:
     def test_whole_minutes_use_a_minute_cron(self) -> None:
         assert dbos_engine._tick_cron(300) == "*/5 * * * *"
@@ -216,8 +246,19 @@ class TestTickCron:
     def test_seconds_use_a_seconds_cron(self) -> None:
         assert dbos_engine._tick_cron(15) == "*/15 * * * * *"
 
-    def test_an_odd_interval_is_capped_at_a_minute(self) -> None:
-        assert dbos_engine._tick_cron(90) == "*/59 * * * * *"
+    @pytest.mark.parametrize(
+        ("seconds", "expression"),
+        [
+            pytest.param(45, "*/30 * * * * *", id="45s-to-30s"),
+            pytest.param(90, "*/1 * * * *", id="90s-to-1min"),
+        ],
+    )
+    def test_an_uneven_interval_rounds_down_to_an_even_cadence(
+        self, seconds: int, expression: str
+    ) -> None:
+        # Cron restarts each step every minute: */45 fires at :00 and :45,
+        # and */59 (what 90 used to become) at :00 and :59.
+        assert dbos_engine._tick_cron(seconds) == expression
 
 
 class TestRunner:

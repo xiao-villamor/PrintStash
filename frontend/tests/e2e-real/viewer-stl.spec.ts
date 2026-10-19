@@ -1,13 +1,13 @@
-/** A large mesh waits to be asked for; a refused viewer keeps its durable reason across reloads and preserves originals. */
+/** A large mesh opens automatically; a refused viewer keeps its durable reason across reloads and preserves originals. */
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { test, expect } from "./helpers";
 
 test.describe("viewer STL", () => {
-  test("waits to be asked before downloading a large mesh", async ({ page }) => {
+  test("opens a large mesh automatically", async ({ page }) => {
     const name = `e2e-viewer-large-${Date.now()}`;
     const backend = resolve("../backend");
-    // A real 17 MB binary STL: one over the automatic budget, unique per run.
+    // A real 17 MB binary STL: larger than the former automatic budget, unique per run.
     const mesh = execFileSync(
       resolve(backend, ".venv/bin/python"),
       [
@@ -54,17 +54,16 @@ test.describe("viewer STL", () => {
       if (new URL(request.url()).pathname === `/api/v1/files/${fileId}/stl`) meshRequests += 1;
     });
     try {
-      // ── Opening the Model costs no mesh download ───────────────────────────
+      // Model detail opens the 3D view directly, including large Artifacts.
       await page.goto(`/models/${modelId}`);
-      const load = page.getByRole("button", { name: "Load 3D preview", exact: true });
-      await expect(load).toBeVisible();
-      await page.waitForLoadState("networkidle");
-      expect(meshRequests).toBe(0);
-
-      // ── Asking for it starts the download ──────────────────────────────────
-      await load.click();
       await expect.poll(() => meshRequests).toBeGreaterThan(0);
-      await expect(load).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Load 3D preview", exact: true })).toHaveCount(
+        0,
+      );
+      await expect(page.getByRole("button", { name: "Screenshot", exact: true })).toBeEnabled({
+        timeout: 60_000,
+      });
+      await expect(page.locator("canvas")).toBeVisible();
     } finally {
       expect((await page.request.delete(`/api/v1/models/${modelId}`)).status()).toBe(204);
     }

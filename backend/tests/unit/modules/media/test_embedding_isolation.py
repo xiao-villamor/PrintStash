@@ -14,6 +14,7 @@ import pytest
 from printstash_core.inference import EmbeddingInput
 from printstash_core.mesh.similarity import GeometryError
 
+from app.modules.media import embedding_isolation as wire
 from app.modules.media.embedding_isolation import decode_reply, encode_reply
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError, encode_error
@@ -111,3 +112,43 @@ class TestComponentFrame:
         assert results[0] == views
         assert isinstance(results[1], GeometryError)
         assert results[1].code == "component_unavailable"
+
+
+class TestImageEnvelopes:
+    def test_refuses_nonimage_view(self):
+        with pytest.raises(MeshWorkerError) as exc:
+            wire.decode_reply(
+                wire.encode_reply((EmbeddingInput("text", text="private"),))
+            )
+        assert exc.value.reason is ThumbnailFailureReason.WORKER_FAILED
+
+    @pytest.mark.parametrize(
+        "rows,count",
+        [
+            ({}, 1),
+            ([], 1),
+            ([{}], 1),
+            ([{"views": []}], 1),
+            ([{"error": 1}], 1),
+            ([], 0),
+        ],
+    )
+    def test_refuses_invalid_component_envelopes(self, rows, count):
+        with pytest.raises(MeshWorkerError) as exc:
+            wire.decode_components(b"EMB2" + json.dumps(rows).encode(), count)
+        assert exc.value.reason is ThumbnailFailureReason.WORKER_FAILED
+
+    def test_refuses_wrong_component_magic(self):
+        with pytest.raises(MeshWorkerError):
+            wire.decode_components(b"EMB1[]", 1)
+
+    @pytest.mark.parametrize("indices", [[], [0, 1, 2]])
+    def test_refuses_excessive_component_work(self, indices):
+        with pytest.raises(ValueError, match="component_budget"):
+            wire.embedding_components(
+                None,
+                file_type="stl",
+                component_indices=indices,
+                image_size=64,
+                triangle_cap=100,
+            )

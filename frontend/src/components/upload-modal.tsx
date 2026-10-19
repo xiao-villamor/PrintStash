@@ -146,6 +146,8 @@ export function UploadModal({
   const [modelName, setModelName] = useState("");
   const [tagInput, setTagInput] = useState("");
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [pendingTagCount, setPendingTagCount] = useState(0);
+  const tagScope = useRef(0);
   const [submitting, setSubmitting] = useState(false);
   // Mounted-source write-back: when library sources are enabled, new uploads can target a
   // writable mounted source.
@@ -315,6 +317,8 @@ export function UploadModal({
   }
 
   function reset() {
+    tagScope.current += 1;
+    setPendingTagCount(0);
     setMeshFile(null);
     setGcodeFile(null);
     setMode("files");
@@ -387,7 +391,7 @@ export function UploadModal({
 
   function doSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting || (sourceMode && destinationBlocked)) return;
+    if (submitting || pendingTagCount > 0 || (sourceMode && destinationBlocked)) return;
     if (mode === "url") {
       if (!urlValue.trim()) return;
       void runUrlImport();
@@ -461,15 +465,21 @@ export function UploadModal({
       if (!selectedTags.includes(existing.slug)) toggleTag(existing.slug);
       return;
     }
+    const scope = tagScope.current;
+    setPendingTagCount((count) => count + 1);
     try {
       const t = await createTag({ name: trimmed });
+      if (scope !== tagScope.current) return;
       // createTag invalidates the query cache → useTags() refetches the new
       // tag; we just select it here.
       setSelectedTags((p) => [...p, t.slug]);
     } catch (err) {
+      if (scope !== tagScope.current) return;
       // 401 is surfaced by AuthBanner; duplicate slug is harmless.
       if (err instanceof ApiError && err.isAuthError) return;
       toast.error(err);
+    } finally {
+      if (scope === tagScope.current) setPendingTagCount((count) => count - 1);
     }
   }
 
@@ -872,8 +882,10 @@ export function UploadModal({
             </Button>
             <Button
               type="submit"
+              aria-busy={pendingTagCount > 0}
               disabled={
                 submitting ||
+                pendingTagCount > 0 ||
                 (sourceMode && destinationBlocked) ||
                 (!user?.is_superuser && !collectionPath) ||
                 // A destination that has not resolved yet would land at the root.

@@ -275,6 +275,10 @@ class JobStore:
             if existing is not None:
                 raise ActiveJobExists(existing)
             own.add(row)
+            # Every column is set above (no server defaults): read the status
+            # now, since the commit expires the row and reading it after would
+            # load it back.
+            status_row = status_of(row)
             try:
                 own.commit()
             except IntegrityError as exc:
@@ -283,8 +287,6 @@ class JobStore:
                 if winner is None:
                     raise
                 raise ActiveJobExists(winner) from exc
-            own.refresh(row)
-            status_row = status_of(row)
         self._changed(status_row)
         return new_id
 

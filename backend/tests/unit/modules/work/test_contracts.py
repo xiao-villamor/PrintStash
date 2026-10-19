@@ -195,10 +195,15 @@ class TestLanePace:
         with pytest.raises(TypeError, match="lane_pace"):
             Lane(LaneName.MAINTENANCE, 1, pace="relaxed")
 
+    def test_the_lane_an_upload_waits_on_is_interactive(self):
+        from app.modules.work.catalog import default_lanes
+        from app.modules.work.contracts import LanePace
+
+        assert default_lanes()[LaneName.INGEST].pace is LanePace.INTERACTIVE
+
     @pytest.mark.parametrize(
         "lane",
         [
-            LaneName.INGEST,
             LaneName.DERIVE_NATIVE,
             LaneName.DERIVE_LIGHT,
             LaneName.NETWORK,

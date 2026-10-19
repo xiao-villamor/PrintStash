@@ -25,6 +25,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     version: "0.15.0",
     date: "Oct 2026",
     changes: [
+      "Back up before upgrading: every model file is re-derived, which can keep a 4 GB NAS busy for hours; rollback requires restoring the pre-upgrade backup. Upgrade all API and workers together for DBOS 3.0; source installs require Python 3.14 or newer. See UPGRADE.md",
       "Library browsing now loads pages as you scroll, keeps folder history and reading positions, filters whole subtrees, and applies nearby changes without rebuilding the collection tree",
       "Library sources can be renamed and remapped; remote sources show their real location, report discovery progress, and explain empty scans",
       "Imports publish Models before background previews, use bounded per-entry staging, and show clearer reviewed-ZIP and preview preparation progress",
@@ -34,7 +35,6 @@ export const CHANGELOG: ChangelogEntry[] = [
       "Mesh measurements, thumbnails, viewer conversion, and similarity work run with bounded native workers and durable cancellation, retry, and publication authority",
       "Library, search, thumbnails, and uploads use fewer repeated reads and writes, with bounded caches and explicit recovery from competing edits",
       "Storage insights separate local and remote locations, while Trash supports selecting several Models to restore or permanently delete",
-      "Upgrade all API and worker processes together: DBOS moves to 3.0, and source installs require Python 3.14 or newer; see UPGRADE.md",
     ],
   },
   {

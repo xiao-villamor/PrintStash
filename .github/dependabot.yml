@@ -11,3 +11,22 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # 0.0.45 stores every datetime as DateTime(timezone=True) and rejects
+      # naive values; adopting it needs a TIMESTAMPTZ migration, not a bump.
+      - dependency-name: sqlmodel
+        versions:
+          - ">=0.0.45"
+
+  # The pnpm workspace root: the app plus packages/domain and packages/ui.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      frontend-minor-patch:
+        update-types:
+          - minor
+          - patch

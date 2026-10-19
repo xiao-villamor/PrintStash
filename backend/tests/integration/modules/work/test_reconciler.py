@@ -303,6 +303,38 @@ class TestRepair:
         assert stranded.status is EngineStatus.CANCELLED
         assert _row(db_session, job.id).attempts == 2
 
+    def test_reruns_work_whose_executor_left_no_record(
+        self, engine: InlineJobEngine, make_job, db_session
+    ) -> None:
+        # A clean stop deletes its row even when the engine's shutdown wait
+        # left a step running; the engine never recovers another id's work.
+        job = make_job(kind=REQUESTED)
+        run_pass(REQUESTED)
+        stranded = engine.executions[execution_id(job.id, 1, job.execution_epoch)]
+        stranded.status = EngineStatus.RUNNING
+        stranded.executor_id = "stopped-executor"
+
+        result = run_pass(REQUESTED)
+
+        assert result.interrupted == 1
+        assert _row(db_session, job.id).attempts == 2
+
+    def test_leaves_work_of_this_processs_engine_alone(
+        self, engine: InlineJobEngine, make_job, db_session
+    ) -> None:
+        # This process's engine is running the pass, so it is alive whether or
+        # not its row is written yet.
+        job = make_job(kind=REQUESTED)
+        run_pass(REQUESTED)
+        running = engine.executions[execution_id(job.id, 1, job.execution_epoch)]
+        running.status = EngineStatus.RUNNING
+        running.executor_id = engine.executor_id
+
+        result = run_pass(REQUESTED)
+
+        assert result.interrupted == 0
+        assert running.status is EngineStatus.RUNNING
+
     def test_reruns_work_of_another_version(
         self, engine: InlineJobEngine, make_job, db_session: Session
     ) -> None:
@@ -758,6 +790,22 @@ class TestSweepLostPasses:
         assert sweep_lost_passes() == 1
         assert engine.executions[stranded].status is EngineStatus.CANCELLED
 
+    def test_cancels_a_pass_whose_executor_left_no_record(
+        self, engine: InlineJobEngine
+    ) -> None:
+        stranded = _stranded_pass(engine, SOURCED, "stopped-executor")
+
+        assert sweep_lost_passes() == 1
+        assert engine.executions[stranded].status is EngineStatus.CANCELLED
+
+    def test_leaves_this_processs_own_pass_running(
+        self, engine: InlineJobEngine
+    ) -> None:
+        running = _stranded_pass(engine, SOURCED, engine.executor_id)
+
+        assert sweep_lost_passes() == 0
+        assert engine.executions[running].status is EngineStatus.RUNNING
+
     def test_leaves_a_live_executors_pass_running(
         self, engine: InlineJobEngine, make_work_executor
     ) -> None:
@@ -847,11 +895,37 @@ class TestSweepLostTerminalAttempts:
         ) == before
         assert reconciler_module.sweep_lost_terminal_attempts() == 0
 
+    def test_frees_a_slot_a_cancelled_jobs_step_outstays(self, engine, make_job):
+        # A cancelled Job's running execution is left to stop on its own; one
+        # whose step never checks for withdrawal must not hold its lane forever.
+        job = make_job(
+            kind=REQUESTED,
+            state=JobState.CANCELLED,
+            attempts=1,
+            updated_at=utcnow()
+            - timedelta(seconds=settings.jobs_executor_stale_seconds + 1),
+        )
+        hung = _stranded_job(engine, job, engine.executor_id)
+
+        assert reconciler_module.sweep_lost_terminal_attempts() == 1
+
+        assert hung.status is EngineStatus.CANCELLED
+
+    def test_frees_a_terminal_attempt_whose_executor_left_no_record(
+        self, engine, make_job
+    ):
+        job = make_job(kind=REQUESTED, state=JobState.COMPLETED, attempts=1)
+        stranded = _stranded_job(engine, job, "stopped-executor")
+
+        assert reconciler_module.sweep_lost_terminal_attempts() == 1
+
+        assert stranded.status is EngineStatus.CANCELLED
+
     @pytest.mark.parametrize(
         "case",
         [
             "live",
-            "unknown",
+            "own",
             "unowned",
             "active",
             "old_epoch",
@@ -873,7 +947,7 @@ class TestSweepLostTerminalAttempts:
         )
         owner = {
             "live": live.executor_id,
-            "unknown": "unregistered",
+            "own": engine.executor_id,
             "unowned": None,
         }.get(case, dead.executor_id)
         if case == "pass":
@@ -1010,6 +1084,39 @@ class TestSweepLostTerminalAttempts:
             assert stranded.status is EngineStatus.CANCELLED
         finally:
             override_session_factory(previous)
+
+
+class TestSweepLostWork:
+    def test_frees_every_kind_of_lost_work(
+        self, engine, make_job, make_work_executor
+    ):
+        dead = make_work_executor("round-dead", stale=True)
+        _stranded_pass(engine, SOURCED, dead.executor_id)
+        job = make_job(kind=REQUESTED, state=JobState.COMPLETED, attempts=1)
+        _stranded_job(engine, job, dead.executor_id)
+
+        assert reconciler_module.sweep_lost_work() == (1, 1)
+
+    def test_reads_the_engine_once_for_both_sweeps(
+        self, engine, make_job, make_work_executor, monkeypatch
+    ):
+        # Both sweeps run every tick; each used to list the engine's in-flight
+        # executions (and the executors) on its own.
+        dead = make_work_executor("round-dead", stale=True)
+        job = make_job(kind=REQUESTED, state=JobState.COMPLETED, attempts=1)
+        _stranded_job(engine, job, dead.executor_id)
+        reads: list[None] = []
+        active = engine.active
+
+        def counted():
+            reads.append(None)
+            return active()
+
+        monkeypatch.setattr(engine, "active", counted)
+
+        reconciler_module.sweep_lost_work()
+
+        assert len(reads) == 1
 
 
 class TestSweepForeignVersions:

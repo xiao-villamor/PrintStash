@@ -35,7 +35,7 @@ from dbos import (
 )
 from dbos import error as dbos_error
 from sqlalchemy import bindparam, create_engine, inspect, text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.schema import DropSchema
 
 from app.core.config import settings
@@ -59,7 +59,7 @@ from app.modules.work.contracts import (
     Submission,
     SubmitOutcome,
 )
-from app.modules.work.sources import interval_cron
+from app.modules.work.sources import even_step, interval_cron
 from app.modules.work.submission import PRIORITY_RANK
 
 logger = get_logger(__name__)
@@ -77,7 +77,11 @@ _STATUS = {
     "MAX_RECOVERY_ATTEMPTS_EXCEEDED": EngineStatus.FAILED,
     "CANCELLED": EngineStatus.CANCELLED,
 }
-_ACTIVE = ["ENQUEUED", "DELAYED", "PENDING"]
+# Reads of what is in flight name these statuses literally: SQLite and
+# PostgreSQL match a partial index only against literal values, and the engine's
+# in-flight and delayed indexes are what keep these reads off its whole history.
+_IN_FLIGHT_SQL = "('ENQUEUED', 'PENDING')"
+_DELAYED_SQL = "'DELAYED'"
 _WAITING = ["ENQUEUED", "DELAYED"]
 _SETTLED = ["SUCCESS", "ERROR", "CANCELLED", "MAX_RECOVERY_ATTEMPTS_EXCEEDED"]
 _PRUNE_BATCH = 500
@@ -239,6 +243,8 @@ class DbosJobEngine(JobEngine):
         )
         self.tick_seconds = tick_seconds or settings.jobs_reconcile_interval_seconds
         self._queues: dict[LaneName, Queue] = {}
+        # The adapter's own reads of the engine's workflow table (see _active).
+        self._status_db: Engine | None = None
         self._launched = False
         self._lock = threading.Lock()
         # Lanes polled at the boosted interval, with when each returns to its own.
@@ -272,8 +278,14 @@ class DbosJobEngine(JobEngine):
 
     def _register_workflows(self) -> None:
         runner = _DbosRunner()
+        # An execution DBOS recovers after its process died is bounded like a
+        # resubmitted one. Recovery only happens under a pinned executor id,
+        # where the executor never goes stale and the reconciler's resubmit
+        # budget never applies: without this, a step that kills its process
+        # would restart it a hundred times (DBOS's default).
+        recoveries = settings.jobs_max_resubmits
 
-        @DBOS.workflow(name=JOB_WORKFLOW)
+        @DBOS.workflow(name=JOB_WORKFLOW, max_recovery_attempts=recoveries)
         def job_workflow(
             job_id: str, attempt: int, execution_epoch: str | None = None
         ) -> None:
@@ -281,7 +293,7 @@ class DbosJobEngine(JobEngine):
 
             execute_job(job_id, attempt, runner, execution_epoch=execution_epoch)
 
-        @DBOS.workflow(name=RECONCILE_WORKFLOW)
+        @DBOS.workflow(name=RECONCILE_WORKFLOW, max_recovery_attempts=recoveries)
         def reconcile_workflow(source: str) -> None:
             from app.modules.work.reconciler import execute_pass
 
@@ -310,6 +322,7 @@ class DbosJobEngine(JobEngine):
             if listen_lanes is not None:
                 DBOS.listen_queues([lane.value for lane in listen_lanes])
             DBOS.launch()
+            self._status_db = self._open_status_db()
             for lane in self.catalog.lanes.values():
                 self._queues[lane.name] = self._register_queue(lane)
             # Upsert one durable schedule shared by API and worker processes.
@@ -435,11 +448,13 @@ class DbosJobEngine(JobEngine):
 
     def _interval(self, lane: Lane) -> float:
         """How often ``lane`` is polled when nothing has just been handed to it."""
-        return (
-            self.polling
-            if lane.pace is LanePace.PROMPT
-            else max(self.polling, settings.jobs_relaxed_queue_poll_interval_seconds)
-        )
+        if lane.pace is LanePace.INTERACTIVE:
+            return min(
+                self.polling, settings.jobs_interactive_queue_poll_interval_seconds
+            )
+        if lane.pace is LanePace.PROMPT:
+            return self.polling
+        return max(self.polling, settings.jobs_relaxed_queue_poll_interval_seconds)
 
     def _boost(self, name: LaneName) -> None:
         """Poll ``name`` faster for a short while. Never raises into a submission.
@@ -535,6 +550,9 @@ class DbosJobEngine(JobEngine):
                     self._relax_timer = None
                 self._boosted.clear()
             DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=10)
+            if self._status_db is not None:
+                self._status_db.dispose()
+                self._status_db = None
             self._queues.clear()
             self._launched = False
 
@@ -544,9 +562,13 @@ class DbosJobEngine(JobEngine):
         return _detached(self._submit, submission)
 
     def _submit(self, submission: Submission) -> SubmitOutcome:
+        """Enqueue in one write; the insert itself reports an id or key in use.
+
+        A reused execution id is refused by its own insert (``reject``), and a
+        dedupe key another workflow holds names that holder (``return-existing``)
+        so its read is paid only on a conflict. No status is read beforehand.
+        """
         queue = self._queues[submission.lane]
-        if DBOS.get_workflow_status(submission.execution_id) is not None:
-            return SubmitOutcome.EXISTING
         # Equal engine ranks preserve FIFO without changing the Job's logical priority.
         rank = (
             PRIORITY_RANK[WorkPriority.INTERACTIVE]
@@ -557,22 +579,34 @@ class DbosJobEngine(JobEngine):
         if isinstance(submission, JobSubmission):
             if isinstance(submission.routing, Deduplicated):
                 options["deduplication_id"] = submission.routing.key
+                options["duplication_policy"] = "return-existing"
             else:
                 options["queue_partition_key"] = submission.routing.key
         if submission.delay_seconds:
             options["delay_seconds"] = submission.delay_seconds
         try:
-            with SetWorkflowID(submission.execution_id), SetEnqueueOptions(**options):
+            with (
+                SetWorkflowID(
+                    submission.execution_id, workflow_id_reuse_policy="reject"
+                ),
+                SetEnqueueOptions(**options),
+            ):
                 if isinstance(submission, PassSubmission):
-                    queue.enqueue(self._reconcile_workflow, submission.source.value)
+                    handle = queue.enqueue(
+                        self._reconcile_workflow, submission.source.value
+                    )
                 else:
-                    queue.enqueue(
+                    handle = queue.enqueue(
                         self._job_workflow,
                         submission.job_id,
                         submission.attempt,
                         submission.execution_epoch,
                     )
-        except dbos_error.DBOSQueueDeduplicatedError:
+        except dbos_error.DBOSWorkflowIDInUseError:
+            return SubmitOutcome.EXISTING
+        holder = handle.get_workflow_id()
+        if holder != submission.execution_id:
+            # Only a dedupe key held by another workflow names a different one.
             return SubmitOutcome.DEDUPLICATED
         if isinstance(submission, JobSubmission) and submission.expedite:
             self._boost(submission.lane)
@@ -605,37 +639,67 @@ class DbosJobEngine(JobEngine):
         return _detached(self._active)
 
     def _active(self) -> list[ActiveExecution]:
+        # DBOS's own listing orders by creation time, which on SQLite walks the
+        # whole retained history; these read only the in-flight rows.
+        table = self._workflow_status_table()
+        columns = "workflow_uuid, status, name, application_version, executor_id"
+        names = "name IN (:job, :pass)"
+        rows = self._read_status(
+            text(
+                f"SELECT {columns} FROM {table} "
+                f"WHERE status IN {_IN_FLIGHT_SQL} AND {names} "
+                f"UNION ALL SELECT {columns} FROM {table} "
+                f"WHERE status = {_DELAYED_SQL} AND {names}"
+            ),
+            {"job": JOB_WORKFLOW, "pass": RECONCILE_WORKFLOW},
+        )
         return [
             ActiveExecution(
-                execution_id=status.workflow_id,
+                execution_id=workflow_id,
                 kind=ExecutionKind.PASS
-                if status.name == RECONCILE_WORKFLOW
+                if name == RECONCILE_WORKFLOW
                 else ExecutionKind.JOB,
-                status=_STATUS[str(status.status)],
-                app_version=status.app_version,
-                executor_id=status.executor_id,
+                status=_STATUS[status],
+                app_version=app_version,
+                executor_id=executor_id,
             )
-            for status in DBOS.list_workflows(
-                status=_ACTIVE,
-                name=[JOB_WORKFLOW, RECONCILE_WORKFLOW],
-                load_input=False,
-                load_output=False,
-            )
+            for workflow_id, status, name, app_version, executor_id in rows
         ]
 
     def lane_depth(self, lane: LaneName) -> LaneDepth:
         return _detached(self._lane_depth, lane)
 
     def _lane_depth(self, lane: LaneName) -> LaneDepth:
-        queued = running = 0
-        for status in DBOS.list_workflows(
-            queue_name=lane.value, status=_ACTIVE, load_input=False, load_output=False
-        ):
-            if str(status.status) == "PENDING":
-                running += 1
-            else:
-                queued += 1
-        return LaneDepth(queued=queued, running=running)
+        table = self._workflow_status_table()
+        counts: dict[str, int] = dict(
+            self._read_status(
+                text(
+                    f"SELECT status, count(*) FROM {table} "
+                    f"WHERE queue_name = :lane AND status IN {_IN_FLIGHT_SQL} "
+                    "GROUP BY status "
+                    f"UNION ALL SELECT status, count(*) FROM {table} "
+                    f"WHERE status = {_DELAYED_SQL} AND queue_name = :lane "
+                    "GROUP BY status"
+                ),
+                {"lane": lane.value},
+            )
+        )
+        # A status with no rows on the lane has no group, so it reads as zero.
+        return LaneDepth(
+            queued=counts.get("ENQUEUED", 0) + counts.get("DELAYED", 0),
+            running=counts.get("PENDING", 0),
+        )
+
+    def _open_status_db(self) -> Engine:
+        if self.schema is None:
+            return create_engine(self.url, creator=_sqlite_system_connection(self.url))
+        return create_engine(self.url, connect_args={"connect_timeout": 5})
+
+    def _read_status(self, statement: Any, parameters: dict[str, str]) -> list[Any]:
+        if self._status_db is None:
+            raise RuntimeError("engine_not_launched")
+        with self._status_db.connect() as connection:
+            return list(connection.execute(statement, parameters).tuples())
 
     def set_lane_concurrency(self, lane: LaneName, concurrency: int) -> None:
         queue = self._queues[lane]
@@ -703,7 +767,7 @@ class DbosJobEngine(JobEngine):
 
 
 def _tick_cron(seconds: int) -> str:
-    """The tick as a cron: seconds-granular when the interval needs it."""
-    if seconds % 60 == 0:
-        return interval_cron(seconds)
-    return f"*/{max(1, min(seconds, 59))} * * * * *"
+    """The tick as a cron: seconds-granular below a minute, always even."""
+    if seconds < 60:
+        return f"*/{even_step(60, seconds)} * * * * *"
+    return interval_cron(seconds)

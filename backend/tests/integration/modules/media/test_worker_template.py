@@ -12,6 +12,8 @@ import socket
 import subprocess
 import sys
 
+import pytest
+
 from app.modules.media import worker_template
 from tests.paths import BACKEND_DIR
 
@@ -103,3 +105,45 @@ class TestServe:
         process.wait(timeout=30)
         process.stdout.close()
         assert (refused, output) == (b"", b"")
+
+
+class TestForkFailureExit:
+    @pytest.mark.parametrize(
+        "fault,expected",
+        [
+            ("none", 0),
+            ("code", 7),
+            ("text", 1),
+            ("memory", None),
+            ("early_memory", None),
+            ("descriptors", 1),
+        ],
+    )
+    def test_preserves_supervised_worker_exit(self, fault, expected):
+        from app.modules.media.worker_bootstrap import RESOURCE_EXIT
+
+        code = """
+import os, sys
+from app.modules.media import worker_template, worker_bootstrap
+fault = sys.argv[1]
+def execute(arguments):
+    assert arguments[1] == str(os.getppid())
+    if fault == 'memory': raise MemoryError()
+    raise SystemExit(None if fault == 'none' else 7 if fault == 'code' else 'private failure')
+worker_bootstrap.main = execute
+if fault == 'early_memory':
+    def unavailable(path): raise MemoryError()
+    os.listdir = unavailable
+request = {'descriptors': [], 'environment': dict(os.environ), 'arguments': ['4096', '0', 'fake']}
+worker_template._become_worker(request, [1, 2] if fault == 'descriptors' else [1])
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code, fault],
+            cwd=BACKEND_DIR,
+            capture_output=True,
+            timeout=30,
+        )
+        assert result.returncode == (
+            RESOURCE_EXIT if fault in {"memory", "early_memory"} else expected
+        )
+        assert result.stdout == b""

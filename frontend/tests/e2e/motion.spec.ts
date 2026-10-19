@@ -69,7 +69,14 @@ test.describe("motion and layering", () => {
           },
         }),
       );
+      // This is a motion contract, so first wait for the fixture's browse acknowledgement.
+      const browse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === "/api/v1/models/browse" &&
+          response.request().method() === "GET",
+      );
       await page.goto("/");
+      expect((await browse).status()).toBe(200);
       const cards = page.getByRole("main").locator("article");
       await expect(cards.first()).toBeVisible();
       await expect(cards).toHaveCount(3);

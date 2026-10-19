@@ -41,7 +41,7 @@ def _decide(job: Job, evidence: EngineEvidence | None, **kw):
         evidence,
         now=NOW,
         app_version=kw.pop("app_version", VERSION),
-        stale_executors=kw.pop("stale", set()),
+        live_executors=frozenset(kw.pop("live", {"e1"})),
         max_resubmits=kw.pop("max_resubmits", 3),
         grace=GRACE,
     )
@@ -123,7 +123,7 @@ class TestDecide:
 
     def test_interrupts_an_execution_stranded_on_a_dead_executor(self) -> None:
         decision = _decide(
-            _job(), _seen(EngineStatus.RUNNING, executor="dead"), stale={"dead"}
+            _job(), _seen(EngineStatus.RUNNING, executor="dead"), live={"e1"}
         )
 
         assert (decision.verdict, decision.reason) == (
@@ -136,7 +136,7 @@ class TestDecide:
         "status", [EngineStatus.QUEUED, EngineStatus.DELAYED, EngineStatus.RUNNING]
     )
     def test_leaves_live_work_alone(self, status: EngineStatus) -> None:
-        decision = _decide(_job(), _seen(status), stale={"someone-else"})
+        decision = _decide(_job(), _seen(status), live={"e1", "someone-else"})
 
         assert (decision.verdict, decision.reason) == (Verdict.NONE, "in_progress")
 
@@ -145,7 +145,7 @@ class TestDecide:
     ) -> None:
         # Nobody owns a queued execution yet; any live executor can take it.
         decision = _decide(
-            _job(), _seen(EngineStatus.QUEUED, executor="dead"), stale={"dead"}
+            _job(), _seen(EngineStatus.QUEUED, executor="dead"), live={"e1"}
         )
 
         assert decision.verdict is Verdict.NONE

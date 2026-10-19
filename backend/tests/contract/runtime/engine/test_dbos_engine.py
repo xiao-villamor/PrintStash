@@ -1,4 +1,4 @@
-"""Actual engine queue ordering, persistent ticks and DBOS system-state upgrades.
+"""Actual engine queue ordering, polling, persistent ticks and DBOS system-state upgrades.
 
 The engine finds queued work only by polling. A lane that was just handed
 interactive work is polled faster for a short window and then returns to its
@@ -8,22 +8,30 @@ polling interval for nothing, or an idle server keeps paying for the fast one.
 
 import sqlite3
 import threading
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from dbos import DBOS
-from sqlalchemy import Column, Integer, MetaData, Table, create_engine
+from sqlalchemy import Column, Integer, MetaData, Table, create_engine, event
+from sqlalchemy.engine import Engine
 from sqlmodel import select
 
-from app.core.config import _overlay
+from app.core.config import _overlay, settings
 from app.db.models import Job, JobState, LaneName, WorkPriority
 from app.db.session import get_session_factory
 from app.modules.work import catalog as catalog_module
 from app.modules.work import submission
 from app.modules.work.catalog import WorkCatalog
-from app.modules.work.contracts import Deduplicated, JobSubmission, SubmitOutcome
+from app.modules.work.contracts import (
+    Deduplicated,
+    EngineStatus,
+    ExecutionKind,
+    JobSubmission,
+    SubmitOutcome,
+)
 from app.runtime.engine.dbos_engine import TICK_WORKFLOW, system_database_url
 from tests.containers import fresh_postgres_database
 from tests.contract.modules.work._harness import (
@@ -247,6 +255,208 @@ class TestLaneBoost:
         engine.settle()
 
         assert engine.state(job_id) == JobState.COMPLETED
+
+
+@contextmanager
+def _statements_on(url: str) -> Iterator[set[tuple[str, tuple]]]:
+    """Every distinct workflow query the engine sends to the database at ``url``."""
+    seen: set[tuple[str, tuple]] = set()
+
+    def capture(conn, cursor, statement, parameters, context, executemany):
+        if str(conn.engine.url) == url and "workflow_status" in statement:
+            seen.add((statement, tuple(parameters)))
+
+    event.listen(Engine, "before_cursor_execute", capture)
+    try:
+        yield seen
+    finally:
+        event.remove(Engine, "before_cursor_execute", capture)
+
+
+class TestIdlePolling:
+    """An idle server polls every lane forever (#476).
+
+    On SQLite a poll that cannot use an index reads every retained workflow row,
+    so idle CPU grows with history: ~30% on a mini PC holding a week of
+    reconcile passes. The plan, not the row count, decides this.
+    """
+
+    def test_no_poll_scans_the_workflow_table_on_sqlite(self, tmp_path):
+        url = f"sqlite:///{tmp_path / 'engine.sqlite'}"
+        with running_engine((url, None)) as harness:
+            # Launch recovers this executor's work once; polling is what repeats.
+            harness.relaunch(app_version=VERSION, listen_lanes=None)
+            with _statements_on(url) as seen:
+                lanes = {lane.value for lane in harness.catalog.lanes}
+                harness.wait_for(
+                    lambda: lanes <= {p for _, ps in list(seen) for p in ps}
+                )
+                polled = set(seen)
+
+        with sqlite3.connect(url.removeprefix("sqlite:///")) as connection:
+            scans = {
+                statement: detail
+                for statement, parameters in polled
+                for *_, detail in connection.execute(
+                    f"EXPLAIN QUERY PLAN {statement}", parameters
+                )
+                if detail.startswith("SCAN") and "workflow_status" in detail
+            }
+        assert scans == {}
+
+
+def _epoch_of(job_id: str) -> str:
+    with get_session_factory().scoped_session() as session:
+        row = session.get(Job, job_id)
+        assert row is not None
+        return row.execution_epoch
+
+
+def _waiting_job(subject: str) -> Job:
+    with get_session_factory().scoped_session() as session:
+        job = build_job(session, kind=PLAIN, subject=subject)
+        session.expunge(job)
+    return job
+
+
+class TestSubmission:
+    """A submission is one enqueue; nothing is read from the engine first.
+
+    It used to read the workflow's status (joined with its input and output)
+    before every enqueue, only to tell a reused id from a new one. The insert
+    already reports that, so every Job and every reconcile pass paid a read for
+    nothing.
+    """
+
+    def test_a_submission_reads_no_workflow_before_enqueuing(self, engine):
+        job = _waiting_job("submission/one-write")
+        caller = threading.get_ident()
+        statements: list[str] = []
+
+        def capture(conn, cursor, statement, parameters, context, executemany):
+            if threading.get_ident() == caller and "workflow_status" in statement:
+                statements.append(statement.lstrip().split(None, 1)[0].upper())
+
+        event.listen(Engine, "before_cursor_execute", capture)
+        try:
+            outcome = engine.engine.submit(_submission(job))
+        finally:
+            event.remove(Engine, "before_cursor_execute", capture)
+
+        assert (outcome, statements) == (SubmitOutcome.ACCEPTED, ["INSERT"])
+
+
+class TestRecovery:
+    """An execution DBOS recovers is bounded like one the reconciler resubmits.
+
+    Only a pinned executor id recovers its own work after a restart, and a
+    pinned executor never goes stale, so the resubmit budget never applies to
+    it. A step that kills its process would otherwise restart it a hundred
+    times, DBOS's default.
+    """
+
+    def test_gives_up_on_an_execution_recovered_past_the_resubmit_budget(
+        self, tmp_path
+    ):
+        url = f"sqlite:///{tmp_path / 'engine.sqlite'}"
+        gate = threading.Event()
+        with running_engine((url, None)) as harness:
+            harness.relaunch(app_version=VERSION, listen_lanes=None)
+            job_id = harness.job(PLAIN, "recovery/poison", behaviour=gated(gate))
+            submission.submit(job_id)
+            harness.started("recovery/poison")
+            execution = submission.execution_id(job_id, 1, _epoch_of(job_id))
+            harness.engine.shutdown()
+            # Stands in for that many crashes, each recovered on restart.
+            with sqlite3.connect(url.removeprefix("sqlite:///")) as connection:
+                connection.execute(
+                    "UPDATE workflow_status SET recovery_attempts = ? "
+                    "WHERE workflow_uuid = ?",
+                    (settings.jobs_max_resubmits + 1, execution),
+                )
+
+            harness.relaunch(app_version=VERSION, listen_lanes=None)
+            harness.wait_for(
+                lambda: (
+                    harness.engine.evidence([execution])[execution].status
+                    is EngineStatus.FAILED
+                )
+            )
+            gate.set()
+
+            assert harness.engine.evidence([execution])[execution].status is (
+                EngineStatus.FAILED
+            )
+
+
+class TestInFlightReads:
+    """Lane depth and the active list read only what is in flight.
+
+    Every discovery pass, the admin page (once per lane), housekeeping and the
+    tick's sweeps read them. DBOS's own listing orders by creation time, so on
+    SQLite it walked every retained workflow row: 137 ms per read at 200,000
+    rows, which a bulk import and a week of reconcile passes reach.
+    """
+
+    def test_counts_waiting_executions_as_queued(self, engine):
+        queued = _waiting_job("in-flight/queued")
+        delayed = _waiting_job("in-flight/delayed")
+        engine.engine.submit(_submission(queued))
+        engine.engine.submit(replace(_submission(delayed), delay_seconds=600))
+
+        depth = engine.engine.lane_depth(FAST)
+
+        assert (depth.queued, depth.running) == (2, 0)
+
+    def test_lists_waiting_executions_as_active(self, engine):
+        queued = _waiting_job("in-flight/queued")
+        delayed = _waiting_job("in-flight/delayed")
+        engine.engine.submit(_submission(queued))
+        engine.engine.submit(replace(_submission(delayed), delay_seconds=600))
+
+        active = {
+            execution.execution_id: (execution.kind, execution.status)
+            for execution in engine.engine.active()
+        }
+
+        assert active == {
+            _submission(queued).execution_id: (ExecutionKind.JOB, EngineStatus.QUEUED),
+            _submission(delayed).execution_id: (
+                ExecutionKind.JOB,
+                EngineStatus.DELAYED,
+            ),
+        }
+
+    def test_no_in_flight_read_walks_the_workflow_history_on_sqlite(self, tmp_path):
+        url = f"sqlite:///{tmp_path / 'engine.sqlite'}"
+        with running_engine((url, None)) as harness:
+            harness.engine.submit(_submission(_waiting_job("in-flight/plan")))
+            with _statements_on(url) as seen:
+                harness.engine.lane_depth(FAST)
+                harness.engine.active()
+                read = set(seen)
+
+        with sqlite3.connect(url.removeprefix("sqlite:///")) as connection:
+            # A partial index holds only in-flight (or delayed) rows, so a scan
+            # of one is bounded by the work in flight, not by history.
+            partial = {
+                name
+                for (name,) in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'index' "
+                    "AND tbl_name = 'workflow_status' AND sql LIKE '% WHERE %'"
+                )
+            }
+            walks = {
+                statement: detail
+                for statement, parameters in read
+                for *_, detail in connection.execute(
+                    f"EXPLAIN QUERY PLAN {statement}", parameters
+                )
+                if detail.startswith("SCAN")
+                and "workflow_status" in detail
+                and not any(f"INDEX {name}" in detail for name in partial)
+            }
+        assert walks == {}
 
 
 def _recover_legacy_job(harness):

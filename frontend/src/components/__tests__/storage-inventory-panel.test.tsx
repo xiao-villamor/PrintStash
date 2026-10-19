@@ -73,6 +73,10 @@ function setup(response = report) {
   });
 }
 
+async function storedHere(view: Pick<ReturnType<typeof renderApp>, "findByText">) {
+  return (await view.findByText("Files stored here")).parentElement;
+}
+
 describe("Storage insights", () => {
   it("reserves the capacity layout while insights load", async () => {
     let finish: (response: Response) => void = () => {};
@@ -606,5 +610,77 @@ describe("Storage insights", () => {
     expect(await view.findByRole("status")).toHaveTextContent(
       "2 derived cache objects queued for verified cleanup.",
     );
+  });
+  it("shows the kept measurement when the panel is opened again", async () => {
+    const first = setup({
+      ...report,
+      inventory: { ...report.inventory, unique_owned_bytes: 5 * 1024 ** 2 },
+    });
+    expect(await storedHere(first)).toHaveTextContent("5 MB");
+    first.rerender(<p>Elsewhere in settings</p>);
+    expect(screen.queryByText("Files stored here")).toBeNull();
+
+    first.rerender(<StorageInventoryPanel />);
+
+    expect(screen.getByText("Files stored here").parentElement).toHaveTextContent("5 MB");
+    expect(screen.queryByRole("status", { name: "Loading storage insights…" })).toBeNull();
+    expect(
+      first.requests().filter(({ url }) => url.endsWith("/api/v1/storage/inventory")),
+    ).toHaveLength(1);
+  });
+  it("re-measures on refresh while the last figures stay on screen", async () => {
+    const user = userEvent.setup();
+    let finish: (response: Response) => void = () => {};
+    let reads = 0;
+    const view = renderApp(<StorageInventoryPanel />, {
+      auth: adminSession(),
+      routes: {
+        "GET /api/v1/storage/inventory": (url) => {
+          if (!url.endsWith("/inventory")) return json({ detail: "not_found" }, 404);
+          reads += 1;
+          if (reads === 1)
+            return json({
+              ...report,
+              inventory: { ...report.inventory, unique_owned_bytes: 5 * 1024 ** 2 },
+            });
+          return new Promise<Response>((resolve) => {
+            finish = resolve;
+          });
+        },
+        "POST /api/v1/storage/inventory/sample": json(report.inventory),
+      },
+    });
+    expect(await storedHere(view)).toHaveTextContent("5 MB");
+
+    await user.click(view.getByRole("button", { name: "Refresh measurement" }));
+
+    await waitFor(() => expect(reads).toBe(2));
+    expect(view.getByText("Files stored here").parentElement).toHaveTextContent("5 MB");
+    expect(view.getByRole("button", { name: "Refresh measurement" })).toBeDisabled();
+    finish(
+      json({ ...report, inventory: { ...report.inventory, unique_owned_bytes: 7 * 1024 ** 2 } }),
+    );
+    await waitFor(() =>
+      expect(view.getByText("Files stored here").parentElement).toHaveTextContent("7 MB"),
+    );
+    expect(view.requestsWithMethod("POST").map(({ url }) => url)).toEqual([
+      "/api/v1/storage/inventory/sample",
+    ]);
+  });
+  it("keeps the last figures when a refresh fails", async () => {
+    const user = userEvent.setup();
+    const view = setup({
+      ...report,
+      inventory: { ...report.inventory, unique_owned_bytes: 5 * 1024 ** 2 },
+    });
+    expect(await storedHere(view)).toHaveTextContent("5 MB");
+    view.route({ "POST /api/v1/storage/inventory/sample": json({ detail: "boom" }, 500) });
+
+    await user.click(view.getByRole("button", { name: "Refresh measurement" }));
+
+    expect(await view.findByRole("alert")).toHaveTextContent(
+      "Storage insights could not be loaded.",
+    );
+    expect(view.getByText("Files stored here").parentElement).toHaveTextContent("5 MB");
   });
 });

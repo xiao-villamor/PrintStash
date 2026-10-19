@@ -39,8 +39,8 @@ test.describe("upload and capture", () => {
     await expect(page.getByRole("dialog", { name: "Upload model" })).toHaveCount(0);
     await page.getByRole("button", { name: "Notifications" }).click();
     await expect(page.getByText("Upload Cube")).toBeVisible();
-    await expect(page.getByText("completed", { exact: true })).toBeVisible();
-    await expect(page.getByText("running", { exact: true })).toHaveCount(0);
+    const uploadSummary = page.getByText("Upload Cube", { exact: true }).locator("..");
+    await expect(uploadSummary.getByText("completed", { exact: true })).toBeVisible();
 
     expect(problems).toEqual([]);
   });

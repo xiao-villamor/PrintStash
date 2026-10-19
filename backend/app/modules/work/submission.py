@@ -456,8 +456,26 @@ def forget_queued_passes() -> int:
 
 
 def nudge_all(*, now: datetime | None = None) -> None:
-    """The tick: nudge every definition. Each pass is cheap when idle."""
+    """The tick: nudge every definition that a pass could find work for.
+
+    A definition with a source is always nudged: its source decides what is
+    pending. One without (requested work) has nothing but its own Jobs to
+    repair, so it is nudged only while one of them is active. Its pass would
+    otherwise be an engine workflow that reads two empty results, every tick,
+    for every such definition, and stays in the engine's history for a week.
+    """
     if not catalog_module.bound():
         return
-    for name in sorted(catalog_module.get_catalog().definitions):
+    catalog = catalog_module.get_catalog()
+    with get_session_factory().scoped_session() as session:
+        active = set(
+            session.exec(
+                select(Job.kind)
+                .where(col(Job.state).in_(ACTIVE_JOB_STATES))
+                .distinct()
+            ).all()
+        )
+    for name, definition in sorted(catalog.definitions.items()):
+        if definition.source is None and name not in active:
+            continue
         nudge(name, now=now, priority=WorkPriority.BACKFILL)

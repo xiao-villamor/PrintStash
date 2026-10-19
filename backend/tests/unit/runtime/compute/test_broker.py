@@ -108,3 +108,24 @@ class TestActiveTickets:
         assert active == []
         assert completion.is_set()
         assert completion.released
+
+
+class TestPrivateOwnerElection:
+    def test_refuses_a_nonprivate_compute_root(self, tmp_path):
+        from app.runtime.compute.broker import serve
+
+        tmp_path.chmod(0o777)
+        with pytest.raises(ValueError, match="compute_private_directory_required"):
+            serve(tmp_path)
+
+    def test_preserves_an_existing_elected_owner(self, tmp_path):
+        import fcntl
+        from unittest.mock import Mock
+
+        from app.runtime.compute.broker import serve
+
+        factory = Mock()
+        with (tmp_path / "owner.lock").open("a+b") as owner:
+            fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            assert serve(tmp_path, dispatcher_factory=factory) is None
+        factory.assert_not_called()

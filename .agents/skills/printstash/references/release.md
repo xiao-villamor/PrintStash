@@ -77,6 +77,9 @@ sweep). This file is the ordered checklist that ties it together.
         own `umbrel-update-app` and `umbrel-test-app` skills.
       - CasaOS / ZimaOS: a PR to `IceWhaleTech/CasaOS-AppStore`, validated with
         its `./scripts/build_dist.sh`.
+      - Cosmos Cloud: a PR to `azukaar/cosmos-servapps-official`, after
+        `node .github/scripts/validate-servapps.js PrintStash` passes in the fork;
+        the package is `catalogues/cosmos/PrintStash/`.
       - Runtipi: push the updated app to the PrintStash Runtipi app store
         (`xiao-villamor/printstash-runtipi`) with `tipi_version` incremented.
       - Unraid: nothing to do; Community Applications re-reads the template.

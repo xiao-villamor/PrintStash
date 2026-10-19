@@ -72,6 +72,13 @@ resource ids, Trash timestamps, key counts and byte counts. The approval API
 accepts only that exact 64-character digest. A restored, edited or concurrently
 purged candidate invalidates the plan.
 
+Expired printers participate in the same preview, backup, approval and quarantine
+protocol. Finalization removes their tools, material slots, permissions,
+maintenance records and remote-file inventory. Print jobs and notification
+history remain, with the deleted printer reference detached; saved print-job
+names are retained. Removing inventory never sends a command to the physical
+printer or deletes its remote files.
+
 ## Backup Gate
 
 Approval requires a backup witness with all of these properties:
@@ -195,6 +202,14 @@ permission to attach a domain pointer. Guarded producers first lock their Job
 execution and domain output, update the pointer, then adopt the prepared receipt
 in the same transaction. A rolled-back domain transaction leaves its durable
 pending receipt available to the orphan owner.
+
+A known capability refusal happens before reserving a locator, so enrolling an
+unverified root permits the same thumbnail to be retried. Failures after storage
+I/O starts retain their pending evidence because bytes may have been created.
+The hourly coordinator also runs bounded recovery of stale pending publications,
+even when Trash retention is disabled or a preview awaits approval. Recovery
+preserves generation evidence, refuses uncertain deletion and pauses during
+restore; it does not approve Trash expiry.
 
 Adopters, reservers, collectors and cleanup use one persistent SQL locator
 anchor, ordered by backend, namespace and key. Domain authority and output rows

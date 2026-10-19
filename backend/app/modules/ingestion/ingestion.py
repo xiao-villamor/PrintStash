@@ -895,6 +895,19 @@ def _collision_safe_path(directory: Path, filename: str) -> Path:
         n += 1
 
 
+def _has_live_vault_artifact(session: Session, model: Model) -> bool:
+    return (
+        session.exec(
+            select(File.id).where(
+                File.model_id == model.id,
+                File.is_external == False,  # noqa: E712
+                live(File),
+            )
+        ).first()
+        is not None
+    )
+
+
 def resolve_write_target(
     session: Session,
     *,
@@ -906,7 +919,9 @@ def resolve_write_target(
     """Decide whether a new blob is written back into a NAS library or vault.
 
     Rules: a model that already has external (NAS-linked) files keeps new
-    files/revisions in that same library (write-back follows the model); a
+    files/revisions in that same library (write-back follows the model), except
+    that a remote source is read-only, so a model the vault also holds keeps
+    them in the vault and a model only a remote source holds is refused; a
     brand-new model uses the upload's chosen ``target_library_id``; otherwise the
     blob goes to vault storage. When the feature is disabled everything is vault.
     """
@@ -944,6 +959,10 @@ def resolve_write_target(
         raise ExternalRootBindingError("missing", "external_library_missing")
 
     if library.source_kind.value != "mounted":
+        # A remote source only references a model the vault also holds (it
+        # indexed bytes that were uploaded here), so the vault stays its home.
+        if existing_ext is not None and _has_live_vault_artifact(session, model):
+            return vault
         raise ExternalRootBindingError("read_only", "remote_writeback_disabled")
 
     # An explicitly selected library, or a model already linked to one, must

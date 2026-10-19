@@ -2,6 +2,147 @@
 
 ## Unreleased
 
+## 0.15.0
+
+**Back up before upgrading to 0.15.0. Every model file will be re-derived in
+the background; a large library on a 4 GB NAS can keep the CPU busy for hours.
+DBOS 3.0 and application database migrations require restoring the pre-upgrade
+backup to roll back.**
+
+Stop all API and worker processes before upgrading them together. Source
+installations require Python 3.14 or newer; Docker images include the runtime.
+See [0.15.0 upgrade notes](UPGRADE.md#0150-notes).
+
+- PrintStash now keeps a manifest for the Cosmos Cloud market
+  (`azukaar/cosmos-servapps-official`) next to the other store catalogues, with the
+  install dialog creating the first administrator and the same memory budgets the
+  other stores pass. Nothing changes for existing installations; the store
+  submission is a separate step, described in `catalogues/README.md`.
+
+- The Model filters panel lists G-code below a divider, after the source formats
+  it is sliced from, and writes formats as STL, 3MF, OBJ, STEP, DXF and G-code.
+  Active-filter chips use the panel's names and values ("File type: G-code",
+  "Revision: Needs test"), and material or printer names show as written.
+
+- An upload into a library folder on a network or automounted share no longer
+  fails with `storage_root_changed` when the share briefly reports a different
+  identity while it reconnects. PrintStash re-checks the folder and retries the
+  write once; a folder that was really replaced, or that disagrees again, is
+  still refused (#210).
+
+- Bambu LAN printers reporting zero or missing task IDs reuse their external
+  print job across status updates instead of adding a row on every tick.
+  Repeated completion reports no longer queue duplicate notifications, while
+  an observed new run of the same file still creates a separate history row.
+
+- An idle server uses about half the CPU again: only the ingest lane, where an
+  upload or import waits to start, is still polled four times a second
+  (`VAULT_JOBS_INTERACTIVE_QUEUE_POLL_INTERVAL_SECONDS`, 0.25). Derive, network,
+  printing and reconcile lanes go back to once a second
+  (`VAULT_JOBS_QUEUE_POLL_INTERVAL_SECONDS`, now 1.0). On a 4-core test server
+  with 300 Models, idle CPU fell from 11.4% to 6.1% of one core (0.14.0: 6.1%),
+  and uploads start as soon as before.
+
+- Search projection waits for an import to finish, like thumbnails do. Its
+  writes competed with the import for SQLite's single writer. A 300-file ZIP
+  import on a 4-core test server took 60 s instead of 121 s (0.14.0: 55–67 s).
+  Library browsing and filters do not depend on it.
+
+- A valid 3MF too large to read within the preview memory budget is reported
+  as too large to preview, not as a damaged file. Its XML parser running out
+  of memory was recorded as `invalid_source`. The `invalid_source` message now
+  says the file may be damaged or incomplete instead of asking you to check
+  its storage.
+
+- A ZIP over the upload limit says so, with its size and the settings that
+  raise the limit, and the message stays in Tasks. The image's proxy refused it
+  with its own page, which the app reported as a server it could not reach.
+
+- Library titles and controls adapt to the available pane width. Cards use the
+  full grid width, collection tags and description actions share a compact row,
+  and description editing stays visible and usable on phones.
+
+- Library filters keep their position while facet counts load, so a response
+  arriving during a click does not lose the selected filter.
+
+- Uploads wait for newly created tags to be saved, so a quick submission keeps
+  every selected tag. Cancelling a draft ignores late tag acknowledgements.
+
+- Restoring large unfiltered collection trees reuses subtree counts instead of
+  repeating the same lookup for every descendant.
+
+- Model metadata stays current when derivative updates arrive during an in-flight
+  detail read, including revision comparison fields. Confirmed edit receipts
+  with a different derivative snapshot trigger a fresh authorized read.
+
+- Preparing-preview activity waits until the Library is ready before reading
+  the background queue. Opening Notifications can still request activity early.
+
+- Interrupted uploads remain in Notifications after reloading the page, so you
+  can select the same file and resume the existing upload session.
+
+- Mesh previews and geometry processing continue to work when a busy server has
+  more than 1,024 files open. Compute connections also wait for replies and detect
+  disconnected peers without the same descriptor limit. Warm workers preserve
+  high-numbered resource permits and close every unrelated descriptor before
+  processing a model.
+
+- An idle server on SQLite no longer uses more CPU the longer it runs. Each
+  background-work lane keeps checking for queued work on a short interval, and on
+  SQLite every check read the engine's entire workflow history, which the
+  default 7-day retention grows into tens of thousands of rows. On a low-power
+  mini PC that kept the server near 30% CPU with nothing to do. The checks now
+  use an index (DBOS 3.3). PostgreSQL was not affected.
+
+- **Background work no longer gets stuck after a restart.** Stopping or
+  restarting PrintStash while a long job ran (a mesh, a backup, an import)
+  could leave that job "running" forever. On lanes that run one job at a time,
+  such as backups and maintenance, nothing else on the lane ran again until the
+  next upgrade. Such jobs are now picked up and rerun after the restart. With
+  separate worker processes, a worker that started after the backup being
+  restored now registers itself again instead of having its jobs rerun.
+
+- A job whose work had finished is no longer marked **failed** because the
+  database was briefly busy (a locked SQLite file, a PostgreSQL restart) while
+  its result was being saved. Saving the result is retried.
+
+- Cancelling a running job no longer lets its lane start another job before the
+  cancelled one has actually stopped, so lanes sized to the server's memory stay
+  within their limit. A cancelled job whose work never stops still frees its
+  lane after `VAULT_JOBS_EXECUTOR_STALE_SECONDS` (2 minutes by default).
+
+- The admin **Background work** page and each reconcile pass read lane depth
+  and active work without scanning the engine's whole history on SQLite (137 ms
+  per read at 200,000 history rows, now under a millisecond).
+
+- With a pinned executor id, a job that crashes the server is retried as many
+  times as `VAULT_JOBS_MAX_RESUBMITS` allows (3 by default), instead of up to
+  100 restarts.
+
+- Background work does less redundant database work: submitting a job no
+  longer reads the engine first, creating one no longer reads it back, the
+  periodic check skips the 12 kinds of requested work that have nothing to
+  repair (a third of its engine runs, and of the history they leave behind), and
+  its two sweeps share one read. Per job that is about 10% fewer database
+  statements on each of the engine and application databases.
+
+- A reconcile interval that does not divide evenly into a minute, hour or day
+  (for example 90 seconds) now runs at an even cadence rounded down, instead of
+  firing twice in quick succession.
+
+- Settings no longer re-measures **Storage insights** or re-checks **Server
+  GPU** every time you open them. Both took several seconds to load; each
+  answer is now kept for the session. Storage insights are measured again after
+  the library changes or when you choose **Refresh measurement**, and the GPU
+  status when you choose **Check again**. The last figures stay on screen while
+  a new measurement runs.
+
+- Adding a G-code revision to a model you uploaded no longer fails with "This
+  model's source is remote and read-only" when a remote library source (S3,
+  WebDAV, SFTP) has also indexed the same file. The revision is stored in the
+  vault with the rest of the model. A model that only a remote source holds
+  still gets that message.
+
 - AI Search can run a second local text model: **all-MiniLM-L6-v2** (English,
   90 MB). It embeds a query in about half the time BGE takes and needs less
   memory, at slightly lower recall. BGE stays the recommended default; the
@@ -55,13 +196,6 @@
   remote source, so it now says so (409) and the dialog shows a readable
   explanation. In the same dialog, "Mark as recommended" is a star you fill
   instead of a checkbox next to one.
-
-## 0.15.0
-
-**Upgrade note:** Back up and stop all API and worker processes before
-upgrading them together to DBOS 3.0. Source installations now
-require Python 3.14 or newer; Docker images include the runtime. See
-[0.15.0 upgrade notes](UPGRADE.md#0150-notes).
 
 - Deleted models can be selected in Settings, Trash: tick several (or all) and
   restore or permanently delete them in one step.
@@ -628,8 +762,9 @@ require Python 3.14 or newer; Docker images include the runtime. See
 
 
 **Upgrade note:** The background engine now uses DBOS 3.0. Stop all API and
-worker processes before upgrading together. Engine state migrates on startup;
-rolling back requires discarding the upgraded, disposable engine state first.
+worker processes before upgrading together. Restore the pre-upgrade application
+database and managed files to roll back; discarding the DBOS engine state alone
+is insufficient. Every model file is re-derived in the background after upgrading.
 See [the upgrade guide](UPGRADE.md#0150-dbos-30).
 
 ### Added
@@ -670,6 +805,15 @@ See [the upgrade guide](UPGRADE.md#0150-dbos-30).
   will be removed in 0.16.
 
 ### Fixed
+
+- Expired printers now appear in garbage-collection previews and can be purged
+  after backup verification, approval and quarantine. Printer configuration is
+  removed without foreign-key failures; print and notification history survives.
+
+
+- Refused storage writes no longer strand thumbnail reservations. Hourly cleanup
+  recovers stale failed publications even when trash expiry is disabled or a GC
+  preview awaits approval, so thumbnails can be generated again after enrollment.
 
 - Preserve remote scan deadlines when native metadata or streaming reads time out, so bounded imports continue instead of entering provider-error backoff.
 

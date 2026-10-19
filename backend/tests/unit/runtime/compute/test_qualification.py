@@ -79,3 +79,19 @@ class TestReadReceipts:
         target.write_text("{broken")
 
         assert read_receipts(target) == ()
+
+
+class TestEvidenceBounds:
+    def test_reads_valid_qualification(self, tmp_path, receipt):
+        target = tmp_path / "receipt.json"
+        target.write_text("[" + receipt.model_dump_json() + "]")
+        assert read_receipts(target) == (receipt,)
+
+    @pytest.mark.parametrize(
+        "payload",
+        [" " * (1024**2 + 1), "{}", "[" + ",".join("{}" for _ in range(257)) + "]"],
+    )
+    def test_refuses_excessive_receipt_input(self, tmp_path, payload):
+        target = tmp_path / "receipt.json"
+        target.write_text(payload)
+        assert read_receipts(target) == ()

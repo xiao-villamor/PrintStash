@@ -81,16 +81,18 @@ def lanes_of(row: WorkExecutor) -> list[LaneName]:
     return [LaneName(lane) for lane in row.lanes.split(",")] if row.lanes else []
 
 
-def heartbeat(*, active_mutations: int, now: datetime | None = None) -> None:
+def heartbeat(*, active_mutations: int, now: datetime | None = None) -> bool:
+    """Renew this executor's row; ``False`` when it has none to renew."""
     now = now or utcnow()
     with get_session_factory().scoped_session() as session:
         row = session.get(WorkExecutor, executor_id())
         if row is None:
-            return
+            return False
         row.heartbeat_at = now
         row.active_mutations = max(0, active_mutations)
         session.add(row)
         session.commit()
+    return True
 
 
 def deregister() -> None:
@@ -137,6 +139,20 @@ def stale_ids(
     now = now or utcnow()
     rows = all_executors() if session is None else _all(session)
     return {row.executor_id for row in rows if is_stale(row, now=now)}
+
+
+def live_ids(
+    *, now: datetime | None = None, session: Session | None = None
+) -> set[str]:
+    """Executors heartbeating within the stale window.
+
+    Liveness is proven, never assumed. An execution held by an executor outside
+    this set is lost whether its row went stale, was deleted by a clean stop
+    that left a step running past the engine's shutdown wait, or was forgotten.
+    """
+    now = now or utcnow()
+    rows = all_executors() if session is None else _all(session)
+    return {row.executor_id for row in rows if not is_stale(row, now=now)}
 
 
 API_ROLES = (ProcessRole.ALL, ProcessRole.API)

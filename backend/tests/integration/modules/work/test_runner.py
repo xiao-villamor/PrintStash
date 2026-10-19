@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 
 import pytest
 from sqlalchemy import event
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
 from app.core.config import _overlay
@@ -162,6 +163,23 @@ def _run(engine: InlineJobEngine, job: Job, attempt: int = 1) -> None:
     execute_job(
         job.id, attempt, _Runner(engine, execution), execution_epoch=job.execution_epoch
     )
+
+
+_LOCKED = OperationalError("UPDATE jobs", {}, Exception("database is locked"))
+
+
+def _refusing_once(write):
+    """``write``, refused once by a database that is busy for a moment."""
+    calls = 0
+
+    def busy_then(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise _LOCKED
+        return write(*args, **kwargs)
+
+    return busy_then
 
 
 def _status(job_id: str):
@@ -660,6 +678,43 @@ class TestExecuteJob:
         assert (status.state, status.retryable) == ("failed", True)
         assert status.error and "/srv/secret" not in status.error
         assert TRACE.steps == ["one"]
+
+    def test_a_claim_the_database_refuses_once_is_retried(
+        self, engine: InlineJobEngine, make_job, monkeypatch
+    ) -> None:
+        job = make_job(kind=MUTATING)
+        monkeypatch.setattr(jobs, "lock_execution", _refusing_once(jobs.lock_execution))
+
+        _run(engine, job)
+
+        assert _status(job.id).state == "completed"
+
+    def test_a_settlement_the_database_refuses_once_is_retried(
+        self, engine: InlineJobEngine, make_job, monkeypatch
+    ) -> None:
+        # Left to fail, the execution ends in error and the reconciler fails a
+        # Job whose every step succeeded.
+        job = make_job(kind=MUTATING)
+        monkeypatch.setattr(jobs, "settle", _refusing_once(jobs.settle))
+
+        _run(engine, job)
+
+        assert _status(job.id).state == "completed"
+
+    def test_a_settlement_the_database_keeps_refusing_ends_the_execution(
+        self, engine: InlineJobEngine, make_job, monkeypatch
+    ) -> None:
+        job = make_job(kind=MUTATING)
+
+        def refused(*_args, **_kwargs):
+            raise _LOCKED
+
+        monkeypatch.setattr(jobs, "settle", refused)
+
+        with pytest.raises(OperationalError):
+            _run(engine, job)
+
+        assert [name for name, *_ in engine.step_retries] == ["work.settle"] * 4
 
     def test_a_failed_job_withdraws_its_subject(
         self, engine: InlineJobEngine, make_job

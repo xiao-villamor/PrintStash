@@ -353,7 +353,12 @@ function parseDetailCode(body: string): string | null {
 }
 
 function errorCode(status: number, body: string): string {
-  return parseDetailCode(body) ?? String(status);
+  const code = parseDetailCode(body);
+  if (code !== null) return code;
+  // The image's nginx refuses an oversized body with its own HTML page before
+  // the API sees it. It is a file over the upload limit, not a server that
+  // cannot be reached.
+  return status === 413 ? "upload_too_large" : String(status);
 }
 
 async function parseError(res: Response, context?: ResponseContext): Promise<ApiError> {

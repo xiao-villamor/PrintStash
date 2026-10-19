@@ -24,6 +24,7 @@ from app.modules.storage.storage_backend.contracts import (
     StagedRemoteObject,
     StorageBackend,
     StorageCollisionError,
+    StorageConfigurationError,
     StorageTier,
 )
 from app.modules.storage.storage_publication import (
@@ -641,6 +642,16 @@ def finish_publication_batch(
         enqueue_prepared_owned_deletion(session, retirement, required_proof=True)
 
 
+def _require_publication_capability(backend: StorageBackend) -> None:
+    """Refuse known non-writers before creating durable ownership intent.
+
+    Once I/O starts, failures may have published bytes and must retain their
+    reservation for recovery; capability refusal has no such uncertainty.
+    """
+    if not backend.capabilities.conditional_create:
+        raise StorageConfigurationError("storage_write_unverified")
+
+
 def prepare_bytes(
     session: Session,
     backend: StorageBackend,
@@ -651,6 +662,7 @@ def prepare_bytes(
     sha256: str | None = None,
 ) -> PendingPublication:
     """Reserve/create bytes and keep durable PENDING evidence without adoption."""
+    _require_publication_capability(backend)
     require_clean_publication_transaction(session)
     digest = sha256 or hashlib.sha256(data).hexdigest()
     provider_ref = provider_ref_for_backend(
@@ -692,6 +704,7 @@ def prepare_stream(
     sha256: str | None = None,
 ) -> PendingPublication:
     """Publish a caller-owned stream without buffering it in memory."""
+    _require_publication_capability(backend)
     require_clean_publication_transaction(session)
     provider_ref = provider_ref_for_backend(
         backend, namespace=_namespace_for(backend, key)
@@ -740,6 +753,7 @@ def prepare_file(
     so the bytes are not uploaded a second time; otherwise *source* is
     published as usual. Either way *source* is consumed when *move* is set.
     """
+    _require_publication_capability(backend)
     require_clean_publication_transaction(session)
     effective_provider_ref = provider_ref or provider_ref_for_backend(
         backend,

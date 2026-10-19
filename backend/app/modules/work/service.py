@@ -49,7 +49,7 @@ from app.schemas.jobs import (
 
 from . import catalog as catalog_module
 from . import executors
-from .contracts import JobOutcome
+from .contracts import EngineStatus, JobOutcome
 from .jobs import TERMINAL_STATES, ActiveJobExists, jobs, status_of
 from .submission import execution_id, nudge
 
@@ -134,8 +134,19 @@ def cancel(job_id: str, *, actor: User) -> JobStatus:
     if settled is None:
         raise OperationError("job_not_active", kind=ErrorKind.CONFLICT)
     if attempts:
+        engine = catalog_module.get_engine()
+        current = execution_id(job_id, attempts, epoch)
         try:
-            catalog_module.get_engine().cancel(execution_id(job_id, attempts, epoch))
+            # Cancelling a running execution in the engine frees its lane slot
+            # at once, while its step runs on until it next checks withdrawal:
+            # the lane would start more work than its concurrency allows. A
+            # running step sees the cancelled Job and stops, ending its
+            # execution; one stranded on a lost executor, or whose step never
+            # checks, is swept instead. Anything else is cancelled as before:
+            # without a record, the cancel is a no-op the engine allows.
+            seen = engine.evidence([current]).get(current)
+            if seen is None or seen.status is not EngineStatus.RUNNING:
+                engine.cancel(current)
         except Exception:  # noqa: BLE001 - the Job is settled; the engine catches up
             logger.warning("engine cancel failed", extra={"job_id": job_id})
     result = jobs.get(job_id)

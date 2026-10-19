@@ -186,6 +186,22 @@ def _bambu_identity_matches(
     )
 
 
+def _identityless_filename_match_allowed(
+    bambu_printer: bool, candidate: PrintJob
+) -> bool:
+    """Allow filename fallback without overriding an external Bambu identity.
+
+    Callers use this only when the incoming report has no usable typed IDs.
+    External rows with missing or zero IDs have the same filename-only evidence
+    as provider-neutral reports; typed external rows still require identity.
+    """
+    return (
+        not bambu_printer
+        or candidate.source == "vault"
+        or not _bambu_identity(candidate)
+    )
+
+
 def _bambu_project_task_transition(
     incoming: dict[str, str],
     candidate: PrintJob,
@@ -859,7 +875,9 @@ class PrinterHub:
                         (
                             not incoming_identity
                             and cached_job.remote_filename == filename
-                            and (not bambu_printer or cached_job.source == "vault")
+                            and _identityless_filename_match_allowed(
+                                bambu_printer, cached_job
+                            )
                         )
                         or (
                             incoming_identity
@@ -900,18 +918,19 @@ class PrinterHub:
                             job = candidate
                             break
                 # Provider-neutral reports (Moonraker, OctoPrint, PrusaLink,
-                # and manual vault dispatch) do not carry a typed Bambu
-                # identity. Reconcile them to the active row for the same
-                # filename so a vault job is updated instead of creating an
-                # external sentinel row. A filename is never allowed to
-                # override a non-empty Bambu identity above.
+                # manual vault dispatch, and identityless Bambu external
+                # runs) have only a filename to reconcile to an active row.
+                # Typed external Bambu identities cannot be overridden by
+                # filename fallback.
                 if job is None and not incoming_identity:
                     for candidate in rows:
                         if (
                             candidate.remote_filename == filename
                             and candidate.finished_at is None
                             and candidate.dedupe_absorbed_at is None
-                            and (not bambu_printer or candidate.source == "vault")
+                            and _identityless_filename_match_allowed(
+                                bambu_printer, candidate
+                            )
                         ):
                             job = candidate
                             break
@@ -936,7 +955,9 @@ class PrinterHub:
                             candidate.remote_filename == filename
                             and candidate.finished_at is not None
                             and candidate.dedupe_absorbed_at is None
-                            and (not bambu_printer or candidate.source == "vault")
+                            and _identityless_filename_match_allowed(
+                                bambu_printer, candidate
+                            )
                         ):
                             job = candidate
                             break

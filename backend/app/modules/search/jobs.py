@@ -662,6 +662,10 @@ def definitions() -> list[JobDefinition]:
             mutating=False,
             drain=True,
             label="Search projection",
+            # Each projection page is a write on the database the import is
+            # writing to: projected during an import, it doubled the import's
+            # time. Library browsing and filters do not read the projection.
+            waits_for_additions=True,
         ),
         JobDefinition(
             name=JobKind.SEARCH_GENERATION,

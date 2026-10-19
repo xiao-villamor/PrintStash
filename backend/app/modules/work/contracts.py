@@ -119,10 +119,13 @@ class LaneOrder(StrEnum):
 class LanePace(StrEnum):
     """How soon an engine must notice work queued on a lane.
 
-    An engine that polls pays for every look, working or idle. Lanes someone
-    is waiting on are looked at often; lanes of background upkeep are not.
+    An engine that polls pays for every look, working or idle. The lane whose
+    next Job a person watches start (the upload they just sent) is looked at
+    most often, work that follows on from it about once a second, and
+    background upkeep less often still.
     """
 
+    INTERACTIVE = "interactive"
     PROMPT = "prompt"
     RELAXED = "relaxed"
 

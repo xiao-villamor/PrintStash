@@ -12,7 +12,7 @@ import {
 import type { ModelPrintJobRead } from "@/types";
 import { clearLogin } from "@/lib/auth-store";
 import { queryKeys } from "@/lib/query-client";
-import { aModel } from "@/test-support/factories";
+import { aMetadata, aModel, aRevision } from "@/test-support/factories";
 import { json, renderApp } from "@/test-support/render";
 
 const model = aModel({ id: 1, name: "Current", edit_version: 4 });
@@ -22,6 +22,79 @@ function Probe({ ready }: { ready: (publish: PublishModel) => void }) {
   return <p>{resource.data?.name}</p>;
 }
 describe("useModelDetail", () => {
+  it("revalidates derivatives when a confirmed receipt differs from the observed revision", async () => {
+    let publish!: PublishModel;
+    const fresh = aModel({
+      id: 1,
+      name: "Confirmed",
+      edit_version: 5,
+      derivatives_revision: "ready-after-edit",
+      files: [aRevision({ metadata: aMetadata({ estimated_time_s: 1812 }) })],
+    });
+    const view = renderApp(<Probe ready={(value) => (publish = value)} />, {
+      routes: { "GET /api/v1/models/1": json(fresh) },
+    });
+    await screen.findByText("Current");
+    // A background read settles before the edit response captured earlier arrives.
+    act(() =>
+      view.client.setQueryData(
+        queryKeys.model(1),
+        aModel({
+          ...model,
+          derivatives_revision: "ready-before-edit",
+          files: [aRevision({ metadata: aMetadata({ estimated_time_s: 1812 }) })],
+        }),
+      ),
+    );
+    await act(async () => {
+      await publish(
+        aModel({
+          id: 1,
+          name: "Confirmed",
+          edit_version: 5,
+          derivatives_revision: "pending-before-edit",
+          files: [aRevision({ metadata: null })],
+        }),
+      );
+    });
+
+    await waitFor(() =>
+      expect(view.client.getQueryData(queryKeys.model(1))).toMatchObject({
+        name: "Confirmed",
+        edit_version: 5,
+        derivatives_revision: "ready-after-edit",
+        files: [{ metadata: { estimated_time_s: 1812 } }],
+      }),
+    );
+    expect(view.requests().filter((read) => read.url === "/api/v1/models/1")).toHaveLength(1);
+  });
+
+  it("keeps a matching derivative receipt without another detail read", async () => {
+    let publish!: PublishModel;
+    const view = renderApp(<Probe ready={(value) => (publish = value)} />);
+    await screen.findByText("Current");
+
+    await act(async () => {
+      await publish(aModel({ id: 1, name: "Confirmed", edit_version: 5 }));
+    });
+
+    expect(await screen.findByText("Confirmed")).toBeVisible();
+    expect(view.requests().filter((read) => read.url === "/api/v1/models/1")).toEqual([]);
+  });
+
+  it("ignores a stale edit receipt with a different derivative revision", async () => {
+    let publish!: PublishModel;
+    const view = renderApp(<Probe ready={(value) => (publish = value)} />);
+    await screen.findByText("Current");
+
+    const accepted = await publish(
+      aModel({ id: 1, edit_version: 2, derivatives_revision: "stale-background-state" }),
+    );
+
+    expect(accepted).toBe(false);
+    expect(screen.getByText("Current")).toBeVisible();
+    expect(view.requests().filter((read) => read.url === "/api/v1/models/1")).toEqual([]);
+  });
   it("rejects a receipt after a different history has become canonical", async () => {
     let publish!: PublishModel;
     const view = renderApp(

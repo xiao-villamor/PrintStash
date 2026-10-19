@@ -31,7 +31,11 @@ def _native_default() -> int:
 def default_lanes() -> dict[LaneName, Lane]:
     """Every lane with its configured (environment) concurrency."""
     lanes = (
-        Lane(LaneName.INGEST, settings.jobs_ingest_concurrency),
+        Lane(
+            LaneName.INGEST,
+            settings.jobs_ingest_concurrency,
+            pace=LanePace.INTERACTIVE,
+        ),
         Lane(LaneName.DERIVE_NATIVE, _native_default(), queue_order=LaneOrder.FIFO),
         Lane(
             LaneName.DERIVE_LIGHT,

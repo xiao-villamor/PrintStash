@@ -289,6 +289,7 @@ class DbosHarness(Harness):
         self.system_db = system_db
         self.schema = schema
         self.tick_seconds = tick_seconds
+        self.executor_id = "contract-executor"
         self.engine = self._build(app_version=app_version)
         self.engine.launch(listen_lanes=listen_lanes)
 
@@ -299,7 +300,7 @@ class DbosHarness(Harness):
             self.catalog,
             system_database_url=self.system_db,
             schema=self.schema,
-            executor_id="contract-executor",
+            executor_id=self.executor_id,
             app_version=app_version,
             polling_interval_seconds=0.1,
             tick_seconds=self.tick_seconds,
@@ -326,6 +327,14 @@ class DbosHarness(Harness):
         self.engine.shutdown()
         self.engine = self._build(app_version=app_version)
         self.engine.launch(listen_lanes=listen_lanes)
+        catalog_module.bind(self.engine, self.catalog)
+
+    def restart_as(self, executor_id: str) -> None:
+        """Stop cleanly, then start again as a new process would: a new id."""
+        self.engine.shutdown()
+        self.executor_id = executor_id
+        self.engine = self._build(app_version=None)
+        self.engine.launch(listen_lanes=None)
         catalog_module.bind(self.engine, self.catalog)
 
     def started(self, subject: str) -> None:

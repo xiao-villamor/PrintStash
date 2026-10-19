@@ -283,6 +283,22 @@ class TestCancel:
         execution = work_engine.executions[execution_id(job.id, 1, job.execution_epoch)]
         assert execution.status is EngineStatus.CANCELLED
 
+    def test_leaves_a_running_execution_to_stop_on_its_own(
+        self, work_engine, make_job, owner
+    ) -> None:
+        # Cancelling it in the engine would free its lane slot while its step
+        # still runs; the step sees the cancelled Job and ends it instead.
+        from app.modules.work.submission import submit
+
+        job = make_job(kind=JobKind.SOURCES_SCAN, owner=owner)
+        submit(job.id)
+        execution = work_engine.executions[execution_id(job.id, 1, job.execution_epoch)]
+        execution.status = EngineStatus.RUNNING
+
+        service.cancel(job.id, actor=owner)
+
+        assert execution.status is EngineStatus.RUNNING
+
     def test_a_job_never_submitted_needs_no_engine_cancel(
         self, db_session: Session, work_engine, make_job, owner, monkeypatch
     ) -> None:

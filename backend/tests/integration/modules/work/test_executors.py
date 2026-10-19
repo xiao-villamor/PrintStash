@@ -85,6 +85,10 @@ class TestHeartbeat:
 
         assert db_session.get(WorkExecutor, executors.executor_id()) is None
 
+    def test_reports_that_it_had_no_row_to_renew(self) -> None:
+        # Its caller registers again: an executor with no row reads as lost.
+        assert executors.heartbeat(active_mutations=0) is False
+
 
 class TestLiveness:
     def test_staleness_is_read_in_a_session_the_caller_has_open(
@@ -105,6 +109,23 @@ class TestLiveness:
 
         assert executors.stale_ids() == {dead.executor_id}
         assert [row.executor_id for row in executors.live()] == [alive.executor_id]
+
+    def test_only_a_heartbeating_executor_is_live(self, make_work_executor) -> None:
+        make_work_executor("dead", stale=True)
+        alive = make_work_executor("alive")
+
+        assert executors.live_ids() == {alive.executor_id}
+
+    def test_liveness_is_read_in_a_session_the_caller_has_open(
+        self, make_work_executor, db_session: Session, transactions: list[str]
+    ) -> None:
+        alive = make_work_executor("alive")
+        db_session.commit()
+        transactions.clear()
+
+        live = executors.live_ids(session=db_session)
+
+        assert (live, len(transactions)) == ({alive.executor_id}, 1)
 
     def test_forgets_executors_silent_for_ten_stale_windows(
         self, make_work_executor, db_session: Session

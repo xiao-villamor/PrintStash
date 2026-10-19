@@ -51,6 +51,7 @@ from app.db.transactions import begin_write
 from . import catalog as catalog_module
 from . import executors, fences
 from .contracts import (
+    ActiveExecution,
     DiscoveryBudget,
     EngineEvidence,
     EngineStatus,
@@ -128,14 +129,16 @@ def decide(
     *,
     now: datetime,
     app_version: str,
-    stale_executors: set[str],
+    live_executors: frozenset[str],
     max_resubmits: int,
     grace: timedelta,
 ) -> Decision:
     """The pure decision table for one non-terminal Job.
 
     ``evidence`` is what the engine recorded about the Job's current attempt,
-    ``None`` when it has no record of it. Every branch names why.
+    ``None`` when it has no record of it. ``live_executors`` are the executors
+    proven alive; a running execution held by any other is stranded. Every
+    branch names why.
     """
     if job.state is JobState.INTERRUPTED:
         if job.resubmits > max_resubmits:
@@ -163,7 +166,7 @@ def decide(
     if (
         status is EngineStatus.RUNNING
         and evidence.executor_id is not None
-        and evidence.executor_id in stale_executors
+        and evidence.executor_id not in live_executors
     ):
         return Decision(Verdict.INTERRUPT, Reason.EXECUTOR_LOST, cancel_engine=True)
     return Decision(Verdict.NONE, Reason.IN_PROGRESS)
@@ -184,6 +187,32 @@ class PassResult:
 
     def count(self, outcome: Reason | PassNote | SkipReason) -> None:
         self.outcomes[outcome] = self.outcomes.get(outcome, 0) + 1
+
+
+def _live_executors(
+    *, now: datetime | None = None, session: Session | None = None
+) -> frozenset[str]:
+    """Executors proven alive: every heartbeating one, and this process's engine."""
+    own = catalog_module.get_engine().executor_id
+    return frozenset(executors.live_ids(now=now, session=session) | {own})
+
+
+@dataclass(frozen=True)
+class EngineSnapshot:
+    """What the engine is running and who is alive, read once per sweep round."""
+
+    active: list[ActiveExecution]
+    live: frozenset[str]
+
+
+def engine_snapshot(*, now: datetime | None = None) -> EngineSnapshot:
+    live = _live_executors(now=now)
+    return EngineSnapshot(catalog_module.get_engine().active(), live)
+
+
+def _stranded(executor_id: str | None, live: frozenset[str]) -> bool:
+    """Whether an execution's engine owner is not proven alive."""
+    return executor_id is not None and executor_id not in live
 
 
 def _interrupt(job: Job, reason: Reason, *, now: datetime) -> bool:
@@ -237,7 +266,7 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
         )
         for row in rows:
             session.expunge(row)
-        stale = executors.stale_ids(now=now, session=session) if rows else set()
+        live = _live_executors(now=now, session=session) if rows else frozenset()
     if not rows:
         return
     admission = _RecoveryAdmission(definition)
@@ -278,7 +307,7 @@ def _repair(definition: JobDefinition, *, now: datetime, result: PassResult) -> 
             seen,
             now=now,
             app_version=settings.app_version,
-            stale_executors=stale,
+            live_executors=live,
             max_resubmits=settings.jobs_max_resubmits,
             grace=grace,
         )
@@ -997,24 +1026,27 @@ def _pass_summary(source: JobKind) -> int:
     return run_pass(source).submitted
 
 
-def sweep_lost_passes(*, now: datetime | None = None) -> int:
+def sweep_lost_passes(
+    *, now: datetime | None = None, snapshot: EngineSnapshot | None = None
+) -> int:
     """Cancel reconcile passes a dead executor was running.
 
     Passes are not Jobs, so repair never interrupts them, and their lane is
-    global: each one a killed process left running holds a slot everywhere
-    until it is cancelled. A pass is idempotent and every source is nudged
-    again (at startup, and by each tick), so cancelling one loses nothing.
+    global: each one a killed or stopped process left running holds a slot
+    everywhere until it is cancelled. A pass is idempotent and every source is
+    nudged again (at startup, and by each tick), so cancelling one loses nothing.
+    ``snapshot`` is the round's shared read; without one it is read here.
     """
-    stale = executors.stale_ids(now=now)
-    if not stale:
-        return 0
+    if snapshot is None:
+        snapshot = engine_snapshot(now=now)
+    live = snapshot.live
     engine = catalog_module.get_engine()
     cancelled = 0
-    for execution in engine.active():
+    for execution in snapshot.active:
         if (
             execution.kind is not ExecutionKind.PASS
             or execution.status is not EngineStatus.RUNNING
-            or execution.executor_id not in stale
+            or not _stranded(execution.executor_id, live)
         ):
             continue
         try:
@@ -1027,23 +1059,32 @@ def sweep_lost_passes(*, now: datetime | None = None) -> int:
     return cancelled
 
 
-def sweep_lost_terminal_attempts(*, now: datetime | None = None) -> int:
-    """Free engine slots after a terminal SQL write outlives its executor.
+def sweep_lost_terminal_attempts(
+    *, now: datetime | None = None, snapshot: EngineSnapshot | None = None
+) -> int:
+    """Free engine slots that a settled Job's execution still holds.
 
     A Job can commit its outcome just before the engine records workflow
-    success. Normal repair only sees active Jobs, so this exact dead attempt
-    needs engine cancellation without changing its durable domain result.
+    success, and normal repair only sees active Jobs. Two such executions are
+    cancelled in the engine without changing the Job's durable result:
+
+    - one whose executor is lost: nothing will ever end it;
+    - one still running a stale window after its Job settled. A cancelled
+      Job's execution is left to stop on its own, because cancelling it in the
+      engine frees its lane slot while its step still runs; a step that never
+      checks for withdrawal would otherwise hold that slot until a restart.
     """
-    stale = executors.stale_ids(now=now)
-    if not stale:
-        return 0
+    now = now or utcnow()
+    overdue_before = now - timedelta(seconds=settings.jobs_executor_stale_seconds)
+    if snapshot is None:
+        snapshot = engine_snapshot(now=now)
+    live = snapshot.live
     engine = catalog_module.get_engine()
     candidates = [
         execution
-        for execution in engine.active()
+        for execution in snapshot.active
         if execution.kind is ExecutionKind.JOB
         and execution.status is EngineStatus.RUNNING
-        and execution.executor_id in stale
     ]
     cancelled = 0
     # Bound every IN query while examining the entire candidate set. Missing
@@ -1054,28 +1095,41 @@ def sweep_lost_terminal_attempts(*, now: datetime | None = None) -> int:
         identifiers = {execution.execution_id.partition(":")[0] for execution in batch}
         with get_session_factory().scoped_session() as session:
             terminal = session.exec(
-                select(Job.id, Job.attempts, Job.execution_epoch).where(
+                select(Job.id, Job.attempts, Job.execution_epoch, Job.updated_at).where(
                     col(Job.id).in_(identifiers), col(Job.state).in_(TERMINAL_STATES)
                 )
             ).all()
-            owned = {
-                execution_id(job_id, attempt, epoch)
-                for job_id, attempt, epoch in terminal
+            # A terminal write is a Job's last; its time is when it settled.
+            overdue = {
+                execution_id(job_id, attempt, epoch): ensure_utc(settled)
+                <= overdue_before
+                for job_id, attempt, epoch, settled in terminal
             }
-        targets = [execution for execution in batch if execution.execution_id in owned]
+        targets = [
+            execution
+            for execution in batch
+            if execution.execution_id in overdue
+            and (
+                overdue[execution.execution_id]
+                or _stranded(execution.executor_id, live)
+            )
+        ]
         if not targets:
             continue
         # Engine calls own no caller SQL transaction. A restarted executor may
         # have registered or recovered this workflow since the first snapshot.
         evidence = engine.evidence([execution.execution_id for execution in targets])
-        still_stale = executors.stale_ids(now=now)
+        still_live = _live_executors(now=now)
         for execution in targets:
             seen = evidence.get(execution.execution_id)
             if (
                 seen is None
                 or seen.status is not EngineStatus.RUNNING
                 or seen.executor_id != execution.executor_id
-                or seen.executor_id not in still_stale
+                or not (
+                    overdue[execution.execution_id]
+                    or _stranded(seen.executor_id, still_live)
+                )
             ):
                 continue
             try:
@@ -1089,16 +1143,27 @@ def sweep_lost_terminal_attempts(*, now: datetime | None = None) -> int:
     return cancelled
 
 
+def sweep_lost_work(*, now: datetime | None = None) -> tuple[int, int]:
+    """Both lost-work sweeps over one read of the engine and the executors.
+
+    Returns how many passes and how many settled Jobs' executions were
+    cancelled.
+    """
+    snapshot = engine_snapshot(now=now)
+    passes = sweep_lost_passes(now=now, snapshot=snapshot)
+    if passes:
+        logger.warning("cancelled %d reconcile pass(es) of a lost executor", passes)
+    terminal = sweep_lost_terminal_attempts(now=now, snapshot=snapshot)
+    if terminal:
+        logger.warning("freed %d slot(s) held by settled Jobs' executions", terminal)
+    return passes, terminal
+
+
 def tick() -> None:
     """Free lost passes and terminal attempt wrappers, then nudge every source."""
     from .submission import nudge_all
 
-    swept = sweep_lost_passes()
-    if swept:
-        logger.warning("cancelled %d reconcile pass(es) of a lost executor", swept)
-    terminal = sweep_lost_terminal_attempts()
-    if terminal:
-        logger.warning("cancelled %d terminal attempt(s) of a lost executor", terminal)
+    sweep_lost_work()
     nudge_all()
 
 
@@ -1129,5 +1194,6 @@ __all__ = [
     "sweep_foreign_versions",
     "sweep_lost_passes",
     "sweep_lost_terminal_attempts",
+    "sweep_lost_work",
     "tick",
 ]

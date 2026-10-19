@@ -75,9 +75,10 @@ as private even for public repositories; see
 
 For Unraid, use the [single-container template](../templates/printstash.xml)
 and its [installation and migration guide](../unraid/README.md). Manifests for
-Runtipi, Umbrel and CasaOS/ZimaOS are kept in [`catalogues/`](../catalogues/README.md)
-and published to those stores with each release. On other container dashboards,
-add the published image as a custom container with these settings:
+Runtipi, Umbrel, CasaOS/ZimaOS and Cosmos Cloud are kept in
+[`catalogues/`](../catalogues/README.md) and published to those stores with each
+release. On other container dashboards, add the published image as a custom
+container with these settings:
 
 | Setting | Value |
 | --- | --- |
