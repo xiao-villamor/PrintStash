@@ -6,7 +6,7 @@
 
 **Back up before upgrading to 0.15.0. Every model file will be re-derived in
 the background; a large library on a 4 GB NAS can keep the CPU busy for hours.
-DBOS 3.0 and application database migrations require restoring the pre-upgrade
+DBOS 3.3.0 and application database migrations require restoring the pre-upgrade
 backup to roll back.**
 
 Stop all API and worker processes before upgrading them together. Source
@@ -761,7 +761,7 @@ See [0.15.0 upgrade notes](UPGRADE.md#0150-notes).
   failures for unchanged input, and backfill accurate metadata with recipe 3 (#259).
 
 
-**Upgrade note:** The background engine now uses DBOS 3.0. Stop all API and
+**Upgrade note:** The background engine now uses DBOS 3.3.0. Stop all API and
 worker processes before upgrading together. Restore the pre-upgrade application
 database and managed files to roll back; discarding the DBOS engine state alone
 is insufficient. Every model file is re-derived in the background after upgrading.
@@ -882,7 +882,7 @@ See [the upgrade guide](UPGRADE.md#0150-dbos-30).
 
 - Keep native STEP/STP conversion within small worker memory budgets by using serial tessellation, and classify B-rep allocation failures as resource refusals.
 
-- Background work starts on DBOS 3.0, with a persistent reconciler schedule
+- Background work starts on DBOS 3.3.0, with a persistent reconciler schedule
   that survives process restarts and is recreated after restore.
 
 - Late derivative results can no longer overwrite cancellation, retries, regeneration, trashed Artifacts or replaced source bytes. Stale Job executions also cannot settle a newer attempt or reclaim its staging files.

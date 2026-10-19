@@ -74,6 +74,32 @@ Expected:
 - valid legacy local backups are discoverable and can be explicitly adopted without
   making invalid/unowned archives restorable
 
+## 0.14.0 to 0.15.0 upgrade rehearsal
+
+Use an isolated copy or a fresh released 0.14.0 instance populated through its
+HTTP API with representative real STL, 3MF and STEP files. A database created
+by current code is not evidence for this upgrade. Keep the original data intact.
+
+1. Confirm the old image version, settle its work, and record catalog IDs,
+   original-file SHA-256 hashes, thumbnails and derivative recipes.
+2. Create, download and verify a pre-upgrade application backup. Stop every
+   process and preserve a complete volume checkpoint including the secrets key.
+3. Start the release candidate on that volume through its normal entrypoint.
+   For a constrained-host rehearsal, cap RAM at 4 GB and record the CPU quota.
+   Confirm both application and DBOS migrations and record exact image revisions.
+4. Browse and fetch existing previews while re-derivation runs. Measure elapsed
+   time, container CPU time and peak memory; wait for every eligible file's new
+   recipe to reach a terminal state. Report refusals or failures explicitly.
+5. Verify the old catalog IDs and original checksums, then test a new upload,
+   thumbnail, backup creation and backup verification.
+6. Rehearse rollback on another isolated volume: restore the pre-upgrade data,
+   discard disposable engine state as described in `UPGRADE.md`, boot 0.14.0,
+   and verify the original catalog and checksums again.
+
+A successful small-corpus rehearsal is not a large-library or physical-NAS
+performance certification. Connection-pool exhaustion in #495 remains
+unconfirmed until the affected workload is exercised after release.
+
 ## Backend
 
 ```bash

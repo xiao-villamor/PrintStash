@@ -8,7 +8,7 @@ restoring the pre-upgrade application database and managed files.**
 
 Back up the application database and managed files, and retain the previous
 image. Stop every API and worker process and restart them on the same new
-image. Derivation queues do not need to drain first. DBOS 3.0
+image. Derivation queues do not need to drain first. DBOS 3.3.0
 migrates its disposable engine state; read the [rollback instructions](#0150-dbos-30)
 before starting the upgrade. Do not use `docker compose down -v`.
 
@@ -91,9 +91,11 @@ through the reconciler, and engine checkpoints are lost.
 
 <a id="unreleased-dbos-30"></a>
 
-## 0.15.0: DBOS 3.0
+<a id="0150-dbos-30"></a>
 
-The embedded background engine upgrades from DBOS 2.31.1 to 3.0.0. Its first
+## 0.15.0: DBOS 3.3.0
+
+The embedded background engine upgrades from DBOS 2.31.1 to 3.3.0. Its first
 startup automatically migrates the engine database on SQLite and PostgreSQL;
 saved workflow inputs and results remain readable, and queued Jobs can resume.
 The periodic reconciler now uses a persistent schedule, recreated after restore.
@@ -116,8 +118,9 @@ The periodic reconciler now uses a persistent schedule, recreated after restore.
   same way.
 - **Previews are prepared again after the upgrade.** New thumbnail and
   metadata recipes re-derive every model file in the background. Browsing and
-  imports keep working meanwhile; on a 4-core server it took about 2 seconds of
-  CPU per file, so a large library keeps the server busy for hours.
+  imports keep working meanwhile. Processing time depends on geometry and
+  hardware; a large library on a 4 GB NAS can keep the CPU busy for hours.
+  Allow the background queue to settle before judging steady-state load.
 
 See the [DBOS upgrade guide](https://docs.dbos.dev/python/upgrading).
 
