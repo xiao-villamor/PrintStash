@@ -37,6 +37,36 @@ def _staged(tmp_path: Path, name: str = "part.stl") -> Path:
     return staged
 
 
+def _flicker_root_identity(
+    monkeypatch: pytest.MonkeyPatch, root: Path, *, flickering_reads: set[int]
+) -> None:
+    """Report another inode for *root* on the given no-follow reads (1-based).
+
+    A network mount that briefly reconnects answers the same path with a
+    different identity; the directory itself never moves.
+    """
+    real_stat = storage_local.os.stat
+    reads = 0
+
+    def flickering_stat(path, *args, **kwargs):
+        nonlocal reads
+        result = real_stat(path, *args, **kwargs)
+        if (
+            kwargs.get("follow_symlinks") is False
+            and kwargs.get("dir_fd") is None
+            and isinstance(path, (str, bytes, Path))
+            and Path(os.fsdecode(path)) == root
+        ):
+            reads += 1
+            if reads in flickering_reads:
+                fields = list(result)
+                fields[stat.ST_INO] = result.st_ino + 1
+                return os.stat_result(fields)
+        return result
+
+    monkeypatch.setattr(storage_local.os, "stat", flickering_stat)
+
+
 @pytest.fixture
 def cross_mount_staging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """link(2) out of staging fails the way it does across two mounts."""
@@ -289,6 +319,90 @@ class TestCreateStream:
             backend.create_bytes(b"must-not-publish", str(root / "part.stl"))
 
         assert not (root / "part.stl").exists()
+
+    def test_external_root_identity_flicker_publishes_after_one_retry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "nas"
+        root.mkdir()
+        backend = LocalStorageBackend(external_roots=(root,))
+        _flicker_root_identity(monkeypatch, root, flickering_reads={2})
+
+        receipt = backend.create_bytes(b"external", str(root / "a" / "part.stl"))
+
+        assert receipt.size == len(b"external")
+        assert (root / "a" / "part.stl").read_bytes() == b"external"
+
+    def test_managed_root_identity_flicker_publishes_after_one_retry(
+        self,
+        configured_backend: LocalStorageBackend,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        root = tmp_path / "files"
+        _flicker_root_identity(monkeypatch, root, flickering_reads={2})
+
+        configured_backend.create_bytes(b"managed", str(root / "part.stl"))
+
+        assert (root / "part.stl").read_bytes() == b"managed"
+
+    def test_root_identity_disagreeing_on_the_retry_publishes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "nas"
+        root.mkdir()
+        backend = LocalStorageBackend(external_roots=(root,))
+        _flicker_root_identity(monkeypatch, root, flickering_reads={2, 4})
+
+        with pytest.raises(StorageConfigurationError, match="storage_root_changed"):
+            backend.create_bytes(b"must-not-publish", str(root / "part.stl"))
+
+        assert not (root / "part.stl").exists()
+
+    def test_foreign_root_swapped_in_while_pinned_is_refused_on_the_retry(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = tmp_path / "nas"
+        root.mkdir()
+        expected = {
+            "format": 1,
+            "installation": "a" * 64,
+            "role": "external-library",
+            "library_id": 7,
+            "root_identity": "b" * 64,
+        }
+        (root / ".printstash-external-root.json").write_text(
+            json.dumps(expected), encoding="utf-8"
+        )
+        replacement = tmp_path / "replacement"
+        replacement.mkdir()
+        foreign = {**expected, "library_id": 8, "root_identity": "c" * 64}
+        (replacement / ".printstash-external-root.json").write_text(
+            json.dumps(foreign), encoding="utf-8"
+        )
+        backend = LocalStorageBackend(
+            external_roots=(root,), external_root_bindings={root: expected}
+        )
+        real_mkdir = storage_local.os.mkdir
+        swapped = False
+
+        def swap_while_walking(path, *args, **kwargs):
+            nonlocal swapped
+            if not swapped and kwargs.get("dir_fd") is not None:
+                swapped = True
+                root.rename(tmp_path / "old-mount")
+                replacement.rename(root)
+            return real_mkdir(path, *args, **kwargs)
+
+        monkeypatch.setattr(storage_local.os, "mkdir", swap_while_walking)
+
+        with pytest.raises(
+            StorageConfigurationError, match="external_root_binding_changed"
+        ):
+            backend.create_bytes(b"must-not-publish", str(root / "a" / "part.stl"))
+
+        assert not (root / "a" / "part.stl").exists()
+        assert not (tmp_path / "old-mount" / "a" / "part.stl").exists()
 
     def test_mount_marker_swap_during_publication_fails_closed(
         self,

@@ -83,6 +83,10 @@ def _withdraw_link(
     os.unlink(name, dir_fd=parent_fd)
 
 
+class _RootIdentityChanged(StorageConfigurationError):
+    """The root's device/inode disagreed between checks while it was pinned."""
+
+
 class LocalStorageBackend(StorageBackend):
     backend_name = "local"
     provider_id = "local"
@@ -265,71 +269,90 @@ class LocalStorageBackend(StorageBackend):
             root = configured_root.expanduser().absolute()
             if lexical == root or not lexical.is_relative_to(root):
                 continue
-            # This check must precede opening/creating any descendant.  The
-            # descriptor below then pins the validated root for the rest of
-            # the publication, even if the pathname is concurrently remounted.
-            if role == "external":
-                if not root.is_dir():
-                    raise StorageConfigurationError("storage_root_unavailable")
-                resolved = lexical.resolve(strict=False)
-                if resolved != root.resolve(
-                    strict=False
-                ) and not resolved.is_relative_to(root.resolve(strict=False)):
-                    raise StorageCollisionError("managed_storage_symlink_escape")
-            else:
-                self._assert_root_binding_for(lexical)
-            root_path_stat = os.stat(root, follow_symlinks=False)
-            root_fd = os.open(
-                root,
-                os.O_RDONLY
-                | getattr(os, "O_DIRECTORY", 0)
-                | getattr(os, "O_NOFOLLOW", 0),
-            )
-            parent_fd = os.dup(root_fd)
             try:
-                if role == "external":
-                    self._assert_external_binding_pinned(root_fd, root)
-                relative = lexical.relative_to(root)
-                parts = relative.parts
-                if not parts:
-                    raise StorageConfigurationError("storage_destination_invalid")
-                for part in parts[:-1]:
-                    if role == "external":
-                        if not root.is_dir():
-                            raise StorageConfigurationError("storage_root_unavailable")
-                    else:
-                        self._assert_root_binding_for(lexical)
-                    try:
-                        os.mkdir(part, mode=0o755, dir_fd=parent_fd)
-                    except FileExistsError:
-                        pass
-                    child_fd = os.open(
-                        part,
-                        os.O_RDONLY
-                        | getattr(os, "O_DIRECTORY", 0)
-                        | getattr(os, "O_NOFOLLOW", 0),
-                        dir_fd=parent_fd,
-                    )
-                    os.close(parent_fd)
-                    parent_fd = child_fd
-                root_stat = os.fstat(root_fd)
-                current_root = os.stat(root, follow_symlinks=False)
-                if (
-                    root_path_stat.st_dev != root_stat.st_dev
-                    or root_path_stat.st_ino != root_stat.st_ino
-                    or root_stat.st_dev != current_root.st_dev
-                    or root_stat.st_ino != current_root.st_ino
-                    or (role != "external" and not self._bind_root(role, root))
-                ):
-                    raise StorageConfigurationError("storage_root_changed")
-                if role == "external":
-                    self._assert_external_binding_pinned(root_fd, root)
-                return root_fd, parent_fd, parts[-1], root, role
-            except Exception:
-                os.close(parent_fd)
-                os.close(root_fd)
-                raise
+                return self._pin_root(role, root, lexical)
+            except _RootIdentityChanged:
+                # Network and automounted filesystems can briefly report a
+                # different identity for the same root while they reconnect
+                # (#210). No file has been published yet, so pin once more from
+                # scratch: a root that was really replaced is still validated
+                # like any later request, and a second disagreement fails.
+                logger.warning(
+                    "storage root identity changed while pinning; retrying once",
+                    extra={"root": str(root), "role": role},
+                )
+                return self._pin_root(role, root, lexical)
         return None
+
+    def _pin_root(
+        self, role: str, root: Path, lexical: Path
+    ) -> tuple[int, int, str, Path, str]:
+        """Pin *root* and walk to *lexical*'s parent, validating identity once."""
+        # This check must precede opening/creating any descendant.  The
+        # descriptor below then pins the validated root for the rest of
+        # the publication, even if the pathname is concurrently remounted.
+        if role == "external":
+            if not root.is_dir():
+                raise StorageConfigurationError("storage_root_unavailable")
+            resolved = lexical.resolve(strict=False)
+            if resolved != root.resolve(
+                strict=False
+            ) and not resolved.is_relative_to(root.resolve(strict=False)):
+                raise StorageCollisionError("managed_storage_symlink_escape")
+        else:
+            self._assert_root_binding_for(lexical)
+        root_path_stat = os.stat(root, follow_symlinks=False)
+        root_fd = os.open(
+            root,
+            os.O_RDONLY
+            | getattr(os, "O_DIRECTORY", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+        )
+        parent_fd = os.dup(root_fd)
+        try:
+            if role == "external":
+                self._assert_external_binding_pinned(root_fd, root)
+            relative = lexical.relative_to(root)
+            parts = relative.parts
+            if not parts:
+                raise StorageConfigurationError("storage_destination_invalid")
+            for part in parts[:-1]:
+                if role == "external":
+                    if not root.is_dir():
+                        raise StorageConfigurationError("storage_root_unavailable")
+                else:
+                    self._assert_root_binding_for(lexical)
+                try:
+                    os.mkdir(part, mode=0o755, dir_fd=parent_fd)
+                except FileExistsError:
+                    pass
+                child_fd = os.open(
+                    part,
+                    os.O_RDONLY
+                    | getattr(os, "O_DIRECTORY", 0)
+                    | getattr(os, "O_NOFOLLOW", 0),
+                    dir_fd=parent_fd,
+                )
+                os.close(parent_fd)
+                parent_fd = child_fd
+            root_stat = os.fstat(root_fd)
+            current_root = os.stat(root, follow_symlinks=False)
+            if (
+                root_path_stat.st_dev != root_stat.st_dev
+                or root_path_stat.st_ino != root_stat.st_ino
+                or root_stat.st_dev != current_root.st_dev
+                or root_stat.st_ino != current_root.st_ino
+            ):
+                raise _RootIdentityChanged("storage_root_changed")
+            if role != "external" and not self._bind_root(role, root):
+                raise StorageConfigurationError("storage_root_changed")
+            if role == "external":
+                self._assert_external_binding_pinned(root_fd, root)
+            return root_fd, parent_fd, parts[-1], root, role
+        except Exception:
+            os.close(parent_fd)
+            os.close(root_fd)
+            raise
 
     def _assert_external_binding_pinned(self, root_fd: int, root: Path) -> None:
         """Verify an external marker through the already-pinned root fd."""
