@@ -81,7 +81,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.1.0",
     "@vitest/coverage-v8": "^4.1.11",
-    "happy-dom": "^20.11.6",
+    "happy-dom": "^21.0.1",
     "jsdom": "^29.1.1",
     "oxc-parser": "0.146.0",
     "oxc-transform-react": "^0.145.0",
