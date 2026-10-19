@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Bambu LAN printers reporting zero or missing task IDs reuse their external
+  print job across status updates instead of adding a row on every tick.
+  Repeated completion reports no longer queue duplicate notifications, while
+  an observed new run of the same file still creates a separate history row.
+
 - An idle server uses about half the CPU again: only the ingest lane, where an
   upload or import waits to start, is still polled four times a second
   (`VAULT_JOBS_INTERACTIVE_QUEUE_POLL_INTERVAL_SECONDS`, 0.25). Derive, network,
