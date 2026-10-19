@@ -706,8 +706,11 @@
 
 
 **Upgrade note:** The background engine now uses DBOS 3.0. Stop all API and
-worker processes before upgrading together. Engine state migrates on startup;
-rolling back requires discarding the upgraded, disposable engine state first.
+worker processes before upgrading together. Engine state migrates on startup.
+Rolling back means restoring the application database and managed files from
+the copy taken before the upgrade: 0.14.0 does not start on the migrated
+database, so discarding the engine state alone is not enough. Every model file
+is re-derived in the background after the upgrade.
 See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
 
 ### Added
