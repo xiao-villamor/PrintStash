@@ -798,6 +798,14 @@ def _rasterise_triangles(
     x0, x1, y0, y1 = x0[keep], x1[keep], y0[keep], y1[keep]
     vert_nrm = vert_nrm[keep]  # (F, 3, 3)
 
+    # Edge differences are constant across a face's candidate pixels. Retain
+    # their input dtype and the weight expression's operation order so reuse
+    # preserves the original rounding at shared edges and depth ties.
+    w0_x = v1[:, 1] - v2[:, 1]
+    w0_y = v2[:, 0] - v1[:, 0]
+    w1_x = v2[:, 1] - v0[:, 1]
+    w1_y = v0[:, 0] - v2[:, 0]
+
     bbox_w = x1 - x0 + 1
     bbox_h = y1 - y0 + 1
     areas = bbox_w * bbox_h
@@ -836,12 +844,8 @@ def _rasterise_triangles(
         c = v2[source_idx]
         d = denom[source_idx]
 
-        w0 = (
-            (b[:, 1] - c[:, 1]) * (fx - c[:, 0]) + (c[:, 0] - b[:, 0]) * (fy - c[:, 1])
-        ) / d
-        w1 = (
-            (c[:, 1] - a[:, 1]) * (fx - c[:, 0]) + (a[:, 0] - c[:, 0]) * (fy - c[:, 1])
-        ) / d
+        w0 = (w0_x[source_idx] * (fx - c[:, 0]) + w0_y[source_idx] * (fy - c[:, 1])) / d
+        w1 = (w1_x[source_idx] * (fx - c[:, 0]) + w1_y[source_idx] * (fy - c[:, 1])) / d
         w2 = 1.0 - w0 - w1
         inside = (w0 >= 0) & (w1 >= 0) & (w2 >= 0)
         if inside.any():

@@ -838,6 +838,46 @@ class TestRasteriseTriangles:
         assert candidates > 0
         np.testing.assert_array_equal(image, np.zeros((8, 8, 3), dtype=np.uint8))
 
+    @pytest.mark.parametrize("dtype", [np.float32, np.float64])
+    @pytest.mark.parametrize("corner_order", [(0, 1, 2), (2, 1, 0)])
+    @pytest.mark.parametrize("pixel_budget", [1, 7, 125_000])
+    def test_preserves_planar_frame_after_skipping_degenerate_faces(
+        self, monkeypatch, dtype, corner_order, pixel_budget
+    ) -> None:
+        # The surviving face lies on z = 2x + 4y + 1. Its diagonal edge
+        # passes through pixel centers, so coverage includes exact edge ties.
+        tri = np.array(
+            [
+                [[0, 0, 0], [1, 1, 0], [2, 2, 0]],
+                [[0, 0, 1], [4, 0, 9], [0, 4, 17]],
+            ],
+            dtype=dtype,
+        )[:, corner_order]
+        tri.flags.writeable = False
+        normals = np.tile(np.array([1.0, 0.0, 0.0]), (2, 3, 1))
+        image = np.zeros((4, 4, 3), dtype=np.uint8)
+        depth = np.full((4, 4), np.inf)
+        expected_depth = np.array(
+            [
+                [4, 6, 8, 10],
+                [8, 10, 12, np.inf],
+                [12, 14, np.inf, np.inf],
+                [16, np.inf, np.inf, np.inf],
+            ]
+        )
+        expected_image = np.isfinite(expected_depth)[:, :, None] * np.array(
+            [255, 0, 0], dtype=np.uint8
+        )
+        monkeypatch.setattr(rasterizer, "_CHUNK_PIXEL_BUDGET", pixel_budget)
+
+        candidates = rasterizer._rasterise_triangles(
+            image, depth, tri, normals, lambda n: n, np.full(3, 255), 4, 4
+        )
+
+        assert candidates == 16
+        np.testing.assert_array_equal(image, expected_image)
+        np.testing.assert_array_equal(depth, expected_depth)
+
     def test_keeps_the_nearer_of_two_overlapping_triangles(self) -> None:
         near = [[2.0, 2.0, -1.0], [12.0, 2.0, -1.0], [2.0, 12.0, -1.0]]
         far = [[2.0, 2.0, 5.0], [12.0, 2.0, 5.0], [2.0, 12.0, 5.0]]
