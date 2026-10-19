@@ -4,7 +4,8 @@
  * A collection is a path, and every model under it carries that path, so deleting one is
  * never just deleting a row. The recursive delete is here because it is the one action
  * that can take a shelf of somebody's library with it, and the flow that guards it lives
- * in the UI rather than the API.
+ * in the UI rather than the API. Keyboard focus keeps each action exposed while
+ * deferred tree reads move rows away from the pointer.
  */
 import { test, expect } from "./helpers";
 import { createCollectionViaVault, uploadModel } from "./util";
@@ -22,7 +23,7 @@ test.describe("collections", () => {
     await page.reload();
     await expect(collection).toBeVisible();
 
-    await collection.hover();
+    await collection.focus();
     await collection
       .locator("..")
       .getByRole("button", { name: "Delete collection", exact: true })
@@ -45,7 +46,7 @@ test.describe("collections", () => {
     const parentRow = sidebar.getByRole("button", { name: parent, exact: true });
     await parentRow.locator("xpath=preceding-sibling::button[@aria-label='Expand']").click();
     const childRow = sidebar.getByRole("button", { name: child, exact: true });
-    await childRow.hover();
+    await childRow.focus();
     await childRow
       .locator("..")
       .getByRole("button", { name: "Delete collection", exact: true })
@@ -94,7 +95,7 @@ test.describe("collections", () => {
     }
     await sidebar.screenshot({ path: testInfo.outputPath("nested-collection-counts.png") });
 
-    await parentRow.hover();
+    await parentRow.focus();
     await parentRow
       .locator("..")
       .getByRole("button", { name: "Delete collection", exact: true })
@@ -105,7 +106,11 @@ test.describe("collections", () => {
     await page.goto("/settings");
     await page.getByRole("button", { name: "Trash" }).click();
     await expect(page.getByText(model)).toBeVisible();
-    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await page
+      .getByRole("checkbox", { name: `Select deleted model ${model}`, exact: true })
+      .locator("..")
+      .getByRole("button", { name: "Delete", exact: true })
+      .click();
     await page.getByRole("button", { name: "Delete forever" }).click();
     await expect(page.getByText(model)).toHaveCount(0);
   });
@@ -118,16 +123,18 @@ test.describe("collections", () => {
     await createCollectionViaVault(page, col);
     await uploadModel(page, model, { collection: col });
 
-    // Sidebar outliner: hover the collection row, hit its delete, confirm.
+    // Keep the action exposed even when the pointer leaves its moving row.
     await page.goto("/");
     const sidebar = page.locator("aside");
     const label = sidebar.getByRole("button", { name: col, exact: true });
     await expect(label).toBeVisible();
-    await label.hover();
-    await label
+    await label.focus();
+    const deleteAction = label
       .locator("..")
-      .getByRole("button", { name: "Delete collection", exact: true })
-      .click();
+      .getByRole("button", { name: "Delete collection", exact: true });
+    await page.mouse.move(0, 0);
+    await expect(deleteAction).toBeVisible();
+    await deleteAction.click();
     await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
     await expect(sidebar.getByRole("button", { name: col, exact: true })).toHaveCount(0);
 
@@ -137,7 +144,11 @@ test.describe("collections", () => {
     await expect(page.getByText(model)).toBeVisible();
 
     // Clean up: purge it forever so the shared DB doesn't accumulate trash.
-    await page.getByRole("button", { name: "Delete", exact: true }).click();
+    await page
+      .getByRole("checkbox", { name: `Select deleted model ${model}`, exact: true })
+      .locator("..")
+      .getByRole("button", { name: "Delete", exact: true })
+      .click();
     await page.getByRole("button", { name: "Delete forever" }).click();
     await expect(page.getByText(model)).toHaveCount(0);
   });
