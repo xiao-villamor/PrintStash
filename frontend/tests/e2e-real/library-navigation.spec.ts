@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "./helpers";
 import { scrollToEnd } from "../e2e/_scroll";
-import { settleLibraryRead } from "../e2e/_library";
+import { refreshLibrary, settleLibraryRead } from "../e2e/_library";
 import { loadNextLibraryPage, modelCard, uploadGcodeModel } from "./util";
 
 test.describe("Library navigation", () => {
@@ -61,7 +61,7 @@ test.describe("Library navigation", () => {
       const seeded = JSON.parse(
         execFileSync(
           path.join(backend, ".venv/bin/python"),
-          ["-m", "tests.fakes.outliner_library", dataRoot],
+          ["-m", "tests.fakes.outliner_library", dataRoot, "--models", "100"],
           { cwd: backend, encoding: "utf8" },
         ),
       );
@@ -122,39 +122,76 @@ test.describe("Library navigation", () => {
       const seeded = JSON.parse(
         execFileSync(
           path.join(backend, ".venv/bin/python"),
-          ["-m", "tests.fakes.outliner_library", dataRoot],
+          ["-m", "tests.fakes.outliner_library", dataRoot, "--models", "100"],
           { cwd: backend, encoding: "utf8" },
         ),
       );
+      const tag = await page.request.post("/api/v1/tags", {
+        data: { name: `Revision change ${seeded.root.id}-${Date.now()}` },
+      });
+      expect(tag.status()).toBe(201);
+      const changedTag: { id: number } = await tag.json();
       const continuation = Promise.withResolvers<void>();
-      await page.route(
-        (url) => url.pathname === "/api/v1/models/browse" && url.searchParams.has("cursor"),
-        async (route) => {
-          await continuation.promise;
-          await route.continue();
-        },
-      );
       try {
         await page.goto(`/?c=${encodeURIComponent(seeded.folder.path)}&type=all&sort=name-asc`);
         const entries = page.locator("main [data-library-entry]");
         await settleLibraryRead(page, entries.first());
         const firstPageCount = await entries.count();
-        const changed = await page.request.post("/api/v1/collections", {
-          data: { name: `Revision change ${Date.now()}`, parent_id: seeded.root.id },
+        // A single-page view settles ordinary changes automatically. Establish
+        // a paged reading before testing the explicit continuation recovery.
+        await loadNextLibraryPage(page, firstPageCount + 10);
+        await page.route(
+          (url) => url.pathname === "/api/v1/models/browse" && url.searchParams.has("cursor"),
+          async (route) => {
+            await continuation.promise;
+            await route.continue();
+          },
+        );
+        const pending = page.waitForRequest((request) => {
+          const url = new URL(request.url());
+          return url.pathname === "/api/v1/models/browse" && url.searchParams.has("cursor");
         });
-        expect(changed.status()).toBe(201);
-        continuation.resolve();
-
         await scrollToEnd(page);
+        await pending;
+        const rejected = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            url.pathname === "/api/v1/models/browse" &&
+            url.searchParams.has("cursor") &&
+            response.status() === 409
+          );
+        });
+        // An unused tag changes the real browse revision without generating
+        // searchable content that would independently change the revision again.
+        const changed = await page.request.delete(`/api/v1/tags/${changedTag.id}`);
+        expect(changed.status()).toBe(204);
+        continuation.resolve();
+        await rejected;
         const refresh = page.getByRole("main").getByRole("button", {
           name: "Refresh library",
           exact: true,
         });
         await expect(refresh).toBeVisible();
-        await loadNextLibraryPage(page, firstPageCount + 10);
+        await expect(entries.nth(firstPageCount + 10)).toBeAttached();
+        const resumed = page.waitForResponse((response) => {
+          const url = new URL(response.url());
+          return (
+            url.pathname === "/api/v1/models/browse" &&
+            url.searchParams.has("cursor") &&
+            response.status() === 200
+          );
+        });
+
+        await refreshLibrary(page);
+        await scrollToEnd(page);
+        await resumed;
+
+        await expect.poll(() => entries.count()).toBeGreaterThan(firstPageCount + 10);
         await expect(refresh).toBeHidden();
       } finally {
         continuation.resolve();
+        const cleanup = await page.request.delete(`/api/v1/tags/${changedTag.id}`);
+        expect([204, 404]).toContain(cleanup.status());
         expect(
           (
             await page.request.delete(`/api/v1/collections/${seeded.root.id}?recursive=true`)

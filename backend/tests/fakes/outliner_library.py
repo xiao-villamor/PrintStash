@@ -17,6 +17,7 @@ from tests.factories.library_scale import build_library_at_scale
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("data_root", type=Path)
+    parser.add_argument("--models", type=int, default=501)
     args = parser.parse_args()
     database = args.data_root / "db/printstash.sqlite"
     if not database.is_file():
@@ -24,7 +25,9 @@ def main() -> None:
     engine = create_engine(f"sqlite:///{database}")
     with Session(engine) as session:
         root = build_collection(session, f"Outliner browser {uuid4().hex[:8]}")
-        seeded = build_library_at_scale(session, under=root, collections=1, models=501)
+        seeded = build_library_at_scale(
+            session, under=root, collections=1, models=args.models
+        )
         from app.db.models import Collection
 
         folder = session.get(Collection, seeded.collection_ids[0])
