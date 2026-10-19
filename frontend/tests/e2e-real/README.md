@@ -27,6 +27,11 @@ Artifact bytes. Historical release archives are checked separately by the
 - Vite on `:3310` with `VITE_API_URL` pointed at that backend.
 - The standalone Moonraker/Spoolman emulator used by fleet scenarios.
 
+Library navigation covers desktop grid and phone list reading positions through
+detail, Back and Forward. A controlled real revision change checks explicit
+refresh recovery before continuation; returns assert the visible anchor because
+a late revision notice can change the document height.
+
 Storage-provider setup is deliberately isolated because it must begin with an
 unconfigured instance and restart after changing transports:
 

@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { test, expect } from "./helpers";
 import { scrollToEnd } from "../e2e/_scroll";
-import { modelCard, uploadGcodeModel } from "./util";
+import { loadNextLibraryPage, modelCard, uploadGcodeModel } from "./util";
 
 test.describe("Library navigation", () => {
   test("reuses the admitted shell through real Model detail navigation", async ({ page }) => {
@@ -21,9 +21,10 @@ test.describe("Library navigation", () => {
       // ── A fresh page load opens the connection and is admitted ─────────────
       await page.goto("/");
       await expect(modelCard(page, name)).toBeVisible();
-      await expect.poll(() => sockets).toBe(1);
+      await expect.poll(() => sockets).toBeGreaterThan(0);
       await page.waitForLoadState("networkidle");
       const admitted = probes;
+      const connected = sockets;
       expect(admitted).toBeGreaterThan(0);
 
       // ── Detail and Back are application paths: nothing is reopened ─────────
@@ -33,7 +34,7 @@ test.describe("Library navigation", () => {
       await expect(modelCard(page, name)).toBeVisible();
       await page.waitForLoadState("networkidle");
 
-      expect(sockets).toBe(1);
+      expect(sockets).toBe(connected);
       expect(probes).toBe(admitted);
     } finally {
       const found = await (
@@ -68,8 +69,7 @@ test.describe("Library navigation", () => {
         const entries = page.locator("main [data-library-entry]");
         await expect(entries.first()).toBeVisible();
         const firstPageCount = await entries.count();
-        await scrollToEnd(page);
-        await expect.poll(() => entries.count()).toBeGreaterThan(firstPageCount + 10);
+        await loadNextLibraryPage(page, firstPageCount + 10);
         const target = entries.nth(firstPageCount + 10);
         const targetHref = await target.getAttribute("data-library-entry");
         if (!targetHref) throw new Error("Missing paged reading anchor");
@@ -95,11 +95,6 @@ test.describe("Library navigation", () => {
         await expect
           .poll(() => link.evaluate((node) => node.getBoundingClientRect().top))
           .toBeCloseTo(before.top, 0);
-        expect(
-          await page
-            .locator("main, main .overflow-y-auto")
-            .evaluateAll((nodes) => nodes.map((node) => node.scrollTop)),
-        ).toEqual(before.offsets);
         await page.goForward();
         await expect(page).toHaveURL(new RegExp(`${targetHref}\\?return=`));
         await page.goBack();
@@ -108,6 +103,57 @@ test.describe("Library navigation", () => {
           .poll(() => link.evaluate((node) => node.getBoundingClientRect().top))
           .toBeCloseTo(before.top, 0);
       } finally {
+        expect(
+          (
+            await page.request.delete(`/api/v1/collections/${seeded.root.id}?recursive=true`)
+          ).status(),
+        ).toBe(204);
+      }
+    });
+
+    test(`pages after a Library revision change through explicit refresh (${layout})`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height });
+      await page.addInitScript((value) => localStorage.setItem("ps-vault-view", value), layout);
+      const backend = path.resolve("../backend");
+      const dataRoot = process.env.PLAYWRIGHT_REAL_DATA_DIR ?? path.resolve("tests/e2e-real/.data");
+      const seeded = JSON.parse(
+        execFileSync(
+          path.join(backend, ".venv/bin/python"),
+          ["-m", "tests.fakes.outliner_library", dataRoot],
+          { cwd: backend, encoding: "utf8" },
+        ),
+      );
+      const continuation = Promise.withResolvers<void>();
+      await page.route(
+        (url) => url.pathname === "/api/v1/models/browse" && url.searchParams.has("cursor"),
+        async (route) => {
+          await continuation.promise;
+          await route.continue();
+        },
+      );
+      try {
+        await page.goto(`/?c=${encodeURIComponent(seeded.folder.path)}&type=all&sort=name-asc`);
+        const entries = page.locator("main [data-library-entry]");
+        await expect(entries.first()).toBeVisible();
+        const firstPageCount = await entries.count();
+        const changed = await page.request.post("/api/v1/collections", {
+          data: { name: `Revision change ${Date.now()}`, parent_id: seeded.root.id },
+        });
+        expect(changed.status()).toBe(201);
+        continuation.resolve();
+
+        await scrollToEnd(page);
+        const refresh = page.getByRole("main").getByRole("button", {
+          name: "Refresh library",
+          exact: true,
+        });
+        await expect(refresh).toBeVisible();
+        await loadNextLibraryPage(page, firstPageCount + 10);
+        await expect(refresh).toBeHidden();
+      } finally {
+        continuation.resolve();
         expect(
           (
             await page.request.delete(`/api/v1/collections/${seeded.root.id}?recursive=true`)

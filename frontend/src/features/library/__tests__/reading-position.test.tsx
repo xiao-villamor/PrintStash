@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { useRef, useState } from "react";
 import { Link, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearLogin } from "@/lib/auth-store";
 import { json, renderApp } from "@/test-support/render";
 import {
@@ -367,4 +367,113 @@ describe("Confirmed favorite reading position", () => {
       expect(neighbor.getBoundingClientRect().top).toBe(200 - expected);
     },
   );
+});
+
+function HistoryLibrary({
+  layout,
+  anchorVisible,
+}: {
+  layout: LibraryLayout;
+  anchorVisible: boolean;
+}) {
+  const entry = useLibraryEntry("/?type=all", true);
+  const main = useRef<HTMLElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const reading = useLibraryReadingPosition(entry, layout, main, list, true, {
+    ready: true,
+    models: { count: 1, more: false, pending: false, failed: false, next: () => {} },
+    folders: { count: 1, more: false, pending: false, failed: false, next: () => {} },
+  });
+  return (
+    <main ref={main} aria-label="Library">
+      <output aria-label="Reading status">{reading.status}</output>
+      {anchorVisible && (
+        <Link to="/detail" data-library-entry="/models/1">
+          Reading anchor
+        </Link>
+      )}
+      <Link to="/detail" data-library-entry="/models/2">
+        Neighbor
+      </Link>
+    </main>
+  );
+}
+
+function HistoryBrowser({ layout }: { layout: LibraryLayout }) {
+  const navigate = useNavigate();
+  const [anchorVisible, setAnchorVisible] = useState(true);
+  return (
+    <>
+      <button onClick={() => navigate(-1)}>History Back</button>
+      <button onClick={() => navigate(1)}>History Forward</button>
+      <button onClick={() => setAnchorVisible(false)}>Remove anchor</button>
+      <Routes>
+        <Route
+          path="/"
+          element={<HistoryLibrary layout={layout} anchorVisible={anchorVisible} />}
+        />
+        <Route path="/detail" element={<p>Model detail</p>} />
+      </Routes>
+    </>
+  );
+}
+
+function installReadingGeometry(header: { height: number }) {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    function (this: HTMLElement) {
+      if (!this.hasAttribute("data-library-entry")) return new DOMRect(0, 0, 300, 500);
+      const main = this.closest("main");
+      if (!main) throw new Error("Reading geometry requires a Library container");
+      const top = this.dataset.libraryEntry === "/models/2" ? 450 : 300;
+      return new DOMRect(0, top + header.height - main.scrollTop, 300, 100);
+    },
+  );
+}
+
+describe("History departure reading anchor", () => {
+  beforeEach(() => clearLogin());
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each(["grid", "list"] as const)(
+    "records a visible %s anchor on history departure after a layout shift",
+    (layout) => {
+      const header = { height: 0 };
+      installReadingGeometry(header);
+      renderApp(<HistoryBrowser layout={layout} />);
+      const main = screen.getByRole("main");
+      main.scrollTop = 200;
+      fireEvent.scroll(main);
+      fireEvent.click(screen.getByRole("link", { name: "Reading anchor" }));
+      fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+      expect(screen.getByRole("link", { name: "Reading anchor" }).getBoundingClientRect().top).toBe(
+        100,
+      );
+
+      header.height = 102;
+      screen.getByRole("main").scrollTop = 302;
+      fireEvent.scroll(screen.getByRole("main"));
+      fireEvent.click(screen.getByRole("button", { name: "History Forward" }));
+      header.height = 0;
+      fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+
+      expect(screen.getByRole("link", { name: "Reading anchor" }).getBoundingClientRect().top).toBe(
+        100,
+      );
+    },
+  );
+
+  it("resets when the selected history anchor is missing", () => {
+    installReadingGeometry({ height: 0 });
+    renderApp(<HistoryBrowser layout="grid" />);
+    screen.getByRole("main").scrollTop = 200;
+    fireEvent.scroll(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("link", { name: "Reading anchor" }));
+    fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove anchor" }));
+    fireEvent.click(screen.getByRole("button", { name: "History Forward" }));
+    fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+
+    expect(screen.getByLabelText("Reading status")).toHaveTextContent("reset");
+    expect(screen.getByRole("main").scrollTop).toBe(0);
+  });
 });

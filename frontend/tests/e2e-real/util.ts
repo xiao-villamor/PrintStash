@@ -2,6 +2,7 @@ import { expect, type APIResponse, type Page, type Response } from "@playwright/
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
+import { scrollToEnd } from "../e2e/_scroll";
 
 /** The new backup, as the finished `backups.create` Job reports it. */
 export interface CreatedBackup {
@@ -278,4 +279,25 @@ export async function openFilters(page: Page) {
     .getByRole("button", { name: "Filters", exact: true })
     .filter({ visible: true });
   if ((await button.getAttribute("aria-expanded")) !== "true") await button.click();
+}
+
+/** Follow one explicit stale-page recovery before establishing a reading anchor. */
+export async function loadNextLibraryPage(page: Page, beyond: number): Promise<void> {
+  const main = page.getByRole("main");
+  const entries = main.locator("[data-library-entry]");
+  const refresh = main.getByRole("button", { name: "Refresh library", exact: true });
+  await scrollToEnd(page);
+  await expect(entries.nth(beyond).or(refresh).first()).toBeAttached();
+  if (await refresh.isVisible()) {
+    const acknowledged = page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return url.pathname === "/api/v1/models/browse" && !url.searchParams.has("cursor");
+    });
+    await refresh.click();
+    expect((await acknowledged).status()).toBe(200);
+    await expect(refresh).toBeHidden();
+    await expect(main).toHaveAttribute("aria-busy", "false");
+    await scrollToEnd(page);
+  }
+  await expect.poll(() => entries.count()).toBeGreaterThan(beyond);
 }
