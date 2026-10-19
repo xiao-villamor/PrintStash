@@ -50,12 +50,12 @@ class TestEffectiveTagPairs:
         statement = effective_tag_pairs()
         assert db_session.exec(statement).all() == []
 
-        if association == "model":
-            tag_model(model, tag)
-        elif association == "file":
-            tag_file(artifact, tag)
-        else:
-            tag_collection(collection, tag)
+        link, subject = {
+            "model": (tag_model, model),
+            "file": (tag_file, artifact),
+            "collection": (tag_collection, collection),
+        }[association]
+        link(subject, tag)
 
         assert db_session.exec(statement).all() == [(tag.id, model.id)]
 
@@ -115,11 +115,14 @@ class TestEffectiveTagPairs:
         expected = {(tag.id, left_model.id), (tag.id, right_model.id)}
         assert set(db_session.exec(effective_tag_pairs()).all()) == expected
 
-        for collection, model in ((left, left_model), (right, right_model)):
-            scope = select(Collection.id).where(Collection.id == collection.id)
-            assert db_session.exec(effective_tag_pairs(scope)).all() == [
-                (tag.id, model.id)
-            ]
+        left_scope = select(Collection.id).where(Collection.id == left.id)
+        assert db_session.exec(effective_tag_pairs(left_scope)).all() == [
+            (tag.id, left_model.id)
+        ]
+        right_scope = select(Collection.id).where(Collection.id == right.id)
+        assert db_session.exec(effective_tag_pairs(right_scope)).all() == [
+            (tag.id, right_model.id)
+        ]
 
         assert set(db_session.exec(effective_tag_pairs()).all()) == expected
 
