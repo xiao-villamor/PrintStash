@@ -95,6 +95,18 @@ by current code is not evidence for this upgrade. Keep the original data intact.
 6. Rehearse rollback on another isolated volume: restore the pre-upgrade data,
    discard disposable engine state as described in `UPGRADE.md`, boot 0.14.0,
    and verify the original catalog and checksums again.
+7. Repeat on another 0.14.0 copy with real work still in flight: hold a native
+   producer, submit additional files through the API, and record both `PENDING`
+   and `ENQUEUED` DBOS executions plus any `DELAYED` reconciliation work. Kill
+   only that isolated instance, preserve its crash-state volume, and upgrade
+   without deleting or draining the engine database. Verify that old-version
+   executions become terminal, their application Jobs recover with bounded
+   resubmissions, and all original and newly submitted files retain their IDs
+   and checksums. Wait for every current recipe across the full library; an
+   empty queue between discovery batches is not proof of completion. Check for
+   duplicate live outputs and stranded work. Distinguish historical interrupted
+   derivative records from failures of current recipes, and confirm that
+   reconciliation continues after restart.
 
 A successful small-corpus rehearsal is not a large-library or physical-NAS
 performance certification. Connection-pool exhaustion in #495 remains
