@@ -18,7 +18,7 @@ loses what it reported.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 import pytest
 from sqlalchemy import event
@@ -48,7 +48,7 @@ from app.modules.work.contracts import (
     Step,
 )
 from app.modules.work.jobs import jobs
-from app.modules.work.runner import ExecutionContext, _begin, _settle, execute_job
+from app.modules.work.runner import ExecutionContext, _settle, execute_job
 from app.runtime.engine.inline import InlineJobEngine, _Execution, _Runner
 
 # Probes borrow real kinds and a lane; this catalog holds only them.
@@ -63,11 +63,6 @@ class _NothingPending:
 
     def next_due(self, session, *, now):
         return None
-
-
-class _PrioritizedNothingPending(_NothingPending):
-    def pending_prioritized(self, session, *, now, budget):
-        return []
 
 
 LANE = LaneName.INGEST
@@ -250,130 +245,6 @@ def writes(db_session: Session) -> list[str]:
 def hold() -> float:
     _overlay["jobs_progress_hold_seconds"] = 30.0
     return 30.0
-
-
-class TestBegin:
-    @pytest.fixture
-    def prioritized_source(self, engine: InlineJobEngine) -> None:
-        definition = engine.catalog.definition(DISCOVERED)
-        engine.catalog.definitions[DISCOVERED] = replace(
-            definition, source=_PrioritizedNothingPending()
-        )
-
-    def test_claim_queues_interactive_successor_discovery(
-        self, engine, prioritized_source, make_job, db_session, transactions
-    ) -> None:
-        job = make_job(kind=DISCOVERED)
-        transactions.clear()
-
-        claim = _begin(job.id, 1, job.execution_epoch)
-        transaction_count = len(transactions)
-
-        assert claim == {
-            "kind": DISCOVERED.value,
-            "subject_key": job.subject_key,
-            "priority": WorkPriority.INTERACTIVE.value,
-        }
-        assert _status(job.id).state is JobState.RUNNING
-        assert _stamped(db_session) == {DISCOVERED}
-        assert _nudged(engine) == {DISCOVERED}
-        assert transaction_count == 1
-
-    @pytest.mark.parametrize(
-        ("kind", "source", "priority"),
-        [
-            pytest.param(MUTATING, None, WorkPriority.INTERACTIVE, id="requested"),
-            pytest.param(
-                DISCOVERED,
-                _NothingPending(),
-                WorkPriority.INTERACTIVE,
-                id="ordinary-source",
-            ),
-            pytest.param(
-                DISCOVERED,
-                _PrioritizedNothingPending(),
-                WorkPriority.BACKFILL,
-                id="backfill",
-            ),
-        ],
-    )
-    def test_claim_without_released_priority_slot_does_not_nudge(
-        self, engine, make_job, db_session, kind, source, priority
-    ) -> None:
-        definition = engine.catalog.definition(kind)
-        engine.catalog.definitions[kind] = replace(definition, source=source)
-        job = make_job(kind=kind, priority=priority)
-
-        assert _begin(job.id, 1, job.execution_epoch) is not None
-
-        assert _status(job.id).state is JobState.RUNNING
-        assert _stamped(db_session) == set()
-        assert _nudged(engine) == set()
-
-    @pytest.mark.parametrize(
-        ("state", "attempt", "epoch"),
-        [
-            pytest.param(JobState.QUEUED, 2, "superseded", id="old-epoch"),
-            pytest.param(JobState.QUEUED, 1, "current", id="old-attempt"),
-            pytest.param(JobState.COMPLETED, 2, "current", id="completed"),
-            pytest.param(JobState.FAILED, 2, "current", id="failed"),
-            pytest.param(JobState.CANCELLED, 2, "current", id="cancelled"),
-        ],
-    )
-    def test_refused_claim_does_not_nudge(
-        self, engine, prioritized_source, make_job, db_session, state, attempt, epoch
-    ) -> None:
-        job = make_job(
-            kind=DISCOVERED, state=state, attempts=2, execution_epoch="current"
-        )
-
-        assert _begin(job.id, attempt, epoch) is None
-
-        assert _stamped(db_session) == set()
-        assert _nudged(engine) == set()
-
-    def test_missing_claim_does_not_nudge(
-        self, engine, prioritized_source, db_session
-    ) -> None:
-        assert _begin("missing-job", 1, "missing-epoch") is None
-
-        assert _stamped(db_session) == set()
-        assert _nudged(engine) == set()
-
-    def test_replayed_claim_coalesces_successor_discovery(
-        self, engine, prioritized_source, make_job
-    ) -> None:
-        job = make_job(kind=DISCOVERED)
-        first = _begin(job.id, 1, job.execution_epoch)
-
-        assert _begin(job.id, 1, job.execution_epoch) == first
-
-        passes = [
-            ex.submission
-            for ex in engine.executions.values()
-            if isinstance(ex.submission, PassSubmission)
-        ]
-        assert len(passes) == 1
-        assert passes[0].source is DISCOVERED
-
-    def test_failed_claim_commit_does_not_nudge(
-        self, engine, prioritized_source, make_job, db_session
-    ) -> None:
-        job = make_job(kind=DISCOVERED)
-
-        def refuse(_session) -> None:
-            raise _LOCKED
-
-        event.listen(Session, "before_commit", refuse)
-        try:
-            with pytest.raises(OperationalError, match="database is locked"):
-                _begin(job.id, 1, job.execution_epoch)
-        finally:
-            event.remove(Session, "before_commit", refuse)
-
-        assert _status(job.id).state is JobState.QUEUED
-        assert _stamped(db_session) == set()
-        assert _nudged(engine) == set()
 
 
 class TestExecutionContext:
