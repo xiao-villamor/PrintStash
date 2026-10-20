@@ -27,6 +27,44 @@ class TestApplyLibrarySearch:
 
         assert {row.id for row in rows} == {tagged.id, plain.id}
 
+    def test_combines_text_with_current_effective_tags(
+        self,
+        db_session,
+        make_collection,
+        make_model,
+        make_file,
+        make_tag,
+        tag_collection,
+        tag_file,
+        tag_model,
+    ):
+        parent = make_collection("Workshop")
+        child = make_collection("Shelf", parent=parent)
+        other = make_collection("Other")
+        matching = make_model("Complete", collection=child)
+        text_only = make_model("Text only", collection=child)
+        slug_only = make_model("Slug only", collection=other)
+        artifact = make_file(matching)
+        inherited = make_tag("Bracket")
+        required = make_tag("Functional")
+        tag_collection(parent, inherited)
+        tag_file(artifact, required)
+        tag_model(slug_only, required)
+
+        statement = apply_library_search(
+            select(Model).where(live(Model)),
+            query="bracket",
+            tag_slugs=[required.slug],
+        )
+        assert {row.id for row in db_session.exec(statement).all()} == {matching.id}
+
+        tag_model(text_only, required)
+
+        assert {row.id for row in db_session.exec(statement).all()} == {
+            matching.id,
+            text_only.id,
+        }
+
 
 class TestEffectiveTagPairs:
     @pytest.mark.parametrize("association", ["model", "file", "collection"], ids=str)

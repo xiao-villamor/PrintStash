@@ -18,7 +18,8 @@ from sqlmodel import Session, create_engine, select
 
 from app.core.time import utcnow
 from app.db.migrate import run_migrations
-from app.db.models import Collection, CollectionRole
+from app.db.models import Collection, CollectionRole, Model
+from app.db.scopes import live
 from app.db.url import normalize_database_url
 from app.modules.library import collection_tree, library_search
 from tests.containers import postgres_url
@@ -242,6 +243,36 @@ class TestEffectiveTagsOnPostgres:
         pg_session.rollback()
 
         assert pg_session.exec(statement).all() == expected
+
+    def test_combines_text_with_current_effective_tags(
+        self, pg_session: Session
+    ) -> None:
+        parent = build_collection(pg_session, "Workshop")
+        child = build_collection(pg_session, "Shelf", parent=parent)
+        other = build_collection(pg_session, "Other")
+        matching = build_model(pg_session, "Complete", collection=child)
+        text_only = build_model(pg_session, "Text only", collection=child)
+        slug_only = build_model(pg_session, "Slug only", collection=other)
+        artifact = build_file(pg_session, matching)
+        inherited = build_tag(pg_session, "Bracket")
+        required = build_tag(pg_session, "Functional")
+        tag_collection(pg_session, parent, inherited)
+        tag_file(pg_session, artifact, required)
+        tag_model(pg_session, slug_only, required)
+
+        statement = library_search.apply_library_search(
+            select(Model).where(live(Model)),
+            query="bracket",
+            tag_slugs=[required.slug],
+        )
+        assert {row.id for row in pg_session.exec(statement).all()} == {matching.id}
+
+        tag_model(pg_session, text_only, required)
+
+        assert {row.id for row in pg_session.exec(statement).all()} == {
+            matching.id,
+            text_only.id,
+        }
 
 
 class TestOutlinerOnPostgres:
