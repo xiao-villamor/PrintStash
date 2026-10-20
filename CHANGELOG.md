@@ -8,6 +8,11 @@
   other stores pass. Nothing changes for existing installations; the store
   submission is a separate step, described in `catalogues/README.md`.
 
+- SQLite installations temporarily poll interactive derivative work and its
+  discovery passes more frequently after accepting a submission. Duplicate,
+  delayed and backfill submissions keep the ordinary polling policy; the
+  temporary interval expires after activity stops.
+
 - The Model filters panel lists G-code below a divider, after the source formats
   it is sliced from, and writes formats as STL, 3MF, OBJ, STEP, DXF and G-code.
   Active-filter chips use the panel's names and values ("File type: G-code",
