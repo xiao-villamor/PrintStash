@@ -63,6 +63,9 @@ from printstash_core.mesh.similarity.components import (
 from ..paths import FIXTURES_DIR
 
 _FROZEN_RENDER = json.loads((FIXTURES_DIR / "render-prepared-v1.json").read_text())
+_FROZEN_FRACTIONAL = json.loads(
+    (FIXTURES_DIR / "raster-fractional-v1.json").read_text()
+)["cases"]
 _FROZEN_FRAMES = [
     pytest.param(case, view, id=f"{case['name']}-{index}")
     for case in _FROZEN_RENDER["cases"]
@@ -691,6 +694,53 @@ class TestFrontRotationForThinAxis:
 
 
 class TestRasteriseTriangles:
+    @pytest.mark.parametrize("case", _FROZEN_FRACTIONAL, ids=lambda case: case["name"])
+    @pytest.mark.parametrize("pixel_budget", [1, 7, 125_000])
+    @pytest.mark.parametrize("strided", [False, True])
+    def test_preserves_frozen_fractional_frame(
+        self, monkeypatch, case, pixel_budget, strided
+    ) -> None:
+        # Captured before coefficient reuse from the pinned baseline. Fractional
+        # coordinates exercise dtype-specific rounding and overlapping surfaces.
+        original_tri = np.array(case["triangles"], dtype=case["dtype"])
+        original_normals = np.array(case["normals"], dtype=case["dtype"])
+        if strided:
+            tri_storage = np.full((*original_tri.shape[:2], 6), 71, dtype=case["dtype"])
+            normal_storage = np.full_like(tri_storage, 83)
+            tri, normals = tri_storage[:, :, ::2], normal_storage[:, :, ::2]
+            tri[:] = original_tri
+            normals[:] = original_normals
+            assert not tri.flags.c_contiguous
+        else:
+            tri_storage, normal_storage = original_tri.copy(), original_normals.copy()
+            tri, normals = tri_storage, normal_storage
+        saved_tri, saved_normals = tri_storage.copy(), normal_storage.copy()
+        tri.flags.writeable = False
+        normals.flags.writeable = False
+        image = np.zeros((case["height"], case["width"], 3), dtype=np.uint8)
+        depth = np.full(image.shape[:2], np.inf)
+        expected_depth = np.array(
+            [[float.fromhex(z) for z in row] for row in case["depth_hex"]]
+        )
+        monkeypatch.setattr(rasterizer, "_CHUNK_PIXEL_BUDGET", pixel_budget)
+
+        candidates = rasterizer._rasterise_triangles(
+            image,
+            depth,
+            tri,
+            normals,
+            lambda n: (n + 1) / 2,
+            np.array(case["base_color"]),
+            case["width"],
+            case["height"],
+        )
+
+        assert candidates == case["candidates"]
+        np.testing.assert_array_equal(image, np.array(case["pixels"], dtype=np.uint8))
+        assert depth.tobytes() == expected_depth.tobytes()
+        np.testing.assert_array_equal(tri_storage, saved_tri)
+        np.testing.assert_array_equal(normal_storage, saved_normals)
+
     def paint(
         self,
         tri: np.ndarray,

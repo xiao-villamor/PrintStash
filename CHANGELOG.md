@@ -1005,6 +1005,9 @@ See [the upgrade guide](UPGRADE.md#unreleased-dbos-30).
   the collection an administrator selects, avoiding a permissions request for
   every collection when the page opens.
 
+- CPU mesh previews reuse triangle interpolation coefficients within each bounded
+  render chunk, preserving pixel coverage, depth ordering and image quality.
+
 ## 0.14.0
 
 **Running from a git checkout? The old `docker-compose.yml` is now

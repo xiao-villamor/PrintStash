@@ -793,18 +793,21 @@ def _rasterise_triangles(
     if not keep.any():
         return 0
 
-    v0, v1, v2 = v0[keep], v1[keep], v2[keep]
+    # Store each coefficient as a contiguous face column. The first two rows
+    # hold each weight's x/y coefficients and vertex z; the last keeps the
+    # anchor vertex. Input precision and expression order stay unchanged.
+    coefficients = np.empty((3, 3, int(keep.sum())), dtype=tri.dtype)
+    coefficients[0, 0] = v1[keep, 1] - v2[keep, 1]
+    coefficients[0, 1] = v2[keep, 0] - v1[keep, 0]
+    coefficients[0, 2] = v0[keep, 2]
+    coefficients[1, 0] = v2[keep, 1] - v0[keep, 1]
+    coefficients[1, 1] = v0[keep, 0] - v2[keep, 0]
+    coefficients[1, 2] = v1[keep, 2]
+    coefficients[2] = v2[keep].T
+    del v0, v1, v2
     denom = denom[keep]
     x0, x1, y0, y1 = x0[keep], x1[keep], y0[keep], y1[keep]
     vert_nrm = vert_nrm[keep]  # (F, 3, 3)
-
-    # Edge differences are constant across a face's candidate pixels. Retain
-    # their input dtype and the weight expression's operation order so reuse
-    # preserves the original rounding at shared edges and depth ties.
-    w0_x = v1[:, 1] - v2[:, 1]
-    w0_y = v2[:, 0] - v1[:, 0]
-    w1_x = v2[:, 1] - v0[:, 1]
-    w1_y = v0[:, 0] - v2[:, 0]
 
     bbox_w = x1 - x0 + 1
     bbox_h = y1 - y0 + 1
@@ -839,18 +842,19 @@ def _rasterise_triangles(
 
         fx = pix_x + 0.5
         fy = pix_y + 0.5
-        a = v0[source_idx]
-        b = v1[source_idx]
-        c = v2[source_idx]
+        # One gather allocates nine values per candidate, with each arithmetic
+        # input contiguous instead of striding across all nine vertex values.
+        face_pixels = np.take(coefficients, source_idx, axis=2)
+        a, b, c = face_pixels
         d = denom[source_idx]
 
-        w0 = (w0_x[source_idx] * (fx - c[:, 0]) + w0_y[source_idx] * (fy - c[:, 1])) / d
-        w1 = (w1_x[source_idx] * (fx - c[:, 0]) + w1_y[source_idx] * (fy - c[:, 1])) / d
+        w0 = (a[0] * (fx - c[0]) + a[1] * (fy - c[1])) / d
+        w1 = (b[0] * (fx - c[0]) + b[1] * (fy - c[1])) / d
         w2 = 1.0 - w0 - w1
         inside = (w0 >= 0) & (w1 >= 0) & (w2 >= 0)
         if inside.any():
             pix = (pix_y * width + pix_x)[inside]
-            z = (w0 * a[:, 2] + w1 * b[:, 2] + w2 * c[:, 2])[inside]
+            z = (w0 * a[2] + w1 * b[2] + w2 * c[2])[inside]
             # Nearest candidate per pixel within this chunk: sort by
             # (pixel, z) and keep the first occurrence of each pixel.
             order = np.lexsort((z, pix))
@@ -879,6 +883,9 @@ def _rasterise_triangles(
             col = shade(n)
             flat_z[target] = z_u[nearer]
             flat_img[target] = np.clip(base_color * col, 0, 255).astype(np.uint8)
+        # The row views otherwise retain the whole gathered block while the next
+        # pixel batch allocates its replacement.
+        del a, b, c, face_pixels
 
     return candidates
 
