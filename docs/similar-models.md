@@ -7,7 +7,8 @@ files.
 
 ## Start a review
 
-1. In **Settings → Maintenance → Similar models**, enable analysis and save.
+1. As an administrator, enable analysis in the **Similar models** settings panel
+   and save.
 2. Choose the library, a Collection, an external source, or selected Models,
    then choose **Start analysis**. Alternatively, open a Model's **Similar** tab
    and choose **Find similar**.

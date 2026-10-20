@@ -173,7 +173,7 @@ export function useLibraryReadingPosition(
         ? (previous?.anchor ?? null)
         : null;
       let adjacent = anchor ? (previous?.adjacent ?? null) : null;
-      // Scan visible entries only at a gesture, never for every scroll event.
+      // Scan visible entries only while recording an anchor, never for every scroll event.
       if (captureAnchor) {
         // A list may grow inside main instead of owning an independent scroll range.
         const container = list && list.scrollHeight > list.clientHeight ? list : main;
@@ -308,9 +308,16 @@ export function useLibraryReadingPosition(
     return () => {
       main.removeEventListener("scroll", capture, true);
       main.removeEventListener("click", capture, true);
-      // A history traversal can beat the last scroll event. Retain the actual
-      // departing containers: React may have detached their refs already.
-      capturePosition(false, null, { main, list });
+      // History traversal has no entry click to capture an anchor. Record the
+      // visible entry before leaving: a revision notice can change the raw
+      // offset without changing where the reader is. Retain the containers
+      // because React may have detached their refs already.
+      const anchor = readLibraryPosition(entry, layout)?.anchor;
+      const target = anchor
+        ? main.querySelector<HTMLElement>(`[data-library-entry="${CSS.escape(anchor.key)}"]`)
+        : null;
+      // A missing selected anchor must still reset on return, not adopt another row.
+      capturePosition(!anchor || target !== null, target, { main, list });
     };
   }, [
     current,

@@ -7,7 +7,8 @@
  * identical until somebody reloads.
  */
 import { test, expect } from "./helpers";
-import { modelCard, uploadGcodeModel, uploadModel } from "./util";
+import { modelCard, openFilters, uploadGcodeModel, uploadModel } from "./util";
+import { settleLibraryRead } from "../e2e/_library";
 
 test.describe("structured filters", () => {
   test("artifact filter is URL-restorable and clearable", async ({ page }) => {
@@ -19,7 +20,9 @@ test.describe("structured filters", () => {
     await uploadModel(page, mesh, { mesh: true, gcode: false });
 
     await page.goto("/");
-    await page.getByRole("button", { name: "Filters", exact: true }).click();
+    await settleLibraryRead(page, modelCard(page, gcode));
+    await expect(modelCard(page, mesh)).toBeVisible();
+    await openFilters(page);
     const sidebar = page.locator("aside");
     await sidebar.getByRole("button", { name: "File type", exact: true }).click();
     await sidebar.getByText("G-code", { exact: true }).click();
@@ -29,6 +32,7 @@ test.describe("structured filters", () => {
 
     // A full reload preserves the canonical repeated-filter query and results.
     await page.reload();
+    await settleLibraryRead(page, modelCard(page, gcode));
     await expect(page).toHaveURL(/file_type=gcode/);
     await expect(modelCard(page, gcode)).toBeVisible();
     await expect(modelCard(page, mesh)).toHaveCount(0);

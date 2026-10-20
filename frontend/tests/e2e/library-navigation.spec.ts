@@ -2,11 +2,48 @@
 import { expect, test } from "@playwright/test";
 import { useMockApi } from "./_setup";
 import { scrollToEnd } from "./_scroll";
+import { settleLibraryRead } from "./_library";
 import { aModel, aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
 
 test.describe("Library navigation", () => {
+  test("recovers an unaccepted Library read through explicit refresh", async ({ page }) => {
+    const model = aModelListItem({ id: 1, name: "Recovered initial read" });
+    let reads = 0;
+    let recoverable = false;
+    await page.route("**/api/v1/models/browse?**", (route) => {
+      reads += 1;
+      return !recoverable
+        ? route.fulfill({ status: 409, json: { detail: "browse_refresh_required" } })
+        : route.fulfill({
+            json: {
+              items: [{ kind: "model", model }],
+              total: 1,
+              next_cursor: null,
+              browse_revision: "r1",
+              authorization_revision: "a1",
+            },
+          });
+    });
+    await page.goto("/?type=all&sort=date-desc");
+    const refresh = page.getByRole("main").getByRole("button", { name: "Refresh library" });
+    await expect(refresh).toBeVisible();
+    const beforeRefresh = reads;
+    expect(beforeRefresh).toBeGreaterThan(0);
+    const link = page
+      .getByRole("main")
+      .getByRole("link", { name: new RegExp(model.name) })
+      .first();
+    recoverable = true;
+
+    await settleLibraryRead(page, link);
+
+    await expect(link).toBeVisible();
+    await expect(refresh).toBeHidden();
+    expect(reads).toBe(beforeRefresh + 1);
+  });
+
   for (const kind of ["Model", "Multipart set"] as const) {
     test(`restores the originating Library history entry for a ${kind}`, async ({ page }) => {
       const model = aModelListItem({ id: 1, name: "skadis_kitchen-roll_screw", starred: true });

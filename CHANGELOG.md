@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Library Back and Forward keep the same visible reading position when a
+  revision notice changes the page height.
+
+- Refresh library now recovers an initial read rejected by concurrent changes,
+  even before the first page has loaded.
+
+- Ingestion qualification returns idle capacity credits during drain instead of
+  depending on the work heartbeat's timing. Active reservations remain protected.
+
 - PrintStash now keeps a manifest for the Cosmos Cloud market
   (`azukaar/cosmos-servapps-official`) next to the other store catalogues, with the
   install dialog creating the first administrator and the same memory budgets the
