@@ -32,6 +32,7 @@ from sqlmodel import SQLModel, create_engine
 from app.db import session as db_session_module
 from app.db.models import Job, JobKind, JobState, LaneName, WorkPriority
 from app.db.session import get_session_factory, override_session_factory
+from app.db.url import normalize_database_url
 from app.modules.work import catalog as catalog_module
 from app.modules.work.catalog import WorkCatalog, default_lanes
 from app.modules.work.contracts import (
@@ -345,11 +346,12 @@ class DbosHarness(Harness):
 
 
 @contextmanager
-def shared_app_db(path: Path | None = None) -> Iterator[None]:
+def shared_app_db(path: Path | str | None = None) -> Iterator[None]:
     """One application database shared by callers and DBOS-created threads.
 
-    A supplied path creates an isolated current schema. Replacing the ContextVar
-    itself gives threads created by DBOS the same default factory as the test;
+    A supplied path or database URL creates an isolated current schema.
+    Replacing the ContextVar itself gives threads created by DBOS the same
+    default factory as the test;
     restoring the original object preserves the caller's previous override.
     """
     if path is None:
@@ -364,10 +366,15 @@ def shared_app_db(path: Path | None = None) -> Iterator[None]:
             _empty(engine)
         return
 
-    engine = create_engine(
-        f"sqlite:///{path}", connect_args={"check_same_thread": False}
+    url = (
+        f"sqlite:///{path}" if isinstance(path, Path) else normalize_database_url(path)
     )
-    event.listen(engine, "connect", db_session_module._set_sqlite_pragmas)
+    sqlite = url.startswith("sqlite")
+    engine = create_engine(
+        url, connect_args={"check_same_thread": False} if sqlite else {}
+    )
+    if sqlite:
+        event.listen(engine, "connect", db_session_module._set_sqlite_pragmas)
     factory = db_session_module.SQLiteSessionFactory(engine)
     previous_factory = db_session_module._default_factory
     previous_context = db_session_module._factory_ctx
@@ -394,16 +401,27 @@ def _empty(engine) -> None:
 
 
 @contextmanager
-def harness_for(kind: str, tmp_path: Path) -> Iterator[Harness]:
+def harness_for(
+    kind: str,
+    tmp_path: Path,
+    *,
+    catalog: WorkCatalog | None = None,
+    system_db: tuple[str, str | None] | None = None,
+) -> Iterator[Harness]:
     RECORD.steps.clear()
     RECORD.behaviour.clear()
     RECORD.discover.clear()
     RECORD.running = RECORD.peak = 0
-    catalog = contract_catalog()
+    catalog = catalog or contract_catalog()
+    url, schema = (
+        system_db
+        if system_db is not None
+        else (f"sqlite:///{tmp_path / 'engine.sqlite'}", None)
+    )
     built: Harness = (
         InlineHarness(catalog)
         if kind == "inline"
-        else DbosHarness(catalog, f"sqlite:///{tmp_path / 'engine.sqlite'}")
+        else DbosHarness(catalog, url, schema=schema)
     )
     catalog_module.bind(built.engine, catalog)
     try:

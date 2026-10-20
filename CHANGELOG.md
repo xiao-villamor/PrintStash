@@ -37,6 +37,9 @@
   with 300 Models, idle CPU fell from 11.4% to 6.1% of one core (0.14.0: 6.1%),
   and uploads start as soon as before.
 
+- Interactive background work can prepare its next queued job while the
+  current job runs, using the existing queue and admission limits.
+
 - Search projection waits for an import to finish, like thumbnails do. Its
   writes competed with the import for SQLite's single writer. A 300-file ZIP
   import on a 4-core test server took 60 s instead of 121 s (0.14.0: 55–67 s).

@@ -89,7 +89,10 @@ One pass (`work.reconciler.run_pass`) per definition, claimed through its
    follows commit. A lost or expired holder cannot admit work.
 3. **Continue or stop.** A full batch that created Jobs while the lane still had
    room runs again immediately. A full lane stops; each Job's completion nudges
-   its source. A nudge that arrived during the pass (the dirty mark,
+   its source. Starting an interactive Job from a prioritized source also nudges
+   it, because running interactive Jobs no longer consume the pending allowance.
+   That lets a successor queue during the current attempt without enlarging
+   either priority's cap. A nudge that arrived during the pass (the dirty mark,
    `nudged_at`) makes the pass run once more before it releases.
 
 A completion always nudges the definitions it names (`completion_nudges`). It
@@ -159,7 +162,9 @@ one each. The shared read never holds a lock other steps wait on.
 
 A Job attempt writes as rarely as its guarantees allow:
 
-- **Begin** claims the attempt.
+- **Begin** claims the attempt and, for interactive work from a prioritized
+  source, registers an after-commit nudge. On SQLite its dirty mark commits
+  with the claim, without a second writer transaction.
 - **Progress** a step reports in the first `JOBS_PROGRESS_HOLD_SECONDS` of its
   attempt is held in memory and merged into the next write, so an attempt that
   ends sooner never pays for reports nobody could read. Past the hold each

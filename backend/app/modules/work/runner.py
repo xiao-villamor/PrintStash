@@ -32,7 +32,14 @@ from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, WorkPriorit
 from app.db.session import get_session_factory
 
 from . import catalog as catalog_module
-from .contracts import JobOutcome, RetryPolicy, Step, StepRunner, no_hook
+from .contracts import (
+    JobOutcome,
+    PrioritizedWorkSource,
+    RetryPolicy,
+    Step,
+    StepRunner,
+    no_hook,
+)
 from .jobs import Settlement, failure_of, jobs
 
 logger = get_logger(__name__)
@@ -429,6 +436,15 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
             "priority": row.priority.value,
         }
         session.add(row)
+        if row.priority is WorkPriority.INTERACTIVE:
+            definition = catalog_module.get_catalog().definition(row.kind)
+            if isinstance(definition.source, PrioritizedWorkSource):
+                from .submission import nudge_after_commit
+
+                # Running interactive work frees a pending slot. Let the source
+                # fill that existing allowance while this attempt runs; its
+                # priority quotas and admission checks still bound discovery.
+                nudge_after_commit(session, definition.name)
         session.commit()
         return claim
 
