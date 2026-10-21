@@ -115,19 +115,42 @@ directory per app at its repository root, so the package is `printstash/`, not
 
 ### CasaOS / ZimaOS: pull request to `IceWhaleTech/CasaOS-AppStore`
 
+The store source is the v2 protocol: one `Apps/<App>/docker-compose.yml` holding the
+Compose file plus a top-level `x-casaos` block, and the assets that block names
+beside it. `catalogues/casaos/PrintStash/` is exactly that directory, so a
+submission and every update are a copy of it.
+
 1. Fork and branch: `gh repo fork IceWhaleTech/CasaOS-AppStore --clone`, then
    `git switch -c printstash-X.Y.Z`.
-2. Copy `catalogues/casaos/PrintStash/docker-compose.yml` to
-   `Apps/PrintStash/docker-compose.yml`.
-3. **First submission only:** add `icon.png`, `thumbnail.png` and `screenshot-1.png`
-   next to it, and point `x-casaos.icon`, `thumbnail` and `screenshot_link` at the
-   store's copies (see an existing app such as `Apps/Jellyfin`).
-4. **Every release:** bump the image tag and `x-casaos.version`, and add release
-   notes.
-5. Validate with the store's own build, `./scripts/build_dist.sh`, which must finish
-   without errors and write `dist/apps/PrintStash/`. Then open the PR, saying
-   whether it is a new app or an update and how it was validated. The store's CI
-   validates compose files too.
+2. Copy the whole directory, assets included:
+   `cp -r catalogues/casaos/PrintStash <checkout>/Apps/PrintStash`. The icons,
+   thumbnail and screenshots must travel with it: the store's build resolves each
+   `x-casaos` asset URL by filename inside the app directory, so a URL without
+   its file builds a listing with no icon.
+3. **Every release:** bump the image tag, `x-casaos.version`,
+   `x-casaos.update_at` (`YYYY-MM-DD`) and `x-casaos.release_notes` in `en_US`
+   and `es_ES`. Refresh the screenshots only when the screens they show have
+   changed, and keep `thumbnail.png` distinct from `screenshot-1.png`.
+4. Keep `category` one of the store's fixed values, `Media`, `Productivity`,
+   `Home`, `Networking`, `AI`, `Finance`, `Social`, `Developer` or `Others`.
+   The build accepts a free-form value and the app then appears under no filter.
+   PrintStash is `Productivity`, beside the other self-hosted file libraries.
+   `port_map` must equal the published port (`3378`), and the store assigns a
+   different one in review rather than us.
+5. Validate with the store's own build, `./scripts/build_dist.sh`, which must
+   finish without errors and write `dist/apps/org.printstash.printstash/` with a
+   `meta.json` carrying both architectures, a `meta.es_ES.json`, and the assets
+   under `assets/`. The store's CI also runs `docker compose config -q` on the
+   changed app and a full build.
+6. Open the PR saying whether it is a new app or an update, what changed, and how
+   it was validated. A new app names the version it pins; an update names the
+   release it follows.
+
+Two blocks ship in that compose file on purpose. The service-level `x-casaos`
+(environment, port and volume descriptions) is what older CasaOS clients read;
+the v2 build keeps only the top-level block and drops the service one. Editing
+both keeps the two generations of client described, and neither may contradict
+the root `docker-compose.yml`.
 
 ### Cosmos Cloud: pull request to `azukaar/cosmos-servapps-official`
 

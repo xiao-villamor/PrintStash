@@ -340,6 +340,51 @@ class TestCasaOS:
     def test_uses_the_host_file_identity(self, variable: str) -> None:
         assert _environment("casaos")[variable] == f"${variable}"
 
+    def test_uses_a_category_the_store_lists(self) -> None:
+        # The store filters its listings by this fixed set; the build accepts a
+        # free-form value such as "Utilities" and then shows the app under no
+        # filter at all.
+        compose = _load(CASAOS / "docker-compose.yml")
+
+        assert compose["x-casaos"]["category"] in {
+            "Media",
+            "Productivity",
+            "Home",
+            "Networking",
+            "AI",
+            "Finance",
+            "Social",
+            "Developer",
+            "Others",
+        }
+
+    def test_ships_the_store_assets_it_references(self) -> None:
+        # The store's build copies each asset by filename out of the app
+        # directory, so a URL whose file is missing ships a listing with no icon.
+        xcasaos = _load(CASAOS / "docker-compose.yml")["x-casaos"]
+        referenced = [
+            xcasaos["icon"],
+            xcasaos["thumbnail"],
+            *xcasaos["screenshot_link"],
+        ]
+        missing = [
+            url.rsplit("/", 1)[-1]
+            for url in referenced
+            if not (CASAOS / url.rsplit("/", 1)[-1]).exists()
+        ]
+
+        assert missing == []
+        assert Image.open(CASAOS / "icon.png").size == (256, 256), (
+            "the store shows a square app icon"
+        )
+
+    def test_ships_the_listing_text_in_both_markets(self) -> None:
+        # English and Spanish are the two markets the entry is measured on.
+        xcasaos = _load(CASAOS / "docker-compose.yml")["x-casaos"]
+
+        for field in ("title", "tagline", "description"):
+            assert {"en_US", "es_ES"} <= set(xcasaos[field]), field
+
 
 class TestCosmos:
     def test_routes_to_the_web_port(self) -> None:

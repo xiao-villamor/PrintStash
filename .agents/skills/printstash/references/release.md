@@ -142,3 +142,28 @@ Match existing releases (`v0.8.3`, `v0.8.1`):
   `**Full changelog:** https://github.com/xiao-villamor/PrintStash/compare/vPREV...vX.Y.Z`
 
 Example title: `v0.8.5 — CI/ops hardening`.
+
+## CasaOS / ZimaOS App Store, every release
+
+`catalogues/casaos/PrintStash/` is the source: it is exactly the directory the
+store takes, so a submission and every update are a copy of it.
+`catalogues/README.md` holds the field-by-field contract; this is the order.
+
+1. Copy the whole directory, assets included:
+   `cp -r catalogues/casaos/PrintStash <checkout>/Apps/PrintStash`. The store's
+   build resolves each `x-casaos` asset URL by filename inside the app
+   directory, so a URL whose file is missing ships an entry with no icon.
+2. The release commit already bumped the image tag and `x-casaos.version`; also
+   set `update_at` to the release date (`YYYY-MM-DD`) and rewrite
+   `release_notes` in `en_US` and `es_ES` from the CHANGELOG entry.
+3. Keep `category` one of the store's fixed values (`Media`, `Productivity`,
+   `Home`, `Networking`, `AI`, `Finance`, `Social`, `Developer`, `Others`), or
+   the build accepts the app and lists it under no filter. Keep `port_map`
+   equal to the published port, and refresh the screenshots only when the
+   screens they show have changed.
+4. Validate with the store's `./scripts/build_dist.sh` and require
+   `dist/apps/org.printstash.printstash/` to carry a `meta.json` with both
+   architectures, a `meta.es_ES.json` and the assets under `assets/`.
+5. Open the PR, link it from the GitHub release notes, and record anything the
+   maintainers change (a reassigned port, edited copy) back into
+   `catalogues/casaos/PrintStash/` in the same release.
