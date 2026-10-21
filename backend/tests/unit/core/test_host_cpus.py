@@ -352,6 +352,45 @@ class TestDefaultNativeJobs:
         assert host_cpus.default_native_jobs(0.5) == 3
 
 
+class TestFittingNativeJobs:
+    @pytest.mark.parametrize(
+        ("pool", "jobs"),
+        [
+            pytest.param(64 * 1024**3, 102, id="large-pool-has-no-cpu-cap"),
+            pytest.param(2 * 1024**3, 3, id="two-gib"),
+            pytest.param(1, 1, id="smaller-than-one-floor-still-runs-one"),
+        ],
+    )
+    def test_counts_the_thumbnail_floors_a_pool_fits(
+        self, pool: int, jobs: int
+    ) -> None:
+        assert host_cpus.fitting_native_jobs(pool) == jobs
+
+    def test_rejects_an_empty_pool(self) -> None:
+        with pytest.raises(ValueError, match="at least one byte"):
+            host_cpus.fitting_native_jobs(0)
+
+
+class TestNativePoolBytes:
+    def test_takes_the_fraction_of_the_detected_memory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core import host_memory
+
+        monkeypatch.setattr(host_memory, "memory_limit_bytes", lambda: 8 * 1024**3)
+
+        assert host_cpus.native_pool_bytes(0.25) == 2 * 1024**3
+
+    def test_assumes_the_undetected_pool_without_a_memory_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core import host_memory
+
+        monkeypatch.setattr(host_memory, "memory_limit_bytes", lambda: None)
+
+        assert host_cpus.native_pool_bytes(0.5) == host_cpus.UNDETECTED_POOL_BYTES
+
+
 class TestInferenceJobsFor:
     @pytest.mark.parametrize(
         ("cpus", "jobs"),

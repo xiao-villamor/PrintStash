@@ -3,6 +3,7 @@ import type { GcPlan } from "@/lib/api/gc";
 import type { TrashedModelRead } from "@/types";
 import type { VolumeMeasurement } from "@/types/models";
 import type { ArtifactCacheRead } from "@/lib/api/artifact-cache";
+import type { MeshWorkersRead } from "@/lib/api/mesh-workers";
 /**
  * Builders for API-shaped objects — the frontend's arrange step.
  *
@@ -509,6 +510,19 @@ export function aMultipartModel(
   };
 }
 
+export function aMeshWorkers(overrides: Partial<MeshWorkersRead> = {}): MeshWorkersRead {
+  return {
+    edit_epoch: "00000000000000000000000000000001",
+    edit_version: 1,
+    jobs: 3,
+    configured: null,
+    automatic: 3,
+    maximum: 4,
+    source: "automatic",
+    restart_required: false,
+    ...overrides,
+  };
+}
 export function anArtifactCache(overrides: Partial<ArtifactCacheRead> = {}): ArtifactCacheRead {
   return {
     edit_epoch: "00000000000000000000000000000001",

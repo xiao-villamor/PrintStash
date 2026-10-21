@@ -125,6 +125,9 @@ const ERROR_MESSAGES = {
     "This item was not deleted because storage ownership could not be verified. Check Storage health before retrying.",
   storage_risk_confirmation_required:
     "Permanent deletion needs storage-risk confirmation. Refresh this page and review the confirmation before retrying.",
+  // Background work
+  mesh_workers_exceed_memory:
+    "This machine's memory does not fit that many models at once. Choose a smaller number.",
   // Printers
   printer_not_found: "This printer no longer exists.",
   printer_offline: "The printer is offline.",

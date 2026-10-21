@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Administrators choose how many models are processed at once on Settings →
+  Background work → Worker settings. *Automatic* keeps the CPU-and-memory
+  default; a chosen count may go up to what the native memory pool fits,
+  overrides `VAULT_MAX_RENDER_JOBS`, and applies without a restart (separate
+  worker processes apply it when they restart). *Use default* clears it.
+
 - The default number of simultaneous mesh jobs now follows CPUs and memory:
   one per usable CPU plus one, no more than fit the native memory pool, up to
   eight. Two- and three-CPU installs used to process one file at a time and now

@@ -324,6 +324,10 @@ both Compose files run the first with no setting.
 
 Administrators override lane concurrency at runtime on Settings → Background
 work; the override is stored in the database and applies to every process.
+The same page sets the native mesh job count (`max_render_jobs`, stored in
+`system_config`): the process that saves it re-resolves the `derive.native`
+lane at once, a lane override still wins, and worker processes read it when
+they start.
 
 Native memory is bounded by shared CPU/RAM admission across API and worker
 processes, independent of lane count. A request reserves its complete geometry,

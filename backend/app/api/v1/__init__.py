@@ -19,6 +19,7 @@ from app.api.v1 import (
     ingest,
     jobs,
     maintenance,
+    mesh_workers,
     models,
     multipart_builds,
     multipart_models,
@@ -77,6 +78,7 @@ api_router.include_router(printers.router)
 api_router.include_router(backup.router)
 api_router.include_router(config.router)
 api_router.include_router(artifact_cache.router)
+api_router.include_router(mesh_workers.router)
 api_router.include_router(artifact_uploads.router)
 api_router.include_router(external_libraries.router)
 api_router.include_router(fleet.router)

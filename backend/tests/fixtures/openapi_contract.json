@@ -9536,6 +9536,86 @@
         "title": "MeasuredVolumeRead",
         "type": "object"
       },
+      "MeshWorkersRead": {
+        "properties": {
+          "automatic": {
+            "title": "Automatic",
+            "type": "integer"
+          },
+          "configured": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Configured"
+          },
+          "edit_epoch": {
+            "pattern": "^[0-9a-f]{32}$",
+            "title": "Edit Epoch",
+            "type": "string"
+          },
+          "edit_version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Edit Version",
+            "type": "integer"
+          },
+          "jobs": {
+            "title": "Jobs",
+            "type": "integer"
+          },
+          "maximum": {
+            "title": "Maximum",
+            "type": "integer"
+          },
+          "restart_required": {
+            "title": "Restart Required",
+            "type": "boolean"
+          },
+          "source": {
+            "$ref": "#/components/schemas/MeshWorkersSource"
+          }
+        },
+        "required": [
+          "edit_epoch",
+          "edit_version",
+          "jobs",
+          "configured",
+          "automatic",
+          "maximum",
+          "source",
+          "restart_required"
+        ],
+        "title": "MeshWorkersRead",
+        "type": "object"
+      },
+      "MeshWorkersSource": {
+        "enum": [
+          "database",
+          "environment",
+          "automatic"
+        ],
+        "title": "MeshWorkersSource",
+        "type": "string"
+      },
+      "MeshWorkersUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "jobs": {
+            "minimum": 1.0,
+            "title": "Jobs",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "jobs"
+        ],
+        "title": "MeshWorkersUpdate",
+        "type": "object"
+      },
       "MetadataRead": {
         "properties": {
           "bbox_x_mm": {
@@ -27015,6 +27095,186 @@
           }
         ],
         "summary": "Legacy MakerWorld verification endpoint",
+        "tags": [
+          "config"
+        ]
+      }
+    },
+    "/api/v1/config/mesh-workers": {
+      "delete": {
+        "operationId": "reset_mesh_workers_api_v1_config_mesh_workers_delete",
+        "parameters": [
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeshWorkersRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Reset Mesh Workers",
+        "tags": [
+          "config"
+        ]
+      },
+      "get": {
+        "operationId": "read_mesh_workers_api_v1_config_mesh_workers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeshWorkersRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read Mesh Workers",
+        "tags": [
+          "config"
+        ]
+      },
+      "put": {
+        "operationId": "update_mesh_workers_api_v1_config_mesh_workers_put",
+        "parameters": [
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MeshWorkersUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeshWorkersRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Update Mesh Workers",
         "tags": [
           "config"
         ]

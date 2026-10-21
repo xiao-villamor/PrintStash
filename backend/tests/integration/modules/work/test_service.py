@@ -32,6 +32,7 @@ from app.db.models import (
     Job,
     JobKind,
     JobState,
+    LaneName,
     WorkPriority,
 )
 from app.modules.derivatives.source import subject_key
@@ -827,3 +828,27 @@ class TestExecutionEpoch:
         submit(current.id)
 
         assert work_engine.executions[retried[0]].status is EngineStatus.QUEUED
+
+
+class TestReapplyLaneDefault:
+    def test_resizes_the_lane_to_its_new_default(
+        self, work_engine, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "max_render_jobs", 2)
+
+        service.reapply_lane_default(LaneName.DERIVE_NATIVE)
+
+        assert work_engine.catalog.lanes[LaneName.DERIVE_NATIVE].concurrency == 2
+        assert work_engine.concurrency[LaneName.DERIVE_NATIVE] == 2
+
+    def test_does_nothing_without_a_bound_engine(self, work_engine) -> None:
+        from app.modules.work import catalog as catalog_module
+
+        before = dict(work_engine.concurrency)
+        catalog_module.bind(None, None)
+
+        service.reapply_lane_default(LaneName.DERIVE_NATIVE)
+
+        assert work_engine.concurrency == before
