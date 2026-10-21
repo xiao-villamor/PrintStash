@@ -57,7 +57,7 @@ class TestMeshWorkersConfig:
         assert body["maximum"] == 4
         assert body["restart_required"] is False
 
-    def test_a_stored_count_applies_to_admission_and_the_native_lane(
+    def test_a_stored_count_resizes_admission_with_the_native_lane(
         self,
         client: TestClient,
         auth_headers: dict[str, str],
