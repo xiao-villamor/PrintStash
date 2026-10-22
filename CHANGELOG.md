@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Thumbnails drawn without a GPU take less CPU: the renderer now tests only
+  the pixels each row of a triangle covers instead of its whole bounding box,
+  most of which a long thin triangle leaves empty. The thumbnails are
+  byte-for-byte the same, so nothing is regenerated.
+
 - STEP parts in the Docker image get their exact B-rep volume and similarity
   fingerprints again. The image lacked `libgl1`, which OpenCASCADE's binding
   loads even without a display, so every B-rep read reported STEP as

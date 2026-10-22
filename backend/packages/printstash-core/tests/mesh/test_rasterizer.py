@@ -732,7 +732,7 @@ class TestRasteriseTriangles:
 
     def test_preserves_duplicate_work_under_a_raster_budget(self) -> None:
         tri = np.array([[[2.0, 2.0, 0.0], [12.0, 2.0, 0.0], [2.0, 12.0, 0.0]]])
-        single_work, _ = self.paint(tri)
+        single_work, _ = self.paint(tri, budget=RasterBudget(limit=1000))
         budget = RasterBudget(limit=1000)
 
         actual_work, _ = self.paint(np.repeat(tri, 3, axis=0), budget=budget)
@@ -829,14 +829,59 @@ class TestRasteriseTriangles:
         assert img.max() == 0
 
     def test_leaves_frame_unchanged_for_subpixel_triangle(self) -> None:
-        # This has positive area and an on-screen bounding box, but none of
-        # the candidate pixel centres lies inside its tiny silhouette.
+        # This has positive area and an on-screen bounding box, but no row's
+        # centre line crosses its tiny silhouette, so no pixel is tested.
         tri = np.array([[[0.1, 0.1, 0.0], [0.2, 0.1, 0.0], [0.1, 0.2, 0.0]]])
 
         candidates, image = self.paint(tri, size=8)
 
-        assert candidates > 0
+        assert candidates == 0
         np.testing.assert_array_equal(image, np.zeros((8, 8, 3), dtype=np.uint8))
+
+    def test_tests_only_the_pixels_a_thin_face_spans(self) -> None:
+        # A long diagonal sliver fills a sliver of its bounding box.
+        tri = np.array([[[1.0, 1.0, 0.0], [62.0, 60.0, 0.0], [61.0, 62.0, 0.0]]])
+
+        spanned, image = self.paint(tri, size=64)
+        boxed, box_image = self.paint(tri, size=64, budget=RasterBudget(limit=10**9))
+
+        assert spanned * 5 < boxed
+        np.testing.assert_array_equal(image, box_image)
+
+    @pytest.mark.parametrize("seed", range(6))
+    def test_paints_exactly_what_the_bounding_boxes_paint(self, seed: int) -> None:
+        # Slivers, overlaps, faces off the frame edge and near-degenerate
+        # faces: the spans must keep every fragment the boxes find, in the
+        # same order, so depth ties resolve the same way.
+        rng = np.random.default_rng(seed)
+        size = 48
+        anchors = rng.uniform(-8, size + 8, (300, 1, 3))
+        tri = anchors + rng.normal(
+            0, rng.choice([0.4, 3.0, 20.0], (300, 1, 1)), (300, 3, 3)
+        )
+        tri[:40, 1] = tri[:40, 0] + rng.normal(0, 1e-3, (40, 3))
+        tri[40:80] = tri[np.arange(40)]  # exact duplicates tie in depth
+        tri[..., 2] = np.round(tri[..., 2])
+        normals = rng.normal(size=(300, 3, 3))
+        images = []
+        for budget in (None, RasterBudget(limit=10**9)):
+            img = np.zeros((size, size, 3), dtype=np.uint8)
+            zbuf = np.full((size, size), np.inf, dtype=np.float64)
+            rasterizer._rasterise_triangles(
+                img,
+                zbuf,
+                tri,
+                normals,
+                lambda n: (n + 1) / 2,
+                np.array([200.0, 210.0, 220.0]),
+                size,
+                size,
+                budget=budget,
+            )
+            images.append((img, zbuf))
+
+        np.testing.assert_array_equal(images[0][0], images[1][0])
+        np.testing.assert_array_equal(images[0][1], images[1][1])
 
     def test_keeps_the_nearer_of_two_overlapping_triangles(self) -> None:
         near = [[2.0, 2.0, -1.0], [12.0, 2.0, -1.0], [2.0, 12.0, -1.0]]
