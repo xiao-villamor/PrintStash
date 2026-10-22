@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Importing a ZIP no longer wakes the derivative passes after every file. They
+  would only wait for the import to end, so they now stay asleep until it does,
+  leaving the database to the import, so large ZIPs import and finish
+  processing sooner.
+
 - A ZIP prepared while the server's clock stepped back (an NTP or virtual
   machine time resync) no longer stays at *Queued* forever: the Task Center
   now offers *Choose files* as soon as the preparation ends, whatever time the
