@@ -23,13 +23,16 @@ commit to be tagged and wait for success. Release publication requires green
 `CI` and `Deep CI` runs for that SHA. Nightly and manual `latest` publication
 require a green `CI` run for the same SHA on `main`.
 
-Backend coverage runs in six disjoint ordinary file partitions and one serial
+Backend coverage runs in twelve disjoint ordinary file partitions and one serial
 resource partition on separate runners. Ordinary partitions include slow tests
 and retain work-stealing. The resource lane selects only container-backed and
 `native_host` tests, so each real service starts once and host-native measurements
 have exclusive resources. Resource markers are excluded from every ordinary
 partition; each test executes once across the matrix. Repository tests enforce
-that every ordinary test file belongs to exactly one partition.
+that every ordinary test file belongs to exactly one partition. The twelve
+ordinary partitions reuse the required CI file sets: unit, contract, E2E, two
+API groups, three migration groups, platform, two domain groups and repository
+contracts. Deep CI includes their slow tests and measures them under coverage.
 
 Every shard measures branches and uploads uniquely named raw coverage data,
 using relative source paths so results from different checkout locations refer

@@ -198,24 +198,42 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - suite: unit-contract
+          - suite: unit
             lane: full-ordinary
-            paths: tests/unit tests/contract tests/e2e
-          - suite: api
+            paths: tests/unit
+          - suite: contract
             lane: full-ordinary
-            paths: tests/integration/api
-          - suite: migrations
+            paths: tests/contract
+          - suite: e2e
             lane: full-ordinary
-            paths: tests/integration/db/migrations
-          - suite: platform
+            paths: tests/e2e
+          - suite: integration-api-routes
             lane: full-ordinary
-            paths: tests/repo tests/integration/bootstrap tests/integration/core tests/integration/db/test_*.py tests/integration/db/models tests/integration/db/derived_objects tests/integration/main tests/integration/postgres tests/integration/runtime tests/integration/scripts
-          - suite: domains-a
+            paths: tests/integration/api/test_*.py tests/integration/api/v1/test_*.py
+          - suite: integration-api-domains
+            lane: full-ordinary
+            paths: tests/integration/api/v1/config tests/integration/api/v1/files tests/integration/api/v1/inbox tests/integration/api/v1/ingest tests/integration/api/v1/models tests/integration/api/v1/printers tests/integration/api/v1/provider_connections tests/integration/api/v1/storage tests/integration/api/v1/taxonomy
+          - suite: integration-migrations-a
+            lane: full-ordinary
+            paths: tests/integration/db/migrations/test_[a-i]*.py
+          - suite: integration-migrations-b
+            lane: full-ordinary
+            paths: tests/integration/db/migrations/test_[j-m]*.py
+          - suite: integration-migrations-c
+            lane: full-ordinary
+            paths: tests/integration/db/migrations/test_[n-z]*.py
+          - suite: integration-platform
+            lane: full-ordinary
+            paths: tests/integration/bootstrap tests/integration/core tests/integration/db/test_*.py tests/integration/db/models tests/integration/db/derived_objects tests/integration/main tests/integration/postgres tests/integration/runtime tests/integration/scripts
+          - suite: integration-domains-a
             lane: full-ordinary
             paths: tests/integration/modules/administration tests/integration/modules/backups tests/integration/modules/derivatives tests/integration/modules/identity tests/integration/modules/inference tests/integration/modules/ingestion tests/integration/modules/library tests/integration/modules/media
-          - suite: domains-b
+          - suite: integration-domains-b
             lane: full-ordinary
             paths: tests/integration/modules/notifications tests/integration/modules/printing tests/integration/modules/search tests/integration/modules/similarity tests/integration/modules/sources tests/integration/modules/storage tests/integration/modules/work
+          - suite: repository
+            lane: full-ordinary
+            paths: tests/repo
           - suite: services
             lane: full-resources
             paths: tests

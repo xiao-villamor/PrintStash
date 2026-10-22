@@ -244,6 +244,12 @@ class TestDeepSuite:
         jobs = _workflow("deep-ci.yml")["jobs"]
         job = jobs["backend"]
         rows = job["strategy"]["matrix"]["include"]
+        ordinary = [row for row in rows if row["lane"] == "full-ordinary"]
+        quick_rows = _workflow("ci.yml")["jobs"]["backend"]["strategy"]["matrix"][
+            "include"
+        ]
+        assert len(ordinary) == 12
+        assert ordinary == [dict(row, lane="full-ordinary") for row in quick_rows]
         assert len({row["suite"] for row in rows}) == len(rows)
         resources = [row for row in rows if row["lane"] == "full-resources"]
         assert resources == [
