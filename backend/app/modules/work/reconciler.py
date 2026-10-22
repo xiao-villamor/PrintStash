@@ -53,6 +53,7 @@ from . import executors, fences
 from .contracts import (
     ActiveExecution,
     DiscoveryBudget,
+    DuringAdditions,
     EngineEvidence,
     EngineStatus,
     ExecutionKind,
@@ -72,6 +73,7 @@ from .submission import (
     hand_over,
     nudge,
     prepare_submission,
+    queue_pass,
     submit,
 )
 
@@ -181,6 +183,8 @@ class PassResult:
     completed: int = 0
     skipped: int = 0
     full: bool = False
+    # Discovery ran while an addition was active: look again after a pause.
+    paced: bool = False
     # The earliest moment a subject held back by the resubmit cooldown is due.
     cooling_until: datetime | None = None
     outcomes: dict[str, int] = field(default_factory=dict)
@@ -656,12 +660,15 @@ def _discover(definition: JobDefinition, *, now: datetime, result: PassResult) -
     with get_session_factory().scoped_session() as session:
         if definition.admission(session) is not None:
             return
-        if definition.waits_for_additions and jobs.any_active(
+        during = definition.during_additions
+        if during is not DuringAdditions.RUNS and jobs.any_active(
             session, catalog_module.get_catalog().additions
         ):
-            # The last addition to settle nudges this definition.
-            result.count(PassNote.WAITING_FOR_ADDITIONS)
-            return
+            if during is DuringAdditions.WAITS:
+                # The last addition to settle nudges this definition.
+                result.count(PassNote.WAITING_FOR_ADDITIONS)
+                return
+            result.paced = True
         if isinstance(source, PrioritizedWorkSource):
             budget = _discovery_budget(session, definition)
             limit = budget.total
@@ -964,6 +971,8 @@ def run_pass(source: JobKind, *, holder: str | None = None) -> PassResult:
         _force_release(source, holder)
         raise
     _schedule_next(definition, also=total.cooling_until)
+    if total.paced:
+        queue_pass(source, delay=settings.jobs_paced_discovery_seconds)
     record_reconcile_pass(
         source,
         time.monotonic() - started_clock,
@@ -987,6 +996,7 @@ def _merge(total: PassResult, result: PassResult) -> None:
     total.completed += result.completed
     total.skipped += result.skipped
     total.full = result.full
+    total.paced = total.paced or result.paced
     if result.cooling_until is not None and (
         total.cooling_until is None or result.cooling_until < total.cooling_until
     ):

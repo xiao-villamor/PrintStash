@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Thumbnails, measurements and previews of a ZIP's Models now start while the
+  rest of the ZIP is still being imported, instead of after its last file. The
+  import still shows every Model almost as soon as before, because the derived
+  work looks for new Models every two seconds
+  (`VAULT_JOBS_PACED_DISCOVERY_SECONDS`) rather than after each file. Search
+  indexing still waits for the import to finish.
+
 - Importing a ZIP no longer wakes the derivative passes after every file. They
   would only wait for the import to end, so they now stay asleep until it does,
   leaving the database to the import, so large ZIPs import and finish

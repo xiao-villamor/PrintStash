@@ -12,6 +12,7 @@ from app.core.time import utcnow
 from app.db.models import File, JobKind, LaneName
 from app.db.scopes import live
 from app.modules.work.contracts import (
+    DuringAdditions,
     JobContext,
     JobDefinition,
     JobExecution,
@@ -116,7 +117,10 @@ def _definition(name: JobKind, lane: LaneName, produce: Producer) -> JobDefiniti
         label=derivative_group.label,
         admission=lambda session: policy.admission(session, name),
         # A viewer mesh is what opening a Model in 3D waits for; it never yields.
-        waits_for_additions=name is not JobKind.DERIVATIVES_VIEWER_STL,
+        # Other outputs follow an import as its Models land, at a pace.
+        during_additions=DuringAdditions.RUNS
+        if name is JobKind.DERIVATIVES_VIEWER_STL
+        else DuringAdditions.PACED,
     )
 
 

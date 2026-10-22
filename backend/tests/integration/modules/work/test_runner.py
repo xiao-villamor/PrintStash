@@ -1581,3 +1581,75 @@ class TestAdditionsRelease:
         _context(job).finish(JobOutcome.FAILED, error="broken_upload")
 
         assert WAITING in _nudged(additions_engine)
+
+    def test_the_last_addition_to_end_nudges_the_paced_work_too(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import ADDING, PACED
+
+        job = make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert PACED in _nudged(additions_engine)
+
+
+def _paced_delays(engine: InlineJobEngine, source: JobKind) -> list[float | None]:
+    return [
+        execution.submission.delay_seconds
+        for execution in engine.executions.values()
+        if isinstance(execution.submission, PassSubmission)
+        and execution.submission.source == source
+    ]
+
+
+class TestPacedDuringAdditions:
+    """Paced work follows an addition at a pace, not once per change."""
+
+    def test_an_addition_starting_queues_the_paced_pass(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import ADDING, ALSO_ADDING, PACED
+
+        _overlay["jobs_paced_discovery_seconds"] = 3.5
+        # Another addition stays active, so this one's end releases nothing.
+        make_job(kind=ALSO_ADDING, state=JobState.RUNNING, attempts=1)
+        job = make_job(kind=ADDING)
+
+        _run(additions_engine, job)
+
+        assert _paced_delays(additions_engine, PACED) == [3.5]
+
+    def test_work_that_adds_nothing_queues_no_paced_pass(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import EAGER, PACED
+
+        job = make_job(kind=EAGER)
+
+        _run(additions_engine, job)
+
+        assert _paced_delays(additions_engine, PACED) == []
+
+    def test_a_paced_completion_during_an_addition_stamps_nothing_for_it(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, PACED
+
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+        job = make_job(kind=PACED, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert PACED not in _stamped(db_session) | _nudged(additions_engine)
+
+    def test_a_paced_completion_with_no_addition_active_nudges_it(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import PACED
+
+        job = make_job(kind=PACED, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert PACED in _nudged(additions_engine)

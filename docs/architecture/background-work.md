@@ -102,15 +102,27 @@ on an epoch its last submission did not carry). Request-originated work with
 nothing waiting to be submitted has nothing a pass could find or submit, so no
 pass is queued for it; the tick repairs what a crash left behind.
 
-**Additions first.** A definition that brings Models into the library (an
-upload, an import, a library scan) declares `adds_to_library`; derived outputs
-(thumbnails, measurements, G-code and toolpath previews) and search projection
-declare `waits_for_additions`. While any Job of an adding definition is active, a
-waiting definition's discovery finds nothing new, so a large import shows all
-its Models before their derived work starts competing with it. Jobs already
-created keep running. The last adding Job to settle stamps every waiting
+**Work during additions.** A definition that brings Models into the library
+(an upload, an import, a library scan) declares `adds_to_library`. Every other
+definition declares what its discovery does while one of those Jobs is active
+(`during_additions`):
+
+- `paced` — derived outputs (thumbnails, measurements, G-code and toolpath
+  previews). Discovery keeps finding the Models already added, but looks once
+  every `JOBS_PACED_DISCOVERY_SECONDS` instead of once per added file: an
+  addition starting queues one delayed pass, and each pass that ran during an
+  addition queues the next. A per-file pass would claim its cursor and compete
+  with the import for the write lock on every file.
+- `waits` — search projection. Discovery finds nothing new until the last
+  addition settles: each projection page is a write on the database the
+  import is writing to.
+- `runs` — everything else, including the viewer mesh: opening a Model in 3D
+  asks for it.
+
+Neither `paced` nor `waits` work is nudged per change while an addition is
+active, and a paced definition's own completions do not stamp it then. Jobs
+already created keep running. The last adding Job to settle stamps every held
 definition in its own terminal transaction; the tick recovers a lost nudge.
-The viewer mesh does not wait: opening a Model in 3D asks for it.
 
 A nudge (`work.nudge`) stamps the dirty mark and queues a pass unless one is
 already queued within `JOBS_SUBMIT_GRACE_SECONDS`. An interactive nudge is not
@@ -312,6 +324,7 @@ both Compose files run the first with no setting.
 | `JOBS_MAX_RESUBMITS` | 3 | Interrupted attempts before a Job fails; also how often the engine recovers one execution after its process died (with a pinned `EXECUTOR_ID`) |
 | `JOBS_RESUBMIT_COOLDOWN_SECONDS` / `JOBS_RESUBMIT_BURST` | 30 / 3 | A subject finished this often waits the window out |
 | `JOBS_SUBMIT_GRACE_SECONDS` | 60 | How long a queued pass absorbs further nudges |
+| `JOBS_PACED_DISCOVERY_SECONDS` | 2 | Pause between derived-output passes while Models are being added |
 | `JOBS_PROGRESS_HOLD_SECONDS` | 1.0 | How long an attempt runs before the progress it reports is written (0–60 seconds; 0 writes every report) |
 | `JOBS_EXECUTOR_STALE_SECONDS` | 120 | Heartbeat age after which an executor's work is rerun |
 | `JOBS_RETENTION_DAYS` / `JOBS_RETENTION_PER_USER` | 7 / 500 | User Job history |

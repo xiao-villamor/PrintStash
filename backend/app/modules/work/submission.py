@@ -36,6 +36,7 @@ from app.db.session import get_session_factory
 from . import catalog as catalog_module
 from .contracts import (
     Deduplicated,
+    DuringAdditions,
     ExecutionKind,
     JobSubmission,
     Partitioned,
@@ -340,16 +341,15 @@ def nudge(
 
 
 def _held_for_additions(session: Session, source: JobKind) -> bool:
-    """Whether ``source`` waits for an addition that is still active.
+    """Whether ``source`` holds back for an addition that is still active.
 
-    Its pass would only defer. The last addition to settle stamps every
-    waiting definition in the transaction that ends it, so skipping the stamp
-    here loses no work: that settlement is still to come.
+    Its pass is not owed to this change: paced work looks again on its own,
+    and the last addition to settle stamps every held definition in the
+    transaction that ends it, so skipping the stamp here loses no work.
     """
     catalog = catalog_module.get_catalog()
-    return catalog.definition(source).waits_for_additions and jobs.any_active(
-        session, catalog.additions
-    )
+    held = catalog.definition(source).during_additions is not DuringAdditions.RUNS
+    return held and jobs.any_active(session, catalog.additions)
 
 
 def queue_stamped(sources: Iterable[JobKind]) -> None:

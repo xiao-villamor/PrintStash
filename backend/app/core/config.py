@@ -249,6 +249,9 @@ class Settings(BaseSettings):
     jobs_resubmit_cooldown_seconds: int = Field(default=30, ge=0, le=3600)
     jobs_resubmit_burst: int = Field(default=3, ge=1, le=100)
     jobs_submit_grace_seconds: int = Field(default=60, ge=1, le=3600)
+    # While Models are being added, derived outputs look for new work this
+    # often rather than once per added file.
+    jobs_paced_discovery_seconds: float = Field(default=2.0, gt=0, le=60)
     # Progress a step reports before its attempt has run this long is held and
     # written with the next write, so a short attempt costs no transaction for
     # reports nobody could have read.

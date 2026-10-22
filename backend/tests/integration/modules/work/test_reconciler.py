@@ -1087,9 +1087,7 @@ class TestSweepLostTerminalAttempts:
 
 
 class TestSweepLostWork:
-    def test_frees_every_kind_of_lost_work(
-        self, engine, make_job, make_work_executor
-    ):
+    def test_frees_every_kind_of_lost_work(self, engine, make_job, make_work_executor):
         dead = make_work_executor("round-dead", stale=True)
         _stranded_pass(engine, SOURCED, dead.executor_id)
         job = make_job(kind=REQUESTED, state=JobState.COMPLETED, attempts=1)
@@ -1924,7 +1922,7 @@ class TestFIFORecovery:
 
 
 class TestDiscoveryWaitsForAdditions:
-    """``waits_for_additions``: discovery holds back while the library grows."""
+    """``DuringAdditions.WAITS``: discovery holds back while the library grows."""
 
     @staticmethod
     def _created(session: Session, kind: JobKind) -> list[Job]:
@@ -1967,3 +1965,47 @@ class TestDiscoveryWaitsForAdditions:
         run_pass(EAGER)
 
         assert len(self._created(db_session, EAGER)) == 1
+
+
+class TestPacedDiscovery:
+    """``DuringAdditions.PACED``: discovery looks at a pace while the library grows."""
+
+    @staticmethod
+    def _delays(engine: InlineJobEngine, source: JobKind) -> list[float | None]:
+        return [
+            execution.submission.delay_seconds for execution in _passes(engine, source)
+        ]
+
+    def test_finds_work_while_an_addition_is_active(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, PACED
+
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        run_pass(PACED)
+
+        assert len(TestDiscoveryWaitsForAdditions._created(db_session, PACED)) == 1
+
+    def test_comes_back_after_the_pause_while_the_addition_goes_on(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import ADDING, PACED
+
+        _overlay["jobs_paced_discovery_seconds"] = 3.5
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        run_pass(PACED)
+
+        assert self._delays(additions_engine, PACED) == [3.5]
+
+    def test_does_not_come_back_once_no_addition_is_active(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import ADDING, PACED
+
+        make_job(kind=ADDING, state=JobState.COMPLETED)
+
+        run_pass(PACED)
+
+        assert self._delays(additions_engine, PACED) == []

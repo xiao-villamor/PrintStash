@@ -762,12 +762,27 @@ def _mark(session: Session, source: JobKind) -> datetime | None:
 
 
 class TestHeldForAdditions:
-    """Work that waits for additions is not nudged while one is active.
+    """Work held back by additions is not nudged per change while one is active.
 
-    Its pass would only claim a cursor, see the import and defer, competing
-    with the import's own writes. The last addition to settle stamps it in
-    the transaction that ends it, so nothing is lost.
+    A per-change pass would compete with the import's own writes. Paced work
+    looks again on its own, and the last addition to settle stamps every held
+    definition in the transaction that ends it, so nothing is lost.
     """
+
+    def test_a_nudge_skips_paced_work_during_an_active_addition(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, PACED
+
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        nudge_after_commit(db_session, PACED)
+        db_session.commit()
+
+        assert (_passes(additions_engine, PACED), _mark(db_session, PACED)) == (
+            [],
+            None,
+        )
 
     def test_a_nudge_skips_work_waiting_for_an_active_addition(
         self, additions_engine, make_job, db_session: Session

@@ -15,7 +15,14 @@ from sqlmodel import Session, select
 from app.core.config import settings
 from app.db.models import JobKind, LaneName, WorkLaneOverride
 
-from .contracts import JobDefinition, JobEngine, Lane, LaneOrder, LanePace
+from .contracts import (
+    DuringAdditions,
+    JobDefinition,
+    JobEngine,
+    Lane,
+    LaneOrder,
+    LanePace,
+)
 
 # How many reconcile passes run at once, deployment-wide.
 RECONCILE_CONCURRENCY = 4
@@ -133,10 +140,21 @@ class WorkCatalog:
         )
 
     @property
-    def waiting_for_additions(self) -> tuple[JobKind, ...]:
-        """Definitions whose discovery holds back while additions are active."""
+    def held_by_additions(self) -> tuple[JobKind, ...]:
+        """Definitions not nudged per change while additions are active."""
         return tuple(
-            name for name, item in self.definitions.items() if item.waits_for_additions
+            name
+            for name, item in self.definitions.items()
+            if item.during_additions is not DuringAdditions.RUNS
+        )
+
+    @property
+    def paced_during_additions(self) -> tuple[JobKind, ...]:
+        """Definitions that look for work at a pace while additions are active."""
+        return tuple(
+            name
+            for name, item in self.definitions.items()
+            if item.during_additions is DuringAdditions.PACED
         )
 
     def lane_for(self, definition: JobKind) -> Lane:

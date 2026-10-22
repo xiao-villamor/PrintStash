@@ -103,7 +103,6 @@ class TestCreate:
         assert row.app_version == settings.app_version
         assert json.loads(row.status_json) == {"label": "cube.stl"}
 
-
     def test_reads_nothing_back_after_inserting(
         self, store: JobStore, db_session: Session
     ) -> None:
@@ -127,6 +126,7 @@ class TestCreate:
             event.remove(target, "before_cursor_execute", record)
 
         assert statements == ["SELECT", "INSERT"]
+
     def test_uses_a_caller_supplied_id(self, store: JobStore, owner: User) -> None:
         job_id = store.create(
             definition=JobKind.INGESTION_UPLOAD,

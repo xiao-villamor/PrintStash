@@ -54,6 +54,7 @@ from app.modules.search.subjects import (
     generation_subject,
 )
 from app.modules.work.contracts import (
+    DuringAdditions,
     JobContext,
     JobDefinition,
     JobOutcome,
@@ -665,7 +666,7 @@ def definitions() -> list[JobDefinition]:
             # Each projection page is a write on the database the import is
             # writing to: projected during an import, it doubled the import's
             # time. Library browsing and filters do not read the projection.
-            waits_for_additions=True,
+            during_additions=DuringAdditions.WAITS,
         ),
         JobDefinition(
             name=JobKind.SEARCH_GENERATION,

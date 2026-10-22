@@ -116,6 +116,20 @@ class LaneOrder(StrEnum):
     FIFO = "fifo"
 
 
+class DuringAdditions(StrEnum):
+    """What a definition's discovery does while Models are being added.
+
+    An upload or import brings Models in one file at a time. Work derived from
+    them would compete with it for the database on every file, so it either
+    looks at a pace, once every ``JOBS_PACED_DISCOVERY_SECONDS``, or waits for
+    the last addition to settle. Either way it is not nudged per file.
+    """
+
+    RUNS = "runs"
+    PACED = "paced"
+    WAITS = "waits"
+
+
 class LanePace(StrEnum):
     """How soon an engine must notice work queued on a lane.
 
@@ -332,14 +346,12 @@ class JobDefinition:
     # a notification channel). Required there and refused elsewhere.
     partition: Callable[[str], str] | None = None
     # Whether this work brings Models into the library (an upload, an import,
-    # a library scan). Work that ``waits_for_additions`` finds nothing new
-    # while a Job of such a definition is active.
+    # a library scan). Work not ``DuringAdditions.RUNS`` holds back while a
+    # Job of such a definition is active.
     adds_to_library: bool = False
-    # Whether discovery holds back while the library is still being added to,
-    # so a large import shows all its Models before their derived outputs
-    # (thumbnails, measurements) start competing with it. The last addition
-    # to settle nudges every definition that waited.
-    waits_for_additions: bool = False
+    # What discovery does while the library is still being added to. The last
+    # addition to settle nudges every definition that held back.
+    during_additions: DuringAdditions = DuringAdditions.RUNS
     # Whether each step is admitted as a write-capable operation (drained by a
     # restore, deferred while one holds the fence). Only work that itself takes
     # the restore fence (a vault migration's cutover) opts out and gates itself.
