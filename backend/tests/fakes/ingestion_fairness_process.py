@@ -30,12 +30,12 @@ from app.db.models import (
     WorkPriority,
 )
 from app.db.session import get_session_factory
+from app.modules.media.native_budget import MeshSource, estimate_sources
 from app.modules.media.native_process import native_capacity
 from app.modules.work import service
 from app.modules.work.jobs import status_of
 from app.runtime import native_runtime
 from tests.factories import build_file, build_model, content
-from tests.factories.geometry import three_mf
 from tests.fakes.ingestion_fairness_progress import ForegroundProgress
 from tests.fakes.job_engine_process import _emit, _set_up
 
@@ -46,6 +46,15 @@ _REFILL_INTERVAL_S = 0.1
 # also checks the original wall deadline; faster service cannot exhaust an
 # unrelated fixed count before the two backfills have had their allotted time.
 _MAX_UPLOADS = _WINDOW * (1 + math.ceil(_DEADLINE_S / _REFILL_INTERVAL_S))
+# Each backfill must claim the whole native pool: that is the request that
+# small interactive claims could starve. A 3MF is now weighed by its structure,
+# so a small package no longer asks for the pool. Text the OBJ preflight cannot
+# bound (here a non-ASCII comment) still does, and the reader skips comments.
+_FULL_POOL_OBJ = (
+    "# exportée\n"
+    "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 0 0 1\n"
+    "f 1 2 3\nf 1 2 4\nf 1 3 4\nf 2 3 4\n"
+).encode()
 
 
 def _native_snapshot(directory: Path) -> list[dict]:
@@ -236,13 +245,15 @@ def main() -> None:
         with native_runtime.admit(capacity, capacity, checkpoint=checkpoint):
             with get_session_factory().scoped_session() as session:
                 for index in range(2):
-                    payload = three_mf()
-                    source = source_root / f"old-{index}.3mf"
+                    payload = _FULL_POOL_OBJ
+                    source = source_root / f"old-{index}.obj"
                     source.write_bytes(payload)
+                    claim = estimate_sources(capacity, (MeshSource(source, "obj"),))
+                    assert claim.bytes == capacity.bytes, (claim, capacity)
                     file = build_file(
                         session,
                         build_model(session, name=f"Old fairness {index}"),
-                        file_type=FileType.THREE_MF,
+                        file_type=FileType.OBJ,
                         external=True,
                         path=str(source),
                         size_bytes=len(payload),
