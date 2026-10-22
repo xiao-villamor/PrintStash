@@ -1287,6 +1287,72 @@ describe("attachTaskToImportJob", () => {
     expect(tc.needsArchiveReview(tc.listTasks()[0])).toBe(true);
   });
 
+  it("offers the review of a ZIP stamped ready before it was queued", async () => {
+    // The server clock stepped back (an NTP or VM resync) between the request
+    // that queued the Job and the worker that finished it.
+    const completions = vi.fn<(job: JobStatus) => void>();
+    const unsubscribe = tc.subscribeImportJobCompletions(completions);
+    const taskId = tc.createTask({
+      title: "Prepare parts.zip",
+      archiveSizeBytes: 100,
+      archiveUploading: true,
+    });
+    tc.attachTaskToImportJob(taskId, "zip-job");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "zip-job",
+        kind: "ingestion.archive_inspect",
+        state: "queued",
+        updated_at: "2026-06-14T12:00:14.040Z",
+      }),
+    ]);
+    await tc.syncImportJobs();
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "zip-job",
+        kind: "ingestion.archive_inspect",
+        state: "completed",
+        updated_at: "2026-06-14T12:00:13.434Z",
+      }),
+    ]);
+    await tc.syncImportJobs();
+
+    expect(tc.needsArchiveReview(tc.listTasks()[0])).toBe(true);
+    expect(completions.mock.calls.map(([job]) => job.state)).toEqual(["completed"]);
+    unsubscribe();
+  });
+
+  it("keeps a running Job's newer progress over a late older snapshot", async () => {
+    const taskId = tc.createTask({
+      title: "Prepare parts.zip",
+      archiveSizeBytes: 100,
+      archiveUploading: true,
+    });
+    tc.attachTaskToImportJob(taskId, "zip-job");
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "zip-job",
+        kind: "ingestion.archive_inspect",
+        state: "running",
+        progress: 60,
+        updated_at: "2026-06-14T12:00:02Z",
+      }),
+    ]);
+    await tc.syncImportJobs();
+    listJobs.mockResolvedValue([
+      aJob({
+        job_id: "zip-job",
+        kind: "ingestion.archive_inspect",
+        state: "running",
+        progress: 20,
+        updated_at: "2026-06-14T12:00:01Z",
+      }),
+    ]);
+    await tc.syncImportJobs();
+
+    expect(tc.listTasks()[0]).toMatchObject({ status: "running", progress: 60 });
+  });
+
   it("repairs a persisted duplicate ZIP task", async () => {
     tc.createTask({
       title: "Prepare ZIP",

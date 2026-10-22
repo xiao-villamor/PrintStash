@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A ZIP prepared while the server's clock stepped back (an NTP or virtual
+  machine time resync) no longer stays at *Queued* forever: the Task Center
+  now offers *Choose files* as soon as the preparation ends, whatever time the
+  server stamped on it.
+
 - Administrators choose how many models are processed at once on Settings →
   Background work → Worker settings. *Automatic* keeps the CPU-and-memory
   default; a chosen count may go up to what the native memory pool fits,
