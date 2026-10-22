@@ -240,19 +240,106 @@ class TestDeepSuite:
             "pnpm exec playwright test --config=playwright.real.config.ts"
         )
 
-    def test_runs_the_full_backend_once_under_coverage(self) -> None:
+    def test_measures_each_backend_partition_under_coverage(self) -> None:
         jobs = _workflow("deep-ci.yml")["jobs"]
-        full_jobs = [
-            name
-            for name, job in jobs.items()
-            if "./scripts/test.sh coverage" in _commands(job)
-            or "./scripts/test.sh full" in _commands(job)
-            or "matrix.phase" in _commands(job)
+        job = jobs["backend"]
+        rows = job["strategy"]["matrix"]["include"]
+        assert len({row["suite"] for row in rows}) == len(rows)
+        resources = [row for row in rows if row["lane"] == "full-resources"]
+        assert resources == [
+            {"suite": "services", "lane": "full-resources", "paths": "tests"}
         ]
+        assert all(row["lane"] in {"full-ordinary", "full-resources"} for row in rows)
+        assert job["strategy"]["fail-fast"] is False
+        assert job["env"]["COVERAGE_FILE"] == ".coverage.${{ matrix.suite }}"
+        assert (
+            "./scripts/test.sh ${{ matrix.lane }} ${{ matrix.paths }} -q --cov --cov-report="
+            in _commands(job)
+        )
+        assert "./scripts/test.sh coverage" not in str(jobs)
+        assert not job.get("continue-on-error", False)
 
-        assert full_jobs == ["backend"]
-        assert "./scripts/test.sh coverage -q" in _commands(jobs["backend"])
-        assert not jobs["backend"].get("continue-on-error", False)
+    def test_ordinary_coverage_partitions_cover_every_file_once(self):
+        rows = _workflow("deep-ci.yml")["jobs"]["backend"]["strategy"]["matrix"][
+            "include"
+        ]
+        roots = [
+            path
+            for row in rows
+            if row["lane"] == "full-ordinary"
+            for path in row["paths"].split()
+        ]
+        files = [
+            path.relative_to(REPO_ROOT / "backend")
+            for path in (REPO_ROOT / "backend/tests").rglob("test_*.py")
+            if path.relative_to(REPO_ROOT / "backend/tests").parts[0]
+            in {"unit", "integration", "contract", "e2e", "repo"}
+        ]
+        occurrences = {
+            str(file): sum(
+                fnmatch(str(file), root) if "*" in root else file.is_relative_to(root)
+                for root in roots
+            )
+            for file in files
+        }
+        assert occurrences
+        assert set(occurrences.values()) == {1}, {
+            file: count for file, count in occurrences.items() if count != 1
+        }
+
+    def test_requires_raw_data_from_every_successful_shard(self):
+        jobs = _workflow("deep-ci.yml")["jobs"]
+        shard = jobs["backend"]
+        upload = next(
+            step
+            for step in shard["steps"]
+            if step.get("name") == "Upload backend coverage data"
+        )
+        assert upload["with"]["name"] == "backend-coverage-data-${{ matrix.suite }}"
+        assert upload["with"]["path"] == "backend/.coverage.${{ matrix.suite }}"
+        assert upload["with"]["include-hidden-files"] is True
+        assert upload["with"]["if-no-files-found"] == "error"
+        assert not upload.get("continue-on-error", False)
+        gate = jobs["backend-coverage"]
+        assert gate["needs"] == "backend"
+        assert "if" not in gate
+        assert not gate.get("continue-on-error", False)
+        download = next(
+            step
+            for step in gate["steps"]
+            if step.get("name") == "Download every successful shard"
+        )
+        assert download["with"]["pattern"] == "backend-coverage-data-*"
+        assert download["with"]["path"] == "backend/.coverage-inputs"
+        assert download["with"]["merge-multiple"] is True
+
+    def test_evaluates_the_floors_only_after_combining_data(self):
+        job = _workflow("deep-ci.yml")["jobs"]["backend-coverage"]
+        steps = job["steps"]
+        combine = next(
+            step for step in steps if step.get("name") == "Combine backend coverage"
+        )
+        reports = next(
+            step
+            for step in steps
+            if step.get("name") == "Write combined coverage reports"
+        )
+        floors = next(
+            step
+            for step in steps
+            if step.get("name") == "Enforce unchanged coverage floors"
+        )
+        assert steps.index(combine) < steps.index(reports) < steps.index(floors)
+        assert "coverage json" in reports["run"]
+        assert "coverage html" in reports["run"]
+        assert (
+            floors["run"]
+            == "uv run pytest tests/repo/test_coverage_floors.py -q --no-cov -p no:randomly"
+        )
+        assert not any(
+            step.get("continue-on-error", False) for step in (combine, reports, floors)
+        )
+        assert all("if" not in step for step in (combine, reports, floors))
 
     @pytest.mark.parametrize(
         ("lane", "expected_parallel", "expression"),
@@ -493,7 +580,9 @@ class TestDeepSuite:
         }
         for config in configs:
             assert f"--config={config}" in commands
-        assert "./scripts/test.sh coverage -q" in _commands(workflow["jobs"]["backend"])
+        assert "Enforce unchanged coverage floors" in str(
+            workflow["jobs"]["backend-coverage"]
+        )
         assert all(
             (REPO_ROOT / target["path"]).exists()
             for capability in manifest["capabilities"]

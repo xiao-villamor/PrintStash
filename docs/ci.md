@@ -23,14 +23,26 @@ commit to be tagged and wait for success. Release publication requires green
 `CI` and `Deep CI` runs for that SHA. Nightly and manual `latest` publication
 require a green `CI` run for the same SHA on `main`.
 
-The backend runs once on the supported Python runtime under branch coverage.
-This covers slow tests as well as the quick-gate tests; a second same-runtime
-compatibility suite would duplicate that work. Ordinary tests retain
-work-stealing, then container-backed and `native_host` tests run serially so each
-real service starts once and host-native measurements have exclusive resources.
-Coverage appends that serial phase before evaluating its unchanged aggregate and
-module floors. The phases exclude the separately measured scale and coverage
-gates. The job fails if either phase fails.
+Backend coverage runs in six disjoint ordinary file partitions and one serial
+resource partition on separate runners. Ordinary partitions include slow tests
+and retain work-stealing. The resource lane selects only container-backed and
+`native_host` tests, so each real service starts once and host-native measurements
+have exclusive resources. Resource markers are excluded from every ordinary
+partition; each test executes once across the matrix. Repository tests enforce
+that every ordinary test file belongs to exactly one partition.
+
+Every shard measures branches and uploads uniquely named raw coverage data,
+using relative source paths so results from different checkout locations refer
+to the same application modules. The dependent **Backend coverage gate** runs
+only after every shard and its artifact upload succeed. It combines the raw data,
+then writes JSON/HTML reports and applies the unchanged aggregate/module floors
+once. Coverage is the union of executed statements and branches, never an average
+of shard percentages. Missing coverage files fail their upload; failed shards
+prevent the combined gate from running. The separately measured scale tests and
+the coverage-floor tests are excluded from the shard runs. The floor tests run
+only against the completed combined report. Each shard has a 60-minute limit;
+the combination job has a 15-minute limit. The local `coverage` lane retains its
+single-machine composition.
 
 Deep CI also measures production library startup against real disposable SQLite
 corpora: 91 Models in 27 collections and a 90-Model collection. Both jobs build

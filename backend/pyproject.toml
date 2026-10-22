@@ -201,6 +201,8 @@ DEP002 = [
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
 branch = true
+# Shards can be collected in different checkout directories before combining.
+relative_files = true
 source = ["app"]
 # The suite runs under xdist and the app uses worker threads. Without these,
 # coverage loses the lines executed off the main thread — which reads as a gap in

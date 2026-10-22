@@ -191,43 +191,117 @@ jobs:
           --output ../../../frontend/src/generated/printer-contracts.ts --check
 
   backend:
-    name: Backend branch coverage
+    name: Backend coverage (${{ matrix.suite }})
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: unit-contract
+            lane: full-ordinary
+            paths: tests/unit tests/contract tests/e2e
+          - suite: api
+            lane: full-ordinary
+            paths: tests/integration/api
+          - suite: migrations
+            lane: full-ordinary
+            paths: tests/integration/db/migrations
+          - suite: platform
+            lane: full-ordinary
+            paths: tests/repo tests/integration/bootstrap tests/integration/core tests/integration/db/test_*.py tests/integration/db/models tests/integration/db/derived_objects tests/integration/main tests/integration/postgres tests/integration/runtime tests/integration/scripts
+          - suite: domains-a
+            lane: full-ordinary
+            paths: tests/integration/modules/administration tests/integration/modules/backups tests/integration/modules/derivatives tests/integration/modules/identity tests/integration/modules/inference tests/integration/modules/ingestion tests/integration/modules/library tests/integration/modules/media
+          - suite: domains-b
+            lane: full-ordinary
+            paths: tests/integration/modules/notifications tests/integration/modules/printing tests/integration/modules/search tests/integration/modules/similarity tests/integration/modules/sources tests/integration/modules/storage tests/integration/modules/work
+          - suite: services
+            lane: full-resources
+            paths: tests
     defaults:
       run:
         working-directory: backend
+    env:
+      COVERAGE_FILE: .coverage.${{ matrix.suite }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
         with:
           enable-cache: true
-
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.14.8"
-
       - name: Install backend dependencies
         run: uv sync --extra dev --extra full --frozen
-
       - name: Prepare PID namespace qualification
         run: bash ../scripts/prepare-ci-pid-namespace.sh prepare
-
       - name: Test backend
-        # The `coverage` lane is `full` under branch coverage plus the coverage gate
-        # (tests/repo/test_coverage_floors.py): aggregate and module regression
-        # floors. Branches are
-        # counted, so a guard clause whose false path never runs is half-covered
-        # rather than covered — the same suite reads 95.07% by lines and 93.35% with
-        # branches, and the second number is the one that says something.
-        run: ./scripts/test.sh coverage -q
-
+        # The ordinary file partitions are exhaustive and disjoint. Resource
+        # markers select a separate serial pass, including host-native tests.
+        # Only the combined report is meaningful against the global floors.
+        run: >-
+          ./scripts/test.sh ${{ matrix.lane }} ${{ matrix.paths }} -q
+          --cov --cov-report=
       - name: Remove PID namespace qualification
         if: always()
         run: bash ../scripts/prepare-ci-pid-namespace.sh cleanup
+      - name: Upload backend coverage data
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage-data-${{ matrix.suite }}
+          path: backend/.coverage.${{ matrix.suite }}
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  backend-coverage:
+    name: Backend coverage gate
+    needs: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14.8"
+      - name: Install backend dependencies
+        run: uv sync --extra dev --extra full --frozen
+      - name: Download every successful shard
+        uses: actions/download-artifact@v8
+        with:
+          pattern: backend-coverage-data-*
+          path: backend/.coverage-inputs
+          merge-multiple: true
+      - name: Combine backend coverage
+        run: uv run coverage combine .coverage-inputs
+      - name: Write combined coverage reports
+        run: |
+          uv run coverage report
+          uv run coverage json
+          uv run coverage html
+      - name: Enforce unchanged coverage floors
+        run: uv run pytest tests/repo/test_coverage_floors.py -q --no-cov -p no:randomly
+      - name: Publish combined coverage reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: backend-coverage-report
+          path: |
+            backend/coverage.json
+            backend/.coverage-html/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
   backend-scale:
     name: Backend at supported scale (${{ matrix.measurement }} / ${{ matrix.reader }})
