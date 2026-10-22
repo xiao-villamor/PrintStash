@@ -1,11 +1,11 @@
-"""An import shows every Model first; thumbnails start once it has finished.
+"""Derived work follows an import at a pace; search projection waits for it.
 
 Two uploads go through the public API, the second arriving after the first
-Model is committed. While either is still being imported no thumbnail Job
-exists, so the Models appear without derived work competing with the import;
-the last upload to settle starts the thumbnails, and both arrive. Search
-projection waits the same way: its pages write to the database the import is
-writing to, and interleaving them doubled a large import's time.
+Model is committed. Thumbnails start while the second is still being
+imported: their paced pass finds the Model already added, so the idle CPU
+derives it instead of waiting for the last upload. Search projection still
+waits: its pages write to the database the import is writing to, and
+interleaving them doubled a large import's time.
 """
 
 from __future__ import annotations
@@ -66,16 +66,18 @@ async def _upload(api, headers, name: str, scale: float) -> str:
     return accepted.json()["job_id"]
 
 
-class TestAdditionsFirst:
+class TestWorkDuringAdditions:
     @pytest.mark.asyncio
-    async def test_thumbnails_start_after_the_last_upload(self, api, tmp_path) -> None:
+    async def test_thumbnails_start_while_the_uploads_go_on(
+        self, api, tmp_path
+    ) -> None:
         from app.modules.work.catalog import get_engine
 
         headers = await _setup_and_login(api, tmp_path)
         engine = get_engine()
         first = await _upload(api, headers, "first", 1.0)
-        # The first Model's commit queues a thumbnail pass; the second upload
-        # arrives while that pass is still waiting to run.
+        # The first upload starting queues a paced thumbnail pass; the second
+        # upload arrives while that pass is still waiting to run.
         assert engine.run_one() is not None  # type: ignore[attr-defined]
         second = await _upload(api, headers, "second", 2.0)
         thumbnails_while_importing: list[int] = []
@@ -91,7 +93,7 @@ class TestAdditionsFirst:
         uploads = {job.id: job.state for job in _jobs_of(JobKind.INGESTION_UPLOAD)}
         thumbnails = [job.state for job in _jobs_of(JobKind.DERIVATIVES_MESH)]
         assert uploads == {first: JobState.COMPLETED, second: JobState.COMPLETED}
-        assert set(thumbnails_while_importing) == {0}
+        assert max(thumbnails_while_importing) >= 1
         assert thumbnails == [JobState.COMPLETED, JobState.COMPLETED]
 
     @pytest.mark.asyncio
