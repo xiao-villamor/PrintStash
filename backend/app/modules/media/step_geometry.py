@@ -7,6 +7,11 @@ from pathlib import Path
 
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
+# Largest distance a tessellated facet may lie from its exact surface. Finer
+# than any FDM print and below a pixel in a 640 px preview of a 40 mm part;
+# every STEP mesh (measurements, previews, viewer, fingerprints) uses it.
+LINEAR_DEFLECTION_MM = 0.05
+
 
 class StepGeometryError(ValueError):
     pass
@@ -73,12 +78,12 @@ def tessellate(source: Path, *, triangle_limit: int) -> tuple:
     recipe = {
         "version": "ocp-7.9.3-mm-v1",
         "length_unit": "millimeter",
-        "linear_deflection_mm": 0.05,
+        "linear_deflection_mm": LINEAR_DEFLECTION_MM,
         "angular_deflection_radians": 0.35,
         "relative": False,
         "parallel": False,
     }
-    mesher = BRepMesh_IncrementalMesh(shape, 0.05, False, 0.35, False)
+    mesher = BRepMesh_IncrementalMesh(shape, LINEAR_DEFLECTION_MM, False, 0.35, False)
     if not mesher.IsDone():
         raise StepGeometryError("tessellation_failed")
     vertices, triangles = [], []

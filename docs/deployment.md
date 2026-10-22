@@ -413,7 +413,7 @@ path outside a persistent mount loses state on container replacement.
 | `VAULT_PROCESS_ROLE` | `all` | `all` runs HTTP and every background Job; `api` is the one HTTP process of a deployment with [workers](#background-work-and-workers). |
 | `VAULT_API_RUNS_JOBS` | `true` | With `api`, whether the API also runs Jobs; `false` leaves them to the workers. |
 | `VAULT_SHARED_STORAGE` | `false` | Declares that every process mounts the same volumes; required with workers. |
-| `VAULT_MAX_RENDER_JOBS` | `1` | Mesh renders and local AI inference at once, per process; raise it on hosts with spare RAM. |
+| `VAULT_MAX_RENDER_JOBS` | one per usable CPU plus one, no more than fit the native memory pool (640 MiB each), 1–8 | Native mesh job slots across processes sharing a local data root. Usable CPUs include the container's CPU limit (`--cpus`, `cpus:`), with positive fractional quotas rounded up to whole CPUs; the pool is `VAULT_MESH_MEMORY_BUDGET_FRACTION` of the detected memory limit. Full-pool memory claims run alone; other claims may overlap within the same budget. An explicit value also limits local AI inference in each process, which otherwise runs one per two CPUs (1–4). Set `1` to render strictly one at a time. Settings → Background work → Worker settings → *Models processed at once* overrides it from the UI, up to what the pool fits, and applies at once; separate worker processes apply it when they restart. |
 | `VAULT_JOBS_INGEST_CONCURRENCY` | `2` | Uploads and imports committed at once. |
 
 Settings → Background work overrides each kind of work's concurrency at runtime,
@@ -587,7 +587,7 @@ expects (Compose, Unraid, CasaOS and Umbrel examples are in
 [compute deployment](compute.md) and the catalogue templates):
 
 - NVIDIA: the NVIDIA Container Toolkit with `NVIDIA_DRIVER_CAPABILITIES=all`.
-- Intel and AMD on Linux: `/dev/dri` and the render group.
+- Intel and AMD on Linux: `/dev/dri`; the entrypoint joins its render group.
 - WSL2: `/dev/dxg` and `/usr/lib/wsl`; the image sets the Mesa D3D12 variables.
 
 Two budgets keep the GPU and the machine from being overcommitted, and both can

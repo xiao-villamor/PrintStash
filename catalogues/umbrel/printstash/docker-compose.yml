@@ -1,5 +1,9 @@
 # Umbrel app definition, derived from the root docker-compose.yml. Umbrel pins
-# images by digest; the release that submits this appends @sha256:… to `image`.
+# every submitted image by digest: after publication, add the multi-arch index digest
+# (`docker buildx imagetools inspect ghcr.io/xiao-villamor/printstash:X.Y.Z`).
+# The package ships one tag, so a setting added after that tag runs inert in the
+# store's image: check the tag's Settings before submitting
+# (`.agents/skills/printstash/references/release.md`).
 version: "3.7"
 
 services:
@@ -7,10 +11,14 @@ services:
     environment:
       APP_HOST: printstash_web_1
       APP_PORT: 3000
-      # PrintStash has its own accounts.
-      PROXY_AUTH_ADD: "false"
+      # Keep Umbrel's login in front of the UI. PrintStash's own accounts are what
+      # slicers and print hosts authenticate with, and they cannot send an Umbrel
+      # cookie, so only the API is exempt: browsers keep the Umbrel login (and its
+      # 2FA), integrations keep working.
+      PROXY_AUTH_WHITELIST: "/api/*"
 
   web:
+    # Release source: add the published 0.15.0 index digest before store submission.
     image: ghcr.io/xiao-villamor/printstash:0.15.0
     # Not on-failure: a restart requested from Settings is a graceful SIGTERM,
     # which can exit with status 0 and would not be relaunched.
@@ -27,6 +35,11 @@ services:
       # The credentials Umbrel shows on the app's page (umbrel-app.yml).
       VAULT_SETUP_ADMIN_USERNAME: admin
       VAULT_SETUP_ADMIN_PASSWORD: ${APP_PASSWORD}
+      # Umbrel creates app data as 1000:1000. The image repairs ownership at
+      # start and then runs as this identity (PUID/PGID are upstream settings),
+      # so the library on disk stays owned by the same user Umbrel uses.
+      PUID: "1000"
+      PGID: "1000"
       # GPU use and memory budgets. A GPU is used when the container can see
       # one (docs/compute.md); otherwise the CPU does the work.
       VAULT_COMPUTE_MODE: auto

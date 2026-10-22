@@ -284,7 +284,7 @@ class TestBackendDockerfile:
         A container running as root turns any RCE into host access. The backend
         starts as root on purpose — it has to `chown` the bind-mounted vault to
         whatever uid the operator asked for — so what matters is that it hands
-        off: it re-execs itself through `gosu` under the requested identity, and
+        off: it re-execs itself through `setpriv` under the requested identity, and
         the second pass refuses to continue if it is still not that identity.
         """
         root = _root()
@@ -292,8 +292,7 @@ class TestBackendDockerfile:
         frontend = (root / "frontend" / "Dockerfile").read_text()
         entrypoint = (root / "backend" / "docker-entrypoint.sh").read_text()
 
-        assert 'exec gosu "$requested_identity"' in entrypoint
-        assert 'requested_identity="$PUID:$PGID"' in entrypoint
+        assert 'exec setpriv --reuid="$PUID" --regid="$PGID"' in entrypoint
         # The re-exec is only a hand-off if the second pass verifies it landed.
         assert (
             'if [ "$(id -u)" != "$PUID" ] || [ "$(id -g)" != "$PGID" ]; then'

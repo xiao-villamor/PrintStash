@@ -22,9 +22,7 @@ def _hold_every_slot() -> int:
     """Occupy this process's inference admission, as busy renders would."""
     from printstash_core.inference.context import InferenceContext
 
-    from app.core.config import settings
-
-    held = max(int(settings.max_render_jobs), 1)
+    held = local._limit()
     for _ in range(held):
         local.acquire_slot(InferenceContext.bounded(1, priority="background"))
     return held
@@ -416,3 +414,32 @@ class TestLocalBoundaries:
         ) == ((1, 0, 0),)
         assert assets.stat().st_mtime_ns == timestamp
         assert {path.name: path.read_bytes() for path in assets.iterdir()} == snapshot
+
+
+class TestAdmissionLimit:
+    def test_a_configured_render_job_count_bounds_local_inference(self, monkeypatch):
+        from app.core.config import _overlay
+
+        monkeypatch.setitem(_overlay, "max_render_jobs", 3)
+
+        assert local._limit() == 3
+
+    def test_the_automatic_mesh_count_leaves_inference_one_per_two_cpus(
+        self, monkeypatch
+    ):
+        # The automatic mesh count follows the native memory pool, which
+        # resident models do not share; inference keeps its own default.
+        from types import SimpleNamespace
+
+        from app.core import host_cpus
+
+        monkeypatch.setattr(
+            local,
+            "settings",
+            SimpleNamespace(
+                max_render_jobs=5, frozen=SimpleNamespace(model_fields_set=set())
+            ),
+        )
+        monkeypatch.setattr(host_cpus, "usable_cpus", lambda: 4)
+
+        assert local._limit() == 2

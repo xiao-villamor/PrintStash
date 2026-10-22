@@ -2875,6 +2875,44 @@ describe("ModelBrowser", () => {
       );
     }
 
+    it.each(["first visit", "new destination"] as const)(
+      "recovers a rejected first page through explicit refresh (%s)",
+      async (visit) => {
+        const user = userEvent.setup();
+        const rejected = () => json({ detail: "browse_refresh_required" }, 409);
+        const moving = visit === "new destination";
+        const app = renderVault({
+          collections: moving ? [aCollection()] : [],
+          at: moving ? "/?c=parts&type=all&sort=date-desc" : "/",
+          routes: {
+            "GET /api/v1/models/browse": moving ? modelPage("Previous destination") : rejected,
+            "GET /api/v1/models/browse/revision": changedRevision,
+          },
+        });
+        if (moving) {
+          await within(screen.getByRole("main")).findByText("Previous destination");
+          app.route({ "GET /api/v1/models/browse": rejected });
+          await user.click(
+            within(screen.getByRole("complementary")).getByRole("button", {
+              name: "All Models",
+            }),
+          );
+        }
+        const refresh = await screen.findByRole("button", { name: "Refresh library" });
+        expect(refresh).toBeEnabled();
+        expect(mainHas("Current first page")).not.toBeInTheDocument();
+        app.route({ "GET /api/v1/models/browse": modelPage("Current first page") });
+
+        await user.click(refresh);
+
+        expect(
+          await within(screen.getByRole("main")).findByText("Current first page"),
+        ).toBeVisible();
+        expect(mainHas("Previous destination")).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: "Refresh library" })).toBeNull();
+      },
+    );
+
     it("waits for refreshed folders before replacing models", async () => {
       const pending = Promise.withResolvers<Response>();
       const app = renderVault({

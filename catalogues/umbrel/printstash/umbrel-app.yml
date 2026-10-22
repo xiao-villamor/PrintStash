@@ -1,10 +1,17 @@
 manifestVersion: 1
 id: printstash
+storage:
+  dataRoot: data
 category: files
 name: PrintStash
 version: "0.15.0"
 tagline: A self-hosted library for 3D models and the G-code that prints them
 description: >-
+  Sign in with the username and password Umbrel shows for this app, then choose
+  where PrintStash stores your files. Both steps happen in the browser; nothing
+  needs a terminal.
+
+
   PrintStash keeps your 3D models, sliced G-code revisions and print history in
   one searchable library on your own server.
 
@@ -19,16 +26,21 @@ description: >-
 
   - Send prints and follow jobs on Klipper/Moonraker, with beta support for
   OctoPrint, PrusaLink, Bambu Lab (LAN) and Elegoo printers.
-
-
-  Sign in with the username and password Umbrel shows for this app, then choose
-  where PrintStash stores your files.
 releaseNotes: >-
-  Version 0.15.0 adds smoother paginated library browsing, editable Library
-  sources, clearer import and preview progress, multi-material G-code fixes,
-  and a unified image with optional GPU support. Back up, drain derivative
-  work, and stop API and workers together before upgrading to DBOS 3.0.
-  Source installs require Python 3.14 or newer; see UPGRADE.md.
+  Back up before upgrading. Every model file is re-derived in the background;
+  a large library on a 4 GB NAS can keep the CPU busy for hours. Rollback requires
+  restoring the pre-upgrade backup. Stop all API and workers and upgrade them
+  together for DBOS 3.3.0. Source installs require Python 3.14 or newer.
+
+
+  Version 0.15.0 adds paginated library browsing, editable Library sources,
+  previews during ZIP imports, configurable worker concurrency, faster 3MF and
+  STEP processing, multi-material G-code fixes, and optional GPU support.
+  CPU-only installs and GPU access on Unraid are corrected.
+
+
+  See https://github.com/xiao-villamor/PrintStash/releases/tag/v0.15.0
+  and UPGRADE.md for the full notes and upgrade instructions.
 developer: PrintStash contributors
 website: https://www.printstash.org
 dependencies: []
@@ -41,5 +53,5 @@ path: ""
 # docker-compose.yml passes them to VAULT_SETUP_ADMIN_*.
 defaultUsername: "admin"
 deterministicPassword: true
-submitter: PrintStash contributors
+submitter: Jorge Hermo
 submission: ""

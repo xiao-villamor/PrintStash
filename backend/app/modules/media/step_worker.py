@@ -37,12 +37,20 @@ def convert(
     import cascadio
     import trimesh
 
+    from app.modules.media.step_geometry import LINEAR_DEFLECTION_MM
+
     # Trimesh's STEP adapter enables OpenCASCADE's parallel pool, ignoring
     # OMP_NUM_THREADS. Thread stacks can exhaust the admitted address space and
     # hang native conversion. Use the same GLB intermediate with serial meshing.
     with tempfile.TemporaryDirectory(prefix="printstash-step-") as temporary:
         converted = Path(temporary) / "converted.glb"
-        status = cascadio.step_to_glb(str(source), str(converted), use_parallel=False)
+        status = cascadio.step_to_glb(
+            str(source),
+            str(converted),
+            tol_linear=LINEAR_DEFLECTION_MM,
+            tol_relative=False,
+            use_parallel=False,
+        )
         if status != 0:
             return 4
         loaded = trimesh.load_mesh(str(converted), process=False)

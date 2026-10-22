@@ -22,7 +22,18 @@ from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import String, and_, cast, exists, func, literal, not_, or_, true
+from sqlalchemy import (
+    ColumnElement,
+    String,
+    and_,
+    cast,
+    exists,
+    func,
+    literal,
+    not_,
+    or_,
+    true,
+)
 from sqlmodel import Session, col, select
 
 from app.core.config import settings
@@ -50,7 +61,11 @@ FRESH_INTERACTIVE = timedelta(minutes=10)
 
 
 def _satisfied(
-    kind: str, recipe: int, *, now: datetime, regenerated_at: datetime | None
+    kind: str,
+    recipe: ColumnElement[int],
+    *,
+    now: datetime,
+    regenerated_at: datetime | None,
 ) -> Any:
     d = ArtifactDerivative
     done = col(d.state).in_(
@@ -91,8 +106,15 @@ def pending_predicate(
     """Live Artifacts of the group missing any kind at its current recipe."""
     regen = regenerations(session, definitions=[group.definition])
     missing = [
-        not_(_satisfied(kind, recipe, now=now, regenerated_at=regen.get(kind)))
-        for kind, recipe in group.kinds.items()
+        not_(
+            _satisfied(
+                kind,
+                group.recipe_column(kind),
+                now=now,
+                regenerated_at=regen.get(kind),
+            )
+        )
+        for kind in group.kinds
     ]
     if group.definition is JobKind.DERIVATIVES_MESH:
         missing.append(

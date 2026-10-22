@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -32,6 +33,8 @@ def main() -> None:
     parser.add_argument("--source", type=Path)
     parser.add_argument("--ready", type=Path)
     parser.add_argument("--release", type=Path)
+    parser.add_argument("--cancel", type=Path)
+    parser.add_argument("--gate-timeout", type=float, default=30.0)
     parser.add_argument("--capacity-bytes", type=int)
     parser.add_argument("--spec")
     args = parser.parse_args()
@@ -82,7 +85,7 @@ def main() -> None:
                             }
                         ),
                     )
-                    deadline = time.monotonic() + 30
+                    deadline = time.monotonic() + args.gate_timeout
                     while not args.release.exists():
                         checkpoint()
                         if time.monotonic() >= deadline:
@@ -106,10 +109,17 @@ def main() -> None:
     if args.role == "render":
         import signal
 
+        from printstash_core.mesh.measurements import encode_volume
+
         from app.bootstrap.native_resources import configure
+        from app.core.cancellation import cancellation_scope
         from app.core.config import _overlay
         from app.modules.media import mesh_isolation, native_process
-        from app.modules.media.mesh_contracts import ThumbnailRequest, encode_geometry
+        from app.modules.media.mesh_contracts import (
+            ThumbnailRequest,
+            encode_coverage,
+            encode_geometry,
+        )
         from app.modules.media.mesh_isolation import generate
         from app.modules.media.mesh_telemetry import encode_phase_stats
 
@@ -139,24 +149,44 @@ def main() -> None:
                         str(args.release),
                         "--spec",
                         arguments[0],
+                        "--gate-timeout",
+                        str(args.gate_timeout),
                     ],
                     budget,
                 )
 
             mesh_isolation.worker_command = worker_command
-        result = generate(
-            ThumbnailRequest(
-                args.source,
-                include_thumbnail=gated,
-                width=32 if gated else None,
-                height=32 if gated else None,
+        try:
+            with cancellation_scope(
+                lambda: args.cancel is not None and args.cancel.exists()
+            ):
+                result = generate(
+                    ThumbnailRequest(
+                        args.source,
+                        include_thumbnail=gated,
+                        width=32 if gated else None,
+                        height=32 if gated else None,
+                    )
+                )
+        except mesh_isolation.MeshWorkerCancelled as exc:
+            print(
+                json.dumps(
+                    {
+                        "cancelled": True,
+                        "exit_cause": exc.supervision.exit_cause.value,
+                    }
+                ),
+                flush=True,
             )
-        )
+            raise SystemExit(2) from None
         print(
             json.dumps(
                 {
                     "geometry": result.geometry,
                     "geometry_outcome": encode_geometry(result.geometry_outcome),
+                    "volume": encode_volume(result.volume),
+                    "coverage": encode_coverage(result.coverage),
+                    "strategy": result.strategy.value,
                     "phase_stats": encode_phase_stats(result.phase_stats),
                     "failure_reason": result.failure_reason.value
                     if result.failure_reason is not None
@@ -165,6 +195,7 @@ def main() -> None:
                     if result.supervision is not None
                     else None,
                     "image_bytes": len(result.image or b""),
+                    "image_sha256": hashlib.sha256(result.image or b"").hexdigest(),
                     "image_is_png": (result.image or b"").startswith(
                         b"\x89PNG\r\n\x1a\n"
                     ),

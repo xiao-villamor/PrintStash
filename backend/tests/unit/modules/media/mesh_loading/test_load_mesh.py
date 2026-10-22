@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 import trimesh
 
 from app.modules.media import (
@@ -259,9 +260,32 @@ class TestLoadMesh:
 
 
 class TestLoadStepMeshIsolated:
-    def test_preserves_supervisor_memory_refusal(
+    def test_reports_a_supervisor_memory_refusal_as_a_resource_limit(
         self, tmp_path: Path, monkeypatch
     ) -> None:
+        # A part that outgrows its allowance is valid; calling it unreadable
+        # would show a broken file instead of a resource refusal.
+        from printstash_core.mesh.similarity import GeometryError
+
+        from app.modules.media import mesh_isolation
+        from app.modules.media.mesh_contracts import ThumbnailFailureReason
+
+        path = tmp_path / "complex.step"
+        path.write_text("ISO-10303-21;")
+
+        def refused(*args, **kwargs):
+            raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
+
+        monkeypatch.setattr(mesh_isolation, "supervise_result", refused)
+
+        with pytest.raises(GeometryError, match="resource_limit"):
+            mesh_loading.load_step_mesh(path)
+
+    def test_releases_the_permit_after_a_memory_refusal(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from printstash_core.mesh.similarity import GeometryError
+
         from app.modules.media import mesh_isolation
         from app.modules.media.mesh_contracts import ThumbnailFailureReason
         from app.runtime.native_runtime import current_permit
@@ -273,6 +297,26 @@ class TestLoadStepMeshIsolated:
             raise mesh_isolation.MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
 
         monkeypatch.setattr(mesh_isolation, "supervise_result", refused)
+        with pytest.raises(GeometryError):
+            mesh_loading.load_step_mesh(path)
 
-        assert mesh_loading.load_step_mesh(path) is None
         assert current_permit() is None
+
+    def test_reports_tessellation_beyond_the_triangle_ceiling_as_a_resource_limit(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from printstash_core.mesh.similarity import GeometryError
+
+        from app.modules.media import mesh_isolation
+
+        path = tmp_path / "dense.step"
+        path.write_text("ISO-10303-21;")
+        # The converter's exit status for a mesh above the triangle ceiling.
+        monkeypatch.setattr(
+            mesh_isolation,
+            "supervise_result",
+            lambda command, **_kwargs: SimpleNamespace(returncode=3),
+        )
+
+        with pytest.raises(GeometryError, match="resource_limit"):
+            mesh_loading.load_step_mesh(path)

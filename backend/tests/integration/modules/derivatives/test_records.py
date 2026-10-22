@@ -29,7 +29,11 @@ from app.db.models import (
     JobKind,
 )
 from app.modules.derivatives import records
-from app.modules.derivatives.kinds import VIEWER_STL_RECIPE, group, recipes_for
+from app.modules.derivatives.kinds import (
+    THREE_MF_VIEWER_STL_RECIPE,
+    group,
+    recipes_for,
+)
 from app.modules.derivatives.source import DerivativeSource, subject_key
 from tests.factories import build_derivative
 
@@ -128,20 +132,25 @@ class TestNeeded:
             next_attempt_at=None,
         )
         viewer = group(JobKind.DERIVATIVES_VIEWER_STL)
-        assert viewer.kinds == {DerivativeKind.VIEWER_STL: VIEWER_STL_RECIPE}
+        recipes = viewer.recipes_for(artifact.file_type)
+        assert recipes == {DerivativeKind.VIEWER_STL: THREE_MF_VIEWER_STL_RECIPE}
 
         assert DerivativeKind.VIEWER_STL not in records.rows_for(db_session, artifact)
-        assert records.needed(db_session, artifact, viewer.kinds, now=now) == {
+        assert records.needed(db_session, artifact, recipes, now=now) == {
             DerivativeKind.VIEWER_STL
         }
         offered = DerivativeSource(viewer).pending(db_session, now=now, limit=1)
         assert [item.subject_key for item in offered] == [subject_key(artifact.id)]
         fresh = records.begin(
-            db_session, artifact, DerivativeKind.VIEWER_STL, VIEWER_STL_RECIPE, now=now
+            db_session,
+            artifact,
+            DerivativeKind.VIEWER_STL,
+            THREE_MF_VIEWER_STL_RECIPE,
+            now=now,
         )
         db_session.commit()
 
-        assert fresh.recipe_version == VIEWER_STL_RECIPE
+        assert fresh.recipe_version == THREE_MF_VIEWER_STL_RECIPE
         assert fresh.state is DerivativeState.RUNNING
         assert fresh.attempts == 1
         assert (

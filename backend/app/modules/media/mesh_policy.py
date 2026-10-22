@@ -180,7 +180,7 @@ def detect_memory_limit_bytes() -> int | None:
     return native_process.memory_limit_bytes()
 
 
-def ram_triangle_cap(suffix: str) -> Optional[int]:
+def ram_triangle_cap(suffix: str, *, lib3mf: bool = False) -> Optional[int]:
     """Use the admitted allowance without dividing large jobs by slot count."""
     if settings.mesh_memory_budget_fraction <= 0:
         return None
@@ -192,17 +192,17 @@ def ram_triangle_cap(suffix: str) -> Optional[int]:
         if permit is not None
         else native_process.native_capacity().bytes
     )
-    return face_capacity(memory, suffix)
+    return face_capacity(memory, suffix, lib3mf=lib3mf)
 
 
-def load_face_budget(suffix: str) -> int:
+def load_face_budget(suffix: str, *, lib3mf: bool = False) -> int:
     """Faces a loader may admit for *suffix*: the static, analysis and RAM ceilings.
 
     The single answer for every path that parses a mesh into memory, so a caller
     cannot pick a looser bound than the one the thumbnail engine enforces.
     """
     budget = min(int(settings.mesh_max_render_triangles), MAX_ANALYSIS_FACES)
-    ram_cap = ram_triangle_cap(suffix)
+    ram_cap = ram_triangle_cap(suffix, lib3mf=lib3mf)
     return budget if ram_cap is None else min(budget, ram_cap)
 
 

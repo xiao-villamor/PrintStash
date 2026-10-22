@@ -13,6 +13,9 @@ import {
   type WorkDerivativePolicy,
 } from "@/lib/api/work";
 import { listWorkJobs, cancelJob, retryJob } from "@/lib/api/jobs";
+import { captureEditingBase } from "@/lib/api/editing";
+import { meshWorkersApi, type MeshWorkersRead } from "@/lib/api/mesh-workers";
+import type { EditingBase } from "@/types/editing";
 import type { DerivativeKind, JobStatus, WorkOverview, WorkLane, WorkDefinition } from "@/types";
 
 export const workKeys = {
@@ -208,4 +211,42 @@ export function useWorkMutation(api = workApi) {
         return outcome;
       }, change.signal),
   });
+}
+
+/** The administrator's mesh job count: one read, and save/reset commands that resize the lane. */
+export const meshWorkersKey = [...workKeys.all, "mesh-workers"] as const;
+
+export function meshWorkersOptions(api = meshWorkersApi) {
+  return queryOptions({
+    queryKey: meshWorkersKey,
+    queryFn: ({ signal }) =>
+      withSessionRequest((request) => api.read({ signal: request.signal }), signal),
+    retry: false,
+  });
+}
+
+export type MeshWorkersChange =
+  | { kind: "save"; jobs: number; base: EditingBase }
+  | { kind: "reset"; base: EditingBase };
+
+export function useMeshWorkers(api = meshWorkersApi, enabled = true) {
+  const client = useQueryClient();
+  const query = useQuery({ ...meshWorkersOptions(api), enabled });
+  const mutation = useMutation({
+    retry: false,
+    mutationFn: (change: MeshWorkersChange) =>
+      withSessionRequest(async (request) => {
+        const options = { signal: request.signal, base: captureEditingBase(change.base) };
+        const saved =
+          change.kind === "save" ? await api.save(change.jobs, options) : await api.reset(options);
+        request.assertCurrent();
+        await client.cancelQueries({ queryKey: meshWorkersKey, exact: true });
+        request.assertCurrent();
+        client.setQueryData<MeshWorkersRead>(meshWorkersKey, saved);
+        // The native lane's concurrency follows the count.
+        await client.invalidateQueries({ queryKey: workKeys.overview, exact: true });
+        return saved;
+      }),
+  });
+  return { query, mutation };
 }

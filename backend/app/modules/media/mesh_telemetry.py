@@ -21,6 +21,25 @@ class AdmissionOutcome(StrEnum):
     FAILED = "failed"
 
 
+class EstimateBasis(StrEnum):
+    """Why native admission claimed what it did, before any wait."""
+
+    COUNTED = "counted"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class EstimateStats:
+    """One supervisor preflight: the claim and the cost of computing it."""
+
+    file_types: tuple[str, ...]
+    # None only when a source could not be stat'ed at preflight.
+    source_bytes: int | None
+    basis: EstimateBasis
+    requested_bytes: int
+    elapsed_ns: int
+
+
 @dataclass(frozen=True)
 class AdmissionStats:
     elapsed_ns: int

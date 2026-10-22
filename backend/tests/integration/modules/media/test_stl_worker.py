@@ -150,7 +150,8 @@ class TestMain:
 
         converted = output.read_bytes()
         expected = tetrahedron()
-        expected.apply_scale(1e-18)
+        # lib3mf reads the placement in single precision.
+        expected.apply_scale(float(np.float32(1e-18)))
         assert status == 0
         assert manifest.size == len(converted) == 284
         assert converted == expected.export(file_type="stl")

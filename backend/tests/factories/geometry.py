@@ -7,6 +7,13 @@ import xml.etree.ElementTree as ET
 from tests.factories.content import zip_bytes
 
 CORE_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
+CONTENT_TYPES = (
+    b'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    b'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    b'<Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>'
+    b'<Default Extension="png" ContentType="image/png"/>'
+    b"</Types>"
+)
 
 
 def tetrahedron():
@@ -30,7 +37,13 @@ def three_mf(
     external_paths: dict[int, str] | None = None,
     model_part: str = "3D/3dmodel.model",
     relationship_target: str | None = None,
+    opc: bool = True,
 ) -> bytes:
+    """A 3MF package; ``opc=False`` leaves out the OPC entries every producer writes.
+
+    Without ``[Content_Types].xml`` and ``_rels/.rels`` only the XML reader reads
+    the package (it falls back to the conventional root part); lib3mf refuses it.
+    """
     root = ET.Element("model", xmlns=CORE_NS, unit=unit)
     resources = ET.SubElement(root, "resources")
     for key, mesh in (meshes if meshes is not None else {1: tetrahedron()}).items():
@@ -69,6 +82,10 @@ def three_mf(
             attributes["transform"] = transform
         ET.SubElement(items, "item", **attributes)
     entries = {model_part: ET.tostring(root), **(extras or {})}
+    if opc:
+        entries["[Content_Types].xml"] = CONTENT_TYPES
+        if relationship_target is None:
+            relationship_target = f"/{model_part}"
     if relationship_target is not None:
         relationships = ET.Element(
             "Relationships",

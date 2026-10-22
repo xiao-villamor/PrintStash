@@ -37,7 +37,7 @@ The default is one container, SQLite, and a persistent volume at `/data`.
 ```bash
 mkdir -p printstash && cd printstash
 curl -fsSL https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/docker-compose.yml -o docker-compose.yml
-printf 'PRINTSTASH_VERSION=0.15.0\n' > .env
+printf 'PRINTSTASH_VERSION=0.14.0\n' > .env
 docker compose up -d
 ```
 
@@ -46,7 +46,7 @@ create the administrator account, and upload a model. There are no default
 credentials. To index a folder or NAS, [mount it inside the container](https://www.printstash.org/en/docs/guides/shared-volumes/#mount-a-folder-into-docker)
 and add it under **Settings → Library sources**.
 
-The `.env` file pins the image to **0.15.0**. Without a pin, `latest` can include
+The `.env` file pins the image to the latest published release, **0.14.0**. Without a pin, `latest` can include
 unreleased changes. See [installation options](https://www.printstash.org/en/docs/getting-started/installation/)
 for ports, PostgreSQL, remote storage, and SSO. Existing installations should
 read the [upgrade notes](#project-status--roadmap) first.
@@ -125,17 +125,21 @@ for setup, firmware limits, and unsupported actions.
 
 ## Project Status & Roadmap
 
-**Beta · Published: [0.15.0](./CHANGELOG.md#0150).** This release adds automatic
+**Beta · Preparing [0.15.0](./CHANGELOG.md#0150).** The next release adds automatic
 loading as you scroll, filters across subfolders, editable Library sources, and a unified
 image with optional [GPU support](https://www.printstash.org/en/docs/guides/previews-and-gpu/).
 GPU acceleration depends on the hardware and operation; CPU processing remains available.
+[0.14.0 remains the latest published release](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.14.0)
+until the 0.15.0 tag and images are published.
 
 Run **one API server process per library**. The web app needs a running server.
 See [known limitations](https://www.printstash.org/en/docs/reference/known-limitations/)
 and the [roadmap](https://www.printstash.org/en/roadmap/).
 
 **Upgrading to 0.15.0:** back up, stop all API and worker processes, then upgrade
-them together to DBOS 3.0. Source installs require Python 3.14 or newer.
+them together to DBOS 3.3.0. Every model file is re-derived in the background;
+a large library on a 4 GB NAS can keep the CPU busy for hours. Rollback requires
+restoring the pre-upgrade backup. Source installs require Python 3.14 or newer.
 Read the [upgrade and rollback instructions](https://www.printstash.org/en/docs/guides/upgrading/#version-0150),
 including volume migration when coming from 0.13.x or earlier.
 

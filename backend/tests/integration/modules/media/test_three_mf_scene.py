@@ -183,9 +183,11 @@ print(json.dumps({
         # space: libxml2 fails its allocation and raises a syntax error. This
         # is the real fault, induced with a real ceiling 64 MiB above the
         # interpreter's own size, not a damaged file.
+        # Without OPC entries the XML reader reads the package; lib3mf would
+        # read this model within the same ceiling.
         path = tmp_path / "large.3mf"
         path.write_bytes(
-            three_mf(meshes={1: trimesh.creation.icosphere(subdivisions=6)})
+            three_mf(meshes={1: trimesh.creation.icosphere(subdivisions=6)}, opc=False)
         )
         source = """
 import resource
@@ -213,6 +215,35 @@ except GeometryError as exc:
         )
 
         assert completed.stdout.strip() == "resource_limit", completed.stderr
+
+
+class TestReadSceneWithReader:
+    def test_names_lib3mf_for_a_plain_package(self, tmp_path):
+        path = tmp_path / "plain.3mf"
+        path.write_bytes(three_mf())
+
+        _scene, reader = three_mf_scene.read_scene_with_reader(path)
+
+        assert reader is three_mf_scene.ThreeMFReader.LIB3MF
+
+    def test_names_the_xml_reader_for_a_package_lib3mf_cannot_read_exactly(
+        self, tmp_path
+    ):
+        mesh = tetrahedron()
+        mesh.vertices += 1e9
+        path = tmp_path / "far.3mf"
+        path.write_bytes(three_mf(meshes={1: mesh}))
+
+        _scene, reader = three_mf_scene.read_scene_with_reader(path)
+
+        assert reader is three_mf_scene.ThreeMFReader.XML
+
+    def test_refuses_an_invalid_budget_before_reading(self, tmp_path):
+        path = tmp_path / "plain.3mf"
+        path.write_bytes(three_mf())
+
+        with pytest.raises(GeometryError, match="invalid_scene_budget"):
+            three_mf_scene.read_scene_with_reader(path, max_faces=0)
 
 
 def _model_with_attributes(attributes: str) -> bytes:
@@ -264,9 +295,7 @@ class TestRequiredCapabilities:
             'xmlns:alternate="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" requiredextensions="alternate"',
         ],
     )
-    def test_accepts_compatible_namespace_metadata(
-        self, tmp_path, attributes
-    ):
+    def test_accepts_compatible_namespace_metadata(self, tmp_path, attributes):
         path = tmp_path / "supported.3mf"
         path.write_bytes(
             zip_bytes({"3D/3dmodel.model": _model_with_attributes(attributes)})
@@ -305,8 +334,11 @@ class TestReachedResources:
     def test_does_not_allocate_arrays_for_unreachable_objects(
         self, tmp_path, monkeypatch
     ):
+        # The XML reader's own allocation: without OPC entries it reads the package.
         path = tmp_path / "unused-resource.3mf"
-        path.write_bytes(three_mf(meshes={1: tetrahedron(), 2: tetrahedron()}))
+        path.write_bytes(
+            three_mf(meshes={1: tetrahedron(), 2: tetrahedron()}, opc=False)
+        )
         converted = []
         original = three_mf_scene._attribute_columns
 

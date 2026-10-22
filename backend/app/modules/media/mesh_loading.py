@@ -126,6 +126,12 @@ def load_step_mesh(
                     if returncode == 3
                     else "invalid_step"
                 )
+            if returncode == 3 or failure == "memory budget":
+                # Tessellation outgrew the admitted memory: the part is valid,
+                # this allowance is not enough for it.
+                from printstash_core.mesh.similarity import GeometryError
+
+                raise GeometryError("resource_limit")
             logger.warning(
                 "mesh_processing: isolated STEP tessellation failed for %s (%s%s)",
                 path.name,
@@ -168,7 +174,7 @@ def load_step_mesh(
         return cast("Trimesh", loaded)
 
 
-def _load_3mf_mesh(path: Path, suffix: str) -> Trimesh:
+def _load_3mf_mesh(path: Path) -> Trimesh:
     """One placed `Trimesh` for a 3MF, with typed source refusals preserved.
 
     trimesh expands repeated build/component placements while it loads, so a few
@@ -177,9 +183,9 @@ def _load_3mf_mesh(path: Path, suffix: str) -> Trimesh:
     it parses, so every 3MF entry point shares that guard rather than the
     size-based estimate, which cannot see placements.
     """
-    from app.modules.media.mesh_resources import load_3mf
+    from app.modules.media.mesh_resources import load_3mf_within_ram
 
-    return load_3mf(path, max_faces=mesh_policy.load_face_budget(suffix)).whole_mesh
+    return load_3mf_within_ram(path).whole_mesh
 
 
 def _load_stl_mesh(path: Path) -> Trimesh:
@@ -231,7 +237,7 @@ def load_mesh(path: Path, *, file_type: str | None = None) -> Trimesh | None:
     if suffix in (".step", ".stp"):
         return load_step_mesh(path)
     if suffix == ".3mf":
-        return _load_3mf_mesh(path, suffix)
+        return _load_3mf_mesh(path)
     if suffix == ".stl":
         return _load_stl_mesh(path)
 

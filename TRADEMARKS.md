@@ -1,6 +1,6 @@
 # PrintStash Trademark Policy
 
-This project is source-available under the Elastic License 2.0, but the
+This project is licensed under the GNU AGPL-3.0, but the
 PrintStash name, logo, and branding are not licensed for unrestricted use.
 
 ## Allowed Uses

@@ -29,6 +29,7 @@ from app.db.models import (
     JobKind,
     WorkPriority,
 )
+from app.modules.derivatives import kinds
 from app.modules.derivatives import source as source_module
 from app.modules.derivatives.kinds import group
 from app.modules.derivatives.source import DerivativeSource, file_id_of, subject_key
@@ -264,6 +265,71 @@ class TestPending:
         make_derivative(artifact, DerivativeKind.THUMBNAIL)
 
         assert _pending(db_session) == []
+
+    def test_a_3mf_at_its_own_recipes_needs_nothing(
+        self, db_session: Session, make_model, make_file, make_derivative
+    ) -> None:
+        artifact = make_file(
+            make_model(), filename="part.3mf", file_type=FileType.THREE_MF
+        )
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(artifact, DerivativeKind.THUMBNAIL)
+
+        assert _pending(db_session) == []
+
+    @pytest.mark.parametrize(
+        "kind",
+        [DerivativeKind.METADATA, DerivativeKind.THUMBNAIL],
+        ids=lambda kind: kind.value,
+    )
+    def test_rederives_a_step_from_the_shared_mesh_recipe(
+        self, db_session: Session, make_model, make_file, make_derivative, kind
+    ) -> None:
+        # STEP is now tessellated at 0.05 mm; its outputs at the shared mesh
+        # recipe were made from the 0.01 mm mesh.
+        artifact = make_file(
+            make_model(), filename="part.step", file_type=FileType.STEP
+        )
+        shared = {
+            DerivativeKind.METADATA: kinds.MESH_GEOMETRY_RECIPE,
+            DerivativeKind.THUMBNAIL: kinds.MESH_THUMBNAIL_RECIPE,
+        }
+        make_derivative(artifact, kind, recipe_version=shared[kind])
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL
+            if kind is DerivativeKind.METADATA
+            else DerivativeKind.METADATA,
+        )
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
+
+    @pytest.mark.parametrize(
+        "kind",
+        [DerivativeKind.METADATA, DerivativeKind.THUMBNAIL],
+        ids=lambda kind: kind.value,
+    )
+    def test_rederives_a_3mf_from_the_shared_mesh_recipe(
+        self, db_session: Session, make_model, make_file, make_derivative, kind
+    ) -> None:
+        # Its scene is now read by lib3mf; STL, OBJ and STEP at the shared
+        # recipe stay derived (``test_a_fully_derived_artifact_needs_nothing``).
+        artifact = make_file(
+            make_model(), filename="part.3mf", file_type=FileType.THREE_MF
+        )
+        shared = {
+            DerivativeKind.METADATA: kinds.MESH_GEOMETRY_RECIPE,
+            DerivativeKind.THUMBNAIL: kinds.MESH_THUMBNAIL_RECIPE,
+        }
+        make_derivative(artifact, kind, recipe_version=shared[kind])
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL
+            if kind is DerivativeKind.METADATA
+            else DerivativeKind.METADATA,
+        )
+
+        assert _subjects(db_session) == [subject_key(artifact.id)]
 
     @pytest.mark.parametrize(
         ("file_type", "filename", "job_kind", "old_recipe"),

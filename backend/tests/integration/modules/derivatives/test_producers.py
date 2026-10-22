@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import time
 import zipfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import numpy as np
 import pytest
 import trimesh
 from printstash_core.mesh.measurements import (
@@ -266,11 +268,13 @@ class TestDeriveMesh:
         )
         rows = _rows(db_session, artifact.id)
         assert (
-            rows[DerivativeKind.METADATA].recipe_version == kinds.MESH_GEOMETRY_RECIPE
+            rows[DerivativeKind.METADATA].recipe_version
+            == kinds.recipes_for(artifact)[DerivativeKind.METADATA]
         )
         assert rows[DerivativeKind.METADATA].failure_reason == "unsupported_capability"
         assert (
-            rows[DerivativeKind.THUMBNAIL].recipe_version == kinds.MESH_THUMBNAIL_RECIPE
+            rows[DerivativeKind.THUMBNAIL].recipe_version
+            == kinds.recipes_for(artifact)[DerivativeKind.THUMBNAIL]
         )
         assert (
             json.loads(rows[DerivativeKind.THUMBNAIL].output_json)["strategy"]
@@ -315,7 +319,7 @@ class TestDeriveMesh:
         make_derivative(
             artifact,
             DerivativeKind.METADATA,
-            recipe_version=kinds.MESH_GEOMETRY_RECIPE - 1,
+            recipe_version=kinds.recipes_for(artifact)[DerivativeKind.METADATA] - 1,
         )
         make_derivative(artifact, DerivativeKind.THUMBNAIL)
         reason = ThumbnailFailureReason(failure)
@@ -393,7 +397,7 @@ class TestDeriveMesh:
         make_derivative(
             artifact,
             DerivativeKind.METADATA,
-            recipe_version=kinds.MESH_GEOMETRY_RECIPE - 1,
+            recipe_version=kinds.THREE_MF_GEOMETRY_RECIPE - 1,
         )
         make_derivative(artifact, DerivativeKind.THUMBNAIL)
         reason = ThumbnailFailureReason.UNSUPPORTED_CAPABILITY
@@ -425,7 +429,9 @@ class TestDeriveMesh:
                 records.cancel(
                     db_session,
                     artifact,
-                    kinds.group(JobKind.DERIVATIVES_MESH).kinds,
+                    kinds.group(JobKind.DERIVATIVES_MESH).recipes_for(
+                        artifact.file_type
+                    ),
                     now=utcnow(),
                 )
                 db_session.commit()
@@ -434,7 +440,7 @@ class TestDeriveMesh:
                         db_session,
                         artifact,
                         DerivativeKind.METADATA,
-                        kinds.MESH_GEOMETRY_RECIPE,
+                        kinds.recipes_for(artifact)[DerivativeKind.METADATA],
                         now=utcnow(),
                     )
                     attempt = records.attempt(db_session, artifact, row)
@@ -448,9 +454,11 @@ class TestDeriveMesh:
                 db_session.commit()
             else:
                 monkeypatch.setitem(
-                    kinds.group(JobKind.DERIVATIVES_MESH).kinds,
+                    kinds.group(JobKind.DERIVATIVES_MESH).format_recipes[
+                        FileType.THREE_MF
+                    ],
                     DerivativeKind.METADATA,
-                    kinds.MESH_GEOMETRY_RECIPE + 1,
+                    kinds.THREE_MF_GEOMETRY_RECIPE + 1,
                 )
             return emit_mesh_outputs(request, reply, on_output)
 
@@ -572,10 +580,12 @@ class TestDeriveMesh:
         db_session.expire_all()
         rows = _rows(db_session, artifact.id)
         assert (
-            rows[DerivativeKind.METADATA].recipe_version == kinds.MESH_GEOMETRY_RECIPE
+            rows[DerivativeKind.METADATA].recipe_version
+            == kinds.recipes_for(artifact)[DerivativeKind.METADATA]
         )
         assert (
-            rows[DerivativeKind.THUMBNAIL].recipe_version == kinds.MESH_THUMBNAIL_RECIPE
+            rows[DerivativeKind.THUMBNAIL].recipe_version
+            == kinds.recipes_for(artifact)[DerivativeKind.THUMBNAIL]
         )
         metadata = db_session.exec(
             select(Metadata).where(Metadata.file_id == artifact.id)
@@ -634,11 +644,13 @@ class TestDeriveMesh:
         meta = db_session.exec(
             select(Metadata).where(Metadata.file_id == artifact.id)
         ).one()
+        # lib3mf reads each centred corner as a float32.
+        sides = tuple(2 * float(np.float32(edge / 2)) for edge in (0.001, 0.002, 0.003))
         assert outcome.kinds[DerivativeKind.METADATA] == DerivativeState.READY
         assert (meta.bbox_x_mm, meta.bbox_y_mm, meta.bbox_z_mm) == pytest.approx(
-            (0.001, 0.002, 0.003), rel=1e-12, abs=0
+            sides, rel=1e-12, abs=0
         )
-        assert meta.volume_mm3 == pytest.approx(6e-9, rel=1e-12, abs=0)
+        assert meta.volume_mm3 == pytest.approx(math.prod(sides), rel=1e-12, abs=0)
         assert read_volume(meta) == VolumeMeasured(meta.volume_mm3)
 
     def test_replaces_stale_inconsistent_winding_volume(
@@ -688,10 +700,15 @@ class TestDeriveMesh:
         assert row.failure_reason == "resource_limit"
         assert row.next_attempt_at is None
         assert row.attempts == settings.derivative_max_attempts
-        assert row.recipe_version == kinds.MESH_GEOMETRY_RECIPE
+        assert (
+            row.recipe_version == kinds.recipes_for(artifact)[DerivativeKind.METADATA]
+        )
         assert result.kinds[DerivativeKind.THUMBNAIL] == DerivativeState.READY
         thumbnail = rows[DerivativeKind.THUMBNAIL]
-        assert thumbnail.recipe_version == kinds.MESH_THUMBNAIL_RECIPE
+        assert (
+            thumbnail.recipe_version
+            == kinds.recipes_for(artifact)[DerivativeKind.THUMBNAIL]
+        )
         assert json.loads(thumbnail.output_json)["strategy"] == "embedded"
         assert thumbnail.storage_key is not None
         assert get_backend().exists(thumbnail.storage_key)
@@ -1425,9 +1442,7 @@ class TestBegin:
 
         assert db_session.exec(select(ArtifactDerivative)).all() == []
 
-    def test_a_claim_with_its_artifact_is_one_transaction(
-        self, stored, transactions
-    ):
+    def test_a_claim_with_its_artifact_is_one_transaction(self, stored, transactions):
         artifact = stored("once.gcode", content.gcode())
 
         def rename(session, file):
@@ -1470,7 +1485,10 @@ class TestAttemptPublication:
         artifact = stored("cancel.gcode", content.gcode())
         file, attempts = producers._begin(artifact.id, JobKind.DERIVATIVES_GCODE)
         records.cancel(
-            db_session, artifact, group(JobKind.DERIVATIVES_GCODE).kinds, now=utcnow()
+            db_session,
+            artifact,
+            group(JobKind.DERIVATIVES_GCODE).recipes_for(artifact.file_type),
+            now=utcnow(),
         )
         db_session.commit()
 
@@ -1520,7 +1538,7 @@ class TestAttemptPublication:
             records.cancel(
                 db_session,
                 artifact,
-                group(JobKind.DERIVATIVES_GCODE).kinds,
+                group(JobKind.DERIVATIVES_GCODE).recipes_for(artifact.file_type),
                 now=utcnow(),
             )
             db_session.commit()
@@ -1565,7 +1583,7 @@ class TestAttemptPublication:
             records.cancel(
                 db_session,
                 artifact,
-                group(JobKind.DERIVATIVES_MESH).kinds,
+                group(JobKind.DERIVATIVES_MESH).recipes_for(artifact.file_type),
                 now=utcnow(),
             )
             db_session.commit()
@@ -1615,7 +1633,7 @@ class TestAttemptPublication:
             records.cancel(
                 db_session,
                 artifact,
-                group(JobKind.DERIVATIVES_MESH).kinds,
+                group(JobKind.DERIVATIVES_MESH).recipes_for(artifact.file_type),
                 now=utcnow(),
             )
             db_session.commit()
@@ -1623,7 +1641,7 @@ class TestAttemptPublication:
                 db_session,
                 artifact,
                 DerivativeKind.METADATA,
-                kinds.MESH_GEOMETRY_RECIPE,
+                kinds.recipes_for(artifact)[DerivativeKind.METADATA],
                 now=utcnow(),
             )
             attempt = records.attempt(db_session, artifact, fresh)
@@ -1691,7 +1709,7 @@ class TestAttemptPublication:
             records.cancel(
                 db_session,
                 artifact,
-                group(JobKind.DERIVATIVES_TOOLPATH).kinds,
+                group(JobKind.DERIVATIVES_TOOLPATH).recipes_for(artifact.file_type),
                 now=utcnow(),
             )
             db_session.commit()
@@ -1731,7 +1749,7 @@ class TestAttemptPublication:
             records.cancel(
                 db_session,
                 artifact,
-                group(JobKind.DERIVATIVES_GCODE).kinds,
+                group(JobKind.DERIVATIVES_GCODE).recipes_for(artifact.file_type),
                 now=utcnow(),
             )
             db_session.commit()
@@ -1893,7 +1911,11 @@ class TestDeriveViewerStl:
         assert row.storage_key is None
         assert row.failure_reason == ThumbnailFailureReason.STORAGE.value
         assert row.next_attempt_at is not None
-        records.reset(db_session, artifact, group(JobKind.DERIVATIVES_VIEWER_STL).kinds)
+        records.reset(
+            db_session,
+            artifact,
+            group(JobKind.DERIVATIVES_VIEWER_STL).recipes_for(artifact.file_type),
+        )
         db_session.commit()
         monkeypatch.setattr(backend, "create_stream", create_stream)
 
@@ -2047,7 +2069,7 @@ class TestDeriveViewerStl:
             records.cancel(
                 db_session,
                 artifact,
-                group(JobKind.DERIVATIVES_VIEWER_STL).kinds,
+                group(JobKind.DERIVATIVES_VIEWER_STL).recipes_for(artifact.file_type),
                 now=utcnow(),
             )
             db_session.commit()
@@ -2090,12 +2112,14 @@ class TestDeriveViewerStl:
             records.cancel(
                 db_session,
                 artifact,
-                group(JobKind.DERIVATIVES_VIEWER_STL).kinds,
+                group(JobKind.DERIVATIVES_VIEWER_STL).recipes_for(artifact.file_type),
                 now=utcnow(),
             )
             db_session.commit()
             records.reset(
-                db_session, artifact, group(JobKind.DERIVATIVES_VIEWER_STL).kinds
+                db_session,
+                artifact,
+                group(JobKind.DERIVATIVES_VIEWER_STL).recipes_for(artifact.file_type),
             )
             db_session.commit()
             with monkeypatch.context() as patch:
@@ -2160,12 +2184,14 @@ class TestDeriveViewerStl:
             records.cancel(
                 db_session,
                 artifact,
-                group(JobKind.DERIVATIVES_VIEWER_STL).kinds,
+                group(JobKind.DERIVATIVES_VIEWER_STL).recipes_for(artifact.file_type),
                 now=utcnow(),
             )
             db_session.commit()
             records.reset(
-                db_session, artifact, group(JobKind.DERIVATIVES_VIEWER_STL).kinds
+                db_session,
+                artifact,
+                group(JobKind.DERIVATIVES_VIEWER_STL).recipes_for(artifact.file_type),
             )
             db_session.commit()
             with monkeypatch.context() as patch:
@@ -2640,7 +2666,7 @@ class TestStagedMeshPublication:
                 records.cancel(
                     db_session,
                     artifact,
-                    group(JobKind.DERIVATIVES_MESH).kinds,
+                    group(JobKind.DERIVATIVES_MESH).recipes_for(artifact.file_type),
                     now=utcnow(),
                 )
             else:

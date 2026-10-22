@@ -49,7 +49,19 @@ _running = 0
 
 
 def _limit() -> int:
-    return max(int(settings.max_render_jobs), 1)
+    # A configured render-job count (environment or runtime override) still
+    # bounds local inference too; the automatic mesh count follows the native
+    # memory pool, which resident models do not share.
+    from app.core.config import _overlay
+
+    if (
+        _overlay.get("max_render_jobs") is not None
+        or "max_render_jobs" in settings.frozen.model_fields_set
+    ):
+        return max(int(settings.max_render_jobs), 1)
+    from app.core.host_cpus import inference_jobs_for, usable_cpus
+
+    return inference_jobs_for(usable_cpus())
 
 
 def acquire_slot(context: InferenceContext) -> None:

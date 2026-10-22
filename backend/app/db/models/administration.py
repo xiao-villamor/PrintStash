@@ -193,6 +193,10 @@ class SystemConfig(SQLModel, table=True):
     # VAULT_MODEL_THUMBNAIL_WIDTH (640 by default).
     model_thumbnail_width: Optional[int] = Field(default=None)
 
+    # Native mesh jobs run at once, set from the administration UI. Null keeps
+    # VAULT_MAX_RENDER_JOBS or the automatic CPU-and-memory default.
+    max_render_jobs: Optional[int] = Field(default=None)
+
     # Opt-in master switch for the Spoolman filament-inventory integration. Off
     # by default: while disabled the Spoolman API/UI are idle and no consumption
     # is written. Spoolman stays the source of truth for spools and remaining

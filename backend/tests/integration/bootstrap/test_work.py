@@ -37,6 +37,7 @@ from app.modules.work import executors, fences
 from app.modules.work.catalog import WorkCatalog
 from app.modules.work.contracts import (
     Deduplicated,
+    DuringAdditions,
     EngineStatus,
     JobSubmission,
     PassSubmission,
@@ -277,7 +278,9 @@ class TestStart:
         finally:
             work_bootstrap.stop()
 
-    def test_reconciles_every_definition_with_work_to_find_once(self, started, work_engine) -> None:
+    def test_reconciles_every_definition_with_work_to_find_once(
+        self, started, work_engine
+    ) -> None:
         assert _passes(work_engine) == _findable(started.catalog)
 
     def test_startup_passes_are_backfill(self, started, work_engine) -> None:
@@ -741,18 +744,21 @@ class TestAdditionDeclarations:
         assert not self._declared()[JobKind.INGESTION_ARCHIVE_INSPECT].adds_to_library
 
     @pytest.mark.parametrize(
-        "kind,waits",
+        "kind,during",
         [
-            (JobKind.DERIVATIVES_MESH, True),
-            (JobKind.DERIVATIVES_GCODE, True),
-            (JobKind.DERIVATIVES_TOOLPATH, True),
-            (JobKind.DERIVATIVES_VIEWER_STL, False),
+            (JobKind.DERIVATIVES_MESH, DuringAdditions.PACED),
+            (JobKind.DERIVATIVES_GCODE, DuringAdditions.PACED),
+            (JobKind.DERIVATIVES_TOOLPATH, DuringAdditions.PACED),
+            (JobKind.DERIVATIVES_VIEWER_STL, DuringAdditions.RUNS),
         ],
     )
-    def test_derived_outputs_wait_except_the_viewer_mesh(
-        self, kind: JobKind, waits: bool
+    def test_derived_outputs_are_paced_except_the_viewer_mesh(
+        self, kind: JobKind, during: DuringAdditions
     ) -> None:
-        assert self._declared()[kind].waits_for_additions is waits
+        assert self._declared()[kind].during_additions is during
 
     def test_search_projection_waits_for_additions(self) -> None:
-        assert self._declared()[JobKind.SEARCH_PROJECT].waits_for_additions
+        assert (
+            self._declared()[JobKind.SEARCH_PROJECT].during_additions
+            is DuringAdditions.WAITS
+        )

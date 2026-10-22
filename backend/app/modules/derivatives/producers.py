@@ -140,7 +140,6 @@ def _begin(
     from . import policy
 
     now = utcnow()
-    kinds = group(definition).kinds
     with get_session_factory().scoped_session() as session:
         if execution is not None:
             records.require_execution(session, execution)
@@ -150,6 +149,7 @@ def _begin(
             file_row = _live_file(session, file_id)
         except ArtifactGone:
             return None
+        kinds = group(definition).recipes_for(file_row.file_type)
         needed = records.needed(session, file_row, kinds, now=now)
         attempts = {}
         for kind in needed:
@@ -691,7 +691,9 @@ def _derive_toolpath(file_id: int, *, execution: JobExecution | None = None) -> 
         return Outcome({})
     file_row, attempts = begun
     needed = attempts.keys()
-    recipe = group(JobKind.DERIVATIVES_TOOLPATH).kinds[DerivativeKind.TOOLPATH]
+    recipe = group(JobKind.DERIVATIVES_TOOLPATH).recipes_for(file_row.file_type)[
+        DerivativeKind.TOOLPATH
+    ]
     if DerivativeKind.TOOLPATH not in needed:
         return Outcome({})
     started = time.monotonic()

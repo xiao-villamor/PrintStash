@@ -395,6 +395,7 @@ def _patch_engine(
         _administrator_restore_counts,
         _page_descendants,
     )
+    from app.modules.media.three_mf_bounds import forget_bounds
     from app.modules.search.lexical_index import canonical_passage
     from app.modules.similarity.candidates import _endpoint_queries, _evidence_predicate
 
@@ -406,6 +407,8 @@ def _patch_engine(
     _label_ancestry.cache_clear()
     _endpoint_queries.cache_clear()
     _evidence_predicate.cache_clear()
+    # Bounds are remembered per file identity; a test's tmp_path can reuse one.
+    forget_bounds()
     _overlay.clear()
     # The tables are emptied between tests; so is what this process believes
     # it still holds against them.

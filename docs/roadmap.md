@@ -13,9 +13,11 @@ Issues are better for confirmed bugs or scoped implementation work.
 [Version 0.14.0 is the latest published release](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.14.0).
 The [0.15.0 changelog](../CHANGELOG.md#0150) records the next release's integrated
 scope: scrolling library pagination, subtree filters, editable Library sources,
-bounded imports and previews, multi-material G-code fixes, and a unified image
+bounded imports with previews during processing, configurable worker concurrency,
+faster 3MF and STEP processing, multi-material G-code fixes, and a unified image
 with optional GPU support. Read the [upgrade notes](../UPGRADE.md#0150-notes)
-for Python 3.14, DBOS 3.0, and coordinated API/worker restarts.
+for Python 3.14, DBOS 3.3.0, coordinated API/worker restarts, and the full-library
+re-derivation and backup requirements.
 
 Release preparation does not publish images or a tag. Download released builds
 from [GitHub Releases](https://github.com/xiao-villamor/PrintStash/releases).

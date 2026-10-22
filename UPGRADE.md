@@ -17,6 +17,15 @@ Python 3.14 or newer. The unified image includes optional GPU support; existing
 CPU-only installations continue to work. Device access and memory budgets are
 documented in [Optional portable compute](docs/compute.md).
 
+The default native mesh concurrency now follows the usable CPUs and memory,
+up to eight jobs. Settings → Background work → Worker settings can override
+that count; Automatic restores the CPU-and-memory default. On a constrained NAS,
+review this setting and the memory budgets before starting a large import.
+ZIP previews can now start before the import finishes; search indexing still
+waits until it ends. 3MF and STEP producers have newer recipes in this release,
+so the earlier rehearsal's recipe numbers and processing times are historical,
+not predictions for the current build.
+
 After startup, verify sign-in, library browsing, an upload, a Library source
 scan if configured, previews, and backup creation and verification. Review any
 processing refusals in Tasks and Settings. Upgrading from 0.13.x or earlier

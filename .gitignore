@@ -116,6 +116,8 @@ screenshots/gif-frames/
 !/docs/adr/0015-gpu-rendering.md
 !/docs/adr/0016-native-worker-startup.md
 !/docs/adr/0017-controlled-library-refresh.md
+!/docs/adr/0018-format-renditions.md
+!/docs/adr/0019-design-sources.md
 !/docs/adr/README.md
 !/docs/ai-search.md
 !/docs/architecture/backend.md

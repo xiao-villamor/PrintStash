@@ -70,12 +70,12 @@ Handing a GPU to the container (the same image in every case):
 | Host | Compose / `docker run` |
 |---|---|
 | NVIDIA | `--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all` (Compose: `deploy.resources.reservations.devices` with `driver: nvidia`, `capabilities: [gpu, graphics, compute, utility]`) |
-| Intel / AMD (Linux) | `--device /dev/dri --group-add <render group id>` |
+| Intel / AMD (Linux) | `--device /dev/dri`; the entrypoint adds the group that owns each `/dev/dri` node, so no `--group-add` is needed |
 | WSL2 | `--device /dev/dxg -v /usr/lib/wsl:/usr/lib/wsl:ro`; the entrypoint sets the Mesa D3D12 variables itself |
 
 Handing in a device only makes it visible. Placement still follows the render policy: with the default `qualified` policy an operation stays on the CPU until a qualification receipt matches, and `VAULT_COMPUTE_RENDER_POLICY=preview` lets an operator evaluate it. Settings → GPU shows what the server found and why each operation is or is not placed on it.
 
-Linux AMD/Intel deployments need a hardware Vulkan driver and access to the appropriate /dev/dri/renderD* node through the service UID's groups. NVIDIA containers need the supported [NVIDIA Container Toolkit configuration](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html), including graphics capabilities for Vulkan. A successful nvidia-smi command proves neither Vulkan nor native WebGPU readiness.
+Linux AMD/Intel deployments need a hardware Vulkan driver and access to the appropriate /dev/dri/renderD* node through the service UID's groups. The entrypoint runs the service in the group that owns each mapped /dev/dri node and in any group granted with `--group-add`, never in group 0. A template that cannot leave a device optional, such as Unraid's, maps /dev/dri as a path instead and grants access with `--device-cgroup-rule='c 226:* rmw'`. NVIDIA containers need the supported [NVIDIA Container Toolkit configuration](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html), including graphics capabilities for Vulkan. A successful nvidia-smi command proves neither Vulkan nor native WebGPU readiness.
 
 In WSL, the application remains in Linux containers and uses the host bridge:
 

@@ -186,9 +186,20 @@ preview, but is not zero-copy instancing.
 | Current output identity | Version |
 | --- | --- |
 | Mesh metadata recipe | 12 |
-| Mesh thumbnail recipe | 15 |
+| Mesh thumbnail recipe | 16 |
+| 3MF metadata recipe | 13 |
+| 3MF thumbnail recipe | 17 |
+| STEP metadata recipe | 13 |
+| STEP thumbnail recipe | 17 |
 | Fingerprint interpretation | `geometry-v7-sh5f4577c4` |
 | Viewer STL recipe | 3 |
+| 3MF viewer STL recipe | 4 |
+| STEP viewer STL recipe | 4 |
+
+A group may version a kind separately for one source format when only that
+format's reader changes. 3MF scenes are read by lib3mf in single precision and
+STEP is tessellated at 0.05 mm, so 3MF and STEP Artifacts re-derive at their
+own recipes while STL and OBJ keep the shared ones.
 
 The mesh recipes refresh prior measurements/previews under the retained-scene
 eligibility and budget policy. The fingerprint version invalidates earlier

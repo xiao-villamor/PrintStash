@@ -637,6 +637,9 @@ commands remain outside MutationCache.
 
 Before any Library cursor is accepted, one `browse_refresh_required` response can
 retry the initial page once. A second conflict exposes explicit refresh recovery.
+That action reaches the browse owner even before a displayed page can activate
+revision authority. Reading-position recovery applies only to the current entry's
+snapshot; a retained previous destination cannot block a fresh read.
 Continuation conflicts never retry automatically or replace an accepted snapshot.
 
 Manual printer materials use `features/printers/materials.ts` as their cancellable

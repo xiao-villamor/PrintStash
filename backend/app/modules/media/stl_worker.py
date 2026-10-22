@@ -23,7 +23,7 @@ from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError, read_spec
 from app.modules.media.mesh_loading import load_mesh, load_step_mesh
 from app.modules.media.mesh_policy import canonical_suffix
-from app.modules.media.mesh_resources import load_3mf
+from app.modules.media.mesh_resources import load_3mf_within_ram
 from app.modules.media.stl_isolation import (
     FAILURE_MAGIC,
     MAX_STL_BYTES,
@@ -119,9 +119,7 @@ def convert(path: Path, file_type: str | None, destination: Path) -> STLManifest
     with mesh_policy.render_admission():
         try:
             mesh = (
-                load_3mf(
-                    path, max_faces=mesh_policy.load_face_budget(".3mf")
-                ).whole_mesh
+                load_3mf_within_ram(path).whole_mesh
                 if file_type == "3mf"
                 else load_step_mesh(path, strict_failures=True)
                 if file_type in {"step", "stp"}

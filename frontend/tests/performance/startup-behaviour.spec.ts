@@ -9,27 +9,31 @@ test.describe("production library startup", () => {
     Boolean(process.env.STARTUP_FRONTEND_DIR),
     "The before snapshot has no startup coordinator",
   );
-  test.beforeEach(async ({ page, request }) => {
+  let token: string;
+  let user: string;
+  test.beforeAll(async ({ request }) => {
     const login = await request.post(`${api}/api/v1/auth/login`, {
       data: { username: "admin", password: "admin1234" },
     });
     expect(login.ok()).toBe(true);
-    const token: string = (await login.json()).access_token;
+    token = (await login.json()).access_token;
     const me = await request.get(`${api}/api/v1/auth/me`, {
       headers: { Authorization: `Bearer ${token}` },
     });
+    expect(me.ok()).toBe(true);
+    user = await me.text();
+  });
+
+  test.beforeEach(async ({ page }) => {
     await page
       .context()
       .addCookies([
         { name: "printstash_session", value: token, url: api, httpOnly: true, sameSite: "Strict" },
       ]);
-    await page.addInitScript(
-      (user) => {
-        localStorage.setItem("printstash.user", user);
-        localStorage.setItem("printstash.locale", "en");
-      },
-      await me.text(),
-    );
+    await page.addInitScript((user) => {
+      localStorage.setItem("printstash.user", user);
+      localStorage.setItem("printstash.locale", "en");
+    }, user);
   });
 
   async function ready(page: import("@playwright/test").Page) {

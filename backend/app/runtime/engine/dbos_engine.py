@@ -462,7 +462,8 @@ class DbosJobEngine(JobEngine):
         The engine only finds queued work by polling, so a Job someone waits on
         sits half a polling interval on average. Polling every lane that often
         would be paid for all day by an idle server; boosting the one lane a
-        request just dispatched to is paid for only while a batch arrives.
+        request or interactive derivative batch just dispatched to is paid for
+        only while that batch arrives.
         """
         window = settings.jobs_queue_boost_seconds
         lane = self.catalog.lanes[name]
@@ -608,7 +609,24 @@ class DbosJobEngine(JobEngine):
         if holder != submission.execution_id:
             # Only a dedupe key held by another workflow names a different one.
             return SubmitOutcome.DEDUPLICATED
-        if isinstance(submission, JobSubmission) and submission.expedite:
+        expedite = isinstance(submission, JobSubmission) and submission.expedite
+        if (
+            not expedite
+            and make_url(self.url).get_backend_name() == "sqlite"
+            and submission.priority is WorkPriority.INTERACTIVE
+            and not submission.delay_seconds
+        ):
+            target = (
+                self.catalog.lane_for(submission.source)
+                if isinstance(submission, PassSubmission)
+                else self.catalog.lanes[submission.lane]
+            )
+            # SQLite has one engine owner, enforced by the application process
+            # lock and topology guard. PostgreSQL can share this queue setting
+            # across processes, whose local expiry timers cannot coordinate.
+            # Boost only the single-owner derivative path, including discovery.
+            expedite = target.queue_order is LaneOrder.FIFO
+        if expedite:
             self._boost(submission.lane)
         return SubmitOutcome.ACCEPTED
 

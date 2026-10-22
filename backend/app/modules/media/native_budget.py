@@ -5,7 +5,8 @@ costs per face. Those coefficients already include loader/render overhead;
 adding the process baseline again would count it twice on small hosts. They are
 scheduling estimates, never permission to exceed the hard worker limit.
 Unknown source complexity claims the whole pool, so parallelism cannot turn an
-unmeasurable input into an optimistic allocation.
+unmeasurable input into an optimistic allocation. A 3MF package is countable
+when its structure can be bounded without parsing it (`three_mf_bounds`).
 """
 
 from __future__ import annotations
@@ -41,6 +42,34 @@ DEFAULT_FACE_BYTES = 3000
 # This whole-pipeline coefficient includes the existing startup envelope.
 WEBP_FACE_BYTES = 4000
 THREE_MF_FACE_BYTES = 3600
+# Whole-pipeline worker VmPeak for geometry plus a 640x480 thumbnail, measured
+# over fifty real 3MF packages on the numeric stack above: a 391-440 MiB start,
+# then at most 1940 bytes per placed face or 22 bytes per reached XML byte
+# (attribute-heavy painted models). The claim keeps >= 20% headroom over every
+# measured peak, and never less than the loader's own 3600 B/face ceiling.
+THREE_MF_BASE_MEMORY = 512 * 1024**2
+THREE_MF_PIPELINE_FACE_BYTES = 2000
+THREE_MF_XML_BYTE_COST = 24
+# The same pipeline with scenes read by lib3mf, over the packages it reads: at
+# most 330 bytes per placed face or 4 per model XML byte above that start. The
+# claim keeps >= 25% headroom, and the loader's ceilings use the same weight
+# once the worker has read the scene through lib3mf.
+THREE_MF_LIB3MF_FACE_BYTES = 600
+THREE_MF_LIB3MF_XML_BYTE_COST = 6
+# Counting structure streams each part once in the supervisor; inflating the
+# part dominates (about 1.2 s CPU for 155 MB of model XML). Packages lib3mf
+# reads claim a fraction of the pool even at 1.8M faces, so the scan is worth
+# finishing for them.
+THREE_MF_PREFLIGHT_WALL_SECONDS = 4.0
+THREE_MF_PREFLIGHT_CPU_SECONDS = 2.0
+# Whole-pipeline worker VmPeak for STEP over a mixed corpus: a 470 MiB start,
+# then 570-850 bytes per tessellated face, so 1,500 keeps the loader's ceiling
+# inside the permit.
+STEP_FACE_BYTES = 1500
+# Tessellation density is unknown until it runs. At 0.05 mm every part of that
+# corpus peaked under 620 MiB, so a derivative first claims 1 GiB and runs
+# once more under the whole pool if that is not enough.
+STEP_OPTIMISTIC_MEMORY = 1024**3
 # Optional text preflight must stay cheap in the supervisor. OBJ gets a
 # separate CPU allowance and wall watchdog: runnable-thread contention must not
 # turn a countable source into a whole-pool claim. Check at bounded 128-line
@@ -177,11 +206,14 @@ def request(
     return Resources(1, min(pool.bytes, max(minimum, geometry) + incremental))
 
 
-def face_capacity(memory: int, suffix: str) -> int:
+def face_capacity(memory: int, suffix: str, *, lib3mf: bool = False) -> int:
     if type(memory) is not int or memory <= 0:
         raise ValueError("admitted memory must be a positive integer")
-    cost = THREE_MF_FACE_BYTES if suffix.lower() == ".3mf" else DEFAULT_FACE_BYTES
-    return memory // cost
+    if suffix.lower() in (".step", ".stp"):
+        return memory // STEP_FACE_BYTES
+    if suffix.lower() != ".3mf":
+        return memory // DEFAULT_FACE_BYTES
+    return memory // (THREE_MF_LIB3MF_FACE_BYTES if lib3mf else THREE_MF_FACE_BYTES)
 
 
 def _obj_triangle_count(path: Path, *, deadline: float) -> int | None:
@@ -362,21 +394,113 @@ def _source_triangle_count(source: MeshSource, *, minimum_faces: int = 0) -> int
     return None
 
 
+def _three_mf_claim(
+    pool: Resources, source: MeshSource, work: GeometryWork | RasterWork
+) -> Resources | None:
+    """Weight one package by its bounded structure, or ``None`` when unknown."""
+    from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
+
+    from app.core.native_settings import settings
+    from app.modules.media.three_mf_bounds import bounds
+
+    measured = bounds(
+        source.path,
+        face_cap=MAX_ANALYSIS_FACES,
+        max_model_bytes=settings.mesh_3mf_max_xml_mb * 1024 * 1024,
+        wall_seconds=THREE_MF_PREFLIGHT_WALL_SECONDS,
+        cpu_seconds=THREE_MF_PREFLIGHT_CPU_SECONDS,
+    )
+    # A package beyond the reader's face ceiling is refused once it is read;
+    # until then it is as unknown as one the scan could not bound.
+    if measured is None or measured.placed_faces > MAX_ANALYSIS_FACES:
+        return None
+    minimum, incremental, face_bytes = _work_memory(work)
+    faces = measured.placed_faces
+    if measured.lib3mf_readable:
+        claim = max(
+            minimum,
+            THREE_MF_BASE_MEMORY
+            + max(
+                faces * THREE_MF_LIB3MF_FACE_BYTES,
+                measured.reached_model_bytes * THREE_MF_LIB3MF_XML_BYTE_COST,
+            ),
+        )
+        return Resources(1, min(pool.bytes, claim + incremental))
+    # The loader derives its face ceiling from the permit (`face_capacity`), so
+    # the claim must admit every placed face at that weight as well.
+    claim = max(
+        minimum,
+        faces * max(face_bytes, THREE_MF_FACE_BYTES),
+        THREE_MF_BASE_MEMORY
+        + max(
+            faces * THREE_MF_PIPELINE_FACE_BYTES,
+            measured.reached_model_bytes * THREE_MF_XML_BYTE_COST,
+        ),
+    )
+    return Resources(1, min(pool.bytes, claim + incremental))
+
+
+def optimistic_step_claim(pool: Resources, work: WorkProfile) -> Resources | None:
+    """A STEP derivative's first claim, or ``None`` when it cannot be smaller.
+
+    Only a caller that runs the work again with the whole pool on a memory
+    refusal may ask for it.
+    """
+    if not isinstance(work, (GeometryWork, RasterWork)):
+        return None
+    minimum, incremental, _face_bytes = _work_memory(work)
+    amount = max(minimum, STEP_OPTIMISTIC_MEMORY) + incremental
+    return Resources(1, amount) if amount < pool.bytes else None
+
+
+def _source_bytes(sources: tuple[MeshSource, ...]) -> int | None:
+    try:
+        return sum(source.path.stat().st_size for source in sources)
+    except OSError:
+        # A vanished source is the guarded reader's to report; telemetry
+        # records that its size was unavailable rather than inventing one.
+        return None
+
+
 def estimate_sources(
     pool: Resources,
     sources: tuple[MeshSource, ...],
     *,
     work: WorkProfile = GeometryWork(),
 ) -> Resources:
+    from app.modules.media.mesh_observability import record_estimate
+    from app.modules.media.mesh_telemetry import EstimateBasis, EstimateStats
+
+    started = time.monotonic_ns()
     minimum, _incremental, face_bytes = _work_memory(work)
-    # The floor applies to the combined request, not separately to each source.
-    # Multi-source work needs actual bounds to retain its aggregate allowance.
-    minimum_faces = minimum // face_bytes if len(sources) == 1 else 0
-    return request(
-        pool,
-        tuple(
+    claim: Resources | None = None
+    if (
+        len(sources) == 1
+        and sources[0].file_type.lower().lstrip(".") == "3mf"
+        and isinstance(work, (GeometryWork, RasterWork))
+    ):
+        # Fingerprint analysis has its own uncalibrated peak and keeps the pool.
+        claim = _three_mf_claim(pool, sources[0], work)
+        counted = claim is not None
+    if claim is None:
+        # The floor applies to the combined request, not separately to each source.
+        # Multi-source work needs actual bounds to retain its aggregate allowance.
+        minimum_faces = minimum // face_bytes if len(sources) == 1 else 0
+        counts = tuple(
             _source_triangle_count(source, minimum_faces=minimum_faces)
             for source in sources
-        ),
-        work=work,
+        )
+        counted = all(count is not None for count in counts)
+        claim = request(pool, counts, work=work)
+    record_estimate(
+        EstimateStats(
+            file_types=tuple(
+                source.file_type.lower().lstrip(".") for source in sources
+            ),
+            source_bytes=_source_bytes(sources),
+            basis=EstimateBasis.COUNTED if counted else EstimateBasis.UNKNOWN,
+            requested_bytes=claim.bytes,
+            elapsed_ns=time.monotonic_ns() - started,
+        )
     )
+    return claim

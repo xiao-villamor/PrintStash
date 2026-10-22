@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import zipfile
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, TypeVar, cast
 
@@ -107,7 +108,36 @@ def _attribute_columns(
     return np.array(columns, dtype=dtype).T.copy()
 
 
+class ThreeMFReader(StrEnum):
+    """Which reader produced a scene; each has its own memory weight per face."""
+
+    LIB3MF = "lib3mf"
+    XML = "xml"
+
+
 def read_scene(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> ExpandedScene:
+    """Read through lib3mf when it can answer exactly; otherwise parse the XML."""
+    return read_scene_with_reader(path, max_faces=max_faces)[0]
+
+
+def read_scene_with_reader(
+    path: Path, *, max_faces: int = MAX_ANALYSIS_FACES
+) -> tuple[ExpandedScene, ThreeMFReader]:
+    """The scene and the reader that produced it."""
+    from app.modules.media import three_mf_native
+
+    if type(max_faces) is not int or not 1 <= max_faces <= MAX_ANALYSIS_FACES:
+        raise GeometryError("invalid_scene_budget")
+    try:
+        return (
+            three_mf_native.read_scene(path, max_faces=max_faces),
+            ThreeMFReader.LIB3MF,
+        )
+    except three_mf_native.NativeUnavailable:
+        return _read_scene_xml(path, max_faces=max_faces), ThreeMFReader.XML
+
+
+def _read_scene_xml(path: Path, *, max_faces: int) -> ExpandedScene:
     """Parse bounded XML resources once; never flatten away resource placement.
 
     Production-extension external .model parts inside the same archive are

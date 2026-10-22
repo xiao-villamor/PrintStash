@@ -32,7 +32,9 @@ class TestUnifiedImage(unittest.TestCase):
         self.volume = docker("volume", "create", f"unified-test-{uuid.uuid4().hex}")
         self.addCleanup(docker, "volume", "rm", self.volume)
 
-    def start(self, *environment: str, ready: bool = True) -> str:
+    def start(
+        self, *environment: str, ready: bool = True, run_options: tuple[str, ...] = ()
+    ) -> str:
         options = [item for value in environment for item in ("-e", value)]
         container = docker(
             "run",
@@ -41,6 +43,7 @@ class TestUnifiedImage(unittest.TestCase):
             "127.0.0.1::3000",
             "-v",
             f"{self.volume}:/data",
+            *run_options,
             *options,
             self.image,
         )
@@ -59,7 +62,7 @@ class TestUnifiedImage(unittest.TestCase):
                     ) as response:
                         if response.status == 200:
                             return container
-                except (urllib.error.URLError, OSError, http.client.HTTPException):
+                except urllib.error.URLError, OSError, http.client.HTTPException:
                     pass
                 if docker("inspect", "-f", "{{.State.Running}}", container) != "true":
                     break
@@ -116,6 +119,36 @@ class TestUnifiedImage(unittest.TestCase):
 
         self.assertGreaterEqual(len(services), 2)
         self.assertEqual({(p[1], p[2]) for p in services}, {("12345", "12345")})
+
+    def test_runs_the_api_in_the_group_owning_a_mapped_gpu(self) -> None:
+        # Unraid maps /dev/dri as a path; its nodes belong to the host's render
+        # group, which the unprivileged identity must hold to open them. A
+        # volume stands in for the device directory: no runner has a GPU.
+        gpu = docker("volume", "create", f"unified-gpu-{uuid.uuid4().hex}")
+        self.addCleanup(docker, "volume", "rm", gpu)
+        docker(
+            "run",
+            "--rm",
+            "-v",
+            f"{gpu}:/gpu",
+            "--entrypoint",
+            "sh",
+            self.image,
+            "-c",
+            "touch /gpu/renderD128 && chgrp 4343 /gpu/renderD128",
+        )
+        container = self.start(
+            "PUID=12345", "PGID=12345", run_options=("-v", f"{gpu}:/dev/dri:ro")
+        )
+
+        processes = docker("top", container, "-eo", "pid,supgid,args").splitlines()
+        (api,) = [
+            line.split(maxsplit=2)
+            for line in processes
+            if "uvicorn app.main:app" in line
+        ]
+
+        self.assertIn("4343", api[1].split(","))
 
     def test_serves_spa_deep_links(self) -> None:
         self.start()

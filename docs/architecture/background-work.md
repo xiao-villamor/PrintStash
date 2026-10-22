@@ -89,7 +89,10 @@ One pass (`work.reconciler.run_pass`) per definition, claimed through its
    follows commit. A lost or expired holder cannot admit work.
 3. **Continue or stop.** A full batch that created Jobs while the lane still had
    room runs again immediately. A full lane stops; each Job's completion nudges
-   its source. A nudge that arrived during the pass (the dirty mark,
+   its source. Starting an interactive Job from a prioritized source also nudges
+   it, because running interactive Jobs no longer consume the pending allowance.
+   That lets a successor queue during the current attempt without enlarging
+   either priority's cap. A nudge that arrived during the pass (the dirty mark,
    `nudged_at`) makes the pass run once more before it releases.
 
 A completion always nudges the definitions it names (`completion_nudges`). It
@@ -99,15 +102,27 @@ on an epoch its last submission did not carry). Request-originated work with
 nothing waiting to be submitted has nothing a pass could find or submit, so no
 pass is queued for it; the tick repairs what a crash left behind.
 
-**Additions first.** A definition that brings Models into the library (an
-upload, an import, a library scan) declares `adds_to_library`; derived outputs
-(thumbnails, measurements, G-code and toolpath previews) and search projection
-declare `waits_for_additions`. While any Job of an adding definition is active, a
-waiting definition's discovery finds nothing new, so a large import shows all
-its Models before their derived work starts competing with it. Jobs already
-created keep running. The last adding Job to settle stamps every waiting
+**Work during additions.** A definition that brings Models into the library
+(an upload, an import, a library scan) declares `adds_to_library`. Every other
+definition declares what its discovery does while one of those Jobs is active
+(`during_additions`):
+
+- `paced` — derived outputs (thumbnails, measurements, G-code and toolpath
+  previews). Discovery keeps finding the Models already added, but looks once
+  every `JOBS_PACED_DISCOVERY_SECONDS` instead of once per added file: an
+  addition starting queues one delayed pass, and each pass that ran during an
+  addition queues the next. A per-file pass would claim its cursor and compete
+  with the import for the write lock on every file.
+- `waits` — search projection. Discovery finds nothing new until the last
+  addition settles: each projection page is a write on the database the
+  import is writing to.
+- `runs` — everything else, including the viewer mesh: opening a Model in 3D
+  asks for it.
+
+Neither `paced` nor `waits` work is nudged per change while an addition is
+active, and a paced definition's own completions do not stamp it then. Jobs
+already created keep running. The last adding Job to settle stamps every held
 definition in its own terminal transaction; the tick recovers a lost nudge.
-The viewer mesh does not wait: opening a Model in 3D asks for it.
 
 A nudge (`work.nudge`) stamps the dirty mark and queues a pass unless one is
 already queued within `JOBS_SUBMIT_GRACE_SECONDS`. An interactive nudge is not
@@ -130,6 +145,16 @@ recovery. Because the engine finds queued work only by polling, that
 submission also boosts its lane's polling for a few seconds: the Job is picked
 up sooner, and so is the rest of a batch that follows it.
 
+On SQLite, accepted immediate interactive Jobs on FIFO lanes also use that
+temporary boost, as do the reconcile passes discovering their work. Duplicate,
+delayed and backfill submissions do not start or renew this automatic boost.
+SQLite's process lock and topology guard ensure a single engine owner. The
+extension does not apply to PostgreSQL: its queue configuration is shared by
+multiple processes, while boost expiry is local to each process. Existing
+explicit request boosts keep their current policy. A boost changes polling
+configuration through the engine SDK; it does not interrupt a poll already
+waiting, and is a latency hint rather than an execution guarantee.
+
 The dirty mark is a write, so it travels with a write that already happens.
 `nudge_after_commit` stamps it as the caller's transaction commits, and a Job's
 terminal write stamps the sources its completion affects; only the pass is
@@ -149,7 +174,9 @@ one each. The shared read never holds a lock other steps wait on.
 
 A Job attempt writes as rarely as its guarantees allow:
 
-- **Begin** claims the attempt.
+- **Begin** claims the attempt and, for interactive work from a prioritized
+  source, registers an after-commit nudge. On SQLite its dirty mark commits
+  with the claim, without a second writer transaction.
 - **Progress** a step reports in the first `JOBS_PROGRESS_HOLD_SECONDS` of its
   attempt is held in memory and merged into the next write, so an attempt that
   ends sooner never pays for reports nobody could read. Past the hold each
@@ -297,6 +324,7 @@ both Compose files run the first with no setting.
 | `JOBS_MAX_RESUBMITS` | 3 | Interrupted attempts before a Job fails; also how often the engine recovers one execution after its process died (with a pinned `EXECUTOR_ID`) |
 | `JOBS_RESUBMIT_COOLDOWN_SECONDS` / `JOBS_RESUBMIT_BURST` | 30 / 3 | A subject finished this often waits the window out |
 | `JOBS_SUBMIT_GRACE_SECONDS` | 60 | How long a queued pass absorbs further nudges |
+| `JOBS_PACED_DISCOVERY_SECONDS` | 2 | Pause between derived-output passes while Models are being added |
 | `JOBS_PROGRESS_HOLD_SECONDS` | 1.0 | How long an attempt runs before the progress it reports is written (0–60 seconds; 0 writes every report) |
 | `JOBS_EXECUTOR_STALE_SECONDS` | 120 | Heartbeat age after which an executor's work is rerun |
 | `JOBS_RETENTION_DAYS` / `JOBS_RETENTION_PER_USER` | 7 / 500 | User Job history |
@@ -309,6 +337,10 @@ both Compose files run the first with no setting.
 
 Administrators override lane concurrency at runtime on Settings → Background
 work; the override is stored in the database and applies to every process.
+The same page sets the native mesh job count (`max_render_jobs`, stored in
+`system_config`): the process that saves it re-resolves the `derive.native`
+lane at once, a lane override still wins, and worker processes read it when
+they start.
 
 Native memory is bounded by shared CPU/RAM admission across API and worker
 processes, independent of lane count. A request reserves its complete geometry,

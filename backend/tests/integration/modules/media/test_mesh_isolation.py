@@ -588,6 +588,269 @@ class TestStepCapacityOwnership:
         assert admitted[0].startswith("step-tessellation:")
 
 
+GIB = 1024**3
+STEP_FIXTURE = "cascadio_material.stp"
+
+
+@pytest.fixture
+def pool(monkeypatch):
+    """A 4 GiB native pool: room for the optimistic STEP claim and more."""
+    monkeypatch.setattr(mesh_isolation, "memory_budget_bytes", lambda: 4 * GIB)
+
+
+@pytest.fixture
+def attempts(monkeypatch):
+    """Record each worker attempt's claim and answer it from a script.
+
+    Each scripted step is either an exception the undersized worker raised or
+    a result, with the outputs the attempt streamed before it ended.
+    """
+    calls: list[object] = []
+    script: list[tuple[list[object], object]] = []
+
+    def attempt(request, *, on_output, handoff, amount=None):
+        calls.append(amount)
+        outputs, outcome = script.pop(0)
+        for output in outputs:
+            if on_output is not None:
+                on_output(output)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(mesh_isolation, "_generate_once", attempt)
+    return calls, script
+
+
+@pytest.fixture
+def step_result():
+    from tests.paths import FIXTURES_DIR
+
+    return ThumbnailEngine().generate(
+        _request(
+            FIXTURES_DIR / STEP_FIXTURE, file_type="step", include_fingerprint=False
+        )
+    )
+
+
+def _step_request(**overrides):
+    from tests.paths import FIXTURES_DIR
+
+    return _request(
+        FIXTURES_DIR / STEP_FIXTURE,
+        **{"file_type": "step", "include_fingerprint": False, **overrides},
+    )
+
+
+def _refused(result, reason: ThumbnailFailureReason):
+    """*result* with its geometry refused for *reason*, as a worker reports it."""
+    import dataclasses
+
+    from printstash_core.mesh.measurements import (
+        VolumeNotCalculated,
+        VolumeNotCalculatedCause,
+    )
+
+    from app.modules.media.mesh_contracts import MeshMeasurements
+
+    return dataclasses.replace(
+        result,
+        geometry=MeshMeasurements.unavailable().geometry,
+        geometry_outcome=GeometryRefused(reason),
+        volume=VolumeNotCalculated(VolumeNotCalculatedCause.GEOMETRY_UNAVAILABLE),
+    )
+
+
+class TestStepEscalation:
+    def test_admits_a_step_derivative_under_the_optimistic_claim(self, pool, caplog):
+        from app.modules.media.native_budget import STEP_OPTIMISTIC_MEMORY
+
+        caplog.set_level(logging.INFO, logger="app.modules.media.mesh_observability")
+
+        result = mesh_isolation.generate(_step_request())
+
+        requested = [
+            json.loads(record.getMessage().removeprefix("mesh_admission "))[
+                "requested_bytes"
+            ]
+            for record in caplog.records
+            if record.getMessage().startswith("mesh_admission ")
+        ]
+        assert result.geometry["triangle_count"] > 0
+        assert requested == [STEP_OPTIMISTIC_MEMORY]
+
+    def test_publishes_an_optimistic_attempts_outputs_once(self, pool):
+        published = []
+
+        result = mesh_isolation.generate(_step_request(), on_output=published.append)
+
+        assert [type(output).__name__ for output in published] == [
+            "GeometryOutput",
+            "ThumbnailOutput",
+        ]
+        assert result.image is not None
+
+    @pytest.mark.parametrize(
+        "reason",
+        [ThumbnailFailureReason.RESOURCE_LIMIT, ThumbnailFailureReason.WORKER_FAILED],
+        ids=["memory-refusal", "allocation-crash"],
+    )
+    def test_escalates_an_undersized_worker_to_the_whole_pool(
+        self, pool, attempts, step_result, reason
+    ):
+        from app.modules.media.native_budget import STEP_OPTIMISTIC_MEMORY
+        from app.runtime.native_admission import Resources
+
+        calls, script = attempts
+        script.extend([([], mesh_isolation.MeshWorkerError(reason)), ([], step_result)])
+
+        result = mesh_isolation.generate(_step_request())
+
+        assert calls == [Resources(1, STEP_OPTIMISTIC_MEMORY), Resources(1, 4 * GIB)]
+        assert result is step_result
+
+    def test_escalates_a_result_refused_for_memory(self, pool, attempts, step_result):
+        calls, script = attempts
+        refused = _refused(step_result, ThumbnailFailureReason.RESOURCE_LIMIT)
+        script.extend([([], refused), ([], step_result)])
+
+        result = mesh_isolation.generate(_step_request())
+
+        assert len(calls) == 2
+        assert result is step_result
+
+    def test_discards_the_outputs_of_an_escalated_attempt(
+        self, pool, attempts, step_result
+    ):
+        calls, script = attempts
+        script.extend(
+            [
+                (
+                    ["optimistic geometry"],
+                    mesh_isolation.MeshWorkerError(
+                        ThumbnailFailureReason.RESOURCE_LIMIT
+                    ),
+                ),
+                (["whole-pool geometry", "whole-pool thumbnail"], step_result),
+            ]
+        )
+        published = []
+
+        mesh_isolation.generate(_step_request(), on_output=published.append)
+
+        assert published == ["whole-pool geometry", "whole-pool thumbnail"]
+
+    def test_logs_the_escalation(self, pool, attempts, step_result, caplog):
+        calls, script = attempts
+        script.extend(
+            [
+                (
+                    [],
+                    mesh_isolation.MeshWorkerError(
+                        ThumbnailFailureReason.WORKER_FAILED
+                    ),
+                ),
+                ([], step_result),
+            ]
+        )
+        caplog.set_level(logging.INFO, logger="app.modules.media.mesh_observability")
+
+        mesh_isolation.generate(_step_request())
+
+        assert any(
+            record.getMessage().startswith("mesh_escalation ")
+            and '"reason":"worker_failed"' in record.getMessage()
+            for record in caplog.records
+        )
+
+    def test_refuses_after_one_escalation(self, pool, attempts):
+        calls, script = attempts
+        script.extend(
+            [
+                (
+                    [],
+                    mesh_isolation.MeshWorkerError(
+                        ThumbnailFailureReason.RESOURCE_LIMIT
+                    ),
+                ),
+                (
+                    [],
+                    mesh_isolation.MeshWorkerError(
+                        ThumbnailFailureReason.RESOURCE_LIMIT
+                    ),
+                ),
+            ]
+        )
+
+        with pytest.raises(mesh_isolation.MeshWorkerError) as raised:
+            mesh_isolation.generate(_step_request())
+
+        assert raised.value.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+        assert len(calls) == 2
+
+    def test_does_not_escalate_a_timeout(self, pool, attempts):
+        calls, script = attempts
+        script.append(
+            ([], mesh_isolation.MeshWorkerError(ThumbnailFailureReason.TIMEOUT))
+        )
+
+        with pytest.raises(mesh_isolation.MeshWorkerError):
+            mesh_isolation.generate(_step_request())
+
+        assert len(calls) == 1
+
+    def test_does_not_escalate_an_invalid_source(self, pool, attempts, step_result):
+        calls, script = attempts
+        invalid = _refused(step_result, ThumbnailFailureReason.INVALID_SOURCE)
+        script.append(([], invalid))
+
+        result = mesh_isolation.generate(_step_request())
+
+        assert len(calls) == 1
+        assert result is invalid
+
+    def test_keeps_the_estimate_for_another_format(self, pool, attempts, step_result):
+        calls, script = attempts
+        script.append(([], step_result))
+
+        mesh_isolation.generate(_request(Path("part.stl"), include_fingerprint=False))
+
+        assert calls == [None]
+
+    def test_keeps_the_estimate_for_fingerprint_analysis(
+        self, pool, attempts, step_result
+    ):
+        calls, script = attempts
+        script.append(([], step_result))
+
+        mesh_isolation.generate(_step_request(include_fingerprint=True))
+
+        assert calls == [None]
+
+    def test_keeps_an_admitted_callers_permit(self, pool, attempts, step_result):
+        from app.runtime.native_admission import Resources
+        from app.runtime.native_runtime import admit
+
+        calls, script = attempts
+        script.append(([], step_result))
+
+        with admit(Resources(1, GIB), Resources(2, 4 * GIB), checkpoint=lambda: None):
+            mesh_isolation.generate(_step_request())
+
+        assert calls == [None]
+
+    def test_keeps_the_estimate_when_the_pool_is_no_larger(
+        self, monkeypatch, attempts, step_result
+    ):
+        calls, script = attempts
+        script.append(([], step_result))
+        monkeypatch.setattr(mesh_isolation, "memory_budget_bytes", lambda: GIB)
+
+        mesh_isolation.generate(_step_request())
+
+        assert calls == [None]
+
+
 class TestTelemetry:
     def test_metadata_only_preserves_phase_stats(self, tmp_path: Path) -> None:
         path = tmp_path / "cube.stl"

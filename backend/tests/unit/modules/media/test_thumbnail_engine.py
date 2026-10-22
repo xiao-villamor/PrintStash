@@ -169,7 +169,9 @@ class TestThumbnailEngine:
         monkeypatch.setattr(
             mesh_measurements, "geometry_from_mesh", lambda _mesh: _measurements()
         )
-        monkeypatch.setattr(mesh_policy, "ram_triangle_cap", lambda _suffix: 5)
+        monkeypatch.setattr(
+            mesh_policy, "ram_triangle_cap", lambda _suffix, **_reader: 5
+        )
         monkeypatch.setattr(
             "app.modules.media.mesh_render.render_mesh_thumbnail",
             lambda *_a, **_k: pytest.fail(

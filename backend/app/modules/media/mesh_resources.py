@@ -16,7 +16,11 @@ from printstash_core.mesh.similarity.components import (
     split_components,
 )
 
-from app.modules.media.three_mf_scene import read_scene
+from app.modules.media.three_mf_scene import (
+    ThreeMFReader,
+    read_scene,
+    read_scene_with_reader,
+)
 
 from .mesh_facts import (
     CompleteGeometry,
@@ -208,6 +212,22 @@ def prepare_loaded_mesh(mesh: Trimesh, *, file_type: str) -> PreparedMesh:
 def load_3mf(path: Path, *, max_faces: int = MAX_ANALYSIS_FACES) -> PreparedMesh:
     """Read a bounded source scene, then explicitly materialize its placed mesh."""
     return materialize_scene(read_scene(path, max_faces=max_faces))
+
+
+def load_3mf_within_ram(path: Path) -> PreparedMesh:
+    """Materialize a 3MF whose placed faces fit the permit at its reader's weight.
+
+    The weight per face depends on the reader that produced the scene, which is
+    only known once it has read the package, so the scene is read within the
+    analysis ceiling and checked before any placed array is allocated.
+    """
+    from app.modules.media import mesh_policy
+
+    scene, reader = read_scene_with_reader(path, max_faces=MAX_ANALYSIS_FACES)
+    budget = mesh_policy.load_face_budget(".3mf", lib3mf=reader is ThreeMFReader.LIB3MF)
+    if PreparedScene(scene).triangle_count > budget:
+        raise GeometryError("scene_resource_limit")
+    return materialize_scene(scene)
 
 
 def materialize_scene(scene: ExpandedScene) -> PreparedMesh:

@@ -18,9 +18,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BackgroundWorkPanel, type BackgroundWorkApi } from "@/components/background-work-panel";
 import { setEventSocketFactory, type EventSocket } from "@/lib/events";
 import { retirePrivateSessionScope } from "@/lib/auth-store";
+import type { meshWorkersApi } from "@/lib/api/mesh-workers";
 import { ApiError } from "@/lib/errors";
 import { setLocale } from "@/lib/locale";
-import { aJob, aWorkOverview } from "@/test-support/factories";
+import { aJob, aMeshWorkers, aWorkOverview } from "@/test-support/factories";
 import { renderApp } from "@/test-support/render";
 import type { JobStatus, WorkOverview } from "@/types";
 
@@ -56,8 +57,14 @@ function stubApi(overview: WorkOverview = aWorkOverview(), over: Partial<Backgro
   } satisfies BackgroundWorkApi;
 }
 
+const meshApi = {
+  read: vi.fn<typeof meshWorkersApi.read>().mockResolvedValue(aMeshWorkers()),
+  save: vi.fn<typeof meshWorkersApi.save>().mockResolvedValue(aMeshWorkers({ edit_version: 2 })),
+  reset: vi.fn<typeof meshWorkersApi.reset>().mockResolvedValue(aMeshWorkers({ edit_version: 2 })),
+} satisfies typeof meshWorkersApi;
+
 function renderPanel(api: BackgroundWorkApi) {
-  return renderApp(<BackgroundWorkPanel api={api} />);
+  return renderApp(<BackgroundWorkPanel api={api} meshApi={meshApi} />);
 }
 
 async function openAdvanced(user: ReturnType<typeof userEvent.setup>) {
@@ -189,7 +196,7 @@ describe("BackgroundWorkPanel", () => {
   });
 
   it("explains the preview path in Spanish", async () => {
-    renderApp(<BackgroundWorkPanel api={stubApi()} />, { locale: "es" });
+    renderApp(<BackgroundWorkPanel api={stubApi()} meshApi={meshApi} />, { locale: "es" });
 
     expect(
       await screen.findByRole("heading", { name: "¿Buscas la vista previa de un modelo?" }),
@@ -257,6 +264,17 @@ describe("BackgroundWorkPanel", () => {
     expect(screen.getByText("host")).toBeVisible();
     expect(screen.getByText("Healthy")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Derive missing" })).not.toBeInTheDocument();
+  });
+
+  it("offers the mesh job count among the worker settings", async () => {
+    const user = userEvent.setup();
+    renderPanel(stubApi());
+
+    await openAdvanced(user);
+    await user.click(await screen.findByRole("tab", { name: "Worker settings" }));
+
+    expect(await screen.findByText("Mesh processing")).toBeVisible();
+    expect(await screen.findByLabelText("Models processed at once")).toHaveValue(3);
   });
 
   it("reports an overview it cannot load", async () => {
@@ -558,8 +576,8 @@ describe("work query ownership", () => {
     const api = stubApi();
     renderApp(
       <>
-        <BackgroundWorkPanel api={api} />
-        <BackgroundWorkPanel api={api} />
+        <BackgroundWorkPanel api={api} meshApi={meshApi} />
+        <BackgroundWorkPanel api={api} meshApi={meshApi} />
       </>,
     );
     expect(await screen.findAllByRole("heading", { name: "What's happening now" })).toHaveLength(2);
@@ -806,7 +824,7 @@ describe("work drafts", () => {
 
   it.each(["anonymous", "member"])("does not read administrator work for %s", async (role) => {
     const api = stubApi();
-    renderApp(<BackgroundWorkPanel api={api} />, {
+    renderApp(<BackgroundWorkPanel api={api} meshApi={meshApi} />, {
       auth: role === "member" ? memberSession() : adminSession({ user: null }),
     });
     await act(async () => {});

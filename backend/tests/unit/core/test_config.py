@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.exc import ArgumentError
 
+from app.core import host_cpus
 from app.core.config import (
     DATA_ROOT_LAYOUT,
     ConfigResolver,
@@ -72,6 +73,60 @@ class TestSettings:
         monkeypatch.setenv("VAULT_SLOW_REQUEST_MS", "250")
 
         assert FrozenSettings(_env_file=None).slow_request_ms == 250
+
+    @pytest.mark.parametrize(
+        ("cpus", "memory_gib", "jobs"),
+        [
+            pytest.param(2, 4, 3, id="two-cpus-four-gib"),
+            pytest.param(4, 8, 5, id="four-cpus-eight-gib"),
+            pytest.param(12, 8, 6, id="twelve-cpus-eight-gib"),
+        ],
+    )
+    def test_render_jobs_default_follows_the_host(
+        self, monkeypatch: pytest.MonkeyPatch, cpus: int, memory_gib: int, jobs: int
+    ) -> None:
+        from app.core import host_memory
+
+        monkeypatch.delenv("VAULT_MAX_RENDER_JOBS", raising=False)
+        monkeypatch.delenv("VAULT_MESH_MEMORY_BUDGET_FRACTION", raising=False)
+        monkeypatch.setattr(host_cpus, "usable_cpus", lambda: cpus)
+        monkeypatch.setattr(
+            host_memory, "memory_limit_bytes", lambda: memory_gib * 1024**3
+        )
+
+        assert FrozenSettings(_env_file=None).max_render_jobs == jobs
+
+    def test_render_jobs_default_follows_the_configured_mesh_fraction(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core import host_memory
+
+        monkeypatch.delenv("VAULT_MAX_RENDER_JOBS", raising=False)
+        monkeypatch.setenv("VAULT_MESH_MEMORY_BUDGET_FRACTION", "0.25")
+        monkeypatch.setattr(host_cpus, "usable_cpus", lambda: 4)
+        monkeypatch.setattr(host_memory, "memory_limit_bytes", lambda: 4 * 1024**3)
+
+        assert FrozenSettings(_env_file=None).max_render_jobs == 1
+
+    def test_an_empty_render_jobs_override_uses_the_automatic_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from app.core import host_memory
+
+        monkeypatch.setenv("VAULT_MAX_RENDER_JOBS", "")
+        monkeypatch.delenv("VAULT_MESH_MEMORY_BUDGET_FRACTION", raising=False)
+        monkeypatch.setattr(host_cpus, "usable_cpus", lambda: 2)
+        monkeypatch.setattr(host_memory, "memory_limit_bytes", lambda: 4 * 1024**3)
+
+        assert FrozenSettings(_env_file=None).max_render_jobs == 3
+
+    def test_an_explicit_render_jobs_value_wins(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("VAULT_MAX_RENDER_JOBS", "1")
+        monkeypatch.setattr(host_cpus, "usable_cpus", lambda: 12)
+
+        assert FrozenSettings(_env_file=None).max_render_jobs == 1
 
     @pytest.mark.parametrize(
         ("field", "value"),

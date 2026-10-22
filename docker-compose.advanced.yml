@@ -81,8 +81,7 @@ services:
     # Intel / AMD on Linux:
     # devices:
     #   - /dev/dri:/dev/dri
-    # group_add:
-    #   - "${RENDER_GID:-105}"   # getent group render | cut -d: -f3
+    # (the entrypoint joins the group that owns /dev/dri; no group_add needed)
     # NVIDIA (NVIDIA Container Toolkit):
     # deploy:
     #   resources:
@@ -196,10 +195,11 @@ services:
       VAULT_PROCESS_ROLE: ${VAULT_PROCESS_ROLE:-all}
       VAULT_API_RUNS_JOBS: ${VAULT_API_RUNS_JOBS:-true}
       VAULT_SHARED_STORAGE: ${VAULT_SHARED_STORAGE:-false}
-      # Per process: mesh renders at once (each can peak hundreds of MB), and
-      # uploads committed at once. Settings → Background work overrides every
-      # lane's concurrency at runtime for all processes.
-      VAULT_MAX_RENDER_JOBS: ${VAULT_MAX_RENDER_JOBS:-1}
+      # Native mesh slots across processes sharing the local data root (unset:
+      # one per two usable CPUs, 1 to 4; fractional quotas round up). Memory
+      # admission can hold back large models. Settings → Background work
+      # overrides lane concurrency at runtime for all processes.
+      VAULT_MAX_RENDER_JOBS: ${VAULT_MAX_RENDER_JOBS:-}
       # Portable compute. The image already carries the GPU runtime; it is used
       # only once a device is handed to this service (see "GPU" below) and
       # stays on the CPU otherwise: docs/compute.md

@@ -753,3 +753,87 @@ class TestForgetQueuedPasses:
             (row.pass_queued_at, row.pass_priority) == (None, None)
             for row in db_session.exec(select(ReconcileCursor)).all()
         )
+
+
+def _mark(session: Session, source: JobKind) -> datetime | None:
+    session.expire_all()
+    cursor = session.get(ReconcileCursor, source)
+    return None if cursor is None else cursor.nudged_at
+
+
+class TestHeldForAdditions:
+    """Work held back by additions is not nudged per change while one is active.
+
+    A per-change pass would compete with the import's own writes. Paced work
+    looks again on its own, and the last addition to settle stamps every held
+    definition in the transaction that ends it, so nothing is lost.
+    """
+
+    def test_a_nudge_skips_paced_work_during_an_active_addition(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, PACED
+
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        nudge_after_commit(db_session, PACED)
+        db_session.commit()
+
+        assert (_passes(additions_engine, PACED), _mark(db_session, PACED)) == (
+            [],
+            None,
+        )
+
+    def test_a_nudge_skips_work_waiting_for_an_active_addition(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, WAITING
+
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        nudge(WAITING)
+
+        assert (_passes(additions_engine, WAITING), _mark(db_session, WAITING)) == (
+            [],
+            None,
+        )
+
+    def test_a_nudge_after_commit_skips_work_waiting_for_an_active_addition(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, WAITING
+
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        nudge_after_commit(db_session, WAITING)
+        db_session.commit()
+
+        assert (_passes(additions_engine, WAITING), _mark(db_session, WAITING)) == (
+            [],
+            None,
+        )
+
+    def test_work_that_does_not_wait_is_nudged_meanwhile(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, EAGER
+
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        nudge_after_commit(db_session, EAGER)
+        db_session.commit()
+
+        assert len(_passes(additions_engine, EAGER)) == 1
+        assert _mark(db_session, EAGER) is not None
+
+    def test_waiting_work_is_nudged_once_no_addition_is_active(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, WAITING
+
+        make_job(kind=ADDING, state=JobState.COMPLETED)
+
+        nudge(WAITING)
+
+        assert len(_passes(additions_engine, WAITING)) == 1
+        assert _mark(db_session, WAITING) is not None

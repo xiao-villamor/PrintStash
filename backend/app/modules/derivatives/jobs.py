@@ -12,6 +12,7 @@ from app.core.time import utcnow
 from app.db.models import File, JobKind, LaneName
 from app.db.scopes import live
 from app.modules.work.contracts import (
+    DuringAdditions,
     JobContext,
     JobDefinition,
     JobExecution,
@@ -68,15 +69,24 @@ def _hooks(derivative_group: DerivativeGroup):
                 from .mesh_continuations import withdraw_current_job
 
                 withdraw_current_job(session, file_id_of(subject_key))
-            records.cancel(session, file_row, derivative_group.kinds, now=utcnow())
+            records.cancel(
+                session,
+                file_row,
+                derivative_group.recipes_for(file_row.file_type),
+                now=utcnow(),
+            )
 
     def on_failure(session: Session, subject_key: str, reason: str) -> None:
+        # Trashed Artifacts keep their rows; a purged one took them with it.
+        file_row = session.get(File, file_id_of(subject_key))
+        if file_row is None:
+            return
         records.fail_in_flight(
             session,
             file_id_of(subject_key),
             reason,
             now=utcnow(),
-            kinds=derivative_group.kinds,
+            kinds=derivative_group.recipes_for(file_row.file_type),
         )
 
     def retry(session: Session, subject_key: str) -> bool:
@@ -85,7 +95,9 @@ def _hooks(derivative_group: DerivativeGroup):
         file_row = _file(session, subject_key)
         if file_row is None:
             return False
-        records.reset(session, file_row, derivative_group.kinds)
+        records.reset(
+            session, file_row, derivative_group.recipes_for(file_row.file_type)
+        )
         return True
 
     return cancel, on_failure, retry
@@ -105,7 +117,10 @@ def _definition(name: JobKind, lane: LaneName, produce: Producer) -> JobDefiniti
         label=derivative_group.label,
         admission=lambda session: policy.admission(session, name),
         # A viewer mesh is what opening a Model in 3D waits for; it never yields.
-        waits_for_additions=name is not JobKind.DERIVATIVES_VIEWER_STL,
+        # Other outputs follow an import as its Models land, at a pace.
+        during_additions=DuringAdditions.RUNS
+        if name is JobKind.DERIVATIVES_VIEWER_STL
+        else DuringAdditions.PACED,
     )
 
 

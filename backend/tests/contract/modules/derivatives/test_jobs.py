@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import ContextVar
+from dataclasses import replace
 from hashlib import sha256
 from threading import Event
 
@@ -10,7 +11,7 @@ from sqlalchemy import event
 from sqlmodel import SQLModel, create_engine
 
 from app.db import session as db_session_module
-from app.db.models import JobKind, JobState
+from app.db.models import JobKind, JobState, LaneName
 from app.db.session import (
     SQLiteSessionFactory,
     get_session_factory,
@@ -21,7 +22,7 @@ from app.modules.derivatives import policy, records
 from app.modules.derivatives.source import subject_key
 from app.modules.storage.storage_backend.runtime import bind_backend, get_backend
 from app.modules.work import catalog as catalog_module
-from app.modules.work.catalog import WorkCatalog
+from app.modules.work.catalog import WorkCatalog, default_lanes
 from app.modules.work.jobs import jobs
 from app.modules.work.submission import submit
 from tests import factories
@@ -60,7 +61,12 @@ class TestDerivativeAdmission:
         )
         with shared_app_db():
             factory = get_session_factory()
-            catalog = WorkCatalog(derivative_jobs.definitions())
+            # This contract needs one admitted producer and one queued successor.
+            lanes = default_lanes()
+            lanes[LaneName.DERIVE_NATIVE] = replace(
+                lanes[LaneName.DERIVE_NATIVE], concurrency=1
+            )
+            catalog = WorkCatalog(derivative_jobs.definitions(), lanes=lanes)
             harness = (
                 InlineHarness(catalog)
                 if engine_kind == "inline"
@@ -112,12 +118,15 @@ class TestDerivativeAdmission:
 
                 with ThreadPoolExecutor(max_workers=1) as threads:
                     running = threads.submit(settle)
-                    assert admitted.wait(20), (
-                        f"producer did not reach storage: {jobs.get(first)}; {harness.engine.active()}"
-                    )
-                    with factory.scoped_session() as session:
-                        policy.update(session, {policy.SettingName.MESH: False})
-                    release.set()
+                    try:
+                        assert admitted.wait(20), (
+                            f"producer did not reach storage: {jobs.get(first)}; {harness.engine.active()}"
+                        )
+                        assert jobs.get(second).state is JobState.QUEUED
+                        with factory.scoped_session() as session:
+                            policy.update(session, {policy.SettingName.MESH: False})
+                    finally:
+                        release.set()
                     running.result(timeout=40)
                 assert jobs.get(first).state is JobState.COMPLETED
                 assert jobs.get(second).state is JobState.CANCELLED

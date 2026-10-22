@@ -18,7 +18,7 @@ loses what it reported.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import pytest
 from sqlalchemy import event
@@ -48,7 +48,7 @@ from app.modules.work.contracts import (
     Step,
 )
 from app.modules.work.jobs import jobs
-from app.modules.work.runner import ExecutionContext, _settle, execute_job
+from app.modules.work.runner import ExecutionContext, _begin, _settle, execute_job
 from app.runtime.engine.inline import InlineJobEngine, _Execution, _Runner
 
 # Probes borrow real kinds and a lane; this catalog holds only them.
@@ -63,6 +63,11 @@ class _NothingPending:
 
     def next_due(self, session, *, now):
         return None
+
+
+class _PrioritizedNothingPending(_NothingPending):
+    def pending_prioritized(self, session, *, now, budget):
+        return []
 
 
 LANE = LaneName.INGEST
@@ -245,6 +250,130 @@ def writes(db_session: Session) -> list[str]:
 def hold() -> float:
     _overlay["jobs_progress_hold_seconds"] = 30.0
     return 30.0
+
+
+class TestBegin:
+    @pytest.fixture
+    def prioritized_source(self, engine: InlineJobEngine) -> None:
+        definition = engine.catalog.definition(DISCOVERED)
+        engine.catalog.definitions[DISCOVERED] = replace(
+            definition, source=_PrioritizedNothingPending()
+        )
+
+    def test_claim_queues_interactive_successor_discovery(
+        self, engine, prioritized_source, make_job, db_session, transactions
+    ) -> None:
+        job = make_job(kind=DISCOVERED)
+        transactions.clear()
+
+        claim = _begin(job.id, 1, job.execution_epoch)
+        transaction_count = len(transactions)
+
+        assert claim == {
+            "kind": DISCOVERED.value,
+            "subject_key": job.subject_key,
+            "priority": WorkPriority.INTERACTIVE.value,
+        }
+        assert _status(job.id).state is JobState.RUNNING
+        assert _stamped(db_session) == {DISCOVERED}
+        assert _nudged(engine) == {DISCOVERED}
+        assert transaction_count == 1
+
+    @pytest.mark.parametrize(
+        ("kind", "source", "priority"),
+        [
+            pytest.param(MUTATING, None, WorkPriority.INTERACTIVE, id="requested"),
+            pytest.param(
+                DISCOVERED,
+                _NothingPending(),
+                WorkPriority.INTERACTIVE,
+                id="ordinary-source",
+            ),
+            pytest.param(
+                DISCOVERED,
+                _PrioritizedNothingPending(),
+                WorkPriority.BACKFILL,
+                id="backfill",
+            ),
+        ],
+    )
+    def test_claim_without_released_priority_slot_does_not_nudge(
+        self, engine, make_job, db_session, kind, source, priority
+    ) -> None:
+        definition = engine.catalog.definition(kind)
+        engine.catalog.definitions[kind] = replace(definition, source=source)
+        job = make_job(kind=kind, priority=priority)
+
+        assert _begin(job.id, 1, job.execution_epoch) is not None
+
+        assert _status(job.id).state is JobState.RUNNING
+        assert _stamped(db_session) == set()
+        assert _nudged(engine) == set()
+
+    @pytest.mark.parametrize(
+        ("state", "attempt", "epoch"),
+        [
+            pytest.param(JobState.QUEUED, 2, "superseded", id="old-epoch"),
+            pytest.param(JobState.QUEUED, 1, "current", id="old-attempt"),
+            pytest.param(JobState.COMPLETED, 2, "current", id="completed"),
+            pytest.param(JobState.FAILED, 2, "current", id="failed"),
+            pytest.param(JobState.CANCELLED, 2, "current", id="cancelled"),
+        ],
+    )
+    def test_refused_claim_does_not_nudge(
+        self, engine, prioritized_source, make_job, db_session, state, attempt, epoch
+    ) -> None:
+        job = make_job(
+            kind=DISCOVERED, state=state, attempts=2, execution_epoch="current"
+        )
+
+        assert _begin(job.id, attempt, epoch) is None
+
+        assert _stamped(db_session) == set()
+        assert _nudged(engine) == set()
+
+    def test_missing_claim_does_not_nudge(
+        self, engine, prioritized_source, db_session
+    ) -> None:
+        assert _begin("missing-job", 1, "missing-epoch") is None
+
+        assert _stamped(db_session) == set()
+        assert _nudged(engine) == set()
+
+    def test_replayed_claim_coalesces_successor_discovery(
+        self, engine, prioritized_source, make_job
+    ) -> None:
+        job = make_job(kind=DISCOVERED)
+        first = _begin(job.id, 1, job.execution_epoch)
+
+        assert _begin(job.id, 1, job.execution_epoch) == first
+
+        passes = [
+            ex.submission
+            for ex in engine.executions.values()
+            if isinstance(ex.submission, PassSubmission)
+        ]
+        assert len(passes) == 1
+        assert passes[0].source is DISCOVERED
+
+    def test_failed_claim_commit_does_not_nudge(
+        self, engine, prioritized_source, make_job, db_session
+    ) -> None:
+        job = make_job(kind=DISCOVERED)
+
+        def refuse(_session) -> None:
+            raise _LOCKED
+
+        event.listen(Session, "before_commit", refuse)
+        try:
+            with pytest.raises(OperationalError, match="database is locked"):
+                _begin(job.id, 1, job.execution_epoch)
+        finally:
+            event.remove(Session, "before_commit", refuse)
+
+        assert _status(job.id).state is JobState.QUEUED
+        assert _stamped(db_session) == set()
+        assert _nudged(engine) == set()
 
 
 class TestExecutionContext:
@@ -1452,3 +1581,75 @@ class TestAdditionsRelease:
         _context(job).finish(JobOutcome.FAILED, error="broken_upload")
 
         assert WAITING in _nudged(additions_engine)
+
+    def test_the_last_addition_to_end_nudges_the_paced_work_too(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import ADDING, PACED
+
+        job = make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert PACED in _nudged(additions_engine)
+
+
+def _paced_delays(engine: InlineJobEngine, source: JobKind) -> list[float | None]:
+    return [
+        execution.submission.delay_seconds
+        for execution in engine.executions.values()
+        if isinstance(execution.submission, PassSubmission)
+        and execution.submission.source == source
+    ]
+
+
+class TestPacedDuringAdditions:
+    """Paced work follows an addition at a pace, not once per change."""
+
+    def test_an_addition_starting_queues_the_paced_pass(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import ADDING, ALSO_ADDING, PACED
+
+        _overlay["jobs_paced_discovery_seconds"] = 3.5
+        # Another addition stays active, so this one's end releases nothing.
+        make_job(kind=ALSO_ADDING, state=JobState.RUNNING, attempts=1)
+        job = make_job(kind=ADDING)
+
+        _run(additions_engine, job)
+
+        assert _paced_delays(additions_engine, PACED) == [3.5]
+
+    def test_work_that_adds_nothing_queues_no_paced_pass(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import EAGER, PACED
+
+        job = make_job(kind=EAGER)
+
+        _run(additions_engine, job)
+
+        assert _paced_delays(additions_engine, PACED) == []
+
+    def test_a_paced_completion_during_an_addition_stamps_nothing_for_it(
+        self, additions_engine, make_job, db_session: Session
+    ) -> None:
+        from .conftest import ADDING, PACED
+
+        make_job(kind=ADDING, state=JobState.RUNNING, attempts=1)
+        job = make_job(kind=PACED, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert PACED not in _stamped(db_session) | _nudged(additions_engine)
+
+    def test_a_paced_completion_with_no_addition_active_nudges_it(
+        self, additions_engine, make_job
+    ) -> None:
+        from .conftest import PACED
+
+        job = make_job(kind=PACED, state=JobState.RUNNING, attempts=1)
+
+        _context(job).finish(JobOutcome.COMPLETED)
+
+        assert PACED in _nudged(additions_engine)

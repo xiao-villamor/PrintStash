@@ -16,16 +16,19 @@ output stays visible until its replacement is ready. Do not bump for a refactor
 that cannot change any output. See ``docs/derivatives.md``.
 
 An Artifact belongs to exactly one group (it is a mesh or it is G-code), so a
-kind's recipe version is read relative to the Artifact's group.
+kind's recipe version is read relative to the Artifact's group. A group may
+version a kind separately for one source format, when only that format's
+reader changed: bumping it re-derives those Artifacts and no others. A version
+is therefore always read for a file (``recipes_for``), never for a group alone.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import ColumnElement, Integer, and_, case, func, literal, or_
 from sqlmodel import col
 
 from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, JobKind
@@ -33,6 +36,14 @@ from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, Jo
 # Recipe versions. Bump rule: see the module docstring.
 MESH_GEOMETRY_RECIPE = 12
 MESH_THUMBNAIL_RECIPE = 16
+# 3MF scenes are read through lib3mf in single precision.
+THREE_MF_GEOMETRY_RECIPE = 13
+THREE_MF_THUMBNAIL_RECIPE = 17
+THREE_MF_VIEWER_STL_RECIPE = 4
+# STEP is tessellated at 0.05 mm linear deflection.
+STEP_GEOMETRY_RECIPE = 13
+STEP_THUMBNAIL_RECIPE = 17
+STEP_VIEWER_STL_RECIPE = 4
 GCODE_METADATA_RECIPE = 5
 GCODE_THUMBNAIL_RECIPE = 3
 TOOLPATH_RECIPE = 1
@@ -53,10 +64,46 @@ class DerivativeGroup:
     """
 
     definition: JobKind
-    kinds: dict[DerivativeKind, int]
+    recipes: dict[DerivativeKind, int]
     label: str
     applies: Callable[[], Any]
     applies_to: Callable[[File], bool]
+    format_recipes: dict[FileType, dict[DerivativeKind, int]] = field(
+        default_factory=dict
+    )
+
+    def __post_init__(self) -> None:
+        for overrides in self.format_recipes.values():
+            if not overrides.keys() <= self.recipes.keys():
+                raise ValueError(
+                    "a format recipe must version one of the group's kinds"
+                )
+
+    @property
+    def kinds(self) -> tuple[DerivativeKind, ...]:
+        """The group's kinds in declaration order, without their versions."""
+        return tuple(self.recipes)
+
+    def recipes_for(self, file_type: FileType) -> dict[DerivativeKind, int]:
+        """Every kind of the group at its current version for ``file_type``."""
+        return {**self.recipes, **self.format_recipes.get(file_type, {})}
+
+    def recipe_column(self, kind: DerivativeKind) -> ColumnElement[int]:
+        """``kind``'s current version for the ``files`` row in scope, in SQL."""
+        versions = [
+            (file_type, overrides[kind])
+            for file_type, overrides in self.format_recipes.items()
+            if kind in overrides
+        ]
+        if not versions:
+            return literal(self.recipes[kind], Integer)
+        return case(
+            *(
+                (col(File.file_type) == file_type, version)
+                for file_type, version in versions
+            ),
+            else_=self.recipes[kind],
+        )
 
 
 def _real() -> Any:
@@ -72,9 +119,19 @@ def _is_binary_gcode(file: File) -> bool:
 GROUPS: tuple[DerivativeGroup, ...] = (
     DerivativeGroup(
         definition=JobKind.DERIVATIVES_MESH,
-        kinds={
+        recipes={
             DerivativeKind.METADATA: MESH_GEOMETRY_RECIPE,
             DerivativeKind.THUMBNAIL: MESH_THUMBNAIL_RECIPE,
+        },
+        format_recipes={
+            FileType.THREE_MF: {
+                DerivativeKind.METADATA: THREE_MF_GEOMETRY_RECIPE,
+                DerivativeKind.THUMBNAIL: THREE_MF_THUMBNAIL_RECIPE,
+            },
+            FileType.STEP: {
+                DerivativeKind.METADATA: STEP_GEOMETRY_RECIPE,
+                DerivativeKind.THUMBNAIL: STEP_THUMBNAIL_RECIPE,
+            },
         },
         label="Mesh geometry and thumbnails",
         applies=lambda: and_(_real(), col(File.file_type).in_(MESH_TYPES)),
@@ -84,7 +141,7 @@ GROUPS: tuple[DerivativeGroup, ...] = (
     ),
     DerivativeGroup(
         definition=JobKind.DERIVATIVES_GCODE,
-        kinds={
+        recipes={
             DerivativeKind.METADATA: GCODE_METADATA_RECIPE,
             DerivativeKind.THUMBNAIL: GCODE_THUMBNAIL_RECIPE,
         },
@@ -96,7 +153,11 @@ GROUPS: tuple[DerivativeGroup, ...] = (
     ),
     DerivativeGroup(
         definition=JobKind.DERIVATIVES_VIEWER_STL,
-        kinds={DerivativeKind.VIEWER_STL: VIEWER_STL_RECIPE},
+        recipes={DerivativeKind.VIEWER_STL: VIEWER_STL_RECIPE},
+        format_recipes={
+            FileType.THREE_MF: {DerivativeKind.VIEWER_STL: THREE_MF_VIEWER_STL_RECIPE},
+            FileType.STEP: {DerivativeKind.VIEWER_STL: STEP_VIEWER_STL_RECIPE},
+        },
         label="3D viewer previews",
         applies=lambda: and_(
             _real(),
@@ -111,7 +172,7 @@ GROUPS: tuple[DerivativeGroup, ...] = (
     ),
     DerivativeGroup(
         definition=JobKind.DERIVATIVES_TOOLPATH,
-        kinds={DerivativeKind.TOOLPATH: TOOLPATH_RECIPE},
+        recipes={DerivativeKind.TOOLPATH: TOOLPATH_RECIPE},
         label="Toolpath previews",
         applies=lambda: and_(
             _real(),
@@ -151,7 +212,7 @@ def recipes_for(file: File) -> dict[DerivativeKind, int]:
     """Every kind that applies to ``file``, at its current recipe version."""
     recipes: dict[DerivativeKind, int] = {}
     for candidate in groups_for(file):
-        recipes.update(candidate.kinds)
+        recipes.update(candidate.recipes_for(file.file_type))
     return recipes
 
 

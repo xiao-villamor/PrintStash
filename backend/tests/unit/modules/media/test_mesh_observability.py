@@ -108,3 +108,57 @@ class TestRecordAdmission:
 
         assert result is None
         assert "failed to publish native admission metrics" in caplog.text
+
+
+class TestRecordEscalation:
+    def test_logs_the_escalated_claim(self, caplog: pytest.LogCaptureFixture) -> None:
+        from app.modules.media.mesh_contracts import ThumbnailFailureReason
+        from app.runtime.native_admission import Resources
+
+        caplog.set_level(logging.INFO, logger=mesh_observability.logger.name)
+
+        mesh_observability.record_escalation(
+            "step", Resources(1, 1024**3), ThumbnailFailureReason.WORKER_FAILED
+        )
+
+        record = next(
+            record
+            for record in caplog.records
+            if record.getMessage().startswith("mesh_escalation ")
+        )
+        payload = json.loads(record.getMessage().removeprefix("mesh_escalation "))
+        assert {
+            key: payload[key] for key in ("file_type", "optimistic_bytes", "reason")
+        } == {
+            "file_type": "step",
+            "optimistic_bytes": 1024**3,
+            "reason": "worker_failed",
+        }
+
+    def test_counts_each_escalation_under_its_labels(self) -> None:
+        from app.modules.media.mesh_contracts import ThumbnailFailureReason
+        from app.runtime.native_admission import Resources
+
+        counter = mesh_observability._escalations.labels("step", "resource_limit")
+        before = counter._value.get()
+
+        mesh_observability.record_escalation(
+            "step", Resources(1, 1024**3), ThumbnailFailureReason.RESOURCE_LIMIT
+        )
+
+        assert counter._value.get() == before + 1
+
+    def test_contains_metrics_sink_failure(self, monkeypatch, caplog):
+        from app.modules.media.mesh_contracts import ThumbnailFailureReason
+        from app.runtime.native_admission import Resources
+
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("metrics unavailable")
+
+        monkeypatch.setattr(mesh_observability._escalations, "labels", fail)
+        result = mesh_observability.record_escalation(
+            "step", Resources(1, 1024**3), ThumbnailFailureReason.RESOURCE_LIMIT
+        )
+
+        assert result is None
+        assert "failed to publish mesh escalation metrics" in caplog.text

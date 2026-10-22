@@ -5,10 +5,10 @@ from __future__ import annotations
 from sqlmodel import Session
 
 from app.core.time import utcnow
-from app.db.models import DerivativeKind, File, JobKind
+from app.db.models import File, JobKind
 
 from . import policy, records
-from .kinds import VIEWER_STL_RECIPE
+from .kinds import group
 
 
 def request(session: Session, file: File) -> None:
@@ -22,7 +22,10 @@ def request(session: Session, file: File) -> None:
         file.viewer_requested_at = utcnow()
         session.add(file)
     needed = records.needed(
-        session, file, {DerivativeKind.VIEWER_STL: VIEWER_STL_RECIPE}, now=utcnow()
+        session,
+        file,
+        group(JobKind.DERIVATIVES_VIEWER_STL).recipes_for(file.file_type),
+        now=utcnow(),
     )
     # Release the request connection before the hint opens its own Session.
     # The persisted demand remains authoritative if the hint is lost.

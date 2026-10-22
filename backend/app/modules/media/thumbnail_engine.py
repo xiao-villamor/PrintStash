@@ -90,7 +90,11 @@ from app.modules.media.stl_reader import (
     STLReadFailure,
     scan_stl,
 )
-from app.modules.media.three_mf_scene import Unsupported3MFCapability, read_scene
+from app.modules.media.three_mf_scene import (
+    ThreeMFReader,
+    Unsupported3MFCapability,
+    read_scene_with_reader,
+)
 from app.modules.media.thumbnail_packet import PacketDescriptor, write_packet
 from app.modules.media.worker_bootstrap import WORKER_MARKER
 
@@ -226,6 +230,8 @@ class _Generation:
         self.prepared: PreparedMesh | None = None
         self.detached_prepared: DetachedSceneMesh | None = None
         self.source_scene: PreparedScene | None = None
+        # Set once the scene is read; lib3mf scenes use their lighter face weight.
+        self.lib3mf_scene = False
         self.scene_cleanup_pending = False
         self.fingerprint_result: FingerprintResult | None = None
         self.sample_buffers_pending = False
@@ -450,9 +456,11 @@ class _Generation:
             # Render, topology and FP apply their own budgets
             # before a consumer materializes placed geometry.
             try:
-                self.source_scene = PreparedScene(
-                    read_scene(self.request.path, max_faces=MAX_ANALYSIS_FACES)
+                scene, reader = read_scene_with_reader(
+                    self.request.path, max_faces=MAX_ANALYSIS_FACES
                 )
+                self.source_scene = PreparedScene(scene)
+                self.lib3mf_scene = reader is ThreeMFReader.LIB3MF
             except GeometryError as exc:
                 if exc.code in {
                     "archive_resource_limit",
@@ -638,7 +646,9 @@ class _Generation:
                         )
                         if (
                             self.source_scene.triangle_count
-                            <= mesh_policy.load_face_budget(self.suffix)
+                            <= mesh_policy.load_face_budget(
+                                self.suffix, lib3mf=self.lib3mf_scene
+                            )
                         ):
                             self.scene_cleanup_pending = True
                             try:
@@ -733,7 +743,9 @@ class _Generation:
                     assert render_mesh is not None
                     render_triangles = len(render_mesh.faces)
                 cap = int(settings.mesh_max_render_triangles)
-                ram_cap = mesh_policy.ram_triangle_cap(self.suffix)
+                ram_cap = mesh_policy.ram_triangle_cap(
+                    self.suffix, lib3mf=self.lib3mf_scene
+                )
                 if ram_cap is not None:
                     cap = min(cap, ram_cap)
                 if render_triangles > cap:

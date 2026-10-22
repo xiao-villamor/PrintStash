@@ -37,13 +37,13 @@ class TestGenerate:
         path = tmp_path / "plate.3mf"
         path.write_bytes(_with_slicer_picture())
         order: list[object] = []
-        read = thumbnail_engine.read_scene
+        read = thumbnail_engine.read_scene_with_reader
 
         def reading(*args, **kwargs):
             order.append("load")
             return read(*args, **kwargs)
 
-        monkeypatch.setattr(thumbnail_engine, "read_scene", reading)
+        monkeypatch.setattr(thumbnail_engine, "read_scene_with_reader", reading)
 
         ThumbnailEngine().generate(
             ThumbnailRequest(path, include_fingerprint=False),
@@ -112,7 +112,7 @@ class TestGenerate:
         def unreadable(*_args, **_kwargs):
             raise GeometryError("invalid_scene")
 
-        monkeypatch.setattr(thumbnail_engine, "read_scene", unreadable)
+        monkeypatch.setattr(thumbnail_engine, "read_scene_with_reader", unreadable)
 
         result = ThumbnailEngine().generate(
             ThumbnailRequest(path, include_fingerprint=False), on_output=outputs.append

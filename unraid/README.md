@@ -172,12 +172,22 @@ Docker Compose Manager. It uses the same image and first-run settings.
 
 There is one PrintStash image for every server. It uses a GPU when the
 container can see one and runs on the CPU otherwise, so nothing changes unless
-you hand it a device. Open the container's **Advanced View** and set:
+you hand it a device.
+
+For an Intel or AMD GPU, enter `/dev/dri` in **GPU: Intel or AMD (optional)**,
+which is shown with the main settings. That is the only step. Leave it blank
+to run on the CPU: a blank field is not passed to Docker, so the container
+starts on a server without a GPU. The template's **Extra Parameters** already
+carry `--device-cgroup-rule='c 226:* rmw'`, which lets the container open the
+mapped GPU device and does nothing when none is mapped; keep it when you edit
+Extra Parameters. PrintStash joins the group that owns the GPU device by
+itself, so no group ID is needed.
+
+The remaining settings are under **Advanced View**:
 
 | Setting | Use |
 | --- | --- |
-| **GPU: Intel or AMD render device** | Enter `/dev/dri` to pass the host's render device. Leave it empty for CPU only. |
-| NVIDIA | Install the Nvidia Driver plugin, add `--runtime=nvidia` to **Extra Parameters** (after `--restart=unless-stopped`), and set **GPU: NVIDIA visible devices** to the GPU's UUID or `all`. |
+| NVIDIA | Install the Nvidia Driver plugin, add `--runtime=nvidia` to **Extra Parameters** (after the existing options), and set **GPU: NVIDIA visible devices** to the GPU's UUID or `all`. |
 | **GPU use** (`VAULT_COMPUTE_MODE`) | `auto` uses a visible GPU; `cpu` never does. |
 | **GPU render policy** | `qualified` places work on the GPU only where a measured receipt exists; `preview` lets you try it. |
 | **GPU memory budget (MiB)** | The most GPU memory PrintStash may plan to use (256 to 65536, default 1024). |

@@ -20,13 +20,14 @@ from app.db.models import (
     ArtifactDerivative,
     DerivativeKind,
     DerivativeState,
+    FileType,
     Job,
     JobKind,
     JobState,
     LaneName,
 )
 from app.modules.derivatives import jobs as derivative_jobs
-from app.modules.derivatives import producers
+from app.modules.derivatives import kinds, producers
 from app.modules.derivatives.source import DerivativeSource, subject_key
 from app.modules.work.contracts import PassSubmission
 from tests.factories import content
@@ -41,6 +42,16 @@ def _states(session: Session, file_id: int) -> dict[str, DerivativeState]:
     session.expire_all()
     return {
         row.kind: row.state
+        for row in session.exec(
+            select(ArtifactDerivative).where(ArtifactDerivative.file_id == file_id)
+        ).all()
+    }
+
+
+def _recipes(session: Session, file_id: int) -> dict[str, tuple[DerivativeState, int]]:
+    session.expire_all()
+    return {
+        row.kind: (row.state, row.recipe_version)
         for row in session.exec(
             select(ArtifactDerivative).where(ArtifactDerivative.file_id == file_id)
         ).all()
@@ -272,6 +283,29 @@ class TestCancel:
         assert source is not None
         assert source.pending(db_session, now=utcnow(), limit=10) == []
 
+    def test_withdraws_a_3mf_at_its_own_recipes(
+        self, db_session: Session, make_model, make_file
+    ) -> None:
+        artifact = make_file(
+            make_model(), filename="part.3mf", file_type=FileType.THREE_MF
+        )
+
+        DEFINITIONS[JobKind.DERIVATIVES_MESH].cancel(
+            db_session, subject_key(artifact.id)
+        )
+        db_session.commit()
+
+        assert _recipes(db_session, artifact.id) == {
+            DerivativeKind.METADATA: (
+                DerivativeState.CANCELLED,
+                kinds.THREE_MF_GEOMETRY_RECIPE,
+            ),
+            DerivativeKind.THUMBNAIL: (
+                DerivativeState.CANCELLED,
+                kinds.THREE_MF_THUMBNAIL_RECIPE,
+            ),
+        }
+
     def test_cancelling_a_trashed_artifact_does_nothing(
         self, db_session: Session, make_model, make_file
     ) -> None:
@@ -305,6 +339,67 @@ class TestOnFailure:
             DerivativeKind.THUMBNAIL: DerivativeState.FAILED,
         }
 
+    def test_fails_a_3mf_in_flight_at_its_own_recipe(
+        self, db_session: Session, make_model, make_file, make_derivative
+    ) -> None:
+        artifact = make_file(
+            make_model(), filename="part.3mf", file_type=FileType.THREE_MF
+        )
+        make_derivative(
+            artifact, DerivativeKind.METADATA, state=DerivativeState.RUNNING
+        )
+
+        DEFINITIONS[JobKind.DERIVATIVES_MESH].on_failure(
+            db_session, subject_key(artifact.id), "lost"
+        )
+        db_session.commit()
+
+        assert _states(db_session, artifact.id) == {
+            DerivativeKind.METADATA: DerivativeState.FAILED
+        }
+
+    def test_leaves_a_3mf_row_of_the_shared_recipe_in_flight(
+        self, db_session: Session, make_model, make_file, make_derivative
+    ) -> None:
+        # Only this Job's own rows are its to fail; a 3MF row at the shared
+        # mesh recipe belongs to an execution from before the recipe split.
+        artifact = make_file(
+            make_model(), filename="part.3mf", file_type=FileType.THREE_MF
+        )
+        make_derivative(
+            artifact,
+            DerivativeKind.METADATA,
+            recipe_version=kinds.MESH_GEOMETRY_RECIPE,
+            state=DerivativeState.RUNNING,
+        )
+
+        DEFINITIONS[JobKind.DERIVATIVES_MESH].on_failure(
+            db_session, subject_key(artifact.id), "lost"
+        )
+        db_session.commit()
+
+        assert _states(db_session, artifact.id) == {
+            DerivativeKind.METADATA: DerivativeState.RUNNING
+        }
+
+    def test_a_failure_for_a_purged_artifact_changes_nothing(
+        self, db_session: Session, make_model, make_file, make_derivative
+    ) -> None:
+        artifact = make_file(make_model(), filename="part.stl")
+        make_derivative(
+            artifact, DerivativeKind.METADATA, state=DerivativeState.RUNNING
+        )
+        purged = artifact.id + 1
+
+        DEFINITIONS[JobKind.DERIVATIVES_MESH].on_failure(
+            db_session, subject_key(purged), "lost"
+        )
+        db_session.commit()
+
+        assert _states(db_session, artifact.id) == {
+            DerivativeKind.METADATA: DerivativeState.RUNNING
+        }
+
 
 class TestRetry:
     def test_forgets_the_groups_unsuccessful_rows(
@@ -331,6 +426,29 @@ class TestRetry:
         assert _states(db_session, artifact.id) == {
             DerivativeKind.METADATA: DerivativeState.READY,
             DerivativeKind.TOOLPATH: DerivativeState.FAILED,
+        }
+
+    def test_forgets_a_3mf_failure_at_its_own_recipe(
+        self, db_session: Session, make_model, make_file, make_derivative
+    ) -> None:
+        artifact = make_file(
+            make_model(), filename="part.3mf", file_type=FileType.THREE_MF
+        )
+        make_derivative(artifact, DerivativeKind.METADATA)
+        make_derivative(
+            artifact,
+            DerivativeKind.THUMBNAIL,
+            state=DerivativeState.FAILED,
+            exhausted=True,
+        )
+
+        assert DEFINITIONS[JobKind.DERIVATIVES_MESH].retry(
+            db_session, subject_key(artifact.id)
+        )
+        db_session.commit()
+
+        assert _states(db_session, artifact.id) == {
+            DerivativeKind.METADATA: DerivativeState.READY
         }
 
     def test_a_trashed_artifact_cannot_be_retried(

@@ -754,9 +754,10 @@ def _rasterise_triangles(
 
     ``vert_nrm`` is (F, 3, 3): a view-space normal for each of a triangle's three
     vertices. ``shade`` maps an (N, 3) array of unit normals to (N, 3) RGB in
-    [0, 1]. Each triangle's clipped bounding box is expanded into a flat array of
-    candidate pixels; the three corner normals are interpolated by the same
-    barycentric weights used for the inside test, renormalised, then lit per
+    [0, 1]. Each triangle's candidate pixels are the spans its rows cover (its
+    clipped bounding box under a ``budget``); the three corner normals are
+    interpolated by the same barycentric weights used for the inside test,
+    renormalised, then lit per
     fragment — so the surface shades smoothly without the Gouraud colour banding
     and pole "fan" streaks that interpolating a precomputed colour produced.
     Depth interpolation and per-pixel z-buffer resolution run as whole-array
@@ -809,26 +810,13 @@ def _rasterise_triangles(
     # budget passed by a caller is cumulative across all rasteriser calls; this
     # matters for fallback renderers, which call us once per input chunk.
     candidates = 0
-    for (
-        source_faces,
-        candidate_x0,
-        candidate_y0,
-        candidate_width,
-        counts,
-        pixel_offset,
-    ) in _pixel_batches(x0, y0, bbox_w, bbox_h, areas, budget):
-        candidates += int(counts.sum())
-        tri_idx = np.repeat(np.arange(len(source_faces)), counts)
-        source_idx = source_faces[tri_idx]
-        starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
-        offsets = (
-            pixel_offset + np.arange(int(counts.sum())) - np.repeat(starts, counts)
-        )
-
-        w_per_tri = candidate_width[tri_idx]
-        pix_x = candidate_x0[tri_idx] + offsets % w_per_tri
-        pix_y = candidate_y0[tri_idx] + offsets // w_per_tri
-
+    batches = (
+        _span_batches(x0, x1, y0, y1, v0, v1, v2)
+        if budget is None
+        else _box_batches(x0, y0, bbox_w, bbox_h, areas, budget)
+    )
+    for source_idx, pix_x, pix_y in batches:
+        candidates += len(source_idx)
         fx = pix_x + 0.5
         fy = pix_y + 0.5
         a = v0[source_idx]
@@ -877,6 +865,123 @@ def _rasterise_triangles(
             flat_img[target] = np.clip(base_color * col, 0, 255).astype(np.uint8)
 
     return candidates
+
+
+def _box_batches(
+    x0: IntArray,
+    y0: IntArray,
+    widths: IntArray,
+    heights: IntArray,
+    areas: IntArray,
+    budget: RasterBudget | None,
+) -> Iterator[tuple[IntArray, IntArray, IntArray]]:
+    """Every pixel of each face's bounding box, as (face, x, y) candidates."""
+    import numpy as np
+
+    for (
+        source_faces,
+        candidate_x0,
+        candidate_y0,
+        candidate_width,
+        counts,
+        pixel_offset,
+    ) in _pixel_batches(x0, y0, widths, heights, areas, budget):
+        tri_idx = np.repeat(np.arange(len(source_faces)), counts)
+        starts = np.concatenate(([0], np.cumsum(counts)[:-1]))
+        offsets = (
+            pixel_offset + np.arange(int(counts.sum())) - np.repeat(starts, counts)
+        )
+        w_per_tri = candidate_width[tri_idx]
+        yield (
+            source_faces[tri_idx],
+            candidate_x0[tri_idx] + offsets % w_per_tri,
+            candidate_y0[tri_idx] + offsets // w_per_tri,
+        )
+
+
+# Rows of faces handled at once while finding spans; bounds the row arrays.
+_SPAN_ROW_BUDGET = 125_000
+
+
+def _span_batches(
+    x0: IntArray,
+    x1: IntArray,
+    y0: IntArray,
+    y1: IntArray,
+    v0: FloatArray,
+    v1: FloatArray,
+    v2: FloatArray,
+) -> Iterator[tuple[IntArray, IntArray, IntArray]]:
+    """Candidate pixels of each face, limited to the spans its rows cover.
+
+    A face's bounding box holds every pixel it can cover, but a long thin face
+    covers a sliver of it. Each row's span is where the row's centre line
+    crosses the face, widened by a pixel on each side so the barycentric inside
+    test still decides every fragment: the fragments are the bounding box's,
+    in the same face and row order, without generating the rejected ones.
+    """
+    import numpy as np
+
+    heights = y1 - y0 + 1
+    row_ends = np.cumsum(heights)
+    face_start = 0
+    while face_start < len(heights):
+        consumed = int(row_ends[face_start - 1]) if face_start else 0
+        face_end = max(
+            face_start + 1,
+            int(np.searchsorted(row_ends, consumed + _SPAN_ROW_BUDGET, side="right")),
+        )
+        face_heights = heights[face_start:face_end]
+        face = np.repeat(np.arange(face_start, face_end), face_heights)
+        first_rows = np.repeat(np.cumsum(face_heights) - face_heights, face_heights)
+        row = y0[face] + np.arange(len(face)) - first_rows
+        centre = row + 0.5
+        low = np.full(len(face), np.inf)
+        high = np.full(len(face), -np.inf)
+        for start, end in ((v0, v1), (v1, v2), (v2, v0)):
+            ax, ay = start[face, 0], start[face, 1]
+            bx, by = end[face, 0], end[face, 1]
+            rise = by - ay
+            sloped = rise != 0
+            t = (centre - ay) / np.where(sloped, rise, 1.0)
+            crosses = sloped & (t >= 0) & (t <= 1)
+            x = ax + t * (bx - ax)
+            low = np.where(crosses, np.minimum(low, x), low)
+            high = np.where(crosses, np.maximum(high, x), high)
+            level = ~sloped & (ay == centre)
+            low = np.where(level, np.minimum(low, np.minimum(ax, bx)), low)
+            high = np.where(level, np.maximum(high, np.maximum(ax, bx)), high)
+        covered = np.isfinite(low)
+        left = np.maximum(
+            np.ceil(np.where(covered, low, 0.0) - 0.5).astype(np.int64) - 1, x0[face]
+        )
+        right = np.minimum(
+            np.floor(np.where(covered, high, 0.0) - 0.5).astype(np.int64) + 1, x1[face]
+        )
+        counts = np.where(covered, np.maximum(right - left + 1, 0), 0)
+        pixel_ends = np.cumsum(counts)
+        row_start = 0
+        while row_start < len(counts):
+            done = int(pixel_ends[row_start - 1]) if row_start else 0
+            row_end = max(
+                row_start + 1,
+                int(
+                    np.searchsorted(
+                        pixel_ends, done + _CHUNK_PIXEL_BUDGET, side="right"
+                    )
+                ),
+            )
+            chunk = counts[row_start:row_end]
+            rows = np.repeat(np.arange(row_start, row_end), chunk)
+            if len(rows):
+                firsts = np.repeat(np.cumsum(chunk) - chunk, chunk)
+                yield (
+                    face[rows],
+                    left[rows] + np.arange(len(rows)) - firsts,
+                    row[rows],
+                )
+            row_start = row_end
+        face_start = face_end
 
 
 def _pixel_batches(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 from xml.etree import ElementTree
 
 import pytest
@@ -20,6 +21,14 @@ def _configs(kind: str) -> list[ElementTree.Element]:
 
 def _variables() -> dict[str | None, ElementTree.Element]:
     return {item.get("Target"): item for item in _configs("Variable")}
+
+
+def _paths() -> dict[str | None, ElementTree.Element]:
+    return {item.get("Target"): item for item in _configs("Path")}
+
+
+def _extra_params() -> list[str]:
+    return shlex.split(_template().findtext("ExtraParams", ""))
 
 
 ADMIN_SETTINGS = [
@@ -53,6 +62,7 @@ class TestPrintStashTemplate:
         assert [
             (item.get("Target"), item.get("Default"), item.get("Mode"), item.text)
             for item in _configs("Path")
+            if item.get("Required") == "true"
         ] == [
             (
                 "/data",
@@ -63,8 +73,7 @@ class TestPrintStashTemplate:
         ]
 
     def test_warns_that_a_second_data_mapping_stops_hard_links(self) -> None:
-        (appdata,) = _configs("Path")
-        description = appdata.get("Description", "")
+        description = _paths()["/data"].get("Description", "")
 
         assert "one pool" in description
         assert "subfolder of /data" in description
@@ -141,22 +150,49 @@ class TestPrintStashTemplate:
         variables = {item.get("Target"): item for item in _configs("Variable")}
 
         assert variables["VAULT_RESTART_ENABLED"].text == "true"
-        assert _template().findtext("ExtraParams") == "--restart=unless-stopped"
+        assert "--restart=unless-stopped" in _extra_params()
 
 
 class TestPrintStashTemplateGpu:
-    def test_offers_the_render_device_without_a_default(self) -> None:
-        (device,) = _configs("Device")
+    """An Intel or AMD GPU is one optional field; leaving it blank must start.
 
-        assert device.get("Target") == "/dev/dri"
-        assert (device.get("Default"), device.get("Required")) == ("", "false"), (
-            "a default device would stop the container on hosts without a GPU"
+    Unraid passes every Device field to `docker run`, even an empty one, and
+    `--device=''` stops the container before it starts. A Path field is
+    skipped when blank, so the GPU is offered as a Path mapping and the device
+    access it needs is granted by a cgroup rule that is inert without it.
+    """
+
+    def test_ships_no_device_field(self) -> None:
+        assert _configs("Device") == [], (
+            "Unraid runs a blank Device field as --device='', which never starts"
         )
+
+    def test_offers_the_render_device_as_a_blank_optional_path(self) -> None:
+        device = _paths()["/dev/dri"]
+
+        assert (device.get("Default"), device.get("Required"), device.text) == (
+            "",
+            "false",
+            None,
+        ), "a default device would stop the container on hosts without a GPU"
+
+    def test_shows_the_render_device_up_front(self) -> None:
+        assert _paths()["/dev/dri"].get("Display") == "always", (
+            "hidden under Advanced, a field reads as missing (#248)"
+        )
+
+    def test_allows_the_render_devices_by_default(self) -> None:
+        # 226 is the DRM major: every /dev/dri/card* and renderD* node.
+        assert "--device-cgroup-rule=c 226:* rmw" in _extra_params()
 
     def test_keeps_the_nvidia_runtime_out_of_the_default_parameters(self) -> None:
         # --runtime=nvidia fails on a host without the Nvidia Driver plugin.
-        assert "nvidia" not in _template().findtext("ExtraParams", "")
-        assert "--runtime=nvidia" in _configs("Device")[0].get("Description", "")
+        assert not any("nvidia" in param for param in _extra_params())
+
+    def test_explains_how_to_enable_the_nvidia_runtime(self) -> None:
+        description = _paths()["/dev/dri"].get("Description", "")
+
+        assert "--runtime=nvidia" in description
 
     def test_defaults_the_nvidia_capabilities_to_all(self) -> None:
         assert _variables()["NVIDIA_DRIVER_CAPABILITIES"].text == "all"

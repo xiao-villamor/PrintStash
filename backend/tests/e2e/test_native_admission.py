@@ -14,13 +14,14 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
 from app.bootstrap.native_resources import configure
 from app.core.config import _overlay
 from app.modules.media.native_process import native_capacity
-from app.runtime.native_admission import Resources
+from app.runtime.native_admission import LocalResourcePool, Resources
 from app.runtime.native_runtime import admit
 from tests.factories import content
 from tests.paths import BACKEND_DIR
@@ -32,12 +33,24 @@ def workers(tmp_path):
     source.write_bytes(content.binary_stl(triangles=2))
     processes = []
 
-    def start(*, selected_source=None, ready=None, release=None, capacity_bytes=None):
+    def start(
+        *,
+        selected_source=None,
+        ready=None,
+        release=None,
+        capacity_bytes=None,
+        cancel=None,
+        gate_timeout=None,
+    ):
         arguments = ["--source", str(selected_source or source)]
         if ready is not None:
             arguments += ["--ready", str(ready), "--release", str(release)]
         if capacity_bytes is not None:
             arguments += ["--capacity-bytes", str(capacity_bytes)]
+        if cancel is not None:
+            arguments += ["--cancel", str(cancel)]
+        if gate_timeout is not None:
+            arguments += ["--gate-timeout", str(gate_timeout)]
         process = subprocess.Popen(
             [
                 sys.executable,
@@ -88,6 +101,29 @@ def workers(tmp_path):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.communicate(timeout=5)
+
+
+@pytest.fixture
+def geometry_gate():
+    def wait(process, marker):
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                output, errors = process.communicate(timeout=5)
+                raise AssertionError(
+                    "worker exited before its geometry gate: " + output + errors
+                )
+            try:
+                record = json.loads(marker.read_text())
+            except FileNotFoundError, json.JSONDecodeError:
+                time.sleep(0.01)
+                continue
+            if record["stage"] == "geometry":
+                return record
+            raise AssertionError("worker passed its unreleased geometry gate")
+        raise TimeoutError("worker did not reach its geometry gate")
+
+    return wait
 
 
 class TestNativeAdmission:
@@ -197,3 +233,98 @@ class TestNativeAdmission:
             assert result["image_is_png"] is True
             assert hashlib.sha256(source.read_bytes()).digest() == original
         assert sum(peaks) <= capacity.bytes
+
+    @pytest.mark.parametrize("_linux", [True] if sys.platform == "linux" else [])
+    def test_cancelling_one_worker_preserves_its_peer(
+        self, tmp_path, workers, geometry_gate, _linux
+    ):
+        import fcntl
+
+        start, _queued = workers
+        healthy_source = tmp_path / "healthy.stl"
+        healthy_bytes = content.binary_stl(triangles=2)
+        healthy_source.write_bytes(healthy_bytes)
+        cancelled_source = tmp_path / "cancelled.stl"
+        cancelled_bytes = content.binary_stl(triangles=3)
+        cancelled_source.write_bytes(cancelled_bytes)
+        capacity_bytes = 2 * 1024**3
+        baseline_release = tmp_path / "baseline-release"
+        baseline_release.touch()
+        baseline = start(
+            selected_source=healthy_source,
+            ready=tmp_path / "baseline-ready.json",
+            release=baseline_release,
+            capacity_bytes=capacity_bytes,
+        )
+        baseline_output, baseline_errors = baseline.communicate(timeout=30)
+        assert baseline.returncode == 0, baseline_errors
+        expected = json.loads(baseline_output.splitlines()[-1])
+        assert expected["failure_reason"] is None
+        assert expected["image_bytes"] > 0
+
+        healthy_ready = tmp_path / "healthy-ready.json"
+        cancelled_ready = tmp_path / "cancelled-ready.json"
+        healthy_release = tmp_path / "healthy-release"
+        cancelled_release = tmp_path / "cancelled-release"
+        cancel = tmp_path / "cancel"
+        healthy = start(
+            selected_source=healthy_source,
+            ready=healthy_ready,
+            release=healthy_release,
+            capacity_bytes=capacity_bytes,
+            gate_timeout=60,
+        )
+        cancelled = start(
+            selected_source=cancelled_source,
+            ready=cancelled_ready,
+            release=cancelled_release,
+            capacity_bytes=capacity_bytes,
+            cancel=cancel,
+            gate_timeout=60,
+        )
+        pool = LocalResourcePool(tmp_path / "runtime" / "native")
+        try:
+            healthy_at_gate = geometry_gate(healthy, healthy_ready)
+            cancelled_at_gate = geometry_gate(cancelled, cancelled_ready)
+            healthy_ticket = Path(healthy_at_gate["ticket"])
+            cancelled_ticket = Path(cancelled_at_gate["ticket"])
+            healthy_receipt = healthy_ticket.read_bytes()
+            assert healthy_at_gate["identity"] != cancelled_at_gate["identity"]
+            assert healthy_at_gate["pid"] != cancelled_at_gate["pid"]
+            assert cancelled_ticket.exists()
+
+            cancel.touch()
+            cancelled_output, cancelled_errors = cancelled.communicate(timeout=15)
+
+            assert cancelled.returncode == 2, cancelled_errors
+            assert json.loads(cancelled_output.splitlines()[-1]) == {
+                "cancelled": True,
+                "exit_cause": "cancelled",
+            }
+            with pytest.raises(ProcessLookupError):
+                os.kill(cancelled_at_gate["pid"], 0)
+            assert pool.has_waiters(checkpoint=lambda: None) is False
+            assert not cancelled_ticket.exists()
+            assert healthy_ticket.read_bytes() == healthy_receipt
+            with healthy_ticket.open("r+b") as handle, pytest.raises(BlockingIOError):
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            assert healthy.poll() is None
+            os.kill(healthy_at_gate["pid"], 0)
+        finally:
+            healthy_release.touch()
+            cancelled_release.touch()
+        healthy_output, healthy_errors = healthy.communicate(timeout=30)
+        assert healthy.returncode == 0, healthy_errors
+        actual = json.loads(healthy_output.splitlines()[-1])
+        assert actual["geometry"] == expected["geometry"]
+        assert actual["geometry_outcome"] == expected["geometry_outcome"]
+        assert actual["volume"] == expected["volume"]
+        assert actual["coverage"] == expected["coverage"]
+        assert actual["strategy"] == expected["strategy"]
+        assert actual["failure_reason"] == expected["failure_reason"]
+        assert actual["image_sha256"] == expected["image_sha256"]
+        assert actual["image_bytes"] == expected["image_bytes"]
+        assert healthy_source.read_bytes() == healthy_bytes
+        assert cancelled_source.read_bytes() == cancelled_bytes
+        assert pool.has_waiters(checkpoint=lambda: None) is False
+        assert list(pool.directory.glob("*.ticket")) == []

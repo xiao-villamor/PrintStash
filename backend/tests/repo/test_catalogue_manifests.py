@@ -13,6 +13,8 @@ manifest follows.
 from __future__ import annotations
 
 import json
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +33,11 @@ RUNTIPI = CATALOGUES / "runtipi" / "printstash"
 UMBREL = CATALOGUES / "umbrel" / "printstash"
 CASAOS = CATALOGUES / "casaos" / "PrintStash"
 COSMOS = CATALOGUES / "cosmos" / "PrintStash"
+TRUENAS = CATALOGUES / "truenas" / "printstash"
+# TrueNAS takes a package (a Jinja template plus the app metadata around it)
+# rather than a compose document, so it has its own class instead of a
+# MAIN_SERVICES entry.
+TEMPLATED = {"truenas"}
 
 # The service that runs PrintStash in each store's compose file. Cosmos keeps the
 # service name a template variable, so its key is the placeholder the store renders.
@@ -87,7 +94,9 @@ class TestEveryCatalogue:
         # A new store directory is guarded the day it is added, or this fails.
         stores = {path.name for path in CATALOGUES.iterdir() if path.is_dir()}
 
-        assert stores == set(MAIN_SERVICES), "add the new store to MAIN_SERVICES"
+        assert stores == set(MAIN_SERVICES) | TEMPLATED, (
+            "add the new store to MAIN_SERVICES, or to TEMPLATED when it ships a template"
+        )
 
     def test_classifies_every_store_by_how_it_provisions_the_owner(self) -> None:
         # Each store's setup mode follows from this, so none may be left out.
@@ -97,7 +106,11 @@ class TestEveryCatalogue:
     def test_runs_the_unified_image_at_the_app_version(self, store: str) -> None:
         image = _service(store)["image"]
 
-        assert image == f"{IMAGE}:{settings.app_version}", (
+        # Umbrel appends the multi-arch index digest it pins. The tag in front of
+        # it is still what ties the manifest to the release.
+        reference = image.split("@", 1)[0]
+
+        assert reference == f"{IMAGE}:{settings.app_version}", (
             "bump every catalogue manifest in the release commit"
         )
 
@@ -111,9 +124,7 @@ class TestEveryCatalogue:
         assert "/data" in targets, "without /data every restart starts empty"
 
     @pytest.mark.parametrize("store", STORES, ids=str)
-    def test_ships_compute_budgets_the_settings_accept(
-        self, store: str
-    ) -> None:
+    def test_ships_compute_budgets_the_settings_accept(self, store: str) -> None:
         env = _environment(store)
 
         resolved = Settings(
@@ -256,6 +267,31 @@ class TestRuntipi:
 
 
 class TestUmbrel:
+    def test_uses_a_versioned_release_source_reference(self) -> None:
+        # The source package moves before publication, when no digest exists yet.
+        # Submitted packages must add the published index digest; see the release
+        # procedure. Never carry the previous release's digest to a new tag.
+        image = _service("umbrel")["image"]
+
+        assert re.fullmatch(
+            rf"{re.escape(IMAGE)}:{re.escape(settings.app_version)}(?:@sha256:[0-9a-f]{{64}})?",
+            image,
+        ), "use the app version, with a full SHA-256 digest when published"
+        if os.environ.get("PRINTSTASH_STORE_SUBMISSION") == "1":
+            assert "@sha256:" in image, "store submission requires the published digest"
+
+    def test_declares_the_data_root_the_store_moves(self) -> None:
+        # umbrelOS 2.0 moves this folder when a user relocates app data. Without
+        # it a relocated install starts empty, and it cannot be removed later.
+        manifest = _load(UMBREL / "umbrel-app.yml")
+
+        assert manifest["storage"] == {"dataRoot": "data"}
+
+    def test_ships_the_directory_the_data_mounts_from(self) -> None:
+        # compose mounts ${APP_DATA_DIR}/data; a missing source directory is what
+        # makes a first start fail before the app can create it.
+        assert (UMBREL / "data").is_dir()
+
     def test_routes_the_app_proxy_to_the_web_service(self) -> None:
         proxy = _load(UMBREL / "docker-compose.yml")["services"]["app_proxy"]
 
@@ -367,3 +403,186 @@ class TestCosmos:
 
         assert icon.size == (256, 256), "the store shows icon.png at 256x256"
         assert len(sorted((COSMOS / "screenshots").glob("*.png"))) >= 1
+
+
+def _truenas_env() -> dict[str, str]:
+    """The variables the TrueNAS template sets itself, read from its source."""
+    template = (TRUENAS / "templates" / "docker-compose.yaml").read_text()
+
+    return dict(re.findall(r'add_env\("([A-Z0-9_]+)", "([^"]*)"\)', template))
+
+
+def _truenas_template() -> str:
+    return (TRUENAS / "templates" / "docker-compose.yaml").read_text()
+
+
+def _truenas_fields() -> dict[str, dict[str, Any]]:
+    """The install form's PrintStash group, keyed by variable."""
+    questions = _load(TRUENAS / "questions.yaml")["questions"]
+    group = next(
+        question for question in questions if question["variable"] == "printstash"
+    )
+    return {attr["variable"]: attr for attr in group["schema"]["attrs"]}
+
+
+def _truenas_environment_block() -> str:
+    """The template lines that run only when the form provisions the owner."""
+    # The branch opens and closes at column 0; anything nested inside is indented.
+    match = re.search(
+        r'^\{% if values\.printstash\.setup_mode == "environment" %\}$(.*?)^\{% endif %\}$',
+        _truenas_template(),
+        re.DOTALL | re.MULTILINE,
+    )
+    assert match, (
+        "the administrator settings must sit inside the environment-mode branch"
+    )
+    return match.group(1)
+
+
+class TestTruenas:
+    def test_declares_the_app_version(self) -> None:
+        assert _load(TRUENAS / "app.yaml")["app_version"] == settings.app_version
+
+    def test_uses_a_versioned_release_source_reference(self) -> None:
+        # Source metadata is prepared before the image is published. A submitted
+        # package adds that release's multi-arch index digest after publication.
+        tag = _load(TRUENAS / "ix_values.yaml")["images"]["image"]["tag"]
+
+        assert re.fullmatch(
+            rf"{re.escape(settings.app_version)}(?:@sha256:[0-9a-f]{{64}})?", tag
+        ), "use the app version, with a full SHA-256 digest when published"
+        if os.environ.get("PRINTSTASH_STORE_SUBMISSION") == "1":
+            assert "@sha256:" in tag, "store submission requires the published digest"
+
+    def test_persists_the_data_root(self) -> None:
+        assert 'add_storage("/data"' in _truenas_template(), (
+            "without /data every restart starts empty"
+        )
+
+    def test_maps_the_published_port_onto_the_fixed_container_port(self) -> None:
+        # The image's nginx listens on 3000 and cannot be moved, so the published
+        # port is mapped onto it instead of assuming the two match.
+        assert (
+            'add_port(values.network.web_port, {"container_port": 3000})'
+            in _truenas_template()
+        )
+
+    def test_registers_in_the_browser_by_default(self) -> None:
+        # The administrator fields are hidden until the form asks for them, so an
+        # untouched install registers from the local network.
+        mode = _truenas_fields()["setup_mode"]["schema"]["default"]
+
+        policy = setup_policy.resolve(mode, "", "", "")
+
+        assert isinstance(policy, setup_policy.TrustedNetwork), policy
+
+    def test_offers_both_setup_modes(self) -> None:
+        # The form is the only way past browser registration for an install first
+        # reached through a VPN or a reverse proxy, which the browser path refuses.
+        enum = _truenas_fields()["setup_mode"]["schema"]["enum"]
+
+        assert {option["value"] for option in enum} == {
+            "trusted_network",
+            "environment",
+        }
+
+    def test_passes_the_setup_mode_from_the_form(self) -> None:
+        assert (
+            'add_env("VAULT_SETUP_MODE", values.printstash.setup_mode)'
+            in _truenas_template()
+        )
+
+    @pytest.mark.parametrize(
+        ("field", "variable"),
+        [
+            pytest.param("admin_username", "VAULT_SETUP_ADMIN_USERNAME", id="username"),
+            pytest.param("admin_password", "VAULT_SETUP_ADMIN_PASSWORD", id="password"),
+            pytest.param("admin_email", "VAULT_SETUP_ADMIN_EMAIL", id="email"),
+        ],
+    )
+    def test_passes_each_form_field_only_in_environment_mode(
+        self, field: str, variable: str
+    ) -> None:
+        # Credentials alongside trusted_network are a misconfiguration that keeps
+        # setup closed, so the template passes them only with the environment mode.
+        assert (
+            f'add_env("{variable}", values.printstash.{field})'
+            in _truenas_environment_block()
+        )
+
+    @pytest.mark.parametrize("field", ["admin_username", "admin_password"], ids=str)
+    def test_requires_the_administrator_credentials_in_environment_mode(
+        self, field: str
+    ) -> None:
+        schema = _truenas_fields()[field]["schema"]
+
+        assert (schema["required"], schema["show_if"]) == (
+            True,
+            [["setup_mode", "=", "environment"]],
+        )
+
+    @pytest.mark.parametrize(
+        ("field", "setting"),
+        [
+            pytest.param("admin_username", "username", id="username"),
+            pytest.param("admin_password", "password", id="password"),
+        ],
+    )
+    def test_enforces_the_wizard_limits(self, field: str, setting: str) -> None:
+        # A form that accepts less than startup validation leaves no administrator.
+        schema = _truenas_fields()[field]["schema"]
+
+        assert (schema["min_length"], schema["max_length"]) == (
+            WIZARD_LIMITS[setting]["minLength"],
+            WIZARD_LIMITS[setting]["maxLength"],
+        )
+
+    def test_hides_the_password(self) -> None:
+        assert _truenas_fields()["admin_password"]["schema"]["private"] is True
+
+    def test_runs_as_the_user_the_install_asks_for(self) -> None:
+        # The catalog's permissions container owns the dataset first, so the app
+        # never has to start as root to repair ownership itself.
+        questions = _load(TRUENAS / "questions.yaml")
+        run_as = next(
+            question
+            for question in questions["questions"]
+            if question["variable"] == "run_as"
+        )
+        defaults = {
+            attr["variable"]: attr["schema"]["default"]
+            for attr in run_as["schema"]["attrs"]
+        }
+
+        assert (
+            "set_user(values.run_as.user, values.run_as.group)" in _truenas_template()
+        )
+        assert defaults == {"user": 568, "group": 568}
+
+    def test_leaves_compute_budgets_to_the_image(self) -> None:
+        # The catalog reviewers asked for the image defaults; anyone can still set
+        # the budgets through Additional Environment Variables.
+        budgets = {
+            "VAULT_COMPUTE_MODE",
+            "VAULT_COMPUTE_MEMORY_MB",
+            "VAULT_MESH_MEMORY_BUDGET_FRACTION",
+            "VAULT_EMBEDDING_MEMORY_BUDGET_FRACTION",
+        }
+
+        assert not budgets & set(_truenas_env())
+
+    def test_never_passes_a_jwt_secret(self) -> None:
+        assert "VAULT_JWT_SECRET" not in _truenas_env(), (
+            "an empty value is read as a deliberate choice and skips the generated one"
+        )
+
+    def test_offers_the_settings_restart(self) -> None:
+        assert _truenas_env()["VAULT_RESTART_ENABLED"] == "true"
+
+    def test_relaunches_after_a_graceful_exit(self) -> None:
+        # The catalog library restarts unless-stopped; a Settings restart is a
+        # graceful SIGTERM, and running jobs get the image's 60s to finish.
+        template = _truenas_template()
+
+        assert "on-failure" not in template
+        assert "set_grace_period(60)" in template

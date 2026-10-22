@@ -348,7 +348,7 @@ def rederive(file_id: int) -> None:
     from app.modules.derivatives import kinds, producers
 
     mesh = kinds.group(JobKind.DERIVATIVES_MESH)
-    mesh.kinds[DerivativeKind.THUMBNAIL] = mesh.kinds[DerivativeKind.THUMBNAIL] + 1
+    mesh.recipes[DerivativeKind.THUMBNAIL] = mesh.recipes[DerivativeKind.THUMBNAIL] + 1
     shown_while_deriving: list[str | None] = []
     original = producers.derive_mesh
 

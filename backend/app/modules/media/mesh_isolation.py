@@ -49,6 +49,7 @@ from app.modules.media.fingerprints import (
 )
 from app.modules.media.mesh_contracts import (
     GeometryNotRequested,
+    GeometryRefused,
     MeshMeasurements,
     PreviewCoverage,
     ThumbnailFailureReason,
@@ -62,6 +63,7 @@ from app.modules.media.mesh_contracts import (
 )
 from app.modules.media.mesh_facts import FingerprintFailureCode
 from app.modules.media.mesh_protocol import (
+    BasicOutput,
     FrameDecoder,
     GeometryOutput,
     MeshProtocolError,
@@ -84,6 +86,7 @@ from app.modules.media.native_budget import (
     RasterWork,
     WorkProfile,
     estimate_sources,
+    optimistic_step_claim,
 )
 from app.modules.media.native_execution import admission
 from app.modules.media.worker_bootstrap import (
@@ -721,8 +724,12 @@ def _run_worker(
     work: WorkProfile,
     on_chunk: Callable[[bytes], None] | None = None,
     deadline: float | None = None,
+    amount: Resources | None = None,
 ) -> SupervisedReply:
-    """Plan a weighted native allowance, then run one supervised worker."""
+    """Plan a weighted native allowance, then run one supervised worker.
+
+    *amount* overrides the estimate; an admitted caller's permit still wins.
+    """
     from app.runtime.compute.client import warm_render
 
     def check() -> None:
@@ -739,6 +746,8 @@ def _run_worker(
     amount = (
         existing.resources
         if existing is not None
+        else amount
+        if amount is not None
         else estimate_sources(capacity, sources, work=work)
     )
     with admission(amount, capacity, checkpoint=check) as permit:
@@ -874,13 +883,95 @@ def read_spec(argv: list[str]) -> dict[str, Any]:
     return spec
 
 
+def _work_profile(request: ThumbnailRequest) -> WorkProfile:
+    raster: RasterWork | None = None
+    if request.include_thumbnail:
+        width = int(request.width or settings.model_thumbnail_width)
+        height = int(request.height or round(width * 3 / 4))
+        raster = RasterWork(
+            width, height, 1, RasterCodec(request.output_format.lower())
+        )
+    return (
+        AnalysisWork(raster)
+        if request.include_fingerprint
+        else raster
+        if raster is not None
+        else GeometryWork()
+    )
+
+
+# A first attempt under an optimistic claim ends with one of these when its
+# allowance was too small: a refusal, or OCCT failing its allocations.
+_ESCALATED_FAILURES = frozenset(
+    {ThumbnailFailureReason.RESOURCE_LIMIT, ThumbnailFailureReason.WORKER_FAILED}
+)
+
+
+def _refused_for_memory(result: ThumbnailResult) -> bool:
+    return result.failure_reason is ThumbnailFailureReason.RESOURCE_LIMIT or (
+        isinstance(result.geometry_outcome, GeometryRefused)
+        and result.geometry_outcome.reason is ThumbnailFailureReason.RESOURCE_LIMIT
+    )
+
+
 def generate(
     request: ThumbnailRequest,
     *,
     on_output: OutputSink | None = None,
     handoff: ThumbnailHandoff | None = None,
 ) -> ThumbnailResult:
-    """`ThumbnailEngine.generate` for *request*, run in a supervised child."""
+    """`ThumbnailEngine.generate` for *request*, run in a supervised child.
+
+    A STEP part's tessellation density is unknown until it runs, so it is first
+    admitted under an optimistic claim. Its outputs are held until that attempt
+    succeeds; a memory refusal or an allocation crash discards them and runs the
+    derivative once more under the whole pool, so nothing is published twice.
+    """
+    optimistic = (
+        optimistic_step_claim(
+            Resources(1, memory_budget_bytes()), _work_profile(request)
+        )
+        if current_permit() is None
+        and mesh_policy.canonical_suffix(request.path, request.file_type)
+        in (".step", ".stp")
+        else None
+    )
+    if optimistic is None:
+        return _generate_once(request, on_output=on_output, handoff=handoff)
+    held: list[BasicOutput] = []
+    try:
+        result = _generate_once(
+            request, on_output=held.append, handoff=handoff, amount=optimistic
+        )
+    except MeshWorkerError as exc:
+        if exc.reason not in _ESCALATED_FAILURES:
+            raise
+        reason: ThumbnailFailureReason = exc.reason
+    else:
+        if not _refused_for_memory(result):
+            for output in held:
+                if on_output is not None:
+                    on_output(output)
+            return result
+        reason = ThumbnailFailureReason.RESOURCE_LIMIT
+    from app.modules.media.mesh_observability import record_escalation
+
+    record_escalation(request.path.suffix.lower().lstrip("."), optimistic, reason)
+    return _generate_once(
+        request,
+        on_output=on_output,
+        handoff=handoff,
+        amount=Resources(1, memory_budget_bytes()),
+    )
+
+
+def _generate_once(
+    request: ThumbnailRequest,
+    *,
+    on_output: OutputSink | None,
+    handoff: ThumbnailHandoff | None,
+    amount: Resources | None = None,
+) -> ThumbnailResult:
     decoder = FrameDecoder(request, prepared=handoff is not None)
     geometry_output: GeometryOutput | None = None
     thumbnail_output: ThumbnailOutput | None = None
@@ -921,20 +1012,7 @@ def generate(
         "output_format": request.output_format,
         "reason": request.reason,
     }
-    raster: RasterWork | None = None
-    if request.include_thumbnail:
-        width = int(request.width or settings.model_thumbnail_width)
-        height = int(request.height or round(width * 3 / 4))
-        raster = RasterWork(
-            width, height, 1, RasterCodec(request.output_format.lower())
-        )
-    work: WorkProfile = (
-        AnalysisWork(raster)
-        if request.include_fingerprint
-        else raster
-        if raster is not None
-        else GeometryWork()
-    )
+    work = _work_profile(request)
     with ExitStack() as resources:
         directory: Path | None = None
         directory_identity: tuple[int, int] | None = None
@@ -976,6 +1054,7 @@ def generate(
             ),
             work=work,
             on_chunk=receive,
+            amount=amount,
             **run_options,
         )
         try:

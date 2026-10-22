@@ -9,6 +9,7 @@ Applications reads directly.
 | Store | Files | First administrator |
 | --- | --- | --- |
 | Unraid | `templates/printstash.xml` | **First-run setup** dropdown: `trusted_network` (default; register in the browser, fields blank) or `environment` (fields required) |
+| TrueNAS | `truenas/printstash/` | `trusted_network` by default; choose **Create from this form** under First Administrator to switch to `environment`, which makes the username and password fields required |
 | Runtipi | `runtipi/printstash/` | `environment`, with required install-form fields, so the owner exists before the app serves a request |
 | Umbrel | `umbrel/printstash/` | `environment`, with Umbrel's per-app credentials (`defaultUsername`, `deterministicPassword`) shown on the app's page |
 | CasaOS / ZimaOS | `casaos/PrintStash/` | `trusted_network` by default; set `VAULT_SETUP_MODE=environment` and fill the fields to provision instead |
@@ -24,7 +25,7 @@ and the credentials together (see
 [first use](../docs/first-run.md#an-administrator-from-the-deployment)). Where
 the store always supplies the credentials (Runtipi, Umbrel, Cosmos) the mode is
 `environment`: the owner exists before the first request and the browser has no
-door. Where the fields may be blank (CasaOS, Unraid) the default is
+door. Where the fields may be blank (CasaOS, TrueNAS, Unraid) the default is
 `trusted_network`, browser registration from the local network; switching to
 `environment` makes the fields required. A combination that doesn't fit keeps
 setup closed and the setup page names what to change.
@@ -50,7 +51,31 @@ Check the image before touching any store:
 docker buildx imagetools inspect ghcr.io/xiao-villamor/printstash:X.Y.Z
 ```
 
-The digest it prints (`sha256:…`) is what Umbrel pins.
+The digest it prints (`sha256:…`) is what Umbrel and TrueNAS pin. Before
+publication, this repository's source packages use the new version tag without a
+digest. After publication, add the verified multi-arch index digest to both
+source packages, commit it back here, then copy them to the store forks. Never
+retain a previous release's digest beside the new tag: Docker would run the old
+image. A source package with a bare tag is not ready for store submission.
+
+After adding the digests, run the strict submission gate from `backend/`:
+
+```bash
+PRINTSTASH_STORE_SUBMISSION=1 uv run pytest tests/repo/test_catalogue_manifests.py -q
+```
+
+This deliberately fails for unpinned source packages. Before copying either
+package, also verify both references against the registry:
+
+```bash
+docker buildx imagetools inspect ghcr.io/xiao-villamor/printstash:X.Y.Z
+# Both the tag and tag@sha256:<index digest> must resolve to that same index.
+docker buildx imagetools inspect ghcr.io/xiao-villamor/printstash:X.Y.Z@sha256:<index digest>
+```
+
+Umbrel's `lint:apps --check-images` and the TrueNAS app test still run on the
+copied, digest-pinned packages. Source-package version tests do not establish
+that a submitted package has been published or installed.
 
 ### Unraid
 
@@ -58,26 +83,74 @@ Nothing to submit. Community Applications re-reads `templates/printstash.xml` fr
 `main`, and the template deliberately tracks `:latest`, the Community Applications
 convention, so it is the one manifest the version test does not pin.
 
+### TrueNAS: pull request to `truenas/apps`
+
+The package is submitted to `truenas/apps`, and its source is here: the whole app
+directory the catalog reads (`app.yaml`, `ix_values.yaml`, `questions.yaml`,
+`item.yaml`, `README.md`, the Jinja compose template and its test values). The
+vendored `templates/library/` is not kept here; the catalog's `devbox run
+copy-lib` generates it from `lib_version`. The release order, including that step,
+the metadata regeneration and the two things the template pins (container port
+`3000` and the `PUID`/`PGID` identity), is in
+[`.agents/skills/printstash/references/release.md`](../.agents/skills/printstash/references/release.md),
+section "TrueNAS community catalog, every release", and
+`tests/repo/test_catalogue_manifests.py` checks the fields that must follow a
+release.
+
 ### Umbrel: pull request to `getumbrel/umbrel-apps`
 
 That repository ships agent skills for exactly this: `umbrel-package-app` (first
 submission), `umbrel-update-app` (every release) and `umbrel-test-app`. Follow them
-in a checkout of the fork; they are the store's own contract.
+in a checkout of the fork; they are the store's own contract. The store keeps one
+directory per app at its repository root, so the package is `printstash/`, not
+`apps/printstash/`.
 
 1. Fork and branch: `gh repo fork getumbrel/umbrel-apps --clone`, then
    `git switch -c printstash-X.Y.Z`.
-2. Copy `catalogues/umbrel/printstash/` to `printstash/`.
-3. Pin the image by digest: `image: ghcr.io/xiao-villamor/printstash:X.Y.Z@sha256:…`.
-4. **First submission only:** leave `gallery: []` and omit `icon` (the Umbrel team
-   adds the official assets before merge), set `submitter`, and after opening the PR
-   set `submission` to its URL. Mention in the description that the service uses
-   `restart: unless-stopped` where Umbrel apps usually use `on-failure`: a restart
-   requested from Settings is a graceful exit that can return status 0, which
-   `on-failure` would not relaunch.
-5. **Every release:** bump `version`, update the image and digest, and write
-   `releaseNotes` from the CHANGELOG entry.
-6. Test with `umbrel-test-app` (install on umbrelOS; sign in with the credentials
-   Umbrel shows; choose storage; upload a model), then open the PR.
+2. Copy `catalogues/umbrel/printstash/` to `printstash/`, `data/.gitkeep` included:
+   compose mounts `${APP_DATA_DIR}/data`, and the source directory has to exist in
+   the package or the first start fails.
+3. Pin the image with its tag and its multi-arch index digest together:
+   `image: ghcr.io/xiao-villamor/printstash:X.Y.Z@sha256:…`. Read the digest with
+   `docker buildx imagetools inspect ghcr.io/xiao-villamor/printstash:X.Y.Z` and
+   confirm it lists `linux/amd64` and `linux/arm64`. The linter rejects a tag
+   without a digest, and the store's CI resolves the tag and fails when the digest
+   it gets is not the one pinned.
+4. Keep the fields the store validates: `storage: {dataRoot: data}`, which lets
+   umbrelOS 2.0 move the library to another drive and cannot be removed once
+   shipped; `manifestVersion: 1`; and a `port` unique across the store (`3378` is
+   free as of 2026-10-21, and the linter checks every package for a collision).
+5. Keep Umbrel's login in front of the app. `app_proxy` sets
+   `PROXY_AUTH_WHITELIST: "/api/*"` and nothing else: slicers and print hosts call
+   `/api/*` with PrintStash's own tokens and cannot send an Umbrel cookie, while the
+   UI stays behind the Umbrel login, 2FA included. Do not set
+   `PROXY_AUTH_ADD: "false"`; the store reserves that for apps whose main use breaks
+   behind its login, and `PROXY_AUTH_WHITELIST` has no effect alongside it.
+6. Run the container as Umbrel's data owner: the compose file sets `PUID` and
+   `PGID` to `1000`, the UID/GID umbrelOS creates app data with. The image repairs
+   ownership at start and then drops to that identity, so the library on disk stays
+   owned by the user Umbrel uses.
+7. `restart: unless-stopped` stands where Umbrel apps usually use `on-failure`: a
+   restart requested from Settings is a graceful exit that can return status 0,
+   which `on-failure` would not relaunch. Say so in the PR body, and leave
+   `stop_grace_period: 60s` alone; it is what lets a running job finish.
+8. **First submission only:** `releaseNotes: ""`, `gallery: []` and no `icon` (the
+   Umbrel team creates the official assets before merge), set `submitter`, and set
+   `submission` to the PR URL once it exists. The linter rejects an empty
+   `submission`, so the first push fails `lint:apps` until that commit lands.
+9. **Every release:** bump `version`, update the image tag and digest together, and
+   write `releaseNotes` from the CHANGELOG entry. YAML folds single newlines into
+   spaces, so keep two blank lines between paragraphs and a blank line before and
+   between list items.
+10. Lint before opening the PR: `npm run lint:apps -- printstash --check-images`
+    checks the manifest, the port, image pinning, public pullability, multi-arch
+    support and the `app_proxy` wiring, and verifies the digest against the
+    registry; then `git diff --check`.
+11. Test with `umbrel-test-app` (install on umbrelOS, sign in with the credentials
+    Umbrel shows, choose storage, upload a model), then open the PR stating the app
+    version, upstream URL, image source, testing performed, default credentials and
+    the restart and auth decisions. Put screenshots and the logo in the PR body;
+    never commit gallery or icon assets.
 
 ### CasaOS / ZimaOS: pull request to `IceWhaleTech/CasaOS-AppStore`
 

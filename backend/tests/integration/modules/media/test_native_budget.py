@@ -1,15 +1,94 @@
 """Source preflight stays bounded and cannot guess unknown geometry complexity."""
 
 import hashlib
+import io
+import json
+import logging
 import os
+import zipfile
 from pathlib import Path
 
 import pytest
 
-from app.modules.media import mesh_policy, native_budget
-from app.runtime.native_admission import Resources
+from app.modules.media import mesh_policy, native_budget, three_mf_bounds
+from app.runtime.native_admission import LocalResourcePool, Resources
 from app.runtime.native_runtime import admit
-from tests.factories.content import ascii_stl, binary_stl
+from tests.factories.content import ascii_stl, binary_stl, zip_bytes
+from tests.factories.geometry import tetrahedron, three_mf
+
+THUMBNAIL_WORK = native_budget.RasterWork(640, 480, 1, native_budget.RasterCodec.WEBP)
+
+
+def _estimates(caplog) -> list[dict]:
+    return [
+        json.loads(record.getMessage().removeprefix("mesh_estimate "))
+        for record in caplog.records
+        if record.getMessage().startswith("mesh_estimate ")
+    ]
+
+
+@pytest.fixture
+def without_lib3mf(monkeypatch):
+    """A platform without lib3mf: the worker reads every 3MF as XML."""
+    monkeypatch.setattr(three_mf_bounds, "lib3mf_available", lambda: False)
+
+
+class TestFaceCapacity:
+    def test_weighs_a_lib3mf_scene_by_its_own_weight(self):
+        assert native_budget.face_capacity(600 * 1000, ".3mf", lib3mf=True) == 1000
+
+    def test_weighs_an_xml_scene_by_the_xml_weight(self):
+        assert native_budget.face_capacity(3600 * 1000, ".3mf") == 1000
+
+    @pytest.mark.parametrize("suffix", [".step", ".stp", ".STEP"], ids=str)
+    def test_weighs_a_step_mesh_by_the_step_weight(self, suffix):
+        assert native_budget.face_capacity(1500 * 1000, suffix) == 1000
+
+    def test_ignores_the_lib3mf_weight_outside_3mf(self):
+        assert native_budget.face_capacity(3000 * 1000, ".stl", lib3mf=True) == 1000
+
+
+class TestOptimisticStepClaim:
+    def test_claims_the_optimistic_allowance_for_a_thumbnail(self):
+        assert native_budget.optimistic_step_claim(
+            Resources(2, 4 * 1024**3), THUMBNAIL_WORK
+        ) == Resources(1, native_budget.STEP_OPTIMISTIC_MEMORY)
+
+    def test_claims_the_optimistic_allowance_for_geometry(self):
+        assert native_budget.optimistic_step_claim(
+            Resources(2, 4 * 1024**3), native_budget.GeometryWork()
+        ) == Resources(1, native_budget.STEP_OPTIMISTIC_MEMORY)
+
+    def test_adds_the_workspace_of_a_larger_raster(self):
+        raster = native_budget.RasterWork(1280, 960, 1, native_budget.RasterCodec.WEBP)
+
+        claim = native_budget.optimistic_step_claim(Resources(2, 4 * 1024**3), raster)
+
+        assert claim == Resources(
+            1,
+            native_budget.STEP_OPTIMISTIC_MEMORY
+            + (1280 * 960 - native_budget.QUALIFIED_RASTER_PIXELS)
+            * native_budget.RASTER_PIXEL_BYTES,
+        )
+
+    def test_keeps_fingerprint_analysis_out_of_the_optimistic_claim(self):
+        assert (
+            native_budget.optimistic_step_claim(
+                Resources(2, 4 * 1024**3), native_budget.AnalysisWork(THUMBNAIL_WORK)
+            )
+            is None
+        )
+
+    @pytest.mark.parametrize(
+        "pool_bytes", [1024**3, 512 * 1024**2], ids=["equal", "smaller"]
+    )
+    def test_declines_a_pool_no_larger_than_the_optimistic_claim(self, pool_bytes):
+        assert (
+            native_budget.optimistic_step_claim(
+                Resources(2, pool_bytes), THUMBNAIL_WORK
+            )
+            is None
+        )
 
 
 class TestEstimateSources:
@@ -381,6 +460,194 @@ class TestEstimateSources:
         )
         assert os.stat(source).st_blocks * 512 < 1024**2
 
+    def test_small_3mf_thumbnail_claims_only_the_raster_floor(self, tmp_path):
+        source = tmp_path / "part.3mf"
+        source.write_bytes(three_mf())
+
+        amount = native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3),
+            (native_budget.MeshSource(source, "3mf"),),
+            work=THUMBNAIL_WORK,
+        )
+
+        assert amount == Resources(1, native_budget.MIN_WEBP_MEMORY)
+
+    def test_loader_admits_every_placed_lib3mf_face_under_its_claim(self, tmp_path):
+        components = [(1, f"1 0 0 0 1 0 0 0 1 {i} 0 0") for i in range(300)]
+        placements = tuple((2, f"1 0 0 0 1 0 0 0 1 0 {i} 0") for i in range(300))
+        source = tmp_path / "plate.3mf"
+        source.write_bytes(three_mf(assemblies={2: components}, build=placements))
+        placed_faces = len(tetrahedron().faces) * len(components) * len(placements)
+        pool = Resources(4, 4 * 1024**3)
+
+        amount = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "3mf"),)
+        )
+
+        assert (
+            native_budget.face_capacity(amount.bytes, ".3mf", lib3mf=True)
+            >= placed_faces
+        )
+
+    def test_claims_a_lib3mf_package_by_the_lib3mf_weight(self, tmp_path):
+        components = [(1, f"1 0 0 0 1 0 0 0 1 {i} 0 0") for i in range(300)]
+        placements = tuple((2, f"1 0 0 0 1 0 0 0 1 0 {i} 0") for i in range(300))
+        source = tmp_path / "plate.3mf"
+        source.write_bytes(three_mf(assemblies={2: components}, build=placements))
+        placed_faces = len(tetrahedron().faces) * len(components) * len(placements)
+
+        amount = native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3), (native_budget.MeshSource(source, "3mf"),)
+        )
+
+        # 360,000 placed faces: the XML weight would claim 1.3 GB of the pool.
+        assert amount.bytes < placed_faces * native_budget.THREE_MF_FACE_BYTES
+        assert amount.bytes >= (
+            native_budget.THREE_MF_BASE_MEMORY
+            + placed_faces * native_budget.THREE_MF_LIB3MF_FACE_BYTES
+        )
+
+    def test_loader_admits_every_placed_xml_face_under_its_claim(
+        self, tmp_path, without_lib3mf
+    ):
+        components = [(1, f"1 0 0 0 1 0 0 0 1 {i} 0 0") for i in range(300)]
+        placements = tuple((2, f"1 0 0 0 1 0 0 0 1 0 {i} 0") for i in range(300))
+        source = tmp_path / "plate.3mf"
+        source.write_bytes(three_mf(assemblies={2: components}, build=placements))
+        placed_faces = len(tetrahedron().faces) * len(components) * len(placements)
+        pool = Resources(4, 4 * 1024**3)
+
+        amount = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "3mf"),)
+        )
+
+        assert amount.bytes < pool.bytes
+        assert native_budget.face_capacity(amount.bytes, ".3mf") >= placed_faces
+
+    def test_attribute_heavy_xml_package_claims_its_reached_xml(
+        self, tmp_path, without_lib3mf
+    ):
+        with zipfile.ZipFile(io.BytesIO(three_mf())) as archive:
+            model = archive.read("3D/3dmodel.model")
+        painted = model.replace(b"<vertex ", b'<vertex paint="' + b"4" * 4096 + b'" ')
+        source = tmp_path / "painted.3mf"
+        source.write_bytes(zip_bytes({"3D/3dmodel.model": painted}))
+
+        amount = native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3), (native_budget.MeshSource(source, "3mf"),)
+        )
+
+        assert (
+            amount.bytes
+            >= native_budget.THREE_MF_BASE_MEMORY
+            + len(painted) * native_budget.THREE_MF_XML_BYTE_COST
+        )
+
+    def test_attribute_heavy_lib3mf_package_claims_its_reached_xml(self, tmp_path):
+        with zipfile.ZipFile(io.BytesIO(three_mf())) as archive:
+            model = archive.read("3D/3dmodel.model")
+        painted = model.replace(b"<vertex ", b'<vertex paint="' + b"4" * 65536 + b'" ')
+        source = tmp_path / "painted.3mf"
+        source.write_bytes(zip_bytes({"3D/3dmodel.model": painted}))
+
+        amount = native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3), (native_budget.MeshSource(source, "3mf"),)
+        )
+
+        assert (
+            amount.bytes
+            >= native_budget.THREE_MF_BASE_MEMORY
+            + len(painted) * native_budget.THREE_MF_LIB3MF_XML_BYTE_COST
+        )
+
+    def test_3mf_fingerprint_analysis_keeps_the_whole_pool(self, tmp_path):
+        source = tmp_path / "part.3mf"
+        source.write_bytes(three_mf())
+        pool = Resources(4, 4 * 1024**3)
+
+        amount = native_budget.estimate_sources(
+            pool,
+            (native_budget.MeshSource(source, "3mf"),),
+            work=native_budget.AnalysisWork(THUMBNAIL_WORK),
+        )
+
+        assert amount == Resources(1, pool.bytes)
+
+    def test_3mf_beyond_the_face_cap_claims_the_whole_pool(self, tmp_path):
+        components = [(1, None)] * 2048
+        placements = tuple((2, None) for _ in range(300))
+        source = tmp_path / "plate.3mf"
+        source.write_bytes(three_mf(assemblies={2: components}, build=placements))
+        pool = Resources(4, 4 * 1024**3)
+
+        amount = native_budget.estimate_sources(
+            pool, (native_budget.MeshSource(source, "3mf"),)
+        )
+
+        assert amount == Resources(1, pool.bytes)
+
+    def test_records_a_counted_estimate(self, tmp_path, caplog):
+        source = tmp_path / "part.3mf"
+        source.write_bytes(three_mf())
+        caplog.set_level(logging.INFO, logger="app.modules.media.mesh_observability")
+
+        amount = native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3),
+            (native_budget.MeshSource(source, "3mf"),),
+            work=THUMBNAIL_WORK,
+        )
+
+        (record,) = _estimates(caplog)
+        assert record["basis"] == "counted"
+        assert record["file_types"] == ["3mf"]
+        assert record["source_bytes"] == source.stat().st_size
+        assert record["requested_bytes"] == amount.bytes
+
+    def test_records_an_unknown_estimate(self, tmp_path, caplog):
+        source = tmp_path / "broken.3mf"
+        source.write_bytes(b"PK")
+        caplog.set_level(logging.INFO, logger="app.modules.media.mesh_observability")
+        pool = Resources(4, 4 * 1024**3)
+
+        native_budget.estimate_sources(pool, (native_budget.MeshSource(source, "3mf"),))
+
+        (record,) = _estimates(caplog)
+        assert record["basis"] == "unknown"
+        assert record["requested_bytes"] == pool.bytes
+
+    def test_records_no_size_for_a_vanished_source(self, tmp_path, caplog):
+        caplog.set_level(logging.INFO, logger="app.modules.media.mesh_observability")
+
+        native_budget.estimate_sources(
+            Resources(4, 4 * 1024**3),
+            (native_budget.MeshSource(tmp_path / "missing.stl", "stl"),),
+        )
+
+        (record,) = _estimates(caplog)
+        assert record["source_bytes"] is None
+
+
+class TestConcurrentThreeMFAdmission:
+    def test_two_small_3mf_claims_hold_permits_at_once(self, tmp_path):
+        source = tmp_path / "part.3mf"
+        source.write_bytes(three_mf())
+        capacity = Resources(2, 2 * 1024**3)
+        claim = native_budget.estimate_sources(
+            capacity, (native_budget.MeshSource(source, "3mf"),), work=THUMBNAIL_WORK
+        )
+        pool = LocalResourcePool(tmp_path / "ledger")
+        polls = 0
+
+        def bounded_wait() -> None:
+            nonlocal polls
+            polls += 1
+            if polls > 50:
+                raise AssertionError("second 3MF claim waited for the first")
+
+        with pool.reserve(claim, capacity, checkpoint=bounded_wait) as first:
+            with pool.reserve(claim, capacity, checkpoint=bounded_wait) as second:
+                assert first.resources.bytes + second.resources.bytes <= capacity.bytes
+
 
 class TestObjTriangleCount:
     def test_counts_only_faces_in_obj_with_polylines(self, tmp_path):
@@ -514,7 +781,10 @@ class TestCallerProfiles:
             sources,
             work,
             on_chunk=None,
+            amount=None,
         ):
+            # Other formats keep the estimate: no claim is imposed on it.
+            assert amount is None
             captured.append((sources, work))
             raise _CapturedWork
 

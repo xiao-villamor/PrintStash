@@ -179,7 +179,12 @@ class TestAdditions:
 
         assert set(catalog_module.get_catalog().additions) == {ADDING, ALSO_ADDING}
 
-    def test_lists_the_definitions_that_wait_for_them(self, additions_engine) -> None:
-        from .conftest import WAITING
+    def test_lists_the_definitions_held_back_by_them(self, additions_engine) -> None:
+        from .conftest import PACED, WAITING
 
-        assert catalog_module.get_catalog().waiting_for_additions == (WAITING,)
+        assert set(catalog_module.get_catalog().held_by_additions) == {WAITING, PACED}
+
+    def test_lists_the_definitions_paced_during_them(self, additions_engine) -> None:
+        from .conftest import PACED
+
+        assert catalog_module.get_catalog().paced_during_additions == (PACED,)

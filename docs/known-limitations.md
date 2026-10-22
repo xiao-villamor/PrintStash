@@ -147,7 +147,8 @@ manufacturing platform.
 - STEP tessellation runs in a disposable child process. Its resident-memory
   ceiling uses the existing cgroup-aware mesh memory budget and it has a 90 s
   timeout; an over-budget or overly complex file is stored without geometry or
-  a generated preview instead of risking the API process. The generic 200 MiB
+  a generated preview, reported as a resource limit, instead of risking the
+  API process. The generic 200 MiB
   mesh input cap still applies first and is format-blind. Operators can adjust
   the deadline with `VAULT_MESH_STEP_TIMEOUT_SECONDS`; memory continues to use
   `VAULT_MESH_MEMORY_BUDGET_FRACTION` rather than a STEP-only byte guess.

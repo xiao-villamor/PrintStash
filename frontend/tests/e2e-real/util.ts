@@ -2,6 +2,8 @@ import { expect, type APIResponse, type Page, type Response } from "@playwright/
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
+import { scrollToEnd } from "../e2e/_scroll";
+import { refreshLibrary, settleLibraryRead } from "../e2e/_library";
 
 /** The new backup, as the finished `backups.create` Job reports it. */
 export interface CreatedBackup {
@@ -261,11 +263,9 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
   }
 
   const view = collection ? `/?c=${encodeURIComponent(collection)}` : "/";
-  await expect(async () => {
-    await page.goto(view);
-    await expect(modelCard(page, name)).toBeVisible();
-    if (tag) await expect(modelCard(page, name)).toContainText(tag);
-  }).toPass({ timeout: 60_000 });
+  await page.goto(view);
+  await settleLibraryRead(page, modelCard(page, name));
+  if (tag) await expect(modelCard(page, name)).toContainText(tag);
 }
 
 export function uploadGcodeModel(page: Page, name: string): Promise<void> {
@@ -278,4 +278,18 @@ export async function openFilters(page: Page) {
     .getByRole("button", { name: "Filters", exact: true })
     .filter({ visible: true });
   if ((await button.getAttribute("aria-expanded")) !== "true") await button.click();
+}
+
+/** Follow one explicit stale-page recovery before establishing a reading anchor. */
+export async function loadNextLibraryPage(page: Page, beyond: number): Promise<void> {
+  const main = page.getByRole("main");
+  const entries = main.locator("[data-library-entry]");
+  const refresh = main.getByRole("button", { name: "Refresh library", exact: true });
+  await scrollToEnd(page);
+  await expect(entries.nth(beyond).or(refresh).first()).toBeAttached();
+  if (await refresh.isVisible()) {
+    await refreshLibrary(page);
+    await scrollToEnd(page);
+  }
+  await expect.poll(() => entries.count()).toBeGreaterThan(beyond);
 }

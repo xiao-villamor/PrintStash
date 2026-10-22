@@ -36,6 +36,7 @@ from app.db.session import get_session_factory
 from . import catalog as catalog_module
 from .contracts import (
     Deduplicated,
+    DuringAdditions,
     ExecutionKind,
     JobSubmission,
     Partitioned,
@@ -328,6 +329,8 @@ def nudge(
         catalog_module.get_catalog().definition(source)
         if delay is None:
             with get_session_factory().scoped_session() as session:
+                if _held_for_additions(session, source):
+                    return
                 needed = stamp(session, source, now=now, priority=priority)
                 session.commit()
             if not needed:
@@ -335,6 +338,18 @@ def nudge(
         queue_pass(source, priority=priority, delay=delay)
     except Exception:  # noqa: BLE001 - the tick recovers a lost nudge
         logger.exception("reconciler nudge failed", extra={"source": source.value})
+
+
+def _held_for_additions(session: Session, source: JobKind) -> bool:
+    """Whether ``source`` holds back for an addition that is still active.
+
+    Its pass is not owed to this change: paced work looks again on its own,
+    and the last addition to settle stamps every held definition in the
+    transaction that ends it, so skipping the stamp here loses no work.
+    """
+    catalog = catalog_module.get_catalog()
+    held = catalog.definition(source).during_additions is not DuringAdditions.RUNS
+    return held and jobs.any_active(session, catalog.additions)
 
 
 def queue_stamped(sources: Iterable[JobKind]) -> None:
@@ -397,6 +412,9 @@ def _stamp_committing(session: Session) -> None:
     for source in sorted(pending):
         try:
             catalog_module.get_catalog().definition(source)
+            if _held_for_additions(session, source):
+                pending[source] = False
+                continue
             pending[source] = stamp(session, source, now=now)
         except Exception:  # noqa: BLE001 - the nudge after the commit still happens
             logger.exception("reconciler nudge failed", extra={"source": source.value})
@@ -470,9 +488,7 @@ def nudge_all(*, now: datetime | None = None) -> None:
     with get_session_factory().scoped_session() as session:
         active = set(
             session.exec(
-                select(Job.kind)
-                .where(col(Job.state).in_(ACTIVE_JOB_STATES))
-                .distinct()
+                select(Job.kind).where(col(Job.state).in_(ACTIVE_JOB_STATES)).distinct()
             ).all()
         )
     for name, definition in sorted(catalog.definitions.items()):

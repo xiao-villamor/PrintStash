@@ -11,11 +11,14 @@ from prometheus_client import Counter, Histogram
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.metrics import registry
+from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_telemetry import (
     AdmissionStats,
+    EstimateStats,
     PhaseStats,
     SupervisionStats,
 )
+from app.runtime.native_admission import Resources
 
 logger = get_logger(__name__)
 _worker_exits = Counter(
@@ -77,6 +80,68 @@ _admission_memory = Histogram(
     buckets=(2**24, 2**26, 2**28, 2**29, 2**30, 2**32),
     registry=registry,
 )
+
+
+_estimate_duration = Histogram(
+    "printstash_mesh_estimate_duration_seconds",
+    "Supervisor preflight time spent sizing a native claim.",
+    ("basis",),
+    registry=registry,
+)
+_escalations = Counter(
+    "printstash_mesh_escalations_total",
+    "Derivatives run again under the whole pool after an optimistic claim.",
+    ("file_type", "reason"),
+    registry=registry,
+)
+
+
+def record_escalation(
+    file_type: str, optimistic: Resources, reason: ThumbnailFailureReason
+) -> None:
+    try:
+        logger.info(
+            "mesh_escalation %s",
+            json.dumps(
+                {
+                    "version": 1,
+                    "process_id": os.getpid(),
+                    "process_role": settings.process_role.value,
+                    "file_type": file_type,
+                    "optimistic_bytes": optimistic.bytes,
+                    "reason": reason.value,
+                },
+                allow_nan=False,
+                separators=(",", ":"),
+            ),
+        )
+        _escalations.labels(file_type, reason.value).inc()
+    except Exception:
+        # Telemetry is best-effort and must never alter the escalation itself.
+        logger.exception("failed to publish mesh escalation metrics")
+
+
+def record_estimate(stats: EstimateStats) -> None:
+    try:
+        logger.info(
+            "mesh_estimate %s",
+            json.dumps(
+                {
+                    "version": 1,
+                    "process_id": os.getpid(),
+                    "process_role": settings.process_role.value,
+                    **asdict(stats),
+                },
+                allow_nan=False,
+                separators=(",", ":"),
+            ),
+        )
+        _estimate_duration.labels(stats.basis.value).observe(
+            stats.elapsed_ns / 1_000_000_000
+        )
+    except Exception:
+        # Telemetry is best-effort and must never alter the claim itself.
+        logger.exception("failed to publish mesh estimate metrics")
 
 
 def record_admission(stats: AdmissionStats) -> None:

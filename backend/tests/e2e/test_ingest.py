@@ -26,9 +26,10 @@ from sqlmodel import select
 
 from app.core.config import _overlay, settings
 from app.db.models import ArtifactDerivative, GeometryFingerprint
+from app.modules.derivatives import kinds
 from app.schemas.orca import OrcaNativeContext
 from tests.e2e._jobs import settle
-from tests.factories.geometry import three_mf
+from tests.factories.geometry import tetrahedron, three_mf
 from tests.factories.three_mf_pilot import load_case, opc_package
 from tests.fixtures.three_mf_projects import build_3d_builder_component_project
 from tests.paths import FIXTURES_DIR
@@ -661,6 +662,190 @@ class TestThreeMFCapabilities:
         assert still_ready.content == image_response.content
 
 
+async def _sample(api, name: str, labels: dict[str, str]) -> float:
+    from prometheus_client.parser import text_string_to_metric_families
+
+    response = await api.get("/metrics")
+    assert response.status_code == 200, response.text
+    values = [
+        sample.value
+        for family in text_string_to_metric_families(response.text)
+        for sample in family.samples
+        if sample.name == name and sample.labels == labels
+    ]
+    # Prometheus publishes a labelled series only once it has been observed.
+    return values[0] if values else 0.0
+
+
+class TestThreeMFAdmission:
+    @pytest.mark.asyncio
+    async def test_a_small_3mf_derives_under_a_sized_native_claim(
+        self, api, tmp_path, e2e_db
+    ):
+        """A countable package no longer reserves the whole native pool.
+
+        Its admission is weighted by its bounded structure, so a second small
+        package can run beside it; the guarded worker still completes both
+        outputs under that smaller hard ceiling.
+        """
+        counted = (
+            "printstash_mesh_estimate_duration_seconds_count",
+            {"basis": "counted"},
+        )
+        sized = (
+            "printstash_mesh_admission_requested_bytes_bucket",
+            {"outcome": "admitted", "le": "1.073741824e+09"},
+        )
+        headers = await _setup_and_login(api, tmp_path)
+        counted_before = await _sample(api, *counted)
+        sized_before = await _sample(api, *sized)
+
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("part.3mf", three_mf(), "model/3mf")},
+            data={"model_name": "Sized claim"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        assert job["state"] == "completed", job
+        thumbnail = await _thumbnail_derivative(api, headers, job["file_id"])
+
+        assert thumbnail["state"] == "ready", thumbnail
+        derivatives = await api.get(
+            f"/api/v1/files/{job['file_id']}/derivatives", headers=headers
+        )
+        metadata = next(row for row in derivatives.json() if row["kind"] == "metadata")
+        assert metadata["state"] == "ready", metadata
+        assert await _sample(api, *counted) > counted_before
+        assert await _sample(api, *sized) > sized_before
+
+
+class TestStepAdmission:
+    @pytest.mark.asyncio
+    async def test_a_step_derives_under_the_optimistic_claim(
+        self, api, tmp_path, e2e_db
+    ):
+        """A STEP part no longer reserves the whole native pool up front.
+
+        It is admitted under the optimistic claim and its worker completes
+        both outputs inside it; only a part that does not fit runs again.
+        """
+        optimistic = (
+            "printstash_mesh_admission_requested_bytes_bucket",
+            {"outcome": "admitted", "le": "1.073741824e+09"},
+        )
+        escalated = (
+            "printstash_mesh_escalations_total",
+            {"file_type": "stp", "reason": "resource_limit"},
+        )
+        headers = await _setup_and_login(api, tmp_path)
+        optimistic_before = await _sample(api, *optimistic)
+        escalated_before = await _sample(api, *escalated)
+
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={
+                "file": (
+                    "part.stp",
+                    (FIXTURES_DIR / "cascadio_material.stp").read_bytes(),
+                    "model/step",
+                )
+            },
+            data={"model_name": "STEP admission"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        thumbnail = await _thumbnail_derivative(api, headers, job["file_id"])
+
+        assert thumbnail["state"] == "ready", thumbnail
+        assert await _sample(api, *optimistic) > optimistic_before
+        assert await _sample(api, *escalated) == escalated_before
+
+
+class TestStepTessellation:
+    @pytest.mark.asyncio
+    async def test_a_step_is_derived_at_its_own_recipes(self, api, tmp_path, e2e_db):
+        """STEP outputs carry the 0.05 mm tessellation's recipes."""
+        headers = await _setup_and_login(api, tmp_path)
+
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={
+                "file": (
+                    "part.stp",
+                    (FIXTURES_DIR / "cascadio_material.stp").read_bytes(),
+                    "model/step",
+                )
+            },
+            data={"model_name": "STEP recipes"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        derivatives = await api.get(
+            f"/api/v1/files/{job['file_id']}/derivatives", headers=headers
+        )
+
+        assert {
+            row["kind"]: (row["state"], row["recipe_version"])
+            for row in derivatives.json()
+        } == {
+            "metadata": ("ready", kinds.STEP_GEOMETRY_RECIPE),
+            "thumbnail": ("ready", kinds.STEP_THUMBNAIL_RECIPE),
+        }
+
+
+class TestThreeMFReader:
+    @pytest.mark.asyncio
+    async def test_a_3mf_is_derived_at_its_own_recipes(self, api, tmp_path, e2e_db):
+        """3MF outputs carry their reader's recipes; other meshes keep theirs."""
+        headers = await _setup_and_login(api, tmp_path)
+
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("part.3mf", three_mf(), "model/3mf")},
+            data={"model_name": "lib3mf recipes"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        derivatives = await api.get(
+            f"/api/v1/files/{job['file_id']}/derivatives", headers=headers
+        )
+
+        assert {
+            row["kind"]: (row["state"], row["recipe_version"])
+            for row in derivatives.json()
+        } == {
+            "metadata": ("ready", kinds.THREE_MF_GEOMETRY_RECIPE),
+            "thumbnail": ("ready", kinds.THREE_MF_THUMBNAIL_RECIPE),
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_3mf_is_measured_in_single_precision(self, api, tmp_path, e2e_db):
+        """lib3mf reads each coordinate as the nearest float32 to its text."""
+        mesh = tetrahedron()
+        mesh.vertices += 0.1
+        headers = await _setup_and_login(api, tmp_path)
+
+        uploaded = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": ("offset.3mf", three_mf(meshes={1: mesh}), "model/3mf")},
+            data={"model_name": "lib3mf precision"},
+            headers=headers,
+        )
+        assert uploaded.status_code == 202, uploaded.text
+        job = await _await_job(api, headers, uploaded.json()["job_id"])
+        model = await api.get(f"/api/v1/models/{job['model_id']}", headers=headers)
+        (artifact,) = model.json()["files"]
+
+        assert artifact["metadata"]["bbox_x_mm"] == float(np.float32(10.1)) - float(
+            np.float32(0.1)
+        )
+
+
 class TestHardlinklessStaging:
     @pytest.mark.asyncio
     async def test_uploads_with_visible_staging_degradation(
@@ -859,10 +1044,10 @@ class TestMeshFailureRecovery:
         assert before.failure_reason == "resource_limit"
         assert before.next_attempt_at is None
         assert attempts == settings.derivative_max_attempts
-        assert before.recipe_version == kinds.MESH_GEOMETRY_RECIPE
+        assert before.recipe_version == kinds.THREE_MF_GEOMETRY_RECIPE
         thumbnail = await _thumbnail_derivative(api, headers, file_id)
         assert thumbnail["state"] == "ready"
-        assert thumbnail["recipe_version"] == kinds.MESH_THUMBNAIL_RECIPE
+        assert thumbnail["recipe_version"] == kinds.THREE_MF_THUMBNAIL_RECIPE
         assert _thumbnail_output(e2e_db, file_id)["strategy"] == "embedded"
         image_response = await api.get(
             f"/api/v1/files/{file_id}/thumbnail", headers=headers
@@ -883,7 +1068,7 @@ class TestMeshFailureRecovery:
         assert after.state == "failed"
         assert after.failure_reason == "resource_limit"
         assert after.next_attempt_at is None
-        assert after.recipe_version == kinds.MESH_GEOMETRY_RECIPE
+        assert after.recipe_version == kinds.THREE_MF_GEOMETRY_RECIPE
         original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
         assert original.status_code == 200, original.text
         assert original.content == data
@@ -985,7 +1170,7 @@ class TestStagedMeshOutputs:
             "import json,sys,time\n"
             "from pathlib import Path\n"
             "from app.core.native_settings import install\n"
-            "install(json.loads(sys.argv[1])[\"native_settings\"])\n"
+            'install(json.loads(sys.argv[1])["native_settings"])\n'
             "from app.modules.media import thumbnail_engine,mesh_worker\n"
             f"started=Path({str(started)!r}); release=Path({str(release)!r})\n"
             "extract=thumbnail_engine.extract\n"

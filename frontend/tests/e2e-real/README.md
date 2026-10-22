@@ -27,6 +27,19 @@ Artifact bytes. Historical release archives are checked separately by the
 - Vite on `:3310` with `VITE_API_URL` pointed at that backend.
 - The standalone Moonraker/Spoolman emulator used by fleet scenarios.
 
+Library navigation covers desktop grid and phone list reading positions through
+detail, Back and Forward with 101 Models spanning several pages. A controlled
+real revision change starts from an already paged view and holds its next cursor
+across an unused tag deletion. That transaction advances the browse revision
+without generating searchable content or depending on unrelated indexing work.
+The real backend must reject the stale cursor with HTTP 409; one explicit refresh
+must then restore accepted HTTP 200 continuation. Returns assert the visible
+anchor because a late revision notice can change the document height. Upload
+setup and fresh Library reads follow at most one visible refresh action if initial
+read contention requires it, then await its HTTP 200 acknowledgement. They do not
+loop page reloads. The shared outliner seed keeps its 501-Model default for the
+separate large outliner flows.
+
 Storage-provider setup is deliberately isolated because it must begin with an
 unconfigured instance and restart after changing transports:
 

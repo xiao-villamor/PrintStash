@@ -9,20 +9,20 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/xiao-villamor/PrintStash/issues</Support>
   <Project>https://www.printstash.org</Project>
-  <Overview>PrintStash is a self-hosted 3D print library and G-code vault. This image runs the web UI and API together. Create the first account in the browser from your local network, or set First-run setup to environment and fill in the administrator fields to create it at first start. The one appdata path stores everything PrintStash keeps: the database, uploaded files, thumbnails, staging files, backups, and caches. Add existing model folders as separate Library sources after setup; do not use an existing library as the appdata path. One image serves every server: to use a GPU, map your GPU device or enable the NVIDIA runtime under Advanced View; without one it runs on the CPU.</Overview>
+  <Overview>PrintStash is a self-hosted 3D print library and G-code vault. This image runs the web UI and API together. Create the first account in the browser from your local network, or set First-run setup to environment and fill in the administrator fields to create it at first start. The one appdata path stores everything PrintStash keeps: the database, uploaded files, thumbnails, staging files, backups, and caches. Add existing model folders as separate Library sources after setup; do not use an existing library as the appdata path. One image serves every server: to use an Intel or AMD GPU, enter /dev/dri in the optional GPU field; for NVIDIA, enable the NVIDIA runtime under Advanced View. Left blank, it runs on the CPU.</Overview>
   <Category>Productivity: Tools:</Category>
   <WebUI>http://[IP]:[PORT:3000]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/templates/printstash.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/icon.svg</Icon>
   <ReadMe>https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/unraid/README.md</ReadMe>
   <ExtraSearchTerms>3d printer 3d printing model manager stl library 3mf gcode bgcode step stp obj cad file organizer self hosted docker nas klipper moonraker octoprint prusalink bambu elegoo spoolman orcaslicer prusaslicer cura print history</ExtraSearchTerms>
-  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <ExtraParams>--restart=unless-stopped --device-cgroup-rule='c 226:* rmw'</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DateInstalled/>
   <DonateText/>
   <DonateLink/>
-  <Date>2026-09-25</Date>
+  <Date>2026-10-22</Date>
   <MinVer>6.10</MinVer>
   <License>AGPL-3.0</License>
   <Requires>Choose how the first administrator is created with First-run setup. With trusted_network (the default), leave the administrator fields blank and open the WebUI from your local network (tower.local or the server's LAN IP) to register in the browser; the first person to register becomes administrator, and registration through Tailscale, a VPN, a reverse proxy or a domain is refused. With environment, fill in the administrator username and password and PrintStash creates that account at first start. If the two do not fit together, setup stays closed and the WebUI explains what to change. When moving from the old two-container install, record the old API data owner first, then stop both old containers. Set PUID and PGID to that same owner (the old image usually used 10001:10001); otherwise existing Library sources can become unreadable. Follow the migration guide.</Requires>
@@ -34,7 +34,7 @@
   <Config Name="Administrator email" Target="VAULT_SETUP_ADMIN_EMAIL" Default="" Mode="" Description="Optional, only with First-run setup set to environment: email for that administrator." Type="Variable" Display="always" Required="false" Mask="false"></Config>
   <Config Name="User ID" Target="PUID" Default="99" Mode="" Description="Numeric owner for appdata and mounted Library sources. Default is Unraid's nobody user. On upgrade, use the old API data owner's UID to keep existing Library sources readable." Type="Variable" Display="always" Required="false" Mask="false">99</Config>
   <Config Name="Group ID" Target="PGID" Default="100" Mode="" Description="Numeric group for appdata and mounted Library sources. Default is Unraid's users group. On upgrade, use the old API data owner's GID to keep existing Library sources readable." Type="Variable" Display="always" Required="false" Mask="false">100</Config>
-  <Config Name="GPU: Intel or AMD render device" Target="/dev/dri" Default="" Mode="" Description="Optional. Enter the host's /dev/dri to let PrintStash use an Intel or AMD GPU; leave empty for CPU only. The same image is used either way. For an NVIDIA GPU install the Nvidia Driver plugin, add --runtime=nvidia to Extra Parameters, and set the two NVIDIA fields below." Type="Device" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="GPU: Intel or AMD (optional)" Target="/dev/dri" Default="" Mode="rw" Description="Optional. Enter /dev/dri to let PrintStash use the server's Intel or AMD GPU; leave blank to run on the CPU. Nothing else is needed: Extra Parameters already allows the GPU device, and PrintStash joins the GPU's group by itself. For an NVIDIA GPU install the Nvidia Driver plugin, add --runtime=nvidia to Extra Parameters, and set the two NVIDIA fields under Advanced View." Type="Path" Display="always" Required="false" Mask="false"></Config>
   <Config Name="GPU: NVIDIA visible devices" Target="NVIDIA_VISIBLE_DEVICES" Default="" Mode="" Description="Optional, NVIDIA only (with --runtime=nvidia in Extra Parameters): the GPU UUID from the Nvidia Driver plugin, or all. Leave empty when not using an NVIDIA GPU." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
   <Config Name="GPU: NVIDIA driver capabilities" Target="NVIDIA_DRIVER_CAPABILITIES" Default="all" Mode="" Description="NVIDIA only. Keep all: graphics and compute are both needed for rendering." Type="Variable" Display="advanced" Required="false" Mask="false">all</Config>
   <Config Name="GPU use" Target="VAULT_COMPUTE_MODE" Default="auto|cpu" Mode="" Description="auto uses a GPU when the container can see one and falls back to the CPU otherwise; cpu never uses it. Settings, GPU shows what PrintStash found." Type="Variable" Display="advanced" Required="false" Mask="false">auto</Config>

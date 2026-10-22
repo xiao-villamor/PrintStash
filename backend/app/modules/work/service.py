@@ -299,6 +299,22 @@ def set_lane_concurrency(
     )
 
 
+def reapply_lane_default(lane: LaneName) -> None:
+    """Re-resolve ``lane`` after the setting behind its default changed.
+
+    An administrator's lane override still wins; a process without a bound
+    engine has no queue to resize.
+    """
+    if not catalog_module.bound():
+        return
+    catalog = catalog_module.get_catalog()
+    with get_session_factory().scoped_session() as session:
+        catalog.apply_overrides(session)
+    catalog_module.get_engine().set_lane_concurrency(
+        lane, catalog.lanes[lane].concurrency
+    )
+
+
 def regenerate_derivatives(
     kind: DerivativeKind, *, mode: RegenerateMode, actor: User
 ) -> None:
@@ -437,6 +453,7 @@ __all__ = [
     "cancel_queued",
     "nudge",
     "overview",
+    "reapply_lane_default",
     "regenerate_derivatives",
     "request",
     "retry",

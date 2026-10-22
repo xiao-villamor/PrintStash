@@ -5,9 +5,9 @@ import pytest
 from printstash_core.mesh.similarity import GeometryError
 
 from app.core.config import _overlay
-from app.modules.media.mesh_resources import load_3mf
+from app.modules.media.mesh_resources import load_3mf, load_3mf_within_ram
 from tests.factories import content
-from tests.factories.geometry import expanding_three_mf, three_mf
+from tests.factories.geometry import expanding_three_mf, tetrahedron, three_mf
 
 
 class TestThreeMFResources:
@@ -381,6 +381,57 @@ class TestMeshAttributeParsing:
 
         with pytest.raises(GeometryError, match="degenerate_surface"):
             load_3mf(path)
+
+
+@pytest.fixture
+def permit(monkeypatch):
+    """Hold a native permit of ``amount`` bytes, as an admitted worker does."""
+    from contextlib import contextmanager
+
+    from app.runtime.native_admission import Resources
+    from app.runtime.native_runtime import admit
+
+    monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0.5)
+
+    @contextmanager
+    def held(amount: int):
+        with admit(
+            Resources(1, amount), Resources(4, 4 * amount), checkpoint=lambda: None
+        ):
+            yield
+
+    return held
+
+
+class TestLoad3mfWithinRam:
+    def test_materializes_a_lib3mf_scene_the_xml_weight_would_refuse(
+        self, tmp_path, permit
+    ):
+        # 6,000 bytes admit ten faces at 600 bytes each, one at 3,600.
+        path = tmp_path / "part.3mf"
+        path.write_bytes(three_mf())
+
+        with permit(6000):
+            prepared = load_3mf_within_ram(path)
+
+        assert len(prepared.whole_mesh.faces) == 4
+
+    def test_refuses_a_lib3mf_scene_beyond_its_weight(self, tmp_path, permit):
+        path = tmp_path / "part.3mf"
+        path.write_bytes(three_mf())
+
+        with permit(1800), pytest.raises(GeometryError, match="scene_resource_limit"):
+            load_3mf_within_ram(path)
+
+    def test_refuses_an_xml_scene_beyond_the_xml_weight(self, tmp_path, permit):
+        # Geometry far from the origin is read by the XML reader.
+        mesh = tetrahedron()
+        mesh.vertices += 1e9
+        path = tmp_path / "far.3mf"
+        path.write_bytes(three_mf(meshes={1: mesh}))
+
+        with permit(6000), pytest.raises(GeometryError, match="scene_resource_limit"):
+            load_3mf_within_ram(path)
 
 
 class TestDetachedSceneMesh:

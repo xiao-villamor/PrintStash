@@ -73,3 +73,70 @@ class TestBoundedTessellation:
             [0.0699461326, 0.0254, 0.060356412], rel=1e-6
         )
         assert set(tmp_path.iterdir()) == {source, destination}
+
+
+@pytest.fixture
+def ocp_cylinder(tmp_path):
+    """A 10 mm radius cylinder: its facets show the tessellation's deflection."""
+    from OCP.BRepPrimAPI import BRepPrimAPI_MakeCylinder
+    from OCP.IFSelect import IFSelect_RetDone
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+
+    path = tmp_path / "cylinder.step"
+    writer = STEPControl_Writer()
+    assert (
+        writer.Transfer(BRepPrimAPI_MakeCylinder(10, 20).Shape(), STEPControl_AsIs)
+        == IFSelect_RetDone
+    )
+    assert writer.Write(str(path)) == IFSelect_RetDone
+    return path
+
+
+def _sagitta_mm(mesh, radius_mm: float) -> float:
+    """Largest gap between a cylinder's facets and its surface, in millimetres."""
+    vertices = np.asarray(mesh.vertices)
+    radial = np.hypot(vertices[:, 0], vertices[:, 1])
+    rim = vertices[np.isclose(radial, radial.max(), rtol=1e-6)]
+    angles = np.unique(np.round(np.arctan2(rim[:, 1], rim[:, 0]), 9))
+    step = np.max(np.diff(np.concatenate([angles, [angles[0] + 2 * np.pi]])))
+    return radius_mm * (1 - np.cos(step / 2))
+
+
+class TestConvert:
+    def test_tessellates_curved_surfaces_within_the_shared_deflection(
+        self, tmp_path, ocp_cylinder
+    ):
+        import trimesh
+
+        from app.modules.media.step_geometry import LINEAR_DEFLECTION_MM
+
+        destination = tmp_path / "mesh.glb"
+
+        status = step_worker.convert(
+            ocp_cylinder, destination, 200_000, include_brep=False
+        )
+
+        assert status == 0
+        sagitta = _sagitta_mm(trimesh.load_mesh(destination), radius_mm=10)
+        assert sagitta <= LINEAR_DEFLECTION_MM * 1.001
+
+    def test_tessellates_coarser_than_the_previous_hundredth_of_a_millimetre(
+        self, tmp_path, ocp_cylinder
+    ):
+        # Preview and measurement meshes used 0.01 mm, several times the
+        # triangles a 640 px preview or millimetre measurements can show.
+        import trimesh
+
+        destination = tmp_path / "mesh.glb"
+
+        step_worker.convert(ocp_cylinder, destination, 200_000, include_brep=False)
+
+        assert _sagitta_mm(trimesh.load_mesh(destination), radius_mm=10) > 0.01
+
+    def test_refuses_a_mesh_above_the_triangle_ceiling(self, tmp_path, ocp_cylinder):
+        assert (
+            step_worker.convert(
+                ocp_cylinder, tmp_path / "mesh.glb", 10, include_brep=False
+            )
+            == 3
+        )

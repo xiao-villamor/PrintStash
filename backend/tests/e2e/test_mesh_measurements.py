@@ -2,6 +2,7 @@
 
 import io
 
+import numpy as np
 import pytest
 import trimesh
 from PIL import Image
@@ -14,6 +15,11 @@ from tests.factories import content
 from tests.factories.geometry import three_mf
 
 
+def _single_precision_side(edge: float) -> float:
+    """A centred box's side as lib3mf reads it: each corner is a float32."""
+    return 2 * float(np.float32(edge / 2))
+
+
 @pytest.fixture(
     params=[
         (
@@ -23,7 +29,9 @@ from tests.factories.geometry import three_mf
                 "state": "measured",
                 "unit": "mm3",
                 "method": "mesh_surface_integral",
-                "value_mm3": pytest.approx(1e-9, rel=1e-12, abs=0),
+                "value_mm3": pytest.approx(
+                    _single_precision_side(0.001) ** 3, rel=1e-12, abs=0
+                ),
                 "cause": None,
             },
         ),
@@ -80,7 +88,7 @@ class TestMeshMeasurementEvidence:
         assert metadata["volume_mm3"] == expected["value_mm3"]
         assert tuple(
             metadata[field] for field in ("bbox_x_mm", "bbox_y_mm", "bbox_z_mm")
-        ) == pytest.approx((edge, edge, edge), rel=1e-12, abs=0)
+        ) == pytest.approx((_single_precision_side(edge),) * 3, rel=1e-12, abs=0)
         assert metadata["triangle_count"] == 12
         e2e_db.expire_all()
         row = e2e_db.exec(
@@ -103,11 +111,11 @@ class TestMeshMeasurementEvidence:
         derived = next(
             output for output in listing.json() if output["kind"] == "metadata"
         )
-        from app.modules.derivatives.kinds import MESH_GEOMETRY_RECIPE
+        from app.modules.derivatives.kinds import THREE_MF_GEOMETRY_RECIPE
 
         assert (derived["state"], derived["recipe_version"]) == (
             "ready",
-            MESH_GEOMETRY_RECIPE,
+            THREE_MF_GEOMETRY_RECIPE,
         )
 
 

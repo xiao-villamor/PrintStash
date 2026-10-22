@@ -32,6 +32,8 @@ is worth as much as the one that replaced it.
 | [0014](0014-viewer-representation.md) | Qualify viewer representations before replacing STL | Accepted; measured pilot completed; no automatic GLB/LOD adoption |
 | [0015](0015-gpu-rendering.md) | Qualify optional GPU rendering against complete visual cost | Accepted; measured pilot completed; no application GPU adoption |
 | [0016](0016-native-worker-startup.md) | Reduce unused imports without reusing native parser state | Accepted; measured reduction of parent-only imports |
+| [0018](0018-format-renditions.md) | Produce other formats as Renditions, never as a second source of truth | Proposed (#536) |
+| [0019](0019-design-sources.md) | Keep design sources as Artifacts, linked to the files exported from them | Proposed (#544) |
 
 ADR-0001 and ADR-0002 are cited from code comments but were never written down.
 Numbering starts at 0003 so those citations keep pointing at the decisions they

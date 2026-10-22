@@ -3,7 +3,7 @@
 Bind-mounted data must remain writable across restarts, while migrations and an
 operator-supplied command must run only after the process has dropped privileges.
 These tests execute the real shell flow with tiny command shims standing in for
-the container-only ``id``, ``gosu``, and Python runtime.
+the container-only ``id``, ``setpriv``, and Python runtime.
 """
 
 from __future__ import annotations
@@ -61,19 +61,26 @@ def _entrypoint_harness(tmp_path: Path) -> tuple[Path, Path, Path, Path]:
     _write_executable(
         fake_bin / "id",
         """#!/bin/sh
-if [ "$1" = "-u" ]; then
-  echo "${FAKE_UID:-0}"
-else
-  echo "${FAKE_GID:-0}"
-fi
+case "$1" in
+  -u) echo "${FAKE_UID:-0}" ;;
+  -G) echo "${FAKE_GROUPS:-0}" ;;
+  *) echo "${FAKE_GID:-0}" ;;
+esac
 """,
     )
     _write_executable(
-        fake_bin / "gosu",
+        fake_bin / "setpriv",
         """#!/bin/sh
-spec=$1
-shift
-FAKE_UID=${spec%:*} FAKE_GID=${spec#*:} exec "$@"
+for option; do
+  case "$option" in
+    --reuid=*) uid=${option#*=} ;;
+    --regid=*) gid=${option#*=} ;;
+    --groups=*) groups=${option#*=} ;;
+    *) break ;;
+  esac
+  shift
+done
+FAKE_UID=$uid FAKE_GID=$gid FAKE_SUPPLEMENTARY_GROUPS=$groups exec "$@"
 """,
     )
     _write_executable(
@@ -140,6 +147,8 @@ def _run_entrypoint(
         env["VAULT_PROCESS_ROLE"] = role
     env["PATH"] = f"{fake_bin}:{env['PATH']}"
     env["VAULT_DATA_ROOT"] = str(tmp_path / "data")
+    # A developer machine may have a real /dev/dri; each test chooses its GPU.
+    env["PRINTSTASH_GPU_DEVICE_DIR"] = str(tmp_path / "no-gpu")
     env.update(overrides or {})
     if puid is None:
         env.pop("PUID", None)
@@ -446,7 +455,7 @@ class TestDockerEntrypointIdentity:
     def test_passes_the_operator_command_through_unchanged(
         self, tmp_path: Path
     ) -> None:
-        # The re-exec goes through `gosu "-e" ""`, so a lost argument would
+        # The re-exec goes through `setpriv`, so a lost argument would
         # silently start the default server instead of what the operator asked for.
         script, log, fake_bin, server = _entrypoint_harness(tmp_path)
 
@@ -685,6 +694,137 @@ class TestDockerEntrypointGpu:
 
         env = _server_env(tmp_path)
         assert env["LD_LIBRARY_PATH"] == "/usr/lib/wsl/lib:/opt/extra"
+
+
+def _supplementary_groups(tmp_path: Path) -> list[str]:
+    """The supplementary groups the image command was started with."""
+    return _server_env(tmp_path)["FAKE_SUPPLEMENTARY_GROUPS"].split(",")
+
+
+class TestDockerEntrypointDeviceGroups:
+    """A mapped GPU is usable by the dropped identity without naming its group.
+
+    Unraid and most Compose installs only map /dev/dri; its nodes belong to the
+    host's render/video group, which the unprivileged runtime identity is not a
+    member of unless the entrypoint hands that group on.
+    """
+
+    def _gpu_dir(self, tmp_path: Path) -> Path:
+        gpu = tmp_path / "dri"
+        gpu.mkdir()
+        return gpu
+
+    def test_runs_in_the_group_owning_a_mapped_gpu_node(self, tmp_path: Path) -> None:
+        gpu = self._gpu_dir(tmp_path)
+        node = gpu / "renderD128"
+        node.touch()
+        script, _log, fake_bin, server = _entrypoint_harness(tmp_path)
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            overrides={"PRINTSTASH_GPU_DEVICE_DIR": str(gpu)},
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert str(node.stat().st_gid) in _supplementary_groups(tmp_path)
+
+    def test_keeps_a_group_granted_by_the_operator(self, tmp_path: Path) -> None:
+        script, _log, fake_bin, server = _entrypoint_harness(tmp_path)
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            overrides={"FAKE_GROUPS": "0 4242"},
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "4242" in _supplementary_groups(tmp_path)
+
+    def test_never_hands_on_the_root_group(self, tmp_path: Path) -> None:
+        script, _log, fake_bin, server = _entrypoint_harness(tmp_path)
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            overrides={"FAKE_GROUPS": "0 4242"},
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "0" not in _supplementary_groups(tmp_path)
+
+    def test_runs_only_in_its_own_group_without_a_gpu(self, tmp_path: Path) -> None:
+        script, _log, fake_bin, server = _entrypoint_harness(tmp_path)
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            puid="1234",
+            pgid="2345",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert _supplementary_groups(tmp_path) == ["2345"]
+
+    def test_lists_a_shared_group_once(self, tmp_path: Path) -> None:
+        gpu = self._gpu_dir(tmp_path)
+        (gpu / "card0").touch()
+        (gpu / "renderD128").touch()
+        script, _log, fake_bin, server = _entrypoint_harness(tmp_path)
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            overrides={"PRINTSTASH_GPU_DEVICE_DIR": str(gpu)},
+        )
+
+        assert result.returncode == 0, result.stderr
+        groups = _supplementary_groups(tmp_path)
+        assert len(groups) == len(set(groups))
+
+    def test_ignores_the_by_path_directory(self, tmp_path: Path) -> None:
+        gpu = self._gpu_dir(tmp_path)
+        (gpu / "by-path").mkdir()
+        script, _log, fake_bin, server = _entrypoint_harness(tmp_path)
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            pgid="2345",
+            overrides={"PRINTSTASH_GPU_DEVICE_DIR": str(gpu)},
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert _supplementary_groups(tmp_path) == ["2345"]
+
+    def test_gives_an_identity_without_an_account_the_root_directory_as_home(
+        self, tmp_path: Path
+    ) -> None:
+        script, _log, fake_bin, server = _entrypoint_harness(tmp_path)
+
+        result = _run_entrypoint(
+            script,
+            fake_bin,
+            server,
+            tmp_path=tmp_path,
+            puid="54321",
+            pgid="54321",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert _server_env(tmp_path)["HOME"] == "/"
 
 
 class TestWorkerBytecode:

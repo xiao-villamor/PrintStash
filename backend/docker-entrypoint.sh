@@ -110,10 +110,35 @@ if [ "$(id -u)" = "0" ]; then
       \( ! -uid "$PUID" -o ! -gid "$PGID" \) \
       -exec chown -h "$requested_identity" {} +
   done
+  # A dropped numeric identity has no group memberships of its own, so a GPU
+  # handed in as /dev/dri would be visible but unopenable: its nodes belong to
+  # the host's render/video group. Keep every group that owns a GPU node, and
+  # every group the operator granted with --group-add / group_add, so mapping
+  # the device is the only GPU step on any host. Root's group (0) is never
+  # handed on.
+  supplementary_groups=$PGID
+  add_group() {
+    case ",$supplementary_groups," in
+      *",$1,"*) ;;
+      *) [ "$1" = 0 ] || supplementary_groups="$supplementary_groups,$1" ;;
+    esac
+  }
+  for granted_group in $(id -G); do add_group "$granted_group"; done
+  for gpu_node in "${PRINTSTASH_GPU_DEVICE_DIR:-/dev/dri}"/*; do
+    # Skip by-path/ and the unmatched glob of a host without a GPU.
+    [ -e "$gpu_node" ] && [ ! -d "$gpu_node" ] || continue
+    add_group "$(stat -c %g "$gpu_node")"
+  done
+
   # Re-exec the same entrypoint as the requested numeric identity. This keeps
   # migration and operator-supplied commands in the exact existing order while
   # allowing arbitrary positive host IDs without mutating the image's user DB.
-  exec gosu "$requested_identity" "$0" "$@"
+  # HOME follows the identity, as a login would set it ("/" with no entry).
+  runtime_home=$(getent passwd "$PUID" | cut -d: -f6)
+  HOME=${runtime_home:-/}
+  export HOME
+  exec setpriv --reuid="$PUID" --regid="$PGID" \
+    --groups="$supplementary_groups" "$0" "$@"
 fi
 
 if [ "$(id -u)" != "$PUID" ] || [ "$(id -g)" != "$PGID" ]; then

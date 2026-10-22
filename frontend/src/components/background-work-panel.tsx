@@ -30,6 +30,8 @@ import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TabBar } from "@/components/ui/tabs";
+import { MeshWorkersSection } from "@/components/mesh-workers-section";
+import { meshWorkersApi } from "@/lib/api/mesh-workers";
 import {
   useBackgroundWork,
   useWorkMutation,
@@ -185,17 +187,32 @@ function LaneRow({
   );
 }
 
-export function BackgroundWorkPanel({ api = workApi }: { api?: BackgroundWorkApi }) {
+export function BackgroundWorkPanel({
+  api = workApi,
+  meshApi = meshWorkersApi,
+}: {
+  api?: BackgroundWorkApi;
+  meshApi?: typeof meshWorkersApi;
+}) {
   const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
   const work = useBackgroundWork(api);
-  return <BackgroundWorkView key={`${session}:${work.allowed}`} api={api} work={work} />;
+  return (
+    <BackgroundWorkView
+      key={`${session}:${work.allowed}`}
+      api={api}
+      meshApi={meshApi}
+      work={work}
+    />
+  );
 }
 
 function BackgroundWorkView({
   api,
+  meshApi,
   work,
 }: {
   api: BackgroundWorkApi;
+  meshApi: typeof meshWorkersApi;
   work: ReturnType<typeof useBackgroundWork>;
 }) {
   useUiLocale();
@@ -536,6 +553,15 @@ function BackgroundWorkView({
 
             {activeView === "workers" ? (
               <>
+                <SectionHeader
+                  icon={Cpu}
+                  title={uiText("Mesh processing")}
+                  description={uiText(
+                    "More models at once finish imports sooner and use more memory. Memory admission still holds back what does not fit.",
+                  )}
+                />
+                <MeshWorkersSection api={meshApi} />
+
                 <SectionHeader
                   icon={Layers}
                   title={uiText("How many jobs run at once")}

@@ -5,6 +5,7 @@ import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from fastapi.testclient import TestClient
 from sqlmodel import select
@@ -73,7 +74,11 @@ class StalledStorage(LocalStorageBackend):
                 is not None
             )
         if running:
-            self.marker.write_text(str(file.id))
+            with NamedTemporaryFile(
+                mode="w", dir=self.marker.parent, delete=False
+            ) as temporary:
+                temporary.write(str(file.id))
+            Path(temporary.name).replace(self.marker)
             while True:
                 time.sleep(1)
         with super().local_path(key) as path:

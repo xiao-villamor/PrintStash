@@ -179,6 +179,14 @@ class TestRamTriangleCap:
         with admit(Resources(1, 72000), Resources(4, 288000), checkpoint=lambda: None):
             assert mesh_policy.ram_triangle_cap(suffix) == 72000 // cost
 
+    def test_weighs_a_lib3mf_scene_by_its_lighter_cost(self, monkeypatch) -> None:
+        from app.runtime.native_admission import Resources
+        from app.runtime.native_runtime import admit
+
+        monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0.5)
+        with admit(Resources(1, 72000), Resources(4, 288000), checkpoint=lambda: None):
+            assert mesh_policy.ram_triangle_cap(".3mf", lib3mf=True) == 72000 // 600
+
     def test_uses_current_host_capacity(self, monkeypatch) -> None:
         monkeypatch.setattr(native_process, "memory_limit_bytes", lambda: 4 * 1024**3)
         monkeypatch.setitem(_overlay, "mesh_memory_budget_fraction", 0.5)

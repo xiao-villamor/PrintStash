@@ -29,6 +29,7 @@ from app.db.models import (
     OwnedStorageObject,
     StorageObjectState,
 )
+from app.modules.derivatives.kinds import THREE_MF_VIEWER_STL_RECIPE
 from app.modules.media import mesh_isolation
 from app.modules.storage.storage_backend.runtime import get_backend
 from tests.e2e._jobs import settle
@@ -215,7 +216,7 @@ class TestViewerStlPreparation:
             select(ArtifactDerivative).where(
                 ArtifactDerivative.file_id == file_id,
                 ArtifactDerivative.kind == DerivativeKind.VIEWER_STL,
-                ArtifactDerivative.recipe_version == 3,
+                ArtifactDerivative.recipe_version == THREE_MF_VIEWER_STL_RECIPE,
             )
         ).one()
         jobs = e2e_db.exec(

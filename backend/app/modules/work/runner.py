@@ -32,7 +32,14 @@ from app.db.models import ACTIVE_JOB_STATES, Job, JobKind, JobState, WorkPriorit
 from app.db.session import get_session_factory
 
 from . import catalog as catalog_module
-from .contracts import JobOutcome, RetryPolicy, Step, StepRunner, no_hook
+from .contracts import (
+    JobOutcome,
+    PrioritizedWorkSource,
+    RetryPolicy,
+    Step,
+    StepRunner,
+    no_hook,
+)
 from .jobs import Settlement, failure_of, jobs
 
 logger = get_logger(__name__)
@@ -178,11 +185,14 @@ class ExecutionContext:
                 session, definition.name, besides=self.job_id
             ):
                 sources.add(definition.name)
-            if definition.adds_to_library:
-                # The last addition to end releases the work that waited.
-                catalog = catalog_module.get_catalog()
-                if not jobs.any_active(session, catalog.additions, besides=self.job_id):
-                    sources.update(catalog.waiting_for_additions)
+            catalog = catalog_module.get_catalog()
+            adding = jobs.any_active(session, catalog.additions, besides=self.job_id)
+            if definition.adds_to_library and not adding:
+                # The last addition to end releases the work that held back.
+                sources.update(catalog.held_by_additions)
+            if adding:
+                # Paced work looks again on its own while additions go on.
+                sources.difference_update(catalog.paced_during_additions)
             for source in sorted(sources):
                 if stamp(session, source, now=now):
                     passes.append(source)
@@ -429,6 +439,15 @@ def _begin(job_id: str, attempt: int, execution_epoch: str) -> dict[str, str] | 
             "priority": row.priority.value,
         }
         session.add(row)
+        if row.priority is WorkPriority.INTERACTIVE:
+            definition = catalog_module.get_catalog().definition(row.kind)
+            if isinstance(definition.source, PrioritizedWorkSource):
+                from .submission import nudge_after_commit
+
+                # Running interactive work frees a pending slot. Let the source
+                # fill that existing allowance while this attempt runs; its
+                # priority quotas and admission checks still bound discovery.
+                nudge_after_commit(session, definition.name)
         session.commit()
         return claim
 
@@ -539,13 +558,13 @@ def _settle(context: ExecutionContext, error: str | None) -> None:
         # not known here, and a repeated nudge costs one covered stamp.
         from .submission import nudge
 
-        waiting = (
-            catalog_module.get_catalog().waiting_for_additions
+        held = (
+            catalog_module.get_catalog().held_by_additions
             if definition.adds_to_library
             else ()
         )
         for source in dict.fromkeys(
-            (definition.name, *definition.completion_nudges, *waiting)
+            (definition.name, *definition.completion_nudges, *held)
         ):
             nudge(source)
 
@@ -564,6 +583,12 @@ def execute_job(
     if begun is None:
         return
     definition = catalog_module.get_catalog().definition(JobKind(begun["kind"]))
+    if definition.adds_to_library:
+        # Models start landing: paced work derives them as they do.
+        from .submission import queue_pass
+
+        for source in catalog_module.get_catalog().paced_during_additions:
+            queue_pass(source, delay=settings.jobs_paced_discovery_seconds)
     subject_key = begun["subject_key"]
     context = ExecutionContext(
         job_id=job_id,

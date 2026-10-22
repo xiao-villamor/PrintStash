@@ -71,6 +71,7 @@ PRELOAD = (
     "app.modules.media.mesh_render",
     "app.modules.media.stl_reader",
     "app.modules.media.three_mf_scene",
+    "app.modules.media.three_mf_native",
     "app.modules.media.fingerprints",
     "app.runtime.compute.client",
 )

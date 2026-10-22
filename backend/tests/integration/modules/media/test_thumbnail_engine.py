@@ -1604,9 +1604,12 @@ class TestThumbnailFailureBoundaries:
     def test_allocator_refusal_preserves_document_preview(
         self, tmp_path, monkeypatch, embedded
     ):
+        # NumPy's allocator fails inside the XML reader's array conversion;
+        # without OPC entries that reader reads the package.
         source = tmp_path / "allocation.3mf"
         source_bytes = three_mf(
-            extras={"Metadata/thumbnail.png": content.png()} if embedded else {}
+            extras={"Metadata/thumbnail.png": content.png()} if embedded else {},
+            opc=False,
         )
         source.write_bytes(source_bytes)
 
@@ -1666,8 +1669,10 @@ class TestThumbnailFailureBoundaries:
     def test_propagates_publication_failure_after_allocator_refusal(
         self, tmp_path, monkeypatch, error
     ):
+        # NumPy's allocator fails inside the XML reader's array conversion;
+        # without OPC entries that reader reads the package.
         source = tmp_path / "allocation.3mf"
-        source_bytes = three_mf()
+        source_bytes = three_mf(opc=False)
         source.write_bytes(source_bytes)
         fault = error("output publication refused")
         outputs = []

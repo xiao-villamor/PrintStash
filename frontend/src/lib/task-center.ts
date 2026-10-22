@@ -610,7 +610,12 @@ function applyJob(
     if (isTerminal(job)) publishTerminal(job, scope);
     return;
   }
+  // A late, older snapshot must not undo newer progress. A terminal status
+  // always ends an unfinished task, whatever its stamp: the server's clock may
+  // step back between two writes (an NTP or VM resync) and stamp the end of a
+  // Job before its start.
   if (
+    !isTerminal(job) &&
     existing?.serverUpdatedAt &&
     job.updated_at &&
     Date.parse(job.updated_at) < Date.parse(existing.serverUpdatedAt)

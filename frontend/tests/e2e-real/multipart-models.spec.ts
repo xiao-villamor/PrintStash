@@ -252,7 +252,7 @@ test.describe("multipart models", () => {
     await page.goto(`/?c=${folder}`);
     const sidebar = page.locator("aside");
     const label = sidebar.getByRole("button", { name: folder, exact: true });
-    await label.hover();
+    await label.focus();
     await label
       .locator("..")
       .getByRole("button", { name: "Delete collection", exact: true })
