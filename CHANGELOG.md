@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- STEP parts in the Docker image get their exact B-rep volume and similarity
+  fingerprints again. The image lacked `libgl1`, which OpenCASCADE's binding
+  loads even without a display, so every B-rep read reported STEP as
+  unavailable. The image build now fails if that binding cannot load.
+
 - Thumbnails, measurements and previews of a ZIP's Models now start while the
   rest of the ZIP is still being imported, instead of after its last file. The
   import still shows every Model almost as soon as before, because the derived

@@ -358,6 +358,42 @@ print(json.dumps({
         self.assertEqual(report["placed"], [])
 
 
+class TestFullImageStepGeometry(unittest.TestCase):
+    """The full image reads a STEP part's B-rep, not only its tessellation."""
+
+    def test_measures_a_step_part_from_its_brep(self) -> None:
+        probe = """
+import json
+from pathlib import Path
+from app.modules.media.step_geometry import tessellate
+vertices, faces, brep = tessellate(Path("/tmp/part.stp"), triangle_limit=100_000)
+print(json.dumps({"faces": len(faces), "volume": brep["volume_mm3"]}))
+"""
+        result = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-i",
+                "-v",
+                f"{FIXTURES_DIR / 'cascadio_material.stp'}:/tmp/part.stp:ro",
+                "--entrypoint",
+                "/app/.venv/bin/python",
+                IMAGE,
+                "-",
+            ],
+            input=probe,
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=True,
+        )
+        report = json.loads(result.stdout.splitlines()[-1])
+
+        self.assertGreater(report["faces"], 0)
+        self.assertGreater(report["volume"], 0)
+
+
 class TestLiteImageTransports(unittest.TestCase):
     def test_reports_unavailable_image_capabilities(self) -> None:
         result = _probe()
@@ -573,7 +609,7 @@ def main() -> int:
     classes = (
         TestRuntimeImageEntrypoint,
         *(
-            (TestFullImageTransports, TestRuntimeImageBackup)
+            (TestFullImageTransports, TestFullImageStepGeometry, TestRuntimeImageBackup)
             if VARIANT == "full"
             else (TestLiteImageTransports,)
         ),

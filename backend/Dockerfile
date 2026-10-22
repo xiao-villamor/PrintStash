@@ -83,14 +83,16 @@ COPY --from=opendal-builder /wheels /tmp/opendal-wheels
 # until a device is handed to the container: with no device, discovery finds
 # only a software adapter and every operation stays on the CPU. Handing a device
 # in is a runtime choice (see docs/compute.md), never a different image.
+# OpenCASCADE's Python binding links libGL.so.1 even without VTK; without
+# libgl1 every STEP B-rep read (volume, similarity fingerprint) is unavailable.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openssh-client libvulkan1 mesa-vulkan-drivers libegl1 libgl1-mesa-dri libglx-mesa0 \
+ && apt-get install -y --no-install-recommends openssh-client libvulkan1 mesa-vulkan-drivers libegl1 libgl1 libgl1-mesa-dri libglx-mesa0 \
  && rm -rf /var/lib/apt/lists/* \
  && uv sync --frozen --no-dev --no-editable --extra full --extra gpu --no-install-workspace
 COPY --chmod=0644 packages/printstash-core/src ./packages/printstash-core/src
 RUN uv sync --frozen --no-dev --no-editable --extra full --extra gpu \
  && uv pip install --reinstall /tmp/opendal-wheels/opendal-0.47.6-*.whl \
- && .venv/bin/python -c 'import opendal; opendal.Operator("s3", bucket="build-check", region="us-east-1", access_key_id="build-check", secret_access_key="build-check", disable_config_load="true", disable_ec2_metadata="true"); opendal.Operator("webdav", endpoint="https://example.invalid", root="/"); opendal.Operator("gdrive", root="/", client_id="build-check", client_secret="build-check", refresh_token="build-check"); import asyncssh, wgpu, onnxruntime' \
+ && .venv/bin/python -c 'import opendal; opendal.Operator("s3", bucket="build-check", region="us-east-1", access_key_id="build-check", secret_access_key="build-check", disable_config_load="true", disable_ec2_metadata="true"); opendal.Operator("webdav", endpoint="https://example.invalid", root="/"); opendal.Operator("gdrive", root="/", client_id="build-check", client_secret="build-check", refresh_token="build-check"); import asyncssh, wgpu, onnxruntime, OCP.BRep, OCP.STEPControl' \
  && rm -rf /tmp/opendal-wheels \
  && uv cache clean \
  && rm -rf "$UV_CACHE_DIR"
