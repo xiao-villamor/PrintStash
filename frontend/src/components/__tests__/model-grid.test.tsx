@@ -1956,6 +1956,225 @@ describe("ModelBrowser", () => {
     });
   });
 
+  describe("renaming the open collection", () => {
+    it("keeps a single heading click in browse mode", async () => {
+      const user = userEvent.setup();
+      renderVault({ at: "/?c=parts", collections: [aCollectionNode()] });
+
+      await user.click(await screen.findByRole("heading", { name: "Parts", level: 1 }));
+
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("opens the collection name on double-click", async () => {
+      const user = userEvent.setup();
+      renderVault({ at: "/?c=parts", collections: [aCollectionNode()] });
+
+      await user.dblClick(await screen.findByRole("heading", { name: "Parts", level: 1 }));
+
+      const name = await screen.findByRole("textbox", { name: "Collection name" });
+      expect(name).toHaveValue("Parts");
+      expect(name).toHaveFocus();
+    });
+
+    it("follows the acknowledged renamed collection path", async () => {
+      const user = userEvent.setup();
+      const collection = aCollectionNode();
+      const app = renderVault({
+        at: "/?c=parts&sort=name-asc",
+        collections: [collection],
+        historyProbe: true,
+        routes: {
+          "PATCH /api/v1/collections/1": () => {
+            Object.assign(collection, {
+              name: "Spare parts",
+              path: "spare-parts",
+              slug: "spare-parts",
+            });
+            return json(collection);
+          },
+        },
+      });
+      const pencil = await screen.findByRole("button", { name: "Rename Parts" });
+      pencil.focus();
+      await user.keyboard("{Enter}");
+      const name = await screen.findByRole("textbox", { name: "Collection name" });
+      await user.clear(name);
+      await user.type(name, "  Spare parts  {Enter}");
+
+      expect(await screen.findByRole("heading", { name: "Spare parts", level: 1 })).toBeVisible();
+      expect(screen.getByTestId("vault-location")).toHaveTextContent(
+        "/?c=spare-parts&sort=name-asc",
+      );
+      const writes = app.requestsWithMethod("PATCH");
+      expect(writes).toHaveLength(1);
+      expect(writes[0].url).toContain("/api/v1/collections/1");
+      expect(JSON.parse(writes[0].body ?? "{}")).toEqual({ name: "Spare parts" });
+    });
+
+    it("keeps recent descendants reachable after renaming their parent", async () => {
+      const user = userEvent.setup();
+      const parent = aCollectionNode();
+      const child = aCollectionNode({
+        id: 2,
+        name: "Brackets",
+        slug: "brackets",
+        path: "parts/brackets",
+        parent_id: 1,
+      });
+      window.localStorage.setItem(
+        "ps-recent-folders-labelled",
+        JSON.stringify([["parts/brackets", "Parts/Brackets"]]),
+      );
+      renderVault({
+        at: "/?c=parts",
+        collections: [parent, child],
+        routes: {
+          "PATCH /api/v1/collections/1": () => {
+            Object.assign(parent, { name: "Spares", path: "spares", slug: "spares" });
+            child.path = "spares/brackets";
+            return json(parent);
+          },
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Rename Parts" }));
+      await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
+      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Spares{Enter}");
+      await screen.findByRole("heading", { name: "Spares", level: 1 });
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+      await user.click(screen.getByRole("button", { name: "Recent" }));
+      await user.click(screen.getByRole("menuitem", { name: "Spares/Brackets" }));
+
+      expect(await screen.findByRole("heading", { name: "Brackets", level: 1 })).toBeVisible();
+      expect(
+        JSON.parse(window.localStorage.getItem("ps-recent-folders-labelled") ?? "[]"),
+      ).toContainEqual(["spares/brackets", "Spares/Brackets"]);
+    });
+
+    it("retires the rename draft when navigation changes", async () => {
+      const user = userEvent.setup();
+      renderVault({ at: "/?c=parts", collections: [aCollectionNode()], historyProbe: true });
+      await user.click(await screen.findByRole("button", { name: "Rename Parts" }));
+      await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
+      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Private draft");
+
+      fireEvent.click(screen.getByRole("button", { name: "Open multipart location" }));
+
+      expect(screen.queryByDisplayValue("Private draft")).toBeNull();
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    });
+
+    it("retires the rename draft with its session", async () => {
+      const user = userEvent.setup();
+      renderVault({ at: "/?c=parts", collections: [aCollectionNode()] });
+      await user.click(await screen.findByRole("button", { name: "Rename Parts" }));
+      await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
+      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Private draft");
+
+      act(() => clearLogin());
+
+      expect(screen.queryByDisplayValue("Private draft")).toBeNull();
+    });
+
+    it("does not navigate after a rename outlives the library", async () => {
+      const user = userEvent.setup();
+      const pending = Promise.withResolvers<Response>();
+      const app = renderVault({
+        at: "/?c=parts",
+        collections: [aCollectionNode()],
+        routes: { "PATCH /api/v1/collections/1": () => pending.promise },
+      });
+      await user.click(await screen.findByRole("button", { name: "Rename Parts" }));
+      await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
+      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Spares{Enter}");
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
+      app.rerender(<HistoryProbe />);
+      await user.click(screen.getByRole("button", { name: "Open multipart location" }));
+
+      await act(async () => {
+        pending.resolve(json(aCollectionNode({ name: "Spares", slug: "spares", path: "spares" })));
+        await pending.promise;
+      });
+
+      expect(screen.getByTestId("vault-location")).toHaveTextContent(
+        "/?type=multipart&sort=name-asc",
+      );
+      expect(screen.queryByText("Renamed 1 folder")).toBeNull();
+    });
+
+    it("discards a cancelled collection name draft", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({ at: "/?c=parts", collections: [aCollectionNode()] });
+      const pencil = await screen.findByRole("button", { name: "Rename Parts" });
+      await user.click(pencil);
+      await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
+      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Discard me");
+
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      await user.click(pencil);
+
+      expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue("Parts");
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+    });
+
+    it("refuses a blank collection name", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({ at: "/?c=parts", collections: [aCollectionNode()] });
+      await user.click(await screen.findByRole("button", { name: "Rename Parts" }));
+      const name = screen.getByRole("textbox", { name: "Collection name" });
+      await user.clear(name);
+      await user.type(name, "   {Enter}");
+
+      expect(screen.getByRole("button", { name: "Rename" })).toBeDisabled();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+    });
+
+    it("retains the collection name after a rejected rename", async () => {
+      const user = userEvent.setup();
+      const app = renderVault({
+        at: "/?c=parts",
+        collections: [aCollectionNode()],
+        routes: {
+          "PATCH /api/v1/collections/1": json({ detail: "collection_already_exists" }, 409),
+        },
+      });
+      await user.click(await screen.findByRole("button", { name: "Rename Parts" }));
+      const name = screen.getByRole("textbox", { name: "Collection name" });
+      await user.clear(name);
+      await user.type(name, "Duplicate{Enter}");
+
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
+      await waitFor(() => expect(screen.getByRole("button", { name: "Rename" })).toBeEnabled());
+      expect(name).toHaveValue("Duplicate");
+      expect(screen.getByRole("heading", { name: "Parts", level: 1 })).toBeVisible();
+      expect(screen.getByRole("dialog", { name: "Rename Parts" })).toBeVisible();
+    });
+
+    it.each(["view", "edit"] as const)("hides collection rename from %s members", async (role) => {
+      const user = userEvent.setup();
+      renderVault({
+        at: "/?c=parts",
+        collections: [aCollectionNode({ effective_role: role })],
+        auth: memberSession(),
+      });
+      await user.dblClick(await screen.findByRole("heading", { name: "Parts", level: 1 }));
+
+      expect(screen.queryByRole("button", { name: "Rename Parts" })).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("offers no rename for the library root", async () => {
+      const user = userEvent.setup();
+      renderVault();
+      await user.dblClick(await screen.findByRole("heading", { name: "All Models", level: 1 }));
+
+      expect(screen.queryByRole("button", { name: "Rename All Models" })).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
   describe("acting on several folders at once", () => {
     /** Turn on select mode and tick the folder card. */
     async function selectFolder(user: ReturnType<typeof userEvent.setup>, name = "Parts") {

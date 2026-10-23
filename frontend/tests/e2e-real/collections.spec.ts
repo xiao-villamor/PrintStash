@@ -5,10 +5,12 @@
  * never just deleting a row. The recursive delete is here because it is the one action
  * that can take a shelf of somebody's library with it, and the flow that guards it lives
  * in the UI rather than the API. Keyboard focus keeps each action exposed while
- * deferred tree reads move rows away from the pointer.
+ * deferred tree reads move rows away from the pointer. Heading renames must keep the
+ * selected branch reachable after reload and let keyboard users discard an unsaved name.
  */
+import { readFile } from "node:fs/promises";
 import { test, expect } from "./helpers";
-import { createCollectionViaVault, uploadModel } from "./util";
+import { createCollectionViaVault, gcodeFor, modelCard, uploadModel } from "./util";
 
 // Real CRUD against the backend DB.
 
@@ -33,6 +35,95 @@ test.describe("collections", () => {
 
     await page.reload();
     await expect(collection).toHaveCount(0);
+  });
+
+  test("quick-renames a populated nested collection from its heading", async ({ page }) => {
+    const stamp = Date.now();
+    const parent = `e2e-rename-parent-${stamp}`;
+    const name = `e2e-rename-child-${stamp}`;
+    const renamed = `${name}-renamed`;
+    const model = `e2e-rename-model-${stamp}`;
+    await createCollectionViaVault(page, parent);
+    await createCollectionViaVault(page, name, parent);
+    await uploadModel(page, model, { collection: `${parent}/${name}` });
+    const modelHref = await modelCard(page, model).getAttribute("href");
+    expect(modelHref).toMatch(/^\/models\/\d+(?:\?|$)/);
+    const modelPath = new URL(modelHref!, page.url()).pathname;
+    const sameModel = new RegExp(`^${modelPath}(?:\\?|$)`);
+
+    // ── Double-click the heading to rename the selected collection ──
+    await page.getByRole("heading", { name, exact: true }).dblclick();
+    const dialog = page.getByRole("dialog", { name: `Rename ${name}`, exact: true });
+    const input = dialog.getByRole("textbox", { name: "Collection name", exact: true });
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue(name);
+    await input.fill(renamed);
+    await input.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: renamed, exact: true })).toBeVisible();
+    await expect(page).toHaveURL((url) => url.searchParams.get("c") === `${parent}/${renamed}`);
+    await expect(modelCard(page, model)).toHaveAttribute("href", sameModel);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: renamed, exact: true })).toBeVisible();
+
+    // ── The same Model and its Artifact survive the collection's new path ──
+    await expect(modelCard(page, model)).toHaveAttribute("href", sameModel);
+    await modelCard(page, model).click();
+    await expect(page).toHaveURL((url) => url.pathname === modelPath);
+    await expect(page.getByRole("heading", { name: model, exact: true })).toBeVisible();
+    await page.getByRole("tab", { name: /^Revisions/ }).click();
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTitle("Download").first().click(),
+    ]);
+    expect(download.suggestedFilename()).toBe(`${model}.gcode`);
+    const downloadedPath = await download.path();
+    expect(downloadedPath).not.toBeNull();
+    expect(await readFile(downloadedPath!, "utf8")).toBe(gcodeFor(model));
+    await page.getByRole("link", { name: "Back", exact: true }).click();
+    await expect(page).toHaveURL((url) => url.searchParams.get("c") === `${parent}/${renamed}`);
+    await expect(page.getByRole("heading", { name: renamed, exact: true })).toBeVisible();
+
+    // ── The pen is keyboard-accessible; Escape discards an unsaved rename ──
+    const renameButton = page
+      .getByRole("main")
+      .getByRole("button", { name: `Rename ${renamed}`, exact: true });
+    await renameButton.focus();
+    await renameButton.press("Enter");
+    const cancelledDialog = page.getByRole("dialog", {
+      name: `Rename ${renamed}`,
+      exact: true,
+    });
+    const cancelledInput = cancelledDialog.getByRole("textbox", {
+      name: "Collection name",
+      exact: true,
+    });
+    await expect(cancelledInput).toBeFocused();
+    await cancelledInput.fill(`${renamed}-discarded`);
+    await cancelledInput.press("Escape");
+    await expect(cancelledDialog).toHaveCount(0);
+    await expect(renameButton).toBeFocused();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: renamed, exact: true })).toBeVisible();
+
+    // ── Remove this flow's collection branch ──
+    const sidebar = page.locator("aside");
+    const parentRow = sidebar.getByRole("button", { name: parent, exact: true });
+    await parentRow.focus();
+    await parentRow
+      .locator("..")
+      .getByRole("button", { name: "Delete collection", exact: true })
+      .click();
+    await sidebar.getByRole("button", { name: "Delete", exact: true }).click();
+    await expect(parentRow).toHaveCount(0);
+    await page.goto("/settings?section=trash");
+    await page
+      .getByRole("checkbox", { name: `Select deleted model ${model}`, exact: true })
+      .locator("..")
+      .getByRole("button", { name: "Delete", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Delete forever", exact: true }).click();
+    await expect(page.getByText(model, { exact: true })).toHaveCount(0);
   });
 
   test("deletes an emptied parent collection after its child", async ({ page }) => {

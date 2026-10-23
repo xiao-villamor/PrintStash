@@ -130,6 +130,57 @@ afterEach(() => {
 });
 
 describe("ModelDetail", () => {
+  describe("quick name editing", () => {
+    it("keeps a single model heading click in read mode", async () => {
+      const user = userEvent.setup();
+      renderDetail();
+
+      await user.click(await screen.findByRole("heading", { name: "Benchy", level: 1 }));
+
+      expect(screen.queryByPlaceholderText("Model name")).toBeNull();
+    });
+
+    it("focuses the model name after a heading double-click", async () => {
+      const user = userEvent.setup();
+      renderDetail();
+
+      await user.dblClick(await screen.findByRole("heading", { name: "Benchy", level: 1 }));
+
+      const name = screen.getByPlaceholderText("Model name");
+      expect(name).toHaveValue("Benchy");
+      expect(name).toHaveFocus();
+    });
+
+    it("saves a name opened from the keyboard rename button", async () => {
+      const user = userEvent.setup();
+      const app = renderDetail({
+        routes: { "PATCH /api/v1/models/1": json(aModel({ name: "New Benchy", edit_version: 2 })) },
+      });
+      const pencil = await screen.findByRole("button", { name: "Rename Benchy" });
+      pencil.focus();
+      await user.keyboard("{Enter}");
+      const name = screen.getByPlaceholderText("Model name");
+      await user.clear(name);
+      await user.type(name, "New Benchy");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+
+      expect(await screen.findByRole("heading", { name: "New Benchy", level: 1 })).toBeVisible();
+      expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body ?? "{}")).toMatchObject({
+        name: "New Benchy",
+      });
+    });
+
+    it("hides quick rename for a read-only model", async () => {
+      const user = userEvent.setup();
+      renderDetail({ model: aModel({ effective_role: "view" }), auth: memberSession() });
+
+      await user.dblClick(await screen.findByRole("heading", { name: "Benchy", level: 1 }));
+
+      expect(screen.queryByRole("button", { name: "Rename Benchy" })).toBeNull();
+      expect(screen.queryByPlaceholderText("Model name")).toBeNull();
+    });
+  });
+
   describe("remote Model ownership", () => {
     it("shows a refreshed authorized Model", async () => {
       const { client } = renderDetail();

@@ -20,10 +20,40 @@ import { expect, test } from "@playwright/test";
 
 import { collectPageProblems, useMockApi } from "./_setup";
 import type { ModelRead } from "../../src/types/models";
+import { aModel } from "../../src/test-support/factories";
 
 useMockApi();
 
 test.describe("model detail route", () => {
+  for (const width of [320, 1280]) {
+    test(`wraps the full nested collection path in Overview at ${width}px`, async ({ page }) => {
+      const collectionLabel = "PrintStash/Organization/Gridfinity/" + "NestedCollection".repeat(20);
+      await page.setViewportSize({ width, height: 900 });
+      await page.route("**/api/v1/models/1", (route) =>
+        route.fulfill({ json: aModel({ id: 1, collection_label: collectionLabel }) }),
+      );
+      await page.goto("/models/1");
+      const sidebar = page.getByTestId("model-detail-sidebar");
+      const path = sidebar.getByText(collectionLabel, { exact: true });
+      await expect(path).toBeVisible();
+      await path.scrollIntoViewIfNeeded();
+
+      const bounds = await sidebar.evaluate((element) => ({
+        content: element.scrollWidth,
+        width: element.clientWidth,
+      }));
+      const pathBounds = await path.evaluate((element) => ({
+        content: element.scrollWidth,
+        width: element.clientWidth,
+        height: element.getBoundingClientRect().height,
+        lineHeight: Number.parseFloat(getComputedStyle(element).lineHeight),
+      }));
+      expect(bounds.content).toBeLessThanOrEqual(bounds.width + 1);
+      expect(pathBounds.content).toBeLessThanOrEqual(pathBounds.width + 1);
+      expect(pathBounds.height).toBeGreaterThan(pathBounds.lineHeight * 2);
+    });
+  }
+
   test("recovers a failed Model read without reloading the route", async ({ page }) => {
     let available = false;
     await page.route("**/api/v1/models/1", async (route) => {

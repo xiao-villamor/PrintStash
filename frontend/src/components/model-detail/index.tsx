@@ -194,6 +194,13 @@ function ModelDetailPresentation({
   const star = useLibraryStar();
   const starBusy = star.isPending;
   const [editName, setEditName] = useState(model.name);
+  const nameInput = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (editing) {
+      nameInput.current?.focus();
+      nameInput.current?.select();
+    }
+  }, [editing]);
   const [editDescription, setEditDescription] = useState(model.description || "");
   const [editSourceUrl, setEditSourceUrl] = useState(model.source_url || "");
   const [editCollection, setEditCollection] = useState(model.collection || "");
@@ -686,6 +693,7 @@ function ModelDetailPresentation({
             <div className="min-w-0 flex-1">
               {editing ? (
                 <input
+                  ref={nameInput}
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   aria-invalid={!editName.trim()}
@@ -694,9 +702,29 @@ function ModelDetailPresentation({
                   placeholder={uiText("Model name")}
                 />
               ) : (
-                <h1 className="break-words text-xl font-semibold text-on-surface leading-tight">
-                  {model.name}
-                </h1>
+                <div className="flex min-w-0 items-start gap-1">
+                  <h1
+                    onDoubleClick={() => {
+                      if (auth.isAuthenticated && canEditModel) enterEdit();
+                    }}
+                    className="min-w-0 break-words text-xl font-semibold text-on-surface leading-tight"
+                  >
+                    {model.name}
+                  </h1>
+                  {auth.isAuthenticated && canEditModel && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="shrink-0 text-on-surface-variant"
+                      aria-label={uiText("Rename {value1}", { value1: model.name })}
+                      title={uiText("Rename")}
+                      onClick={enterEdit}
+                    >
+                      <Pencil className="h-3.5 w-3.5" aria-hidden />
+                    </Button>
+                  )}
+                </div>
               )}
               <span className="font-mono text-xs text-on-surface-variant">
                 {(meshFile ?? sourceFiles[0]) && (

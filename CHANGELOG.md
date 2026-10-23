@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Fixed
+
+- Recent folders now opens inside the screen edge, and long collection paths
+  wrap within the Model Overview panel without horizontal overflow.
+- Collection and Model headings offer a pen button and double-click shortcut
+  for renaming, while respecting editing permissions.
+
 ## 0.15.0
 
 **Back up before upgrading to 0.15.0. Every model file will be re-derived in

@@ -104,13 +104,13 @@ the storage step from any page, choose storage, then upload a first Model.
 
 auth (UI login, wrong-password, username + API-key login then revoke) ·
 vault (search, tag filter, list/grid toggle, empty state, narrow responsive toolbar) · collections
-(create / nest / subtree count / delete / recursive-delete non-empty from the sidebar / lazy child expansion and Model move) ·
+(create / nest / heading double-click rename preserving a populated nested collection, Model identity and downloaded Artifact bytes across reload, plus keyboard pen/Escape cancellation / subtree count / delete / recursive-delete non-empty from the sidebar / lazy child expansion and Model move) ·
 documents (markdown editor, collection README, GFM tables) · tags (quick create/assign from a card,
 global delete) ·
 uploads (real Job recovery after lost event/read delivery without reload, resumable transfer pause/reload, viewport-admitted bulk previews, legacy browser queue recovery and clearing across reloads, mesh-only source, BGCODE metadata, into a collection, ZIP preparation in Tasks → select all or select a folder → selected import) · full backup recovery
 (purge → UI restore → byte-for-byte download) · filament & printer presets
 (create / edit / delete) · model lifecycle (upload → edit → trash → restore →
-purge) · model detail (edit tags with save/cancel, log a manual print, download
+purge) · model detail (heading double-click rename with reload persistence and keyboard pen/Cancel, edit tags with save/cancel, log a manual print, download
 a revision) · G-code revisions (add, auto-recommend, re-recommend,
 status, compare) · public share links (view-only vs downloadable, revoke → 404) ·
 multipart sets (real tag/cover conflict review without silently rebasing composition drafts, empty-set first action, external cover, tags, favorites, reusable members, collection browsing with multiple part selection) ·

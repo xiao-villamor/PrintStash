@@ -4,10 +4,11 @@
  * The tag editor is the interesting one — Cancel must discard and Save must persist, and
  * a form that saves on Cancel silently rewrites somebody's library. The download test is
  * here because it goes through the browser's own save machinery, which nothing below this
- * tier can exercise.
+ * tier can exercise. Heading quick rename must reach the same persistent editor and
+ * keep cancelled name drafts out of the saved Model.
  */
 import { test, expect } from "./helpers";
-import { modelCard, uploadGcodeModel } from "./util";
+import { clickModelAction, modelCard, uploadGcodeModel } from "./util";
 
 test.describe("model detail", () => {
   test("reads a Model's detail once when opening it", async ({ page }) => {
@@ -70,6 +71,53 @@ test.describe("model detail", () => {
     expect((await warmed).status()).toBe(200);
     await expect(page).toHaveURL(/\/(\?.*)?$/);
     expect((await page.request.delete(`/api/v1/models/${id}`)).status()).toBe(204);
+  });
+
+  test("quick-renames a Model from its detail heading", async ({ page }) => {
+    const name = `e2e-quick-rename-${Date.now()}`;
+    const renamed = `${name}-renamed`;
+    await uploadGcodeModel(page, name);
+    await modelCard(page, name).click();
+
+    // ── Double-click the heading and persist the new name ──
+    await page.getByRole("heading", { name, exact: true }).dblclick();
+    const input = page.getByPlaceholder("Model name");
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue(name);
+    await input.fill(renamed);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("heading", { name: renamed, exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("heading", { name: renamed, exact: true })).toBeVisible();
+
+    // ── Use the pen with the keyboard, then discard the draft ──
+    const renameButton = page.getByRole("button", {
+      name: `Rename ${renamed}`,
+      exact: true,
+    });
+    await renameButton.focus();
+    await renameButton.press("Enter");
+    await expect(input).toBeFocused();
+    await input.fill(`${renamed}-discarded`);
+    const cancel = page.getByRole("button", { name: "Cancel", exact: true });
+    await cancel.focus();
+    await cancel.press("Enter");
+    await expect(input).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: renamed, exact: true })).toBeVisible();
+
+    // ── Remove the Model and its Artifacts from the shared test database ──
+    await clickModelAction(page, "Delete model");
+    await page.getByRole("dialog").getByRole("button", { name: "Delete" }).click();
+    await page.goto("/settings");
+    await page.getByRole("button", { name: "Trash", exact: true }).click();
+    await page
+      .getByRole("checkbox", { name: `Select deleted model ${renamed}`, exact: true })
+      .locator("..")
+      .getByRole("button", { name: "Delete", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Delete forever", exact: true }).click();
+    await expect(page.getByText(renamed, { exact: true })).toHaveCount(0);
   });
 
   test("log a manual print against an ad-hoc printer; it shows in history", async ({ page }) => {

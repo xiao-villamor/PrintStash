@@ -290,7 +290,7 @@ export function OverviewTab({
               </a>
             )}
             {model.collection_label && (
-              <span className="bg-surface-container text-on-surface px-3 py-1 rounded font-mono text-xs tracking-wider">
+              <span className="min-w-0 max-w-full wrap-anywhere bg-surface-container text-on-surface px-3 py-1 rounded font-mono text-xs tracking-wider">
                 {model.collection_label}
               </span>
             )}

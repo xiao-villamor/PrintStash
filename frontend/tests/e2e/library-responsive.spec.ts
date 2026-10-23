@@ -52,6 +52,36 @@ async function openDisplayMenu(page: Page): Promise<void> {
 }
 
 test.describe("Library responsive layout", () => {
+  for (const width of [320, 824, 1440]) {
+    test(`keeps Recent folders inside the viewport at ${width}px`, async ({ page }) => {
+      const label = "PrintStash/Organization/Gridfinity/Workshop/" + "NestedCollection".repeat(8);
+      await page.setViewportSize({ width, height: 900 });
+      await page.addInitScript((folderLabel) => {
+        localStorage.setItem(
+          "ps-recent-folders-labelled",
+          JSON.stringify([["maraio", folderLabel]]),
+        );
+      }, label);
+      await page.goto("/");
+      await page.getByRole("button", { name: "Recent", exact: true }).click();
+
+      const menu = page.getByRole("menu");
+      const folder = menu.getByRole("menuitem", { name: label, exact: true });
+      await expect(folder).toBeVisible();
+      await expect(folder).toHaveAttribute("title", label);
+      const bounds = await menu.evaluate((element) => ({
+        left: element.getBoundingClientRect().left,
+        right: element.getBoundingClientRect().right,
+        content: element.scrollWidth,
+        width: element.clientWidth,
+      }));
+      expect(bounds.left).toBeGreaterThanOrEqual(0);
+      expect(bounds.right).toBeLessThanOrEqual(width);
+      expect(bounds.content).toBeLessThanOrEqual(bounds.width + 1);
+      await expect(menu.getByRole("menuitem", { name: "Clear recent folders" })).toBeVisible();
+    });
+  }
+
   for (const width of [320, 390, 640, 824, 1044, 1440]) {
     test(`keeps the full collection heading readable at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 });
