@@ -14,7 +14,8 @@ Keep each model's files, slicer settings, and print results together.
 [![CI](https://img.shields.io/github/actions/workflow/status/xiao-villamor/PrintStash/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/xiao-villamor/PrintStash/actions/workflows/ci.yml)
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-2496ED?logo=docker&logoColor=white&style=flat-square)](https://github.com/xiao-villamor/PrintStash/pkgs/container/printstash)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue?style=flat-square)](./LICENSE)
-[![Status: beta](https://img.shields.io/badge/status-beta-f59e0b?style=flat-square)](#project-status--roadmap)
+[![Status: core stable](https://img.shields.io/badge/status-core%20stable-22c55e?style=flat-square)](#project-status--roadmap)
+[![Integrations: beta](https://img.shields.io/badge/integrations-beta-f59e0b?style=flat-square)](#printer-compatibility)
 
 [**Get Started**](#quick-start) · [**Documentation**](https://www.printstash.org/en/docs/) · [**Releases**](https://github.com/xiao-villamor/PrintStash/releases) · [**Contributing**](#contributing)
 
@@ -37,7 +38,7 @@ The default is one container, SQLite, and a persistent volume at `/data`.
 ```bash
 mkdir -p printstash && cd printstash
 curl -fsSL https://raw.githubusercontent.com/xiao-villamor/PrintStash/main/docker-compose.yml -o docker-compose.yml
-printf 'PRINTSTASH_VERSION=0.14.0\n' > .env
+printf 'PRINTSTASH_VERSION=0.15.0\n' > .env
 docker compose up -d
 ```
 
@@ -46,7 +47,7 @@ create the administrator account, and upload a model. There are no default
 credentials. To index a folder or NAS, [mount it inside the container](https://www.printstash.org/en/docs/guides/shared-volumes/#mount-a-folder-into-docker)
 and add it under **Settings → Library sources**.
 
-The `.env` file pins the image to the latest published release, **0.14.0**. Without a pin, `latest` can include
+The `.env` file pins the image to the latest published release, **0.15.0**. Without a pin, `latest` can include
 unreleased changes. See [installation options](https://www.printstash.org/en/docs/getting-started/installation/)
 for ports, PostgreSQL, remote storage, and SSO. Existing installations should
 read the [upgrade notes](#project-status--roadmap) first.
@@ -125,12 +126,19 @@ for setup, firmware limits, and unsupported actions.
 
 ## Project Status & Roadmap
 
-**Beta · Preparing [0.15.0](./CHANGELOG.md#0150).** The next release adds automatic
-loading as you scroll, filters across subfolders, editable Library sources, and a unified
-image with optional [GPU support](https://www.printstash.org/en/docs/guides/previews-and-gpu/).
+**0.15.0 is the latest published release** ([release notes](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.15.0),
+22 October 2026). It loads the library as you scroll, filters across subfolders, makes
+Library sources editable, and ships a unified image with optional
+[GPU support](https://www.printstash.org/en/docs/guides/previews-and-gpu/).
 GPU acceleration depends on the hardware and operation; CPU processing remains available.
-[0.14.0 remains the latest published release](https://github.com/xiao-villamor/PrintStash/releases/tag/v0.14.0)
-until the 0.15.0 tag and images are published.
+
+**Stable today:** the library, G-code revisions with known-good tagging, backups and restore,
+and the one-container Docker deploy on SQLite. **Beta:** the printer integrations marked Beta
+in [Printer Compatibility](#printer-compatibility), meaning Bambu LAN, PrusaLink, OctoPrint and
+the Elegoo Centauri Carbon models.
+
+**Releases:** 0.12.0 (19 August 2026), 0.12.1 (20 August), 0.13.0 (4 September),
+0.14.0 (29 September) and 0.15.0 (22 October), all published from this repository's CI.
 
 Run **one API server process per library**. The web app needs a running server.
 See [known limitations](https://www.printstash.org/en/docs/reference/known-limitations/)
