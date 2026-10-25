@@ -55,6 +55,8 @@
 
 ### Performance
 
+- Search indexing batches vocabulary updates during ingestion while preserving term statistics and transactional rollback.
+
 - Pull request CI runs the full frontend tests in parallel shards and splits the longest backend partitions, preserving the required checks and separate Deep CI coverage.
 
 ## 0.15.0

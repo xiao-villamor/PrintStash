@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from alembic import command
+from app.db.models import SearchLexicalPosting, SearchLexicalState, SearchLexicalTerm
 from app.db.models.search import SearchPassage, SearchProjectionRequest
 from app.db.projections import (
     batch_content_changes,
@@ -17,6 +18,7 @@ from app.db.projections import (
     content_changed,
 )
 from app.db.url import normalize_database_url
+from app.modules.search import lexical_index
 from app.modules.search.passages import sync_subject
 from app.modules.search.projection import LibraryProjection
 from app.modules.search.reconciliation import reconcile_partition
@@ -667,3 +669,77 @@ class TestProjectionLockOrder:
             )
         finally:
             bind_content_projection(previous)
+
+
+class TestLexicalReplace:
+    def test_replacement_preserves_shared_terms_across_batches(self, passage_engine):
+        engine, config = passage_engine
+        command.upgrade(config, "head")
+        with Session(engine) as session:
+            first = build_search_passage(
+                session,
+                SearchSubject(SubjectType.MODEL, build_model(session).id),
+                title="",
+                text="shared " + " ".join(f"old{i}" for i in range(600)),
+            )
+            second = build_search_passage(
+                session,
+                SearchSubject(SubjectType.MODEL, build_model(session).id),
+                title="shared",
+                text="",
+            )
+            lexical_index.replace(session, first, None)
+            lexical_index.replace(session, second, None)
+            session.commit()
+            old = lexical_index.snapshot(first)
+            first.text = "shared " + " ".join(f"new{i}" for i in range(600))
+
+            lexical_index.replace(session, first, old)
+            session.commit()
+
+            assert dict(
+                session.exec(
+                    select(SearchLexicalTerm.term, SearchLexicalTerm.document_frequency)
+                ).all()
+            ) == {"shared": 2} | {f"new{i}": 1 for i in range(600)}
+            assert dict(
+                session.exec(
+                    select(
+                        SearchLexicalPosting.term, SearchLexicalPosting.frequency
+                    ).where(SearchLexicalPosting.passage_id == first.id)
+                ).all()
+            ) == {"shared": 1.0} | {f"new{i}": 1.0 for i in range(600)}
+            state = session.get(SearchLexicalState, 1)
+            assert (state.document_count, state.total_length) == (2, 602)
+
+    def test_rollback_restores_the_published_statistics(self, passage_engine):
+        engine, config = passage_engine
+        command.upgrade(config, "head")
+        with Session(engine) as session:
+            row = build_search_passage(
+                session,
+                SearchSubject(SubjectType.MODEL, build_model(session).id),
+                title="bracket old",
+                text="",
+            )
+            lexical_index.replace(session, row, None)
+            session.commit()
+            old = lexical_index.snapshot(row)
+            row.title = "support new"
+
+            lexical_index.replace(session, row, old)
+            session.rollback()
+
+            assert row.title == "bracket old"
+            assert dict(
+                session.exec(
+                    select(SearchLexicalTerm.term, SearchLexicalTerm.document_frequency)
+                ).all()
+            ) == {"bracket": 1, "old": 1}
+            assert dict(
+                session.exec(
+                    select(SearchLexicalPosting.term, SearchLexicalPosting.frequency)
+                ).all()
+            ) == {"bracket": 5.0, "old": 5.0}
+            state = session.get(SearchLexicalState, 1)
+            assert (state.document_count, state.total_length) == (1, 2)

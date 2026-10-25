@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import batched
 
 from printstash_core.search.lexical import frequencies
 from sqlalchemy import delete, text, update
@@ -24,6 +25,9 @@ from app.db.models.search import (
     SearchLexicalTerm,
     SearchPassage,
 )
+
+# Bound each dispatch without compiling an upsert for every term.
+_TERM_BATCH_SIZE = 256
 
 
 @dataclass(frozen=True)
@@ -125,33 +129,30 @@ def replace(
         insert = (
             sqlite_insert if session.get_bind().dialect.name == "sqlite" else pg_insert
         )
-        for term in previous.keys() | terms.keys():
-            delta = int(term in terms) - int(term in previous)
-            if delta > 0:
-                statement = insert(SearchLexicalTerm).values(
-                    term=term, document_frequency=1
+        additions = terms.keys() - previous.keys()
+        removals = previous.keys() - terms.keys()
+        if additions:
+            statement = insert(SearchLexicalTerm).values(document_frequency=1)
+            statement = statement.on_conflict_do_update(
+                index_elements=["term"],
+                set_={"document_frequency": SearchLexicalTerm.document_frequency + 1},
+            )
+            for batch in batched(sorted(additions), _TERM_BATCH_SIZE, strict=False):
+                session.execute(statement, [{"term": term} for term in batch])
+        # Set updates retain ORM identity-map synchronization. Each IN holds
+        # only a bounded vocabulary batch, never a library-sized set of IDs.
+        for batch in batched(sorted(removals), _TERM_BATCH_SIZE, strict=False):
+            session.exec(
+                update(SearchLexicalTerm)
+                .where(SearchLexicalTerm.term.in_(batch))
+                .values(document_frequency=SearchLexicalTerm.document_frequency - 1)
+            )
+            session.exec(
+                delete(SearchLexicalTerm).where(
+                    SearchLexicalTerm.term.in_(batch),
+                    SearchLexicalTerm.document_frequency <= 0,
                 )
-                session.exec(
-                    statement.on_conflict_do_update(
-                        index_elements=["term"],
-                        set_={
-                            "document_frequency": SearchLexicalTerm.document_frequency
-                            + 1
-                        },
-                    )
-                )
-            elif delta < 0:
-                session.exec(
-                    update(SearchLexicalTerm)
-                    .where(SearchLexicalTerm.term == term)
-                    .values(document_frequency=SearchLexicalTerm.document_frequency - 1)
-                )
-                session.exec(
-                    delete(SearchLexicalTerm).where(
-                        SearchLexicalTerm.term == term,
-                        SearchLexicalTerm.document_frequency <= 0,
-                    )
-                )
+            )
         session.exec(
             delete(SearchLexicalPosting).where(
                 SearchLexicalPosting.passage_id == row.id
