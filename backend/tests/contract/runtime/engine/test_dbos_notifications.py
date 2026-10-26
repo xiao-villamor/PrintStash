@@ -28,6 +28,10 @@ class Runtime:
 
     def launch(self, *, listen=True):
         DBOS.destroy(destroy_registry=True)
+        from app.runtime.engine.dbos_notifications import signals, verify_patch
+
+        verify_patch()
+        signals.configure(enabled=True)
         DBOS(
             config={
                 "name": "notify-contract",
@@ -74,6 +78,9 @@ class Runtime:
         for gate in self.gates.values():
             gate.set()
         DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=5)
+        from app.runtime.engine.dbos_notifications import signals
+
+        signals.configure(enabled=False)
 
 
 @pytest.fixture

@@ -61,6 +61,7 @@ from app.modules.work.contracts import (
 )
 from app.modules.work.sources import even_step, interval_cron
 from app.modules.work.submission import PRIORITY_RANK
+from app.runtime.engine.dbos_notifications import signals, verify_patch
 
 logger = get_logger(__name__)
 
@@ -246,6 +247,7 @@ class DbosJobEngine(JobEngine):
         # The adapter's own reads of the engine's workflow table (see _active).
         self._status_db: Engine | None = None
         self._launched = False
+        self._notifications_enabled = False
         self._lock = threading.Lock()
         # Lanes polled at the boosted interval, with when each returns to its own.
         self._boosted: dict[LaneName, float] = {}
@@ -318,9 +320,21 @@ class DbosJobEngine(JobEngine):
         with self._lock:
             if self._launched:
                 return
+            notification_mode = (
+                settings.jobs_sqlite_queue_notifications
+                and make_url(self.url).get_backend_name() == "sqlite"
+            )
+            if notification_mode:
+                verify_patch()
             self._require_migratable_system_database()
             self._adopt_fifo_queues()
             DBOS.destroy(destroy_registry=True)
+            signals.configure(enabled=notification_mode)
+            self._notifications_enabled = notification_mode
+            logger.info(
+                "DBOS queue dispatch configured",
+                extra={"queue_notifications": notification_mode},
+            )
             DBOS(config=self._config())
             self._register_workflows()
             if listen_lanes is not None:
@@ -469,6 +483,10 @@ class DbosJobEngine(JobEngine):
         request or interactive derivative batch just dispatched to is paid for
         only while that batch arrives.
         """
+        if self._notifications_enabled:
+            # Enqueue already committed and signalled. Avoid config writes and
+            # the expiry timer: there is no polling sleep left to boost.
+            return
         window = settings.jobs_queue_boost_seconds
         lane = self.catalog.lanes[name]
         boosted = min(
@@ -555,6 +573,13 @@ class DbosJobEngine(JobEngine):
                     self._relax_timer = None
                 self._boosted.clear()
             DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=10)
+            if self._notifications_enabled:
+                logger.info(
+                    "DBOS queue notification counters",
+                    extra={"queues": signals.snapshot()},
+                )
+            signals.configure(enabled=False)
+            self._notifications_enabled = False
             if self._status_db is not None:
                 self._status_db.dispose()
                 self._status_db = None

@@ -8,6 +8,7 @@
 
 - CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.
 - Collection Documents accepts spreadsheets, Word files and arbitrary binary attachments, including other resin formats, with original-byte downloads.
+- Optional SQLite queue notifications wake workers when committed work is ready, with bounded failure retry and a verified build-time DBOS integration. Disabled by default; requires an explicitly patched build and runtime opt-in.
 
 ### Security
 

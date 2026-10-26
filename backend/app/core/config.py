@@ -225,6 +225,9 @@ class Settings(BaseSettings):
     # recovery tick. Every look is a transaction on the engine database whether
     # or not work is there, so an idle server pays each lane's cadence all day.
     jobs_queue_poll_interval_seconds: float = Field(default=1.0, ge=0.05, le=5)
+    # Opt-in requires the verified build-time DBOS patch. PostgreSQL ignores
+    # this SQLite-only capability. Restart to change; no runtime SDK mutation.
+    jobs_sqlite_queue_notifications: bool = False
     # The ingest lane, where an accepted upload or import waits for its Job to
     # start. Never slower than the interval above.
     jobs_interactive_queue_poll_interval_seconds: float = Field(

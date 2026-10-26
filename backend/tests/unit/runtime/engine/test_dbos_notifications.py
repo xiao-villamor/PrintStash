@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from app.runtime.engine.dbos_notifications import QueueSignals
+from app.runtime.engine.dbos_notifications import ClaimRetry, QueueSignals
 
 
 class TestQueueSignals:
@@ -62,3 +62,58 @@ class TestQueueSignals:
     def test_rejects_a_nonpositive_recovery_interval(self, seconds):
         with pytest.raises(ValueError, match="positive"):
             QueueSignals().wait("ready", threading.Event(), seconds)
+
+
+class TestClaimRetry:
+    def test_idle_has_no_failure_delay(self):
+        assert ClaimRetry().delay is None
+
+    def test_first_failure_uses_a_short_retry(self):
+        retry = ClaimRetry()
+
+        retry.failed()
+
+        assert retry.delay == 0.25
+
+    @pytest.mark.parametrize(
+        "previous", [1.0, 2.0], ids=["reaches-cap", "stays-capped"]
+    )
+    def test_persistent_failures_have_a_bounded_delay(self, previous):
+        retry = ClaimRetry()
+        retry.delay = previous
+
+        retry.failed()
+
+        assert retry.delay == 2.0
+
+    def test_success_resets_failure_backoff(self):
+        retry = ClaimRetry()
+        retry.failed()
+
+        retry.succeeded()
+
+        assert retry.delay is None
+
+
+class TestNotificationMode:
+    def test_disabled_mode_does_not_accumulate_hints(self):
+        hints = QueueSignals(enabled=False)
+
+        hints.notify("queue")
+
+        assert hints.snapshot() == {}
+
+    def test_restart_discards_old_hint_state(self):
+        hints = QueueSignals()
+        hints.notify("queue")
+
+        hints.configure(enabled=False)
+
+        assert hints.snapshot() == {}
+
+    def test_counts_dispatch_failures_separately(self):
+        hints = QueueSignals()
+
+        hints.failed("queue")
+
+        assert hints.snapshot()["queue"]["failed_passes"] == 1

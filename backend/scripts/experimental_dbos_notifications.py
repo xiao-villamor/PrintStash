@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import ast
 import hashlib
+import json
 from pathlib import Path
 
 EXPECTED = {
@@ -30,7 +31,8 @@ def patch(root: Path) -> None:
         if hashlib.sha256((root / name).read_bytes()).hexdigest() != digest:
             raise ValueError(f"unsupported DBOS source: {name}")
     imports = (
-        "from app.runtime.engine.dbos_notifications import RECOVERY_SECONDS, signals\n"
+        "from app.runtime.engine.dbos_notifications import ClaimRetry, RECOVERY_SECONDS, signals\n"
+        "PRINTSTASH_NOTIFICATION_PATCH = 2\n"
     )
     for name in sources:
         s = sources[name]
@@ -56,23 +58,38 @@ def patch(root: Path) -> None:
     q = sources["_queue.py"]
     q = replace_once(
         q,
-        "        self._sys_db().update_queue(self.name, fields)",
-        "        self._sys_db().update_queue(self.name, fields)\n        signals.notify(self.name)",
-    )
-    q = replace_once(
-        q,
         "    polling_interval = queue._polling_interval_sec\n",
-        '    polling_interval = queue._polling_interval_sec\n    notified_sqlite = dbos._sys_db.engine.dialect.name == "sqlite"\n    if notified_sqlite:\n        signals.notify(queue.name)  # Scan persisted work once at startup.\n',
+        '    polling_interval = queue._polling_interval_sec\n    notified_sqlite = signals.enabled and dbos._sys_db.engine.dialect.name == "sqlite"\n    retry = ClaimRetry()\n    if notified_sqlite:\n        signals.notify(queue.name)  # Scan persisted work once at startup.\n',
     )
     q = replace_once(
         q,
         "    while not stop_event.is_set():\n        # Reload database-backed queue config once per iteration",
-        "    while not stop_event.is_set():\n        if notified_sqlite:\n            interval = (queue._polling_interval_sec if queue._limiter is not None or queue._partition_limiter is not None else RECOVERY_SECONDS)\n            if signals.wait(queue.name, stop_event, interval):\n                return\n        # Reload AFTER the wait so a capacity-change wake uses the new limit.\n        # Reload database-backed queue config once per iteration",
+        "    while not stop_event.is_set():\n        if notified_sqlite:\n            interval = (queue._polling_interval_sec if queue._limiter is not None or queue._partition_limiter is not None else RECOVERY_SECONDS)\n            if retry.delay is not None:\n                if stop_event.wait(retry.delay * random.uniform(0.95, 1.05)):\n                    return\n            elif signals.wait(queue.name, stop_event, interval):\n                return\n        # Reload AFTER the wait so a capacity-change wake uses the new limit.\n        # Reload database-backed queue config once per iteration",
     )
     q = replace_once(
         q,
         "        if stop_event.wait(timeout=polling_interval * random.uniform(0.95, 1.05)):",
         "        if not notified_sqlite and stop_event.wait(timeout=polling_interval * random.uniform(0.95, 1.05)):",
+    )
+    q = replace_once(
+        q,
+        "                latest = queue\n",
+        "                if notified_sqlite:\n                    retry.failed()\n                    signals.failed(queue.name)\n                    continue\n                latest = queue\n",
+    )
+    q = replace_once(
+        q,
+        "        except OperationalError as e:\n            if isinstance(e.orig, errors.LockNotAvailable):",
+        "        except OperationalError as e:\n            if notified_sqlite:\n                retry.failed()\n                signals.failed(queue.name)\n            if isinstance(e.orig, errors.LockNotAvailable):",
+    )
+    q = replace_once(
+        q,
+        "        except Exception as e:\n            if not stop_event.is_set():",
+        "        except Exception as e:\n            if notified_sqlite:\n                retry.failed()\n                signals.failed(queue.name)\n            if not stop_event.is_set():",
+    )
+    q = replace_once(
+        q,
+        "        # Attempt to scale back the polling interval on each iteration",
+        "        else:\n            retry.succeeded()\n\n        # Attempt to scale back the polling interval on each iteration",
     )
     sources["_queue.py"] = q
     c = sources["_core.py"]
@@ -107,6 +124,19 @@ def patch(root: Path) -> None:
         "                )\n            )\n",
         "                )\n                .returning(SystemSchema.workflow_status.c.queue_name)\n            ).scalars().all()\n        for queue_name in set(changed):\n            signals.notify(queue_name)\n",
     )
+    original_body = old[old.index("        now_ms =") :]
+    new_body = new[new.index("        now_ms =") :]
+    header = old[: old.index("        now_ms =")]
+    new = (
+        header
+        + '        if not signals.enabled or self.engine.dialect.name != "sqlite":\n'
+        + "".join(
+            "    " + line if line.strip() else line
+            for line in original_body.splitlines(keepends=True)
+        )
+        + "            return\n"
+        + new_body
+    )
     s = s[:start] + new + s[end:]
     s = replace_once(
         s,
@@ -120,12 +150,37 @@ def patch(root: Path) -> None:
         "        signals.notify(queue_name if queue_name is not None else INTERNAL_QUEUE_NAME)\n\n"
         + marker,
     )
+    for following in ["update_queue", "upsert_queue"]:
+        marker = "    def " + following + "("
+        s = replace_once(s, marker, "        signals.notify(name)\n\n" + marker)
+    s = replace_once(
+        s,
+        "            return not existed\n",
+        "        signals.notify(name)\n        return not existed\n",
+    )
     sources["_sys_db.py"] = s
     for name, content in sources.items():
         ast.parse(content, filename=name)
     for name, content in sources.items():
         (root / name).write_text(content)
         print(name, hashlib.sha256(content.encode()).hexdigest())
+    adapter = (
+        Path(__file__).resolve().parents[1] / "app/runtime/engine/dbos_notifications.py"
+    )
+    manifest = {
+        "patch_version": 2,
+        "dbos_version": "3.3.0",
+        "original_files": EXPECTED,
+        "files": {
+            name: hashlib.sha256(content.encode()).hexdigest()
+            for name, content in sources.items()
+        },
+        "adapter_sha256": hashlib.sha256(adapter.read_bytes()).hexdigest(),
+    }
+    # Written last: interruption cannot leave an activatable partial patch.
+    (root / "printstash-notifications.json").write_text(
+        json.dumps(manifest, indent=2) + "\n"
+    )
 
 
 if __name__ == "__main__":

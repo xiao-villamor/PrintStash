@@ -408,6 +408,29 @@ path outside a persistent mount loses state on container replacement.
 
 ### Background work
 
+The optional SQLite notification adapter is disabled by default. To evaluate it,
+build the backend with `--build-arg PRINTSTASH_DBOS_NOTIFICATIONS=true`, then set
+`VAULT_JOBS_SQLITE_QUEUE_NOTIFICATIONS=true` and restart. The build applies an
+exact-source-checked patch to the locked DBOS 3.3.0 SDK; startup verifies its
+manifest and adapter hash. An incompatible or missing patch refuses opt-in.
+This is a maintained local dependency patch, not an upstream DBOS API. A DBOS
+upgrade requires reviewing and regenerating the patch before opting in again.
+For a disposable development environment, run `backend/scripts/experimental_dbos_notifications.py`
+with that environment's `site-packages/dbos` directory; never patch a running
+or shared interpreter. `uv sync` can replace the patch, so verify again after it.
+
+Notifications wake local SQLite dispatchers after work commits and after capacity
+is released. Durable claims, concurrency limits and recovery stay in DBOS. A
+missed or external-process hint is recovered by a 30-second scan; dispatch failures
+instead retry after 0.25 seconds, doubling to 2 seconds (with 5% jitter). This
+retry delay is additional to any time spent inside a database call. Limited
+queues retain their configured timed checks. PostgreSQL keeps its normal path.
+Startup logs the active mode and shutdown logs per-queue wake, scan and failure
+counts. To roll back, set the runtime flag to `false` and restart; no schema or
+stored-work conversion is needed. Rebuilding without the build argument restores
+the unpatched SDK. The adapter avoids polling-boost writes while notifications
+are active. Production delivery still requires the normal regression gate.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VAULT_PROCESS_ROLE` | `all` | `all` runs HTTP and every background Job; `api` is the one HTTP process of a deployment with [workers](#background-work-and-workers). |
