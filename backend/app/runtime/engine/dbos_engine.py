@@ -332,8 +332,8 @@ class DbosJobEngine(JobEngine):
             signals.configure(enabled=notification_mode)
             self._notifications_enabled = notification_mode
             logger.info(
-                "DBOS queue dispatch configured",
-                extra={"queue_notifications": notification_mode},
+                "DBOS queue dispatch configured notifications=%s",
+                notification_mode,
             )
             DBOS(config=self._config())
             self._register_workflows()
@@ -575,8 +575,8 @@ class DbosJobEngine(JobEngine):
             DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=10)
             if self._notifications_enabled:
                 logger.info(
-                    "DBOS queue notification counters",
-                    extra={"queues": signals.snapshot()},
+                    "DBOS queue notification counters %s",
+                    signals.snapshot(),
                 )
             signals.configure(enabled=False)
             self._notifications_enabled = False
