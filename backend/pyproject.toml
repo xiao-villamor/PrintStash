@@ -66,11 +66,11 @@ full = [
     "asyncssh>=2.21,<3",
     "cascadio>=0.1.1,<0.2",
     "cadquery-ocp-novtk==7.9.3.1.1",
-    "opendal==0.47.10",
+    "opendal==0.47.12",
 ]
 storage-opendal = [
     "asyncssh>=2.21,<3",
-    "opendal==0.47.10",
+    "opendal==0.47.12",
 ]
 dev = [
     # Builds tiny licensed ONNX contract fixtures; never downloads model weights.
