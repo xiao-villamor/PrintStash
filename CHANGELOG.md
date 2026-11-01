@@ -4,6 +4,8 @@
 
 ### Added
 
+- Model covers can use an uploaded PNG/JPEG/WebP, the current 3D view, or an available source image. Chosen covers survive thumbnail regeneration and source-image changes; Reset to automatic restores the latest generated thumbnail. Cover edits support conflict review and are included in backup, storage migration, and purge.
+
 - CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.
 - Collection Documents accepts spreadsheets, Word files and arbitrary binary attachments, including other resin formats, with original-byte downloads.
 

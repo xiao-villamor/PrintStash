@@ -133,6 +133,7 @@ export interface ModelSimilarityRead {
 }
 
 export interface ModelRead {
+  has_custom_cover: boolean;
   edit_epoch: string;
   edit_version: number;
   similarity?: ModelSimilarityRead;

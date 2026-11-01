@@ -35,6 +35,7 @@ const artifact: FileRead = {
 };
 
 const updatedModel: ModelRead = {
+  has_custom_cover: false,
   edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   id: 1,

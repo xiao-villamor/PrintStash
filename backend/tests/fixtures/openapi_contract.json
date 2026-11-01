@@ -1689,6 +1689,20 @@
         "title": "Body_inspect_archive_background_api_v1_ingest_archive_inspect_post",
         "type": "object"
       },
+      "Body_put_model_cover_api_v1_models__model_id__cover_put": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_put_model_cover_api_v1_models__model_id__cover_put",
+        "type": "object"
+      },
       "Body_put_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_put": {
         "properties": {
           "file": {
@@ -10638,6 +10652,21 @@
         "title": "ModelBatchTags",
         "type": "object"
       },
+      "ModelCoverSource": {
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Source Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_id"
+        ],
+        "title": "ModelCoverSource",
+        "type": "object"
+      },
       "ModelEditBatchResult": {
         "properties": {
           "failed": {
@@ -11674,6 +11703,10 @@
             "title": "Files",
             "type": "array"
           },
+          "has_custom_cover": {
+            "title": "Has Custom Cover",
+            "type": "boolean"
+          },
           "hash": {
             "title": "Hash",
             "type": "string"
@@ -11745,6 +11778,7 @@
         "required": [
           "edit_epoch",
           "edit_version",
+          "has_custom_cover",
           "id",
           "name",
           "slug",
@@ -35771,6 +35805,318 @@
           }
         ],
         "summary": "Compare actual print outcomes for Model Artifacts",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/cover": {
+      "delete": {
+        "operationId": "reset_model_cover_api_v1_models__model_id__cover_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Reset the Model cover to automatic",
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "operationId": "put_model_cover_api_v1_models__model_id__cover_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_put_model_cover_api_v1_models__model_id__cover_put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Choose an uploaded Model cover",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/cover/content": {
+      "get": {
+        "operationId": "get_model_cover_api_v1_models__model_id__cover_content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the Model's chosen cover",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/cover/source": {
+      "post": {
+        "operationId": "select_model_cover_source_api_v1_models__model_id__cover_source_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelCoverSource"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Choose a source image as the Model cover",
         "tags": [
           "models"
         ]

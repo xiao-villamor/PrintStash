@@ -200,7 +200,7 @@ def public_detail(session: Session, link: ShareLink) -> PublicModelRead:
     return PublicModelRead(
         name=model.name,
         description=model.description,
-        has_thumbnail=bool(model.thumbnail_file_id or model.thumbnail_path),
+        has_thumbnail=bool(model.cover_filename or model.thumbnail_file_id or model.thumbnail_path),
         allow_download=link.allow_download,
         files=files,
     )

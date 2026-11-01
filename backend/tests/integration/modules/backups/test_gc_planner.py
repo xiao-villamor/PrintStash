@@ -156,6 +156,17 @@ class TestCreateGcPlan:
         with pytest.raises(gc_planner.GcSafetyError, match="gc_plan_active"):
             gc_planner.create_plan(db_session, retention_days=30, requested_by=admin.id)
 
+    def test_candidate_metrics_include_the_chosen_cover(
+        self, db_session, make_model, make_model_cover
+    ):
+        model = make_model(trashed=True)
+        make_model_cover(model, size_bytes=512)
+
+        candidate = gc_planner._model_candidate(db_session, model)
+
+        assert candidate.key_count == 1
+        assert candidate.size_bytes == 512
+
     def test_candidate_metrics_count_owned_storage_evidence(
         self, db_session: Session
     ) -> None:

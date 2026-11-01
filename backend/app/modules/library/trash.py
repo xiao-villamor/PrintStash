@@ -323,6 +323,15 @@ def prepare_purge_deletions(
         if resource.id is None:
             continue
         if isinstance(resource, Model):
+            if resource.cover_filename is not None:
+                keys.append(
+                    (
+                        backend.model_cover_key(resource.id, resource.cover_filename),
+                        True,
+                        "model_cover",
+                        resource.id,
+                    )
+                )
             for file_row in session.exec(
                 select(File).where(File.model_id == resource.id)
             ).all():
@@ -445,7 +454,7 @@ def prepare_purge_deletions(
             resource_id=resource_id,
             allow_unverified=confirm_storage_risk
             and (
-                kind != "multipart_model_cover"
+                kind not in {"multipart_model_cover", "model_cover"}
                 or backend.capabilities.tier is not StorageTier.VERIFIED
             ),
         )
@@ -919,7 +928,9 @@ def hard_delete_model(
     ).first()
     _require_storage_risk(
         operation="purge_model",
-        storage_backed=bool(file_rows) or has_cover is not None,
+        storage_backed=bool(file_rows)
+        or has_cover is not None
+        or model.cover_filename is not None,
         confirmed=confirm_storage_risk,
     )
 

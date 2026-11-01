@@ -12,7 +12,12 @@ retention. This file pins the project's domain language.
 A printable logical asset deduplicated by source-mesh sha256; owns versioned
 Files and remains independently addressable and reusable even when referenced
 by Multipart Models. Everything shows each eligible Model independently of
-its references, alongside eligible Multipart Models.
+its references, alongside eligible Multipart Models. A chosen Model cover is a
+Model-owned image snapshot: uploaded, captured from the current 3D view, or copied
+from a source image. It takes precedence over the automatic Artifact thumbnail
+and survives derivative regeneration and later source-cover changes. Resetting
+the cover reveals the latest automatic thumbnail. Chosen covers are primary
+data included in backups and storage migrations and reclaimed on Model purge.
 _Avoid_: asset, item, part
 
 **Artifact** (File):

@@ -57,6 +57,7 @@ function aFile(over: Partial<FileRead> = {}): FileRead {
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,

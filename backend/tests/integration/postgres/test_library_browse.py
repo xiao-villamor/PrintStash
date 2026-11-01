@@ -24,6 +24,7 @@ from tests.factories import (
     build_collection,
     build_file,
     build_model,
+    build_model_cover,
     build_multipart_model,
     build_print_job,
     build_user,
@@ -43,6 +44,24 @@ def pg_library() -> Iterator:
 
 
 class TestLibraryBrowse:
+    def test_projects_the_chosen_cover_without_changing_automatic_selection(
+        self, pg_library
+    ):
+        with Session(pg_library) as session:
+            user = build_user(session, superuser=True)
+            model = build_model(session, "Chosen cover")
+            cover = build_model_cover(session, model)
+            session.expire_all()
+
+            page = page_items(session, user, BrowseQuery(limit=10))
+
+            assert page.items[0].kind == "model"
+            assert (
+                page.items[0].model.thumbnail_url
+                == f"/api/v1/models/{model.id}/cover/content?v={cover.filename}"
+            )
+            assert session.get(Model, model.id).thumbnail_file_id is None
+
     def test_excludes_trashed_candidates_before_pagination(self, pg_library):
         with Session(pg_library) as session:
             user = build_user(session, superuser=True)

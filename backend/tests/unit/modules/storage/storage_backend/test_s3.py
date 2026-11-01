@@ -772,6 +772,10 @@ class TestS3CompatibilityCoverage:
         assert backend.thumbnail_key(1) == "vault-data/thumbs/1.webp"
         assert backend.source_cover_key(2) == "vault-data/source-covers/2.webp"
         assert (
+            backend.model_cover_key(2, "chosen.webp")
+            == "vault-data/model-covers/2/chosen.webp"
+        )
+        assert (
             backend.capture_upload_slot_key("slot") == "vault-data/capture-slots/slot"
         )
         assert backend.legacy_thumbnail_key(3) == "vault-data/thumbs/3.png"

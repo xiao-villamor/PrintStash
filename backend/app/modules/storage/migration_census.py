@@ -43,6 +43,7 @@ def remap_owned_key(
             backend.collection_image_key(0, "__object__")[: -len("0/__object__")],
             backend.document_file_key(0, "__object__")[: -len("0/__object__")],
             backend.document_image_key(0, "__object__")[: -len("0/__object__")],
+            backend.model_cover_key(0, "__object__")[: -len("0/__object__")],
             backend.multipart_model_cover_key(0, "__object__")[: -len("0/__object__")],
         ]
 

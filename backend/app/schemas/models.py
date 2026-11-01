@@ -158,6 +158,7 @@ class ModelSimilarityRead(BaseModel):
 
 
 class ModelRead(EditingBase):
+    has_custom_cover: bool
     similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
     id: int
     name: str
@@ -555,6 +556,12 @@ class PrintStatisticsRead(BaseModel):
     top_models: List[ModelStatRead] = []
     top_printers: List[PrinterStatRead] = []
     cost_over_time: List[TimeBucketRead] = []
+
+
+class ModelCoverSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: int = Field(gt=0)
 
 
 class ModelUpdate(BaseModel):

@@ -11,7 +11,7 @@ Two routers with very different trust levels:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlmodel import Session
 
 from app.api.v1.files import serve_artifact, stl_response, thumbnail_response
@@ -20,6 +20,7 @@ from app.core.security import require_user
 from app.db.models import CollectionRole, FileType, Model, ShareLink, User
 from app.db.session import get_session
 from app.modules.identity import rbac, share
+from app.modules.library import model_covers
 from app.modules.storage.artifact_delivery import DeliveryPurpose
 from app.schemas.share import ShareLinkCreate, ShareLinkCreated, ShareLinkRead
 
@@ -63,6 +64,15 @@ def get_shared_thumbnail(
 ):
     link = share.resolve_share(session, token)
     model = session.get(Model, link.model_id)
+    if model is not None and model.cover_filename is not None:
+        return Response(
+            content=model_covers.content(model),
+            media_type="image/webp",
+            headers={
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
     if model is None or model.thumbnail_file_id is None:
         raise HTTPException(status_code=404, detail="not_found")
     return thumbnail_response(

@@ -325,6 +325,7 @@ export function aModel(
   override?: Partial<import("@/types").ModelRead>,
 ): import("@/types").ModelRead {
   return {
+    has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,

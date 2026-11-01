@@ -154,6 +154,7 @@ from .library import (
 from .library import (
     Model as Model,
 )
+from .library import ModelCover as ModelCover
 from .library import (
     ModelStar as ModelStar,
 )

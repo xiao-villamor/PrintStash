@@ -1173,3 +1173,13 @@ class TestToolpathStorage:
         monkeypatch.setattr(artifact_content, "get_backend", lambda: s3_backend)
         assert toolpath.read_ascii(artifact) == content
         assert s3_backend.read_bytes(key) == content
+
+
+class TestModelCoverStorage:
+    def test_round_trips_a_chosen_cover(self, versioned_s3_backend):
+        key = versioned_s3_backend.model_cover_key(7, "snapshot.webp")
+        receipt = versioned_s3_backend.create_bytes(b"chosen-cover", key)
+
+        assert versioned_s3_backend.read_bytes(key) == b"chosen-cover"
+        assert versioned_s3_backend.rollback_create(receipt) is True
+        assert not versioned_s3_backend.exists(key)
