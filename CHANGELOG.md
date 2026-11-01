@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.
+- Collection Documents accepts spreadsheets, Word files and arbitrary binary attachments, including other resin formats, with original-byte downloads.
+
+### Fixed
+
+- API key and OrcaSlicer command copy buttons work on HTTP installations without the secure Clipboard API, with a visible error if the browser refuses copying.
+- Confirmed Trash purges reclaim owned files, thumbnails and multipart covers on guarded local/FUSE storage using hash-checked quarantine. Previously blocked guarded cleanup intents are retried; changed objects and external originals remain protected.
+
 ## 0.15.1
 
 **Back up before upgrading and restart every API and worker process on the same

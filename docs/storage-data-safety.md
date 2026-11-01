@@ -37,10 +37,20 @@ and report cleanup as blocked.
 
 Deleting a Multipart Model or removing/replacing its uploaded cover retires the
 cover reference. On Guarded storage, PrintStash first checks the committed
-ownership record, size and content hash, then retains the old image bytes in a
-blocked cleanup intent. This does not bypass physical-deletion safeguards or
-delete member Models. Missing or changed ownership evidence blocks the operation
-with storage guidance.
+ownership record, size and content hash. For local storage (including FUSE),
+the durable cleanup intent moves the object into a private, same-directory
+quarantine, verifies its identity and hash again, then removes that exact object.
+This also reclaims owned model files and thumbnails after a confirmed purge.
+Changed bytes are retained; I/O failures remain retryable. Remote adapters that
+cannot perform safe conditional reclamation retain the bytes as blocked cleanup.
+
+Older guarded intents blocked solely because physical deletion was unsupported
+are retried on the next cleanup or storage verification with the same recorded
+ownership evidence. A purge never deletes
+Multipart member Models or external-library originals. Missing or changed
+ownership evidence blocks the operation with storage guidance. Untracked files
+are not swept by walking the storage directories; use the storage inspection
+and GC preview to review retained objects before any broader cleanup.
 
 Retention expiry is broader and runs without a person selecting each row. It
 uses the GC plan protocol below. The hourly coordinator may create a preview,

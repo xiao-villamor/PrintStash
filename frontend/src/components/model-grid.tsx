@@ -136,7 +136,7 @@ import {
   restoreModel,
 } from "@/lib/api";
 import {
-  isMeshFile,
+  isSourceFile,
   isGcodeFile,
   isArchiveFile,
   walkEntries,
@@ -665,7 +665,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const dragEnterCount = useRef(0);
 
   function classifyDrop(files: File[]): { files: File[]; mode: UploadMode } | null {
-    const meshes = files.filter((f) => isMeshFile(f.name));
+    const meshes = files.filter((f) => isSourceFile(f.name));
     const gcodes = files.filter((f) => isGcodeFile(f.name));
     const zips = files.filter((f) => isArchiveFile(f.name));
     if (meshes.length >= 2) return { mode: "bulk", files: meshes };

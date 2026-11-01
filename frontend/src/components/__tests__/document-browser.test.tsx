@@ -108,14 +108,22 @@ describe("DocumentBrowser", () => {
     it("tells somebody who may write how to add one", async () => {
       renderBrowser({ documents: [] });
 
-      expect(await screen.findByText("Create a markdown doc or upload a PDF.")).toBeInTheDocument();
+      expect(
+        await screen.findByText(
+          "Create a markdown doc or upload any file, including spreadsheets and resin slices.",
+        ),
+      ).toBeInTheDocument();
     });
 
     it("keeps that hint from somebody who may not", async () => {
       renderBrowser({ documents: [], canCreate: false });
 
       await screen.findByText("No documents here yet.");
-      expect(screen.queryByText("Create a markdown doc or upload a PDF.")).toBeNull();
+      expect(
+        screen.queryByText(
+          "Create a markdown doc or upload any file, including spreadsheets and resin slices.",
+        ),
+      ).toBeNull();
     });
 
     it("distinguishes document list failure from empty success", async () => {
@@ -198,6 +206,33 @@ describe("DocumentBrowser", () => {
           true,
         ),
       );
+    });
+
+    it.each([
+      "parts.xlsx",
+      "parts.xls",
+      "guide.docx",
+      "guide.doc",
+      "slices.ctb",
+      "slices.photon",
+      "slices.pwmo",
+      "project.custom",
+    ])("uploads $0 to the selected collection", async (filename) => {
+      const user = userEvent.setup();
+      const uploads: FormData[] = [];
+      renderBrowser({
+        routes: {
+          "POST /api/v1/documents": (_url, init) => {
+            if (init?.body instanceof FormData) uploads.push(init.body);
+            return json(aDocument({ id: 4, kind: "other", filename }));
+          },
+        },
+      });
+      await screen.findByText("Assembly guide");
+      const file = new File(["binary payload"], filename);
+      await user.upload(screen.getByLabelText("Upload file"), file);
+      await waitFor(() => expect(uploads[0]?.get("file")).toBe(file));
+      expect(uploads[0]?.get("collection_id")).toBe("1");
     });
 
     it("surfaces an upload the server refused", async () => {

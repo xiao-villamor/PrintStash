@@ -62,6 +62,9 @@ export interface MetadataRead {
   support_material: boolean | null;
   nozzle_temperature_c: number | null;
   bed_temperature_c: number | null;
+  layer_count: number | null;
+  exposure_time_s: number | null;
+  resin_volume_ml: number | null;
   estimated_time_s: number | null;
   filament_weight_g: number | null;
   filament_length_mm: number | null;
@@ -95,7 +98,8 @@ export interface FileRead {
     | "3dm"
     | "fbx"
     | "step"
-    | "dxf";
+    | "dxf"
+    | "resin";
   version: number;
   gcode_revision_number?: number | null;
   size_bytes: number;
@@ -944,7 +948,8 @@ export type ArtifactFileType =
   | "3dm"
   | "fbx"
   | "step"
-  | "dxf";
+  | "dxf"
+  | "resin";
 
 export interface FacetValueRead {
   value: string;

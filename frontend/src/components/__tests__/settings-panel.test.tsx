@@ -834,6 +834,50 @@ describe("SettingsPanel", () => {
       expect(await screen.findByTitle("Copy API key")).toBeInTheDocument();
     });
 
+    it.each([
+      { title: "Copy API key", expected: MINTED_KEY.api_key, success: "API key copied." },
+      {
+        title: "Copy OrcaSlicer post-processing command",
+        expected: "--api-key",
+        success: "OrcaSlicer command copied.",
+      },
+    ])("copies with $title", async ({ title, expected, success }) => {
+      const user = userEvent.setup();
+      renderSettings({
+        at: "/settings?section=access",
+        routes: { "POST /api/v1/auth/api-keys": json(MINTED_KEY) },
+      });
+      await screen.findByLabelText("Key name");
+      await user.click(screen.getByRole("button", { name: "Generate" }));
+      await user.click(await screen.findByTitle(title));
+      expect(await navigator.clipboard.readText()).toContain(expected);
+      expect(await navigator.clipboard.readText()).toContain(MINTED_KEY.api_key);
+      expect(await screen.findByText(success)).toBeVisible();
+    });
+
+    it("reports clipboard failure without confirming a copy", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(new Error("denied"));
+      const original = document.execCommand;
+      document.execCommand = () => false;
+      try {
+        renderSettings({
+          at: "/settings?section=access",
+          routes: { "POST /api/v1/auth/api-keys": json(MINTED_KEY) },
+        });
+        await screen.findByLabelText("Key name");
+        await user.click(screen.getByRole("button", { name: "Generate" }));
+        await user.click(await screen.findByTitle("Copy API key"));
+        expect(
+          await screen.findByText("Copy failed. Select the text and copy it manually."),
+        ).toBeVisible();
+        expect(screen.queryByText("API key copied.")).toBeNull();
+      } finally {
+        document.execCommand = original;
+        vi.restoreAllMocks();
+      }
+    });
+
     it("lists the keys already issued", async () => {
       renderSettings({
         at: "/settings?section=access",

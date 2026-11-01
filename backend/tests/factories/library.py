@@ -288,7 +288,7 @@ def build_metadata(
             if "volume_mm3" in overrides
             else VolumeNotCalculated(
                 VolumeNotCalculatedCause.NOT_APPLICABLE
-                if file.file_type in (FileType.GCODE, FileType.DXF)
+                if file.file_type in (FileType.GCODE, FileType.DXF, FileType.RESIN)
                 else VolumeNotCalculatedCause.ENRICHMENT_PENDING
             )
         )

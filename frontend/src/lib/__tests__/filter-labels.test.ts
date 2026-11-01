@@ -4,6 +4,10 @@ import { filterValueText } from "../filter-labels";
 import { setLocale } from "../locale";
 afterEach(() => setLocale("en"));
 describe("filterValueText", () => {
+  it("names the supported resin slice formats", () => {
+    expect(filterValueText("file_type", "resin")).toBe("CTB / GOO");
+  });
+
   it("localizes controlled revision states", () => {
     setLocale("es");
     expect(filterValueText("revision_status", "known_good")).toBe("Verificado");

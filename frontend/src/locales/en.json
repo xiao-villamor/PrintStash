@@ -4637,5 +4637,13 @@
   "Similar-model analysis rejects clearly different surface clouds early, reuses prior outcomes and verifies pairs in parallel within CPU and memory budgets": "Similar-model analysis rejects clearly different surface clouds early, reuses prior outcomes and verifies pairs in parallel within CPU and memory budgets",
   "Uploads provide persistent completion links; backup, printer, notification and member settings improve recovery guidance, permissions, accessibility and small-screen layouts": "Uploads provide persistent completion links; backup, printer, notification and member settings improve recovery guidance, permissions, accessibility and small-screen layouts",
   "Task Center batches updates, imports and search avoid repeated database work, and native mesh workers reduce startup, memory-monitoring and cancellation overhead": "Task Center batches updates, imports and search avoid repeated database work, and native mesh workers reduce startup, memory-monitoring and cancellation overhead",
-  "The Imports settings link to the published Chrome extension, and documentation links open the PrintStash documentation site": "The Imports settings link to the published Chrome extension, and documentation links open the PrintStash documentation site"
+  "The Imports settings link to the published Chrome extension, and documentation links open the PrintStash documentation site": "The Imports settings link to the published Chrome extension, and documentation links open the PrintStash documentation site",
+  "Copy failed. Select the text and copy it manually.": "Copy failed. Select the text and copy it manually.",
+  "Create a markdown doc or upload any file, including spreadsheets and resin slices.": "Create a markdown doc or upload any file, including spreadsheets and resin slices.",
+  "Upload file": "Upload file",
+  "3D model / resin slice": "3D model / resin slice",
+  ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo": ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo",
+  "LAYERS": "LAYERS",
+  "EXPOSURE": "EXPOSURE",
+  "RESIN VOLUME": "RESIN VOLUME"
 }

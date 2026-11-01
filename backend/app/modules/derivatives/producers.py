@@ -24,6 +24,7 @@ from printstash_core.mesh.measurements import (
     VolumeNotCalculatedCause,
 )
 from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
+from printstash_core.resin.reader import ResinFormatError
 from sqlmodel import Session, col, delete, select
 
 from app.core.cancellation import checkpoint
@@ -37,6 +38,7 @@ from app.db.models import (
     DerivativeState,
     File,
     FilePlate,
+    FileType,
     JobKind,
     Metadata,
 )
@@ -46,6 +48,7 @@ from app.modules.library.volume_metadata import apply_volume
 from app.modules.media import (
     gcode_parser,
     mesh_isolation,
+    resin,
     stl_isolation,
     thumbnail,
 )
@@ -613,10 +616,33 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
     try:
         with resolve(file_row).materialize() as source:
             if DerivativeKind.METADATA in needed:
-                meta = gcode_parser.parse(source)
-                captured = capture_settings(source)
+                try:
+                    if file_row.file_type is FileType.RESIN:
+                        meta = resin.parse(source)
+                    else:
+                        meta = gcode_parser.parse(source)
+                        captured = capture_settings(source)
+                except ResinFormatError:
+                    _fail(
+                        attempts[DerivativeKind.METADATA],
+                        "invalid_source",
+                        deterministic=True,
+                    )
+                    outcome[DerivativeKind.METADATA] = DerivativeState.FAILED
             if DerivativeKind.THUMBNAIL in needed:
-                image = thumbnail.extract(source)
+                try:
+                    image = (
+                        resin.extract(source)
+                        if file_row.file_type is FileType.RESIN
+                        else thumbnail.extract(source)
+                    )
+                except ResinFormatError:
+                    _fail(
+                        attempts[DerivativeKind.THUMBNAIL],
+                        "invalid_source",
+                        deterministic=True,
+                    )
+                    outcome[DerivativeKind.THUMBNAIL] = DerivativeState.FAILED
     except ArtifactContentError:
         for kind in needed:
             _fail(attempts[kind], "invalid_source", deterministic=False)
@@ -624,7 +650,7 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
         return Outcome(outcome)
     duration_ms = int((time.monotonic() - started) * 1000)
 
-    if DerivativeKind.METADATA in needed:
+    if DerivativeKind.METADATA in needed and DerivativeKind.METADATA not in outcome:
         from app.modules.printing.profile_detection import upsert_detected_profiles
 
         with get_session_factory().scoped_session() as session:
@@ -655,14 +681,18 @@ def _derive_gcode(file_id: int, *, execution: JobExecution | None = None) -> Out
             )
             session.commit()
             try:
-                upsert_detected_profiles(session, meta)
+                if file_row.file_type is not FileType.RESIN:
+                    upsert_detected_profiles(session, meta)
             except Exception:  # noqa: BLE001 - a detected profile is optional
                 session.rollback()
                 logger.exception("profile detection failed", extra={"file_id": file_id})
         outcome[DerivativeKind.METADATA] = DerivativeState.READY
 
     try:
-        if DerivativeKind.THUMBNAIL in needed:
+        if (
+            DerivativeKind.THUMBNAIL in needed
+            and DerivativeKind.THUMBNAIL not in outcome
+        ):
             if image is None:
                 with get_session_factory().scoped_session() as session:
                     records.mark_skipped(

@@ -12,6 +12,7 @@ import { knownUiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
+import { copyText } from "@/lib/clipboard";
 import { parseApiError } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1325,8 +1326,14 @@ export function SettingsPanel() {
 
   async function copyApiKey() {
     if (!newApiKey) return;
-    await navigator.clipboard.writeText(newApiKey);
-    toast.success(uiText("API key copied."));
+    const session = getSessionVersion();
+    try {
+      await copyText(newApiKey);
+      if (accountCurrent(session)) toast.success(uiText("API key copied."));
+    } catch {
+      if (accountCurrent(session))
+        toast.error(uiText("Copy failed. Select the text and copy it manually."));
+    }
   }
 
   async function copyOrcaCommand() {
@@ -1342,8 +1349,14 @@ export function SettingsPanel() {
       "--api-key",
       shellQuote(newApiKey),
     ].join(" ");
-    await navigator.clipboard.writeText(command);
-    toast.success(uiText("OrcaSlicer command copied."));
+    const session = getSessionVersion();
+    try {
+      await copyText(command);
+      if (accountCurrent(session)) toast.success(uiText("OrcaSlicer command copied."));
+    } catch {
+      if (accountCurrent(session))
+        toast.error(uiText("Copy failed. Select the text and copy it manually."));
+    }
   }
 
   async function saveCollectionAccess() {

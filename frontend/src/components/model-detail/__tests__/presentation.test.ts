@@ -10,7 +10,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import { normalizeRecommendedGcodeFiles } from "../presentation";
+import { aMetadata } from "@/test-support/factories";
+import { DEFAULT_METADATA_PREFERENCES } from "@/lib/metadata-preferences";
+import { buildPrintSettingRows, normalizeRecommendedGcodeFiles } from "../presentation";
 
 describe("normalizeRecommendedGcodeFiles", () => {
   it("shows only newest G-code revision as recommended when legacy data contains duplicates", () => {
@@ -22,5 +24,37 @@ describe("normalizeRecommendedGcodeFiles", () => {
     ]);
 
     expect(files.map((file) => file.is_recommended)).toEqual([false, true, false, true]);
+  });
+});
+
+describe("resin print settings", () => {
+  it("shows resin measurements with units", () => {
+    const rows = buildPrintSettingRows(
+      aMetadata({
+        layer_count: 120,
+        layer_height_mm: 0.05,
+        exposure_time_s: 2.5,
+        resin_volume_ml: 2.5,
+        estimated_time_s: 600,
+      }),
+      DEFAULT_METADATA_PREFERENCES,
+    );
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "LAYERS", value: "120" }),
+        expect.objectContaining({ label: "EXPOSURE", value: "2.5 s" }),
+        expect.objectContaining({ label: "RESIN VOLUME", value: "2.5 ml" }),
+      ]),
+    );
+    expect(rows.map((row) => row.label)).not.toEqual(
+      expect.arrayContaining(["NOZZLE", "FILAMENT"]),
+    );
+  });
+
+  it("omits absent resin measurements for FDM files", () => {
+    const rows = buildPrintSettingRows(aMetadata(), DEFAULT_METADATA_PREFERENCES);
+    expect(rows.map((row) => row.label)).not.toEqual(
+      expect.arrayContaining(["LAYERS", "EXPOSURE", "RESIN VOLUME"]),
+    );
   });
 });

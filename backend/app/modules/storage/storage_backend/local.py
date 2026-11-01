@@ -197,7 +197,7 @@ class LocalStorageBackend(StorageBackend):
         except FileNotFoundError:
             self._root_binding_diagnostics[role] = "binding_missing"
             return False
-        except (OSError, ValueError, TypeError):
+        except OSError, ValueError, TypeError:
             self._root_binding_diagnostics[role] = "binding_invalid"
             return False
 
@@ -295,18 +295,16 @@ class LocalStorageBackend(StorageBackend):
             if not root.is_dir():
                 raise StorageConfigurationError("storage_root_unavailable")
             resolved = lexical.resolve(strict=False)
-            if resolved != root.resolve(
-                strict=False
-            ) and not resolved.is_relative_to(root.resolve(strict=False)):
+            if resolved != root.resolve(strict=False) and not resolved.is_relative_to(
+                root.resolve(strict=False)
+            ):
                 raise StorageCollisionError("managed_storage_symlink_escape")
         else:
             self._assert_root_binding_for(lexical)
         root_path_stat = os.stat(root, follow_symlinks=False)
         root_fd = os.open(
             root,
-            os.O_RDONLY
-            | getattr(os, "O_DIRECTORY", 0)
-            | getattr(os, "O_NOFOLLOW", 0),
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0),
         )
         parent_fd = os.dup(root_fd)
         try:
@@ -585,6 +583,22 @@ class LocalStorageBackend(StorageBackend):
                     extra={"destination": str(path), "quarantine": str(quarantine)},
                 )
             os.close(parent_fd)
+
+    def reclaim_guarded(
+        self, receipt: CreationReceipt, *, expected_sha256: str
+    ) -> bool:
+        """Use the local quarantine even when long-lived inode proofs are unstable."""
+        if (
+            receipt.backend != self.backend_name
+            or self.namespace_for(receipt.key) != receipt.namespace
+        ):
+            return False
+        return self.reclaim_unverified(
+            receipt.key,
+            expected_size=receipt.size,
+            expected_etag=receipt.etag,
+            expected_sha256=expected_sha256,
+        )
 
     def direct_path(self, key: str) -> Path | None:
         return Path(key)
@@ -1466,7 +1480,7 @@ def enroll_legacy_local_root(
         legacy_marker = True
     except FileNotFoundError:
         pass
-    except (OSError, ValueError, TypeError):
+    except OSError, ValueError, TypeError:
         return False
     if not proofs and not allow_empty:
         return False
@@ -1507,7 +1521,7 @@ def enroll_legacy_local_root(
                 "role": role,
             }:
                 return False
-        except (OSError, ValueError, TypeError):
+        except OSError, ValueError, TypeError:
             return False
         temporary_marker = marker.with_name(f".{marker.name}.{uuid.uuid4().hex}.tmp")
         marker_to_write = temporary_marker
@@ -1524,7 +1538,7 @@ def enroll_legacy_local_root(
             temporary_marker.unlink(missing_ok=True)
         try:
             return json.loads(marker.read_text(encoding="utf-8")) == expected
-        except (OSError, ValueError, TypeError):
+        except OSError, ValueError, TypeError:
             return False
     except OSError:
         if temporary_marker is not None:

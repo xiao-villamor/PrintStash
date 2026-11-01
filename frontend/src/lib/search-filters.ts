@@ -69,6 +69,7 @@ export function readSearchFilters(params: URLSearchParams): SavedViewFilters {
       "fbx",
       "step",
       "dxf",
+      "resin",
     ] as const),
     revision_status: values(params, "revision_status", [
       "known_good",

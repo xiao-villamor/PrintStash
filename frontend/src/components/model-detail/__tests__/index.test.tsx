@@ -630,6 +630,25 @@ describe("ModelDetail", () => {
       expect(screen.queryByText(/Large 3D preview/)).not.toBeInTheDocument();
     });
 
+    it("shows resin print facts on Overview", async () => {
+      renderDetail({
+        model: aModel({
+          files: [
+            aFile({
+              file_type: "resin",
+              original_filename: "slice.ctb",
+              metadata: aMetadata({ layer_count: 120, exposure_time_s: 2.5, resin_volume_ml: 2.5 }),
+            }),
+          ],
+        }),
+      });
+      expect(await screen.findByText("2.5 ml", { exact: true })).toBeVisible();
+      expect(screen.getByText("120", { exact: true })).toBeVisible();
+      expect(screen.getByText("2.5 s", { exact: true })).toBeVisible();
+      expect(screen.queryByText(/No sliced G-code yet/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Send to printer" })).not.toBeInTheDocument();
+    });
+
     it("offers each plate of a multi-plate 3MF", async () => {
       renderDetail({
         model: aModel({ files: [aFile({ file_type: "3mf", original_filename: "rack.3mf" })] }),

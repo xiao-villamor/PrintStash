@@ -164,7 +164,7 @@ def _validate_purpose_file(request: ArtifactUploadCreate) -> None:
     if request.purpose in {"gcode", "slicer", "revision"}:
         allowed = suffix in ingest_background.GCODE_SUFFIXES
     elif request.purpose in {"model", "external_writeback"}:
-        allowed = suffix in ingest_background.MESH_SUFFIXES
+        allowed = suffix in ingest_background.SOURCE_SUFFIXES
     elif request.purpose == "archive":
         allowed = suffix == ".zip"
     else:
