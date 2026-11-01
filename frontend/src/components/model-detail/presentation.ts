@@ -9,6 +9,7 @@ import {
   formatDuration,
   formatGrams,
   formatMillimeters,
+  formatNumber,
   formatPercent,
   formatTemperature,
 } from "@/lib/format";
@@ -227,15 +228,18 @@ export function buildPrintSettingRows(
   }
 
   if (meta?.layer_count != null) {
-    rows.push({ label: uiText("LAYERS"), value: String(meta.layer_count) });
+    rows.push({ label: uiText("LAYERS"), value: formatNumber(meta.layer_count) });
   }
   if (meta?.exposure_time_s != null) {
-    rows.push({ label: uiText("EXPOSURE"), value: `${Number(meta.exposure_time_s.toFixed(3))} s` });
+    rows.push({
+      label: uiText("EXPOSURE"),
+      value: `${formatNumber(meta.exposure_time_s, { maximumFractionDigits: 3 })} s`,
+    });
   }
   if (meta?.resin_volume_ml != null) {
     rows.push({
       label: uiText("RESIN VOLUME"),
-      value: `${Number(meta.resin_volume_ml.toFixed(3))} ml`,
+      value: `${formatNumber(meta.resin_volume_ml, { maximumFractionDigits: 3 })} ml`,
     });
   }
 

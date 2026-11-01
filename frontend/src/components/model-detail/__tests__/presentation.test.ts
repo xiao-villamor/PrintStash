@@ -8,7 +8,8 @@
  * "recommended" on one model gives a user no way to know which file to print.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setLocale } from "@/lib/locale";
 
 import { aMetadata } from "@/test-support/factories";
 import { DEFAULT_METADATA_PREFERENCES } from "@/lib/metadata-preferences";
@@ -28,6 +29,24 @@ describe("normalizeRecommendedGcodeFiles", () => {
 });
 
 describe("resin print settings", () => {
+  afterEach(() => setLocale("en"));
+  it("formats resin measurements in the selected language", () => {
+    setLocale("es");
+    const rows = buildPrintSettingRows(
+      aMetadata({
+        exposure_time_s: 2.5,
+        resin_volume_ml: 12.75,
+      }),
+      DEFAULT_METADATA_PREFERENCES,
+    );
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: "EXPOSICIÓN", value: "2,5 s" }),
+        expect.objectContaining({ label: "VOLUMEN DE RESINA", value: "12,75 ml" }),
+      ]),
+    );
+  });
+
   it("shows resin measurements with units", () => {
     const rows = buildPrintSettingRows(
       aMetadata({
