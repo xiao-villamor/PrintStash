@@ -288,7 +288,7 @@ describe("UploadModal ingestion", () => {
 
     it("avoids administrative source reads for members", async () => {
       const result = renderUpload({ auth: memberSession() });
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf");
+      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
       expect(
         result
           .requestsWithMethod("GET")
@@ -446,7 +446,7 @@ describe("UploadModal ingestion", () => {
         }),
       ]);
       const { container, onUploaded } = renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf");
+      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
       await user.upload(fileInputs(container)[0], new File(["x"], "requested.stl"));
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
       await waitFor(() => expect(onUploaded).toHaveBeenCalledWith({ id: 42, created }), {
@@ -461,7 +461,7 @@ describe("UploadModal ingestion", () => {
     it("uploads the file the user chose", async () => {
       const user = userEvent.setup();
       const { container, uploadRequests } = renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf");
+      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
 
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
@@ -473,7 +473,7 @@ describe("UploadModal ingestion", () => {
     it("files it in the collection the user chose", async () => {
       const user = userEvent.setup();
       const { container, uploadRequests } = renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf");
+      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
       await user.click(await screen.findByRole("button", { name: "None" }));
       await user.click(await screen.findByRole("option", { name: /Parts/ }));
@@ -488,7 +488,7 @@ describe("UploadModal ingestion", () => {
       // model invisible until a reload.
       const user = userEvent.setup();
       const { container, onUploaded } = renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf");
+      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
 
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
@@ -502,7 +502,7 @@ describe("UploadModal ingestion", () => {
       setJobSource(async () => [aJob({ state: "failed", error: "unsupported_file_type" })]);
       const user = userEvent.setup();
       const { container, onUploaded } = renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf");
+      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
 
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
@@ -517,7 +517,7 @@ describe("UploadModal ingestion", () => {
       // ingester loses every slicer setting the file carries.
       const user = userEvent.setup();
       const { container, requestsWithMethod } = renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf");
+      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
       await user.upload(fileInputs(container)[1], new File(["x"], "part.gcode"));
 
       await user.click(screen.getByRole("button", { name: "Upload to vault" }));
@@ -534,7 +534,7 @@ describe("UploadModal ingestion", () => {
     it("uploads the mesh first", async () => {
       const user = userEvent.setup();
       const { container, requestsWithMethod } = renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf");
+      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
       await user.upload(fileInputs(container)[1], new File(["x"], "cube.gcode"));
 
@@ -550,7 +550,7 @@ describe("UploadModal ingestion", () => {
       // mesh beside it — which is exactly what uploading them together avoids.
       const user = userEvent.setup();
       const { container, uploadRequests } = renderUpload();
-      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf");
+      await screen.findByText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo");
       await user.upload(fileInputs(container)[0], new File(["x"], "cube.stl"));
       await user.upload(fileInputs(container)[1], new File(["x"], "cube.gcode"));
 
