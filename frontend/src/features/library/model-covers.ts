@@ -7,7 +7,6 @@ import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
 import { queryKeys } from "@/lib/query-client";
 import type { ModelRead } from "@/types";
-import type { PublishModel } from "./model-detail";
 
 type CoverState =
   | { phase: "ready"; base: ModelRead; rejected: boolean }
@@ -21,7 +20,11 @@ type CoverState =
     };
 
 /** The editor owns its original base and never replays an uncertain write automatically. */
-export function useModelCoverEditing(model: ModelRead, publish: PublishModel, finish: () => void) {
+export function useModelCoverEditing(
+  model: ModelRead,
+  publish: (saved: ModelRead) => Promise<boolean>,
+  finish: () => void,
+) {
   const client = useQueryClient();
   const [session] = useState(getSessionVersion);
   const currentSession = useSyncExternalStore(onAuthChange, getSessionVersion);
