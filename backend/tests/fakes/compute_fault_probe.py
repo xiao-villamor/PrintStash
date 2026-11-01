@@ -24,7 +24,7 @@ def main():
     stop, collecting = threading.Event(), threading.Event()
     order = []
     _overlay["compute_batch_wait_ms"] = (
-        1000 if scenario in {"preempt", "withdraw"} else 0
+        1000 if scenario in {"preempt", "withdraw", "coalescing-deadline"} else 0
     )
     filled, refused = threading.Event(), threading.Event()
     slot_state = {"accepted": 0, "released": 0}
@@ -162,6 +162,11 @@ def main():
                     else Priority.BACKGROUND,
                 )
                 responses = [background.result(), interactive.result()]
+        elif scenario == "coalescing-deadline":
+            responses = [
+                request("withdrawn", Priority.BACKGROUND),
+                request("healthy", Priority.INTERACTIVE),
+            ]
         else:
             responses = [request("fault", Priority.INTERACTIVE)]
         print(
