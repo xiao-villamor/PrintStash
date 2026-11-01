@@ -212,6 +212,9 @@ class _ProbeBackend(StorageBackend):
     def document_image_key(self, document_id: int, name: str) -> str:
         return f"document-image/{document_id}/{name}"
 
+    def model_cover_key(self, model_id: int, name: str) -> str:
+        return f"model-cover/{model_id}/{name}"
+
     def multipart_model_cover_key(self, multipart_model_id: int, name: str) -> str:
         return f"multipart-cover/{multipart_model_id}/{name}"
 
