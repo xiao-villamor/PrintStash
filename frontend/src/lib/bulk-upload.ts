@@ -16,6 +16,8 @@ const MESH_EXTENSIONS = new Set([
   ".dxf",
 ]);
 export const MESH_ACCEPT = ".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf";
+export const SOURCE_ACCEPT = MESH_ACCEPT + ",.ctb,.goo";
+const RESIN_EXTENSIONS = new Set([".ctb", ".goo"]);
 const GCODE_EXTENSIONS = new Set([".gcode", ".g", ".gco", ".bgcode"]);
 export const GCODE_ACCEPT = ".gcode,.g,.gco,.bgcode";
 // Archives the server rewrites for review; compound suffixes come first so a
@@ -52,6 +54,10 @@ export function isMeshFile(name: string): boolean {
   return MESH_EXTENSIONS.has(extensionOf(name));
 }
 
+export function isSourceFile(name: string): boolean {
+  return isMeshFile(name) || RESIN_EXTENSIONS.has(extensionOf(name));
+}
+
 export function isGcodeFile(name: string): boolean {
   return GCODE_EXTENSIONS.has(extensionOf(name));
 }
@@ -80,7 +86,7 @@ export function fileListToItems(files: FileList | File[]): BulkItem[] {
 // and duplicates (matched by folder path + name + size). Returns counts so the
 // caller can surface a "some files skipped" notice.
 export function mergeBulkItems(existing: BulkItem[], incoming: BulkItem[]): BulkMergeResult {
-  const meshes = incoming.filter((it) => isMeshFile(it.file.name));
+  const meshes = incoming.filter((it) => isSourceFile(it.file.name));
   const skipped = incoming.length - meshes.length;
   const keyOf = (it: BulkItem) => `${it.relPath}/${it.file.name}:${it.file.size}`;
   const seen = new Set(existing.map(keyOf));

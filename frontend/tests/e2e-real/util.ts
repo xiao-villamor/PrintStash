@@ -233,7 +233,7 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
   }
   if (mesh) {
     await page
-      .locator('input[accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf"]')
+      .locator('input[accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf,.ctb,.goo"]')
       .setInputFiles(
         opts.meshFile ?? {
           name: `${name}.stl`,

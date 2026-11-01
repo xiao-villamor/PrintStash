@@ -1483,7 +1483,7 @@
           },
           "file": {
             "contentMediaType": "application/octet-stream",
-            "description": "A .stl, .3mf, .obj, .glb, .gltf, .ply, .3dm, .fbx, .step, .stp, or .dxf file",
+            "description": "A .stl, .3mf, .obj, .glb, .gltf, .ply, .3dm, .fbx, .step, .stp, .dxf, .ctb, or .goo file",
             "title": "File",
             "type": "string"
           },
@@ -6227,6 +6227,7 @@
           "stl",
           "3mf",
           "gcode",
+          "resin",
           "obj",
           "step",
           "dxf",
@@ -9805,6 +9806,17 @@
             ],
             "title": "Estimated Time S"
           },
+          "exposure_time_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposure Time S"
+          },
           "filament_cost": {
             "anyOf": [
               {
@@ -9859,6 +9871,17 @@
               }
             ],
             "title": "Infill Percent"
+          },
+          "layer_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layer Count"
           },
           "layer_height_mm": {
             "anyOf": [
@@ -9935,6 +9958,17 @@
               }
             ],
             "title": "Printer Model"
+          },
+          "resin_volume_ml": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resin Volume Ml"
           },
           "slicer_name": {
             "anyOf": [
@@ -31366,7 +31400,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Ingest a source file (STL, 3MF, OBJ, STEP, DXF)",
+        "summary": "Ingest a source file or resin slice",
         "tags": [
           "ingest"
         ]

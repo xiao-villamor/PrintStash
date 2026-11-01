@@ -87,16 +87,18 @@ export function OverviewTab({
   return (
     <Localized>
       <>
-        <RecommendedPrintCard
-          file={recommendedFile}
-          hasGcode={hasGcode}
-          saving={revisionSaving}
-          onSend={onSend}
-          canSend={canSend}
-          onCompare={onCompare}
-          onMark={onMark}
-          onAddRevision={onAddRevision}
-        />
+        {(hasGcode || !model.files.some((file) => file.file_type === "resin")) && (
+          <RecommendedPrintCard
+            file={recommendedFile}
+            hasGcode={hasGcode}
+            saving={revisionSaving}
+            onSend={onSend}
+            canSend={canSend}
+            onCompare={onCompare}
+            onMark={onMark}
+            onAddRevision={onAddRevision}
+          />
+        )}
 
         {!editing && model.description && (
           <section aria-labelledby="model-description-heading" className="space-y-1">

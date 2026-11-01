@@ -1321,6 +1321,13 @@ function ModelDetailPresentation({
                     onMark={(file, patch) => void revisionUpdater.update(file, patch)}
                     onAddRevision={requestAddRevision}
                   />
+                  {!editing && !hasGcode && latestFile?.file_type === "resin" && (
+                    <SettingsTab
+                      meta={meta}
+                      printSettingRows={printSettingRows}
+                      preferences={metadataPreferences}
+                    />
+                  )}
                   {!editing && <FileHashes files={sortedFiles} />}
                 </div>
               )}

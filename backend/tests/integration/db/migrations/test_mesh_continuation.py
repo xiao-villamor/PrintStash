@@ -78,9 +78,11 @@ class TestMeshContinuationMigration:
                 original_files = connection.execute(
                     text("SELECT id,path,sha256,thumbnail_path FROM files ORDER BY id")
                 ).all()
-                original_metadata = connection.execute(
+                metadata_result = connection.execute(
                     text("SELECT * FROM metadata ORDER BY id")
-                ).all()
+                )
+                metadata_columns = tuple(metadata_result.keys())
+                original_metadata = metadata_result.all()
             command.upgrade(migrate._alembic_config(mesh_upgrade_url), REVISION)
             with engine.connect() as connection:
                 assert (
@@ -123,10 +125,17 @@ class TestMeshContinuationMigration:
                     ).all()
                     == original_files
                 )
-                assert (
-                    connection.execute(text("SELECT * FROM metadata ORDER BY id")).all()
-                    == original_metadata
+                # Later revisions may add nullable facts. Compare every
+                # historical column by name, without freezing the head schema.
+                current_metadata = (
+                    connection.execute(text("SELECT * FROM metadata ORDER BY id"))
+                    .mappings()
+                    .all()
                 )
+                assert [
+                    tuple(row[column] for column in metadata_columns)
+                    for row in current_metadata
+                ] == [tuple(row) for row in original_metadata]
                 assert (
                     connection.execute(
                         text("SELECT COUNT(*) FROM mesh_fingerprint_continuations")

@@ -3340,7 +3340,7 @@ describe("ModelBrowser", () => {
     it("offers a way to upload one", async () => {
       renderVault({ at: "/?v=docs" });
 
-      expect(await screen.findByRole("button", { name: /Upload PDF/ })).toBeInTheDocument();
+      expect(await screen.findByRole("button", { name: "Upload file" })).toBeInTheDocument();
     });
 
     it("remembers the tab for the next visit", async () => {

@@ -30,6 +30,7 @@ import {
   isGcodeFile,
   isArchiveFile,
   isMeshFile,
+  isSourceFile,
   mergeBulkItems,
   walkEntries,
   type BulkItem,
@@ -301,5 +302,16 @@ describe("walkEntries", () => {
     } as FileSystemEntry;
 
     expect(await walkEntries([unsupported])).toEqual([]);
+  });
+});
+
+describe("resin sources", () => {
+  it.each(["slice.ctb", "slice.GOO"])("accepts %s without treating it as a mesh", (name) => {
+    expect(isSourceFile(name)).toBe(true);
+    expect(isMeshFile(name)).toBe(false);
+    const file = new File(["slice"], name);
+    const result = mergeBulkItems([], [{ file, relPath: "" }]);
+    expect(result.items.map((item) => item.file.name)).toEqual([name]);
+    expect(result.skipped).toBe(0);
   });
 });

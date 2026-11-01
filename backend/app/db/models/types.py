@@ -9,6 +9,7 @@ class FileType(str, Enum):
     STL = "stl"
     THREE_MF = "3mf"
     GCODE = "gcode"
+    RESIN = "resin"
     OBJ = "obj"
     STEP = "step"
     DXF = "dxf"
@@ -28,6 +29,8 @@ class FileRevisionStatus(str, Enum):
 
 # Mapping from filesystem suffix to ``FileType``. Used by ingest routers.
 SUFFIX_TO_FILE_TYPE: dict[str, FileType] = {
+    ".ctb": FileType.RESIN,
+    ".goo": FileType.RESIN,
     ".stl": FileType.STL,
     ".3mf": FileType.THREE_MF,
     ".obj": FileType.OBJ,

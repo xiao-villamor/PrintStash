@@ -78,7 +78,7 @@ from tests.fixtures.three_mf_projects import (
     build_3d_builder_component_project,
     build_multi_plate_project,
 )
-from tests.paths import FIXTURES_DIR
+from tests.paths import CORE_PACKAGE_ROOT, FIXTURES_DIR
 
 
 @pytest.fixture
@@ -2940,4 +2940,84 @@ class TestSharedMeshSource:
         assert outcome.kinds == {
             DerivativeKind.THUMBNAIL: DerivativeState.READY,
             DerivativeKind.METADATA: DerivativeState.READY,
+        }
+
+
+class TestDeriveResin:
+    @pytest.mark.parametrize("extension", ["ctb", "goo"])
+    def test_publishes_resin_derivatives(self, db_session, stored, extension):
+        payload = (
+            CORE_PACKAGE_ROOT / "tests/fixtures/resin" / f"header.{extension}"
+        ).read_bytes()
+        artifact = stored(f"slice.{extension}", payload, file_type=FileType.RESIN)
+
+        outcome = producers.derive_gcode(artifact.id)
+
+        assert outcome.kinds == {
+            DerivativeKind.METADATA: DerivativeState.READY,
+            DerivativeKind.THUMBNAIL: DerivativeState.READY,
+        }
+        meta = db_session.exec(
+            select(Metadata).where(Metadata.file_id == artifact.id)
+        ).one()
+        assert meta.layer_count == 120
+        assert meta.layer_height_mm == pytest.approx(0.05)
+        assert meta.exposure_time_s == 2.5
+        assert meta.resin_volume_ml == 2.5
+        assert meta.estimated_time_s == 600
+        assert meta.material_type == "Resin"
+        assert meta.filament_weight_g is None
+        db_session.refresh(artifact)
+        assert artifact.thumbnail_path is not None
+        backend = get_backend()
+        assert backend.read_bytes(artifact.thumbnail_path)[:4] == b"RIFF"
+        assert backend.read_bytes(artifact.path) == payload
+
+    def test_bad_preview_keeps_valid_metadata(self, db_session, stored):
+        import struct
+
+        payload = bytearray(
+            (CORE_PACKAGE_ROOT / "tests/fixtures/resin/header.ctb").read_bytes()
+        )
+        struct.pack_into("<I", payload, 160, 0)
+        artifact = stored("broken.ctb", bytes(payload), file_type=FileType.RESIN)
+
+        outcome = producers.derive_gcode(artifact.id)
+
+        assert outcome.kinds == {
+            DerivativeKind.METADATA: DerivativeState.READY,
+            DerivativeKind.THUMBNAIL: DerivativeState.FAILED,
+        }
+        row = _rows(db_session, artifact.id)[DerivativeKind.THUMBNAIL]
+        assert row.failure_reason == "invalid_source"
+        assert row.next_attempt_at is None
+
+    def test_bad_metadata_keeps_valid_preview(self, db_session, stored):
+        import struct
+
+        payload = bytearray(
+            (CORE_PACKAGE_ROOT / "tests/fixtures/resin/header.ctb").read_bytes()
+        )
+        struct.pack_into("<f", payload, 32, float("nan"))
+        artifact = stored("broken.ctb", bytes(payload), file_type=FileType.RESIN)
+
+        outcome = producers.derive_gcode(artifact.id)
+
+        assert outcome.kinds == {
+            DerivativeKind.METADATA: DerivativeState.FAILED,
+            DerivativeKind.THUMBNAIL: DerivativeState.READY,
+        }
+        row = _rows(db_session, artifact.id)[DerivativeKind.METADATA]
+        assert row.failure_reason == "invalid_source"
+        assert row.next_attempt_at is None
+
+    def test_absent_preview_is_skipped(self, db_session, stored):
+        payload = bytearray(
+            (CORE_PACKAGE_ROOT / "tests/fixtures/resin/header.ctb").read_bytes()
+        )
+        payload[60:64] = bytes(4)
+        artifact = stored("no-preview.ctb", bytes(payload), file_type=FileType.RESIN)
+        assert producers.derive_gcode(artifact.id).kinds == {
+            DerivativeKind.METADATA: DerivativeState.READY,
+            DerivativeKind.THUMBNAIL: DerivativeState.SKIPPED,
         }

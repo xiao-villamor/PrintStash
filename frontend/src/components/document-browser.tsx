@@ -118,12 +118,12 @@ export function DocumentBrowser({
               className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted disabled:opacity-50"
             >
               <Upload className="w-4 h-4 text-muted-foreground" />
-              {uiText(" Upload PDF / file")}
+              {uiText("Upload file")}
             </button>
             <input
               ref={fileRef}
               type="file"
-              accept=".pdf,.md,.markdown,.txt"
+              aria-label={uiText("Upload file")}
               onChange={onFilePicked}
               className="hidden"
             />
@@ -146,7 +146,11 @@ export function DocumentBrowser({
             <FileText className="w-8 h-8 mb-2 opacity-40" />
             <p className="text-sm">{uiText("No documents here yet.")}</p>
             {canCreate && (
-              <p className="text-xs mt-1">{uiText("Create a markdown doc or upload a PDF.")}</p>
+              <p className="text-xs mt-1">
+                {uiText(
+                  "Create a markdown doc or upload any file, including spreadsheets and resin slices.",
+                )}
+              </p>
             )}
           </div>
         ) : (

@@ -27,6 +27,7 @@ from sqlmodel import Session, select
 from app.db.models import OwnedStorageObject, StorageDeleteIntent, StorageObjectState
 from app.modules.administration import audit
 from app.modules.storage import storage_deletion as storage_deletion_service
+from app.modules.storage.storage_backend.contracts import StorageBackend
 from app.modules.storage.storage_backend.runtime import get_backend
 from app.modules.storage.storage_deletion import (
     DeleteIntentResult,
@@ -340,6 +341,92 @@ class TestRecordLegacyBlockedIntent:
 
 
 class TestProcessStorageDeleteIntents:
+    def test_recovers_a_previously_blocked_guarded_intent(self, db_session, owned):
+        data = b"previously retained bytes"
+        key, _receipt = owned(data, sha256=hashlib.sha256(data).hexdigest())
+        enqueue_owned_key(db_session, get_backend(), key, allow_unverified=True)
+        db_session.commit()
+        intent = _intents(db_session)[0]
+        intent.status = "blocked"
+        intent.last_error = "storage_guarded_delete_unsupported"
+        db_session.add(intent)
+        db_session.commit()
+
+        result = process_storage_delete_intents()
+
+        assert result == DeleteIntentResult(completed=1)
+        assert not get_backend().exists(key)
+        assert _intents(db_session)[0].status == "completed"
+
+    def test_preserves_guarded_bytes_changed_after_authorization(
+        self, db_session, owned
+    ):
+        data = b"owned object"
+        key, _receipt = owned(data, sha256=hashlib.sha256(data).hexdigest())
+        enqueue_owned_key(db_session, get_backend(), key, allow_unverified=True)
+        db_session.commit()
+        path = get_backend().direct_path(key)
+        path.write_bytes(b"x" * len(data))
+
+        result = process_storage_delete_intents()
+
+        assert result == DeleteIntentResult(blocked=1)
+        assert path.read_bytes() == b"x" * len(data)
+
+    def test_guarded_reclamation_requires_a_persisted_hash(self, db_session, owned):
+        data = b"owned object"
+        key, _receipt = owned(data, sha256=hashlib.sha256(data).hexdigest())
+        enqueue_owned_key(db_session, get_backend(), key, allow_unverified=True)
+        db_session.commit()
+        intent = _intents(db_session)[0]
+        intent.sha256 = None
+        db_session.add(intent)
+        db_session.commit()
+
+        result = process_storage_delete_intents()
+
+        assert result == DeleteIntentResult(blocked=1)
+        assert get_backend().exists(key)
+        assert _intents(db_session)[0].last_error == "storage_hash_unavailable"
+
+    def test_guarded_reclamation_retries_an_io_failure(
+        self, db_session, owned, monkeypatch
+    ):
+        data = b"owned object"
+        key, _receipt = owned(data, sha256=hashlib.sha256(data).hexdigest())
+        enqueue_owned_key(db_session, get_backend(), key, allow_unverified=True)
+        db_session.commit()
+
+        def unavailable(*args, **kwargs):
+            raise OSError("disk unavailable")
+
+        monkeypatch.setattr(get_backend(), "reclaim_guarded", unavailable)
+
+        result = process_storage_delete_intents()
+
+        assert result == DeleteIntentResult(pending=1)
+        assert get_backend().exists(key)
+        intent = _intents(db_session)[0]
+        assert intent.status == "retry"
+        assert intent.next_attempt_at is not None
+
+    def test_retains_bytes_without_a_safe_guarded_adapter(
+        self, db_session, owned, monkeypatch
+    ):
+        data = b"owned object"
+        key, _receipt = owned(data, sha256=hashlib.sha256(data).hexdigest())
+        enqueue_owned_key(db_session, get_backend(), key, allow_unverified=True)
+        db_session.commit()
+        backend = get_backend()
+        monkeypatch.setattr(
+            backend, "reclaim_guarded", StorageBackend.reclaim_guarded.__get__(backend)
+        )
+
+        result = process_storage_delete_intents()
+
+        assert result == DeleteIntentResult(blocked=1)
+        assert backend.exists(key)
+
     def test_restart_blocks_intent_when_provider_destination_changed(
         self, db_session: Session, owned
     ) -> None:
@@ -508,10 +595,10 @@ class TestProcessStorageDeleteIntents:
         result = process_storage_delete_intents(allow_unverified=False)
 
         intent = _intents(db_session)[0]
-        assert result == DeleteIntentResult(blocked=1)
+        assert result == DeleteIntentResult(completed=1)
         assert intent.authorization_mode == "guarded"
-        assert intent.quarantine_state == "blocked"
-        assert get_backend().exists(key)
+        assert intent.quarantine_state == "deleted"
+        assert not get_backend().exists(key)
 
     def test_verified_intent_retries_after_worker_crash(
         self, db_session: Session, owned, monkeypatch: pytest.MonkeyPatch

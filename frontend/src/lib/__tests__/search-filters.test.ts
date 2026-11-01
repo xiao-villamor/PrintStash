@@ -3,6 +3,15 @@ import { describe, expect, it } from "vitest";
 import { historyFilters, readSearchFilters, writeSearchFilters } from "@/lib/search-filters";
 
 describe("Search filter URLs", () => {
+  it("preserves the resin format in a saved search", () => {
+    const params = writeSearchFilters(
+      { library_view: "all", direct: true, tag: [], favorites: false, file_type: ["resin"] },
+      "",
+      "date-desc",
+    );
+    expect(readSearchFilters(params).file_type).toEqual(["resin"]);
+  });
+
   it("roundtrips actual history including a zero lower bound", () => {
     const filters = {
       library_view: "all" as const,

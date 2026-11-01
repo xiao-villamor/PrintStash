@@ -34,7 +34,7 @@ test.describe("uploads", () => {
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Upload model" });
     await dialog
-      .locator('input[accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf"]')
+      .locator('input[accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf,.ctb,.goo"]')
       .setInputFiles({
         name: `${name}.stl`,
         mimeType: "model/stl",
@@ -135,7 +135,7 @@ test.describe("uploads", () => {
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Upload model" });
     await dialog
-      .locator('input[accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf"]')
+      .locator('input[accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf,.ctb,.goo"]')
       .setInputFiles(file);
     await page.getByPlaceholder("e.g. Bracket v2").fill(name);
     await page.getByRole("button", { name: /upload to vault/i }).click();
@@ -290,7 +290,7 @@ test.describe("uploads", () => {
     await dialog.getByRole("button", { name: "Bulk", exact: true }).click();
     await dialog
       .locator(
-        'input[type="file"][accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf"]',
+        'input[type="file"][accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf,.ctb,.goo"]',
       )
       .setInputFiles(
         names.map((name, index) => ({
@@ -392,7 +392,7 @@ test.describe("completed upload results", () => {
     await page.getByRole("button", { name: "Upload", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Upload model" });
     await dialog
-      .locator('input[accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf"]')
+      .locator('input[accept=".stl,.3mf,.obj,.glb,.gltf,.ply,.3dm,.fbx,.step,.stp,.dxf,.ctb,.goo"]')
       .setInputFiles(file);
     await page.getByPlaceholder("e.g. Bracket v2").fill(requested);
     await page.getByRole("button", { name: /upload to vault/i }).click();

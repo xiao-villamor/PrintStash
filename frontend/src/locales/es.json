@@ -4637,5 +4637,13 @@
   "Similar-model analysis rejects clearly different surface clouds early, reuses prior outcomes and verifies pairs in parallel within CPU and memory budgets": "El análisis de modelos similares descarta pronto las nubes de superficie claramente distintas, reutiliza resultados anteriores y verifica pares en paralelo dentro de los límites de CPU y memoria",
   "Uploads provide persistent completion links; backup, printer, notification and member settings improve recovery guidance, permissions, accessibility and small-screen layouts": "Las cargas ofrecen enlaces persistentes al completarse; los ajustes de copias de seguridad, impresoras, notificaciones y miembros mejoran las indicaciones de recuperación, los permisos, la accesibilidad y los diseños en pantallas pequeñas",
   "Task Center batches updates, imports and search avoid repeated database work, and native mesh workers reduce startup, memory-monitoring and cancellation overhead": "El Centro de tareas agrupa actualizaciones, las importaciones y la búsqueda evitan trabajo repetido en la base de datos, y los procesos nativos de mallas reducen el coste de inicio, supervisión de memoria y cancelación",
-  "The Imports settings link to the published Chrome extension, and documentation links open the PrintStash documentation site": "Los ajustes de Importaciones enlazan con la extensión de Chrome publicada y los enlaces de documentación abren el sitio de documentación de PrintStash"
+  "The Imports settings link to the published Chrome extension, and documentation links open the PrintStash documentation site": "Los ajustes de Importaciones enlazan con la extensión de Chrome publicada y los enlaces de documentación abren el sitio de documentación de PrintStash",
+  "Copy failed. Select the text and copy it manually.": "No se pudo copiar. Selecciona el texto y cópialo manualmente.",
+  "Create a markdown doc or upload any file, including spreadsheets and resin slices.": "Crea un documento Markdown o sube cualquier archivo, incluidas hojas de cálculo y archivos laminados para resina.",
+  "Upload file": "Subir archivo",
+  "3D model / resin slice": "Modelo 3D / archivo de resina",
+  ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo": ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo",
+  "LAYERS": "CAPAS",
+  "EXPOSURE": "EXPOSICIÓN",
+  "RESIN VOLUME": "VOLUMEN DE RESINA"
 }

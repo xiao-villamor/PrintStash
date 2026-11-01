@@ -2114,7 +2114,7 @@ class TestCoverUploadExecution:
 
 
 class TestUploadedCoverRetirement:
-    """Probed NAS filesystems retain covers without trapping their grouping (#577)."""
+    """Probed NAS filesystems reclaim retired covers through a checked quarantine."""
 
     @pytest.fixture
     def fs_kind(self) -> str:
@@ -2202,7 +2202,7 @@ class TestUploadedCoverRetirement:
         assert not backend.exists(key)
 
     @pytest.mark.parametrize("fs_kind", ["unknown", "network"])
-    def test_retains_a_guarded_cover(self, cover, change, db_session):
+    def test_reclaims_a_guarded_cover(self, cover, change, db_session):
         model_id, key = cover
         response = change()
         assert response.status_code in (200, 204), response.text
@@ -2218,11 +2218,10 @@ class TestUploadedCoverRetirement:
         assert intent.resource_id == str(model_id)
         assert intent.sha256 == proof.sha256
         assert intent.authorization_mode == "guarded"
-        assert intent.status == "blocked"
-        assert intent.last_error == "storage_guarded_delete_unsupported"
-        assert get_backend().exists(key)
+        assert intent.status == "completed"
+        assert intent.last_error is None
+        assert not get_backend().exists(key)
         assert process_storage_delete_intents().completed == 0
-        assert get_backend().exists(key)
 
     @pytest.mark.parametrize("fs_kind", ["unknown", "network"])
     def test_deletes_after_removing_the_last_part(
@@ -2391,7 +2390,7 @@ class TestUploadedCoverRetirement:
         assert get_backend().exists(key)
 
     @pytest.mark.parametrize("fs_kind", ["unknown", "network"])
-    def test_confirmed_purge_keeps_guarded_cover_bytes(
+    def test_confirmed_purge_removes_guarded_cover_bytes(
         self, cover, client, auth_headers
     ):
         identifier, key = cover
@@ -2401,8 +2400,8 @@ class TestUploadedCoverRetirement:
             path + "/purge?confirm_storage_risk=true", headers=auth_headers
         )
         assert response.status_code == 200, response.text
-        assert response.json()["storage_cleanup_status"] == "blocked"
-        assert get_backend().exists(key)
+        assert response.json()["storage_cleanup_status"] == "completed"
+        assert not get_backend().exists(key)
 
 
 class TestMultipartTrash:

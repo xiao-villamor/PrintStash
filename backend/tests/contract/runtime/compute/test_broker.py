@@ -465,3 +465,26 @@ class TestWithdrawnInference:
         assert report["order"] == ["background"]
         assert report["responses"] == [{"result": "cmVzdWx0"}, {"error": "deadline"}]
         assert report["cooled"] is False
+
+    def test_does_not_execute_inference_that_expires_during_coalescing(self, tmp_path):
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "tests.fakes.compute_fault_probe",
+                str(tmp_path),
+                "coalescing-deadline",
+            ],
+            cwd=BACKEND_DIR,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert result.returncode == 0, result.stderr
+        report = json.loads(result.stdout)
+        assert report["order"] == ["healthy"]
+        assert report["responses"] == [
+            {"error": "deadline"},
+            {"result": "cmVzdWx0"},
+        ]
+        assert report["cooled"] is False

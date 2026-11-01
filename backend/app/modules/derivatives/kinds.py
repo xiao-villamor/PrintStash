@@ -165,10 +165,19 @@ GROUPS: tuple[DerivativeGroup, ...] = (
             DerivativeKind.METADATA: GCODE_METADATA_RECIPE,
             DerivativeKind.THUMBNAIL: GCODE_THUMBNAIL_RECIPE,
         },
-        label="G-code metadata and thumbnails",
-        applies=lambda: and_(_real(), col(File.file_type) == FileType.GCODE),
+        format_recipes={
+            FileType.RESIN: {
+                DerivativeKind.METADATA: 1,
+                DerivativeKind.THUMBNAIL: 1,
+            }
+        },
+        label="Sliced-file metadata and thumbnails",
+        applies=lambda: and_(
+            _real(), col(File.file_type).in_((FileType.GCODE, FileType.RESIN))
+        ),
         applies_to=lambda file: (
-            file.sha256 != SENTINEL_FILE_HASH and file.file_type == FileType.GCODE
+            file.sha256 != SENTINEL_FILE_HASH
+            and file.file_type in (FileType.GCODE, FileType.RESIN)
         ),
     ),
     DerivativeGroup(

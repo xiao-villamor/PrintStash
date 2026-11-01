@@ -6,6 +6,7 @@
  * case is here because rendering one goes through pdf.js in the browser, which no unit
  * test can stand in for.
  */
+import { readFile } from "node:fs/promises";
 import { devices } from "@playwright/test";
 import { test, expect, authBundleFor, authedContext, type Page } from "./helpers";
 import { createCollectionViaVault } from "./util";
@@ -122,6 +123,43 @@ test.describe("documents", () => {
   });
 });
 
+test.describe("binary collection files", () => {
+  for (const filename of ["calculations.xlsx", "resin.ctb"]) {
+    test(`round-trips ${filename} through Documents`, async ({ page }) => {
+      const col = `e2e-binary-${Date.now()}`;
+      const bytes = Buffer.from([0, 255, 128, 1, 2, 3, 0, 13, 10]);
+      await makeCollection(page, col);
+      await openDocsTab(page, col);
+      const chooserEvent = page.waitForEvent("filechooser");
+      await page.getByRole("button", { name: "Upload file", exact: true }).click();
+      const chooser = await chooserEvent;
+      await chooser.setFiles({
+        name: filename,
+        mimeType: "application/octet-stream",
+        buffer: bytes,
+      });
+      await expect(page).toHaveURL(/\/documents\/\d+$/);
+      const documentUrl = page.url();
+      try {
+        await page.reload();
+        await expect(page.getByText(`${filename} — use Download to open it.`)).toBeVisible();
+        const downloadEvent = page.waitForEvent("download");
+        await page.getByRole("button", { name: "Download", exact: true }).click();
+        const download = await downloadEvent;
+        expect(download.suggestedFilename()).toBe(filename);
+        const path = await download.path();
+        expect(path).not.toBeNull();
+        expect(await readFile(path!)).toEqual(bytes);
+        await page.goto(`/?c=${col}&v=docs`);
+        await expect(page.locator(`a[href="${new URL(documentUrl).pathname}"]`)).toBeVisible();
+      } finally {
+        const id = documentUrl.split("/").at(-1);
+        expect((await page.request.delete(`/api/v1/documents/${id}`)).ok()).toBeTruthy();
+      }
+    });
+  }
+});
+
 test.describe("PDF documents", () => {
   test.use({
     viewport: devices["Pixel 5"].viewport,
@@ -143,7 +181,7 @@ test.describe("PDF documents", () => {
     await page.setViewportSize({ width: 393, height: 851 });
 
     await page
-      .locator('input[accept=".pdf,.md,.markdown,.txt"]')
+      .getByLabel("Upload file", { exact: true })
       .setInputFiles({ name: "manual.pdf", mimeType: "application/pdf", buffer: minimalPdf() });
 
     // Lands on the doc detail page with the themed pdf.js viewer.

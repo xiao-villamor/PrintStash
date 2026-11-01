@@ -124,6 +124,26 @@ class TestRestoreModel:
 
 
 class TestPurgeModel:
+    def test_confirmed_guarded_purge_removes_owned_thumbnail(
+        self, db_session, client, auth_headers, monkeypatch
+    ):
+        model = build_model(db_session, "Guarded thumbnail", trashed=True)
+        artifact = build_stored_file(db_session, get_backend(), model, data=b"owned")
+        key = get_backend().thumbnail_key(artifact.id)
+        store_owned_bytes(
+            db_session, get_backend(), key, b"owned thumbnail", object_kind="thumbnail"
+        )
+        _make_guarded(monkeypatch)
+
+        response = client.delete(
+            f"/api/v1/models/{model.id}/purge?confirm_storage_risk=true",
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["storage_cleanup_status"] == "completed"
+        assert not get_backend().exists(key)
+
     def test_guarded_storage_requires_structured_one_shot_confirmation(
         self,
         db_session: Session,
@@ -171,9 +191,9 @@ class TestPurgeModel:
         db_session.expire_all()
         assert db_session.get(Model, model_id) is None
         body = response.json()
-        assert body["storage_blocked"] == 1
-        assert body["storage_cleanup_status"] == "blocked"
-        assert get_backend().exists(key)
+        assert body["storage_completed"] == 1
+        assert body["storage_cleanup_status"] == "completed"
+        assert not get_backend().exists(key)
 
     def test_permanently_removes_a_trashed_model(
         self, client: TestClient, db_session: Session, auth_headers, make_model

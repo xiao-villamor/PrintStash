@@ -395,6 +395,17 @@ class StorageBackend(ABC):
         del key, expected_size, expected_etag, expected_sha256, expected_version_id
         return False
 
+    def reclaim_guarded(
+        self, receipt: CreationReceipt, *, expected_sha256: str
+    ) -> bool:
+        """Reclaim a ledger-owned object using an atomic, hash-checked quarantine.
+
+        Guarded authorization is not permission to stat/hash then delete by key.
+        Adapters without a safe quarantine primitive must retain the object.
+        """
+        del receipt, expected_sha256
+        return False
+
     @abstractmethod
     def blob_key(self, slug: str, version: int, filename: str) -> str: ...
 

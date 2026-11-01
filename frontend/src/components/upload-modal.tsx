@@ -39,11 +39,11 @@ import {
   fileListToItems,
   GCODE_ACCEPT,
   isGcodeFile,
-  isMeshFile,
+  isSourceFile,
   mergeBulkItems,
   walkEntries,
   ARCHIVE_ACCEPT,
-  MESH_ACCEPT,
+  SOURCE_ACCEPT,
   type BulkItem,
 } from "@/lib/bulk-upload";
 import { CollectionNodeRead } from "@/types";
@@ -201,7 +201,7 @@ export function UploadModal({
 
   function sortIntoSlots(files: File[]) {
     for (const f of files) {
-      if (isMeshFile(f.name)) setMeshFile(f);
+      if (isSourceFile(f.name)) setMeshFile(f);
       else if (isGcodeFile(f.name)) setGcodeFile(f);
     }
   }
@@ -306,13 +306,13 @@ export function UploadModal({
   // files and duplicates), then surface a notice for anything skipped.
   function addBulkItems(items: BulkItem[]) {
     setBulkFiles((prev) => mergeBulkItems(prev, items).items);
-    const skipped = items.length - items.filter((it) => isMeshFile(it.file.name)).length;
+    const skipped = items.length - items.filter((it) => isSourceFile(it.file.name)).length;
     if (skipped > 0) {
       toast.warning(
         uiText("Some files skipped"),
         uiText("uploads.ignored", {
           value1: String(skipped),
-          value3: String(MESH_ACCEPT),
+          value3: String(SOURCE_ACCEPT),
           count: Number(skipped),
         }),
       );
@@ -580,12 +580,12 @@ export function UploadModal({
                 <input
                   id="setup-upload-file"
                   type="file"
-                  accept={`${MESH_ACCEPT},${GCODE_ACCEPT}`}
+                  accept={`${SOURCE_ACCEPT},${GCODE_ACCEPT}`}
                   className="sr-only"
                   aria-label={t("setup.chooseFile")}
                   onChange={(event) => {
                     const file = event.target.files?.[0] ?? null;
-                    setMeshFile(file && isMeshFile(file.name) ? file : null);
+                    setMeshFile(file && isSourceFile(file.name) ? file : null);
                     setGcodeFile(file && isGcodeFile(file.name) ? file : null);
                     if (file) autoName(file);
                   }}
@@ -602,14 +602,16 @@ export function UploadModal({
           ) : mode === "files" ? (
             <div className="space-y-3">
               <FileSlot
-                label={uiText("3D Model")}
-                accept={MESH_ACCEPT}
+                label={uiText("3D model / resin slice")}
+                accept={SOURCE_ACCEPT}
                 file={meshFile}
                 setFile={(f) => {
                   setMeshFile(f);
                   if (f) autoName(f);
                 }}
-                placeholder={uiText(".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf")}
+                placeholder={uiText(
+                  ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo",
+                )}
                 inputRef={meshRef}
               />
               <FileSlot
@@ -1115,7 +1117,7 @@ export function BulkFiles({
         <span className="text-xs text-on-surface">{uiText("Drop 3D models or a folder here")}</span>
         <span className="font-mono text-3xs text-on-surface-variant/60">
           {uiText("{value1} · subfolders become nested collections", {
-            value1: String(MESH_ACCEPT ?? ""),
+            value1: String(SOURCE_ACCEPT ?? ""),
           })}
         </span>
         <button
@@ -1134,7 +1136,7 @@ export function BulkFiles({
       <input
         ref={fileInputRef}
         type="file"
-        accept={MESH_ACCEPT}
+        accept={SOURCE_ACCEPT}
         multiple
         onChange={(e) => {
           if (e.target.files?.length) onAddItems(fileListToItems(e.target.files));

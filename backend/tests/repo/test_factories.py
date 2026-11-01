@@ -152,6 +152,19 @@ class TestGeneratedIdentities:
 
 
 class TestBuildMetadata:
+    def test_resin_defaults_do_not_claim_mesh_measurements(self, db_session):
+        from app.db.models import FileType
+
+        artifact = factories.build_file(
+            db_session, factories.build_model(db_session), file_type=FileType.RESIN
+        )
+        metadata = factories.build_metadata(db_session, artifact)
+        public = metadata_read(db_session, metadata).model_dump(mode="json")
+        assert public["volume_measurement"]["cause"] == "not_applicable"
+        assert public["layer_count"] is None
+        assert public["exposure_time_s"] is None
+        assert public["resin_volume_ml"] is None
+
     @pytest.mark.parametrize(
         "volume",
         [

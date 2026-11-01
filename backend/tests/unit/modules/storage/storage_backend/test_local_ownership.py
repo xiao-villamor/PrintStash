@@ -9,6 +9,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -153,6 +154,21 @@ class TestLocalKeyDerivation:
 
 
 class TestLocalReclaim:
+    @pytest.mark.parametrize("changes", [{"backend": "other"}, {"namespace": "other"}])
+    def test_guarded_reclaim_refuses_a_different_owner(
+        self, configured_backend: LocalStorageBackend, tmp_path: Path, changes
+    ) -> None:
+        key = str(tmp_path / "files" / "guarded-owner.bin")
+        configured_backend.write_bytes(b"owned", key)
+        receipt = configured_backend.adopt_existing(
+            key, expected_size=5, expected_sha256=hashlib.sha256(b"owned").hexdigest()
+        )
+        assert not configured_backend.reclaim_guarded(
+            replace(receipt, **changes),
+            expected_sha256=hashlib.sha256(b"owned").hexdigest(),
+        )
+        assert Path(key).read_bytes() == b"owned"
+
     def test_reclaim_pins_the_original_inode_before_a_path_replacement(
         self,
         configured_backend: LocalStorageBackend,

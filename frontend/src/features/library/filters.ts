@@ -101,6 +101,7 @@ export function readLibraryFilters(
       "fbx",
       "step",
       "dxf",
+      "resin",
     ] as const),
     material_type: source.getAll("material_type"),
     slicer_name: source.getAll("slicer_name"),

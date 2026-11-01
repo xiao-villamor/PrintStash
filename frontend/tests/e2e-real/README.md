@@ -228,3 +228,6 @@ sends no further setup probe.
 - `uploads.spec.ts`: repeated identical STL uploads report the existing Model, retain the destination after reload, and link to the unchanged Model and downloadable bytes.
 
 - `slicer-profiles.spec.ts`: real G-code uploads group repeated filament/printer settings, preserve changed values, and expose source/process details at desktop and mobile widths. Consultation opens without editable fields; the explicit editor and overview fit both widths without horizontal scrolling.
+
+- `resin.spec.ts`: CTB/GOO source upload, persisted print metadata, rendered embedded preview, original-byte download.
+- `documents.spec.ts`: collection spreadsheets and binary resin attachments remain downloadable with their original filenames and bytes.

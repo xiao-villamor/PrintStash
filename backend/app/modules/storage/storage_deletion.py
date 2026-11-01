@@ -6,7 +6,7 @@ import hashlib
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
-from sqlmodel import Session, select
+from sqlmodel import Session, and_, or_, select
 
 from app.core.logging import get_logger
 from app.core.time import utcnow
@@ -425,9 +425,21 @@ def process_storage_delete_intents(
     now = utcnow()
     with get_session_factory().scoped_session() as session:
         statement = select(StorageDeleteIntent).where(
-            StorageDeleteIntent.status.in_(["pending", "retry"]),  # type: ignore[attr-defined]
-            (StorageDeleteIntent.next_attempt_at == None)  # noqa: E711
-            | (StorageDeleteIntent.next_attempt_at <= now),  # pyright: ignore[reportOptionalOperand]
+            or_(
+                and_(
+                    StorageDeleteIntent.status.in_(["pending", "retry"]),
+                    (StorageDeleteIntent.next_attempt_at == None)  # noqa: E711
+                    | (StorageDeleteIntent.next_attempt_at <= now),
+                ),
+                # Older releases retained already-authorized Guarded objects
+                # without asking the adapter whether safe reclamation is possible.
+                and_(
+                    StorageDeleteIntent.status == "blocked",
+                    StorageDeleteIntent.authorization_mode == StorageTier.GUARDED.value,
+                    StorageDeleteIntent.last_error
+                    == "storage_guarded_delete_unsupported",
+                ),
+            )
         )
         if intent_ids is not None:
             statement = statement.where(StorageDeleteIntent.id.in_(intent_ids))
@@ -478,9 +490,25 @@ def process_storage_delete_intents(
                     session.add(intent)
                     session.commit()
                     continue
-                if intent.authorization_mode != StorageTier.VERIFIED.value:
+                if intent.authorization_mode not in (
+                    StorageTier.VERIFIED.value,
+                    StorageTier.GUARDED.value,
+                ):
                     intent.status = "blocked"
                     intent.last_error = "storage_guarded_delete_unsupported"
+                    intent.quarantine_state = "blocked"
+                    intent.attempts += 1
+                    intent.updated_at = utcnow()
+                    blocked += 1
+                    session.add(intent)
+                    session.commit()
+                    continue
+                if (
+                    intent.authorization_mode == StorageTier.GUARDED.value
+                    and not intent.sha256
+                ):
+                    intent.status = "blocked"
+                    intent.last_error = "storage_hash_unavailable"
                     intent.quarantine_state = "blocked"
                     intent.attempts += 1
                     intent.updated_at = utcnow()
@@ -503,7 +531,13 @@ def process_storage_delete_intents(
 
                     outcome = reclaim_receipt(receipt)
                 else:
-                    removed = backend.rollback_create(receipt)
+                    if intent.authorization_mode == StorageTier.GUARDED.value:
+                        assert intent.sha256 is not None
+                        removed = backend.reclaim_guarded(
+                            receipt, expected_sha256=intent.sha256
+                        )
+                    else:
+                        removed = backend.rollback_create(receipt)
                     outcome = (
                         ReceiptReclaimResult.REMOVED
                         if removed

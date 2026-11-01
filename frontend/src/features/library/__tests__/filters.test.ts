@@ -25,6 +25,13 @@ function view(overrides: Partial<SavedViewFilters> = {}): SavedViewFilters {
 }
 
 describe("Library filter projection", () => {
+  it("keeps resin sources selected in library URLs", () => {
+    const state = read("file_type=resin");
+    expect(state.filters.file_type).toEqual(["resin"]);
+    expect(state.structured.file_type).toEqual(["resin"]);
+    expect(state.params.getAll("file_type")).toEqual(["resin"]);
+  });
+
   it("preserves accepted repeated filters", () => {
     const state = read(
       "tag=b&tag=a&tag=b&file_type=obj&file_type=stl&file_type=obj&material_type=PETG&material_type=PLA&slicer_name=Orca&printer_model=MK4",

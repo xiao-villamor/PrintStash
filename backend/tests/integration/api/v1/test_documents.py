@@ -896,6 +896,45 @@ class TestPermanentlyDeleteDocument:
 
 
 class TestGetDocumentFile:
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "calculations.xls",
+            "calculations.xlsx",
+            "guide.doc",
+            "guide.docx",
+            "slices.ctb",
+            "slices.goo",
+            "project.custom",
+        ],
+        ids=str,
+    )
+    def test_downloads_arbitrary_binary_bytes(
+        self, client, admin_headers, make_collection, filename
+    ):
+        collection = make_collection()
+        content = bytes([0, 255, 128, 1, 2, 3, 0])
+        response = client.post(
+            "/api/v1/documents/upload",
+            headers=admin_headers,
+            data={"collection_id": str(collection.id)},
+            files={"file": (filename, content, "application/octet-stream")},
+        )
+        assert response.status_code == 201, response.text
+        doc = response.json()
+        assert doc["kind"] == "other"
+        assert doc["collection_id"] == collection.id
+
+        downloaded = client.get(
+            f"/api/v1/documents/{doc['id']}/file", headers=admin_headers
+        )
+
+        assert downloaded.content == content
+        assert downloaded.headers["content-type"] == "application/octet-stream"
+        assert downloaded.headers["x-content-type-options"] == "nosniff"
+        assert "attachment" in downloaded.headers["content-disposition"]
+        assert filename in downloaded.headers["content-disposition"]
+
     def test_serves_an_uploaded_guide_image_with_its_image_type(
         self, client: TestClient, db_session: Session, admin_headers: dict[str, str]
     ) -> None:

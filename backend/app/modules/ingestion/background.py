@@ -53,6 +53,7 @@ from app.schemas.ingest import (
 logger = get_logger(__name__)
 
 
+RESIN_SUFFIXES = {".ctb", ".goo"}
 GCODE_SUFFIXES = {".gcode", ".g", ".gco", ".bgcode"}
 MESH_SUFFIXES = {
     ".stl",
@@ -67,6 +68,8 @@ MESH_SUFFIXES = {
     ".stp",
     ".dxf",
 }
+
+SOURCE_SUFFIXES = MESH_SUFFIXES | RESIN_SUFFIXES
 
 
 def collection_target(parent: Optional[str], title: str) -> str:
@@ -309,7 +312,7 @@ async def _consume_download(
                     legacy_candidates=legacy_candidates,
                     source_spec=spec,
                 )
-            elif suffix in MESH_SUFFIXES | GCODE_SUFFIXES:
+            elif suffix in SOURCE_SUFFIXES | GCODE_SUFFIXES:
                 batch.register((spec,))
                 await run_in_threadpool(
                     batch.consume,
@@ -642,7 +645,7 @@ async def import_from_url(
                 )
                 return
 
-            if suffix not in MESH_SUFFIXES and suffix not in GCODE_SUFFIXES:
+            if suffix not in SOURCE_SUFFIXES and suffix not in GCODE_SUFFIXES:
                 # The URL resolved to something that isn't a model file or a .zip —
                 # almost always a model *page* (HTML) rather than a direct download
                 # link. Use a dedicated code so the UI can tell the user what to paste.

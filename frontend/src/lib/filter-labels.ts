@@ -14,6 +14,7 @@ const FILE_TYPE_TEXT = {
   fbx: "FBX",
   step: "STEP",
   dxf: "DXF",
+  resin: "CTB / GOO",
   gcode: "G-code",
 } as const satisfies Record<ArtifactFileType, string>;
 

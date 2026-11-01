@@ -9,6 +9,7 @@ import {
   formatDuration,
   formatGrams,
   formatMillimeters,
+  formatNumber,
   formatPercent,
   formatTemperature,
 } from "@/lib/format";
@@ -226,6 +227,22 @@ export function buildPrintSettingRows(
     });
   }
 
+  if (meta?.layer_count != null) {
+    rows.push({ label: uiText("LAYERS"), value: formatNumber(meta.layer_count) });
+  }
+  if (meta?.exposure_time_s != null) {
+    rows.push({
+      label: uiText("EXPOSURE"),
+      value: `${formatNumber(meta.exposure_time_s, { maximumFractionDigits: 3 })} s`,
+    });
+  }
+  if (meta?.resin_volume_ml != null) {
+    rows.push({
+      label: uiText("RESIN VOLUME"),
+      value: `${formatNumber(meta.resin_volume_ml, { maximumFractionDigits: 3 })} ml`,
+    });
+  }
+
   if (preferences.first_layer && meta?.first_layer_height_mm) {
     rows.push({
       get label() {
@@ -235,7 +252,7 @@ export function buildPrintSettingRows(
     });
   }
 
-  if (preferences.nozzle) {
+  if (preferences.nozzle && meta?.layer_count == null) {
     rows.push({
       get label() {
         return uiText("NOZZLE");
@@ -244,7 +261,7 @@ export function buildPrintSettingRows(
     });
   }
 
-  if (preferences.infill) {
+  if (preferences.infill && meta?.layer_count == null) {
     rows.push({
       get label() {
         return uiText("INFILL");
@@ -312,7 +329,7 @@ export function buildPrintSettingRows(
     });
   }
 
-  if (preferences.filament_weight) {
+  if (preferences.filament_weight && meta?.layer_count == null) {
     rows.push({
       get label() {
         return uiText("FILAMENT");

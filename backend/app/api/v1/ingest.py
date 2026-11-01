@@ -357,7 +357,7 @@ def ingest_orca(
     "/model",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Ingest a source file (STL, 3MF, OBJ, STEP, DXF)",
+    summary="Ingest a source file or resin slice",
     description=(
         "Multipart upload of a source file. The file is staged and committed as "
         "an Artifact by a background Job; geometry and a rendered thumbnail follow "
@@ -370,7 +370,7 @@ def ingest_model(
     file: UploadFile = UploadFileParam(
         ...,
         description=(
-            "A .stl, .3mf, .obj, .glb, .gltf, .ply, .3dm, .fbx, .step, .stp, or .dxf file"
+            "A .stl, .3mf, .obj, .glb, .gltf, .ply, .3dm, .fbx, .step, .stp, .dxf, .ctb, or .goo file"
         ),
     ),
     model_name: Optional[str] = Form(None, description="Display name for the model"),
@@ -390,7 +390,7 @@ def ingest_model(
 
         original_filename = Path(file.filename).name
         suffix = Path(original_filename).suffix.lower()
-        if suffix not in ingest_background.MESH_SUFFIXES:
+        if suffix not in ingest_background.SOURCE_SUFFIXES:
             raise HTTPException(status_code=400, detail="unsupported_file_type")
         _require_ingest_collection(session, current_user, collection)
         _validate_target_library(session, target_library_id)

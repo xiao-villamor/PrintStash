@@ -400,3 +400,15 @@ active deletion safety tier.
   are outside this feature. Pi/NAS-scale performance targets remain unverified.
 
 The [user guide](similar-models.md) explains controls, evidence and review choices.
+
+## Resin slice files
+
+CTB v2–5 and GOO V3.0 source files expose their embedded preview and available
+header metadata. This reads saved print estimates; it does not decode layer
+geometry, validate a print job, simulate a resin toolpath, or send it to a resin
+printer. Optional fields absent from the file remain unavailable. Malformed or
+unsupported headers/previews show a derivative failure while the original file
+remains downloadable. CTB files without an embedded preview have no thumbnail.
+
+Other resin formats, spreadsheets and Word documents can be stored in collection
+Documents and downloaded unchanged. Their contents do not have an in-app preview.

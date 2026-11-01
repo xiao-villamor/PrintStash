@@ -34,6 +34,10 @@ class MetadataRead(BaseModel):
     nozzle_temperature_c: Optional[float] = None
     bed_temperature_c: Optional[float] = None
 
+    layer_count: Optional[int] = None
+    exposure_time_s: Optional[float] = None
+    resin_volume_ml: Optional[float] = None
+
     estimated_time_s: Optional[int] = None
     filament_weight_g: Optional[float] = None
     filament_length_mm: Optional[float] = None
