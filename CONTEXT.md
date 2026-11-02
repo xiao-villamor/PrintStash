@@ -231,6 +231,14 @@ A WebP preview stored under `thumbnail_key()` (`{file_id}.webp`);
 through. Pre-WebP installs left PNGs under `legacy_thumbnail_key()` —
 read/delete only, never written.
 
+**Generated Model views**:
+A secondary `previews` Derivative belongs to one selected live mesh Artifact
+and a versioned Recipe. Its immutable manifest describes source-relative
+cameras and image ranges in one owned StorageBackend bundle. It never replaces
+a chosen Model cover. Publication preserves previous valid images while
+replacement runs; primary metadata and thumbnails have independent lifecycles.
+See [Model previews](docs/model-previews.md).
+
 ### Library sources
 
 **External library**:

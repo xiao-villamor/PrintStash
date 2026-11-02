@@ -1,3 +1,4 @@
+import { NO_PREVIEWS } from "@/types/previews";
 /*
  * The legacy source link on the overview tab, and the scheme check on it.
  *
@@ -40,6 +41,7 @@ const editor: ModelMetaEditor = {
 };
 
 const model: ModelRead = {
+  previews: NO_PREVIEWS,
   has_custom_cover: false,
   edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,

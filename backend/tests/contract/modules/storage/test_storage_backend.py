@@ -1183,3 +1183,56 @@ class TestModelCoverStorage:
         assert versioned_s3_backend.read_bytes(key) == b"chosen-cover"
         assert versioned_s3_backend.rollback_create(receipt) is True
         assert not versioned_s3_backend.exists(key)
+
+
+class TestPreviewBundleStorage:
+    def test_publishes_range_addressed_preview_images(
+        self, versioned_s3_backend, db_session
+    ):
+        import trimesh
+
+        from app.api.preview_response import preview_response
+        from app.db.models import (
+            DerivativeKind,
+            DerivativeState,
+            FileType,
+        )
+        from app.modules.derivatives import previews
+        from app.modules.library.model_views.previews import resolve, summaries
+        from app.modules.storage.storage_backend.runtime import (
+            bind_backend,
+            get_backend,
+        )
+
+        original_backend = get_backend()
+        backend = versioned_s3_backend
+        bind_backend(backend)
+        try:
+            data = trimesh.creation.box().export(file_type="stl")
+            key = backend.blob_key("preview-test", 1, "cube.stl")
+            backend.write_bytes(data, key)
+            file = build_file(
+                db_session,
+                build_model(db_session),
+                filename="cube.stl",
+                file_type=FileType.STL,
+                path=key,
+                size_bytes=len(data),
+                sha256=hashlib.sha256(data).hexdigest(),
+            )
+            assert (
+                previews.derive(file.id).kinds[DerivativeKind.PREVIEWS]
+                is DerivativeState.READY
+            )
+            summary = summaries(db_session, [file.model_id])[file.model_id]
+            row, manifest = resolve(
+                db_session,
+                file.model_id,
+                summary.published.manifest_url.rsplit("/", 1)[1],
+            )
+            for view in manifest.views:
+                response = preview_response(row, manifest, view.id)
+                assert hashlib.sha256(response.body).hexdigest() == view.sha256
+                assert len(response.body) == view.size
+        finally:
+            bind_backend(original_backend)

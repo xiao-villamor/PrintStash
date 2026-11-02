@@ -4664,5 +4664,21 @@
   "modelCover.captureFailed": "No se pudo capturar la vista 3D actual.",
   "modelCover.saveFailed": "No se pudo guardar la portada. Comprueba la imagen y tus permisos de edición.",
   "modelCover.reviewFailed": "No se pudo cargar la versión más reciente del modelo.",
-  "modelCover.applyReviewed": "Aplicar mi portada a esta versión"
+  "modelCover.applyReviewed": "Aplicar mi portada a esta versión",
+  "modelPreview.cover": "Portada · cámara desconocida",
+  "modelPreview.orbit0": "Órbita 1 · −35°",
+  "modelPreview.orbit1": "Órbita 2 · 55°",
+  "modelPreview.orbit2": "Órbita 3 · 145°",
+  "modelPreview.orbit3": "Órbita 4 · 235°",
+  "modelPreview.top": "Superior",
+  "modelPreview.bottom": "Inferior",
+  "modelPreview.face": "Cara amplia",
+  "modelPreview.reverse": "Cara posterior",
+  "modelPreview.edge": "Borde oblicuo",
+  "modelPreview.previous": "Vista anterior",
+  "modelPreview.next": "Vista siguiente",
+  "modelPreview.gallery": "Vistas del modelo",
+  "modelPreview.views": "{count} vistas",
+  "modelPreview.retry": "Reintentar vista",
+  "modelPreview.discrete": "Vistas discretas en la orientación importada. Abre el visor 3D para una inspección detallada."
 }

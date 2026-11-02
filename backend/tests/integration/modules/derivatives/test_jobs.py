@@ -104,9 +104,11 @@ class TestDerivation:
         derivative_jobs.nudge_for(db_session, artifact)
         drain_work()
 
+        # The secondary view set follows once the primary cover has settled.
         assert _states(db_session, artifact.id) == {
             DerivativeKind.METADATA: DerivativeState.READY,
             DerivativeKind.THUMBNAIL: DerivativeState.READY,
+            DerivativeKind.PREVIEWS: DerivativeState.READY,
         }
         job = _job(db_session, JobKind.DERIVATIVES_MESH)
         assert job.state == JobState.COMPLETED
@@ -165,16 +167,20 @@ class TestDerivation:
         drain_work()
 
         assert _job(db_session, JobKind.DERIVATIVES_MESH).state == JobState.FAILED
-        assert set(_states(db_session, artifact.id).values()) == {
-            DerivativeState.FAILED
-        }
+        states = _states(db_session, artifact.id)
+        assert {
+            states[DerivativeKind.METADATA],
+            states[DerivativeKind.THUMBNAIL],
+        } == {DerivativeState.FAILED}
+        # The independent secondary group is not taken down by the primary crash.
+        assert states[DerivativeKind.PREVIEWS] is DerivativeState.READY
 
 
 class TestNudgeFor:
     @pytest.mark.parametrize(
         ("filename", "definitions"),
         [
-            ("part.stl", [JobKind.DERIVATIVES_MESH]),
+            ("part.stl", [JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PREVIEWS]),
             ("plate.gcode", [JobKind.DERIVATIVES_GCODE]),
             ("plate.bgcode", [JobKind.DERIVATIVES_GCODE, JobKind.DERIVATIVES_TOOLPATH]),
         ],
@@ -195,7 +201,7 @@ class TestNudgeFor:
     def test_disabled_groups_emit_no_nudge(
         self, db_session, make_model, make_file, monkeypatch, disabled
     ):
-        from app.modules.derivatives.kinds import group, groups_for
+        from app.modules.derivatives.kinds import groups_for
 
         derivative_jobs.policy.update(
             db_session, {derivative_jobs.policy.SETTINGS[disabled]: False}
@@ -207,8 +213,12 @@ class TestNudgeFor:
 
         derivative_jobs.nudge_for(db_session, artifact)
 
+        # Groups sharing one setting (mesh, previews, viewer STL…) disable together.
+        setting = derivative_jobs.policy.SETTINGS[disabled]
         assert sorted(nudged) == sorted(
-            g.definition for g in groups_for(artifact) if g != group(disabled)
+            g.definition
+            for g in groups_for(artifact)
+            if derivative_jobs.policy.SETTINGS[g.definition] != setting
         )
 
 
@@ -223,7 +233,10 @@ class TestNudgeWithCommit:
 
         db_session.commit()
 
-        assert (before, _pass_sources(work_engine)) == ([], [JobKind.DERIVATIVES_MESH])
+        assert (before, _pass_sources(work_engine)) == (
+            [],
+            [JobKind.DERIVATIVES_MESH, JobKind.DERIVATIVES_PREVIEWS],
+        )
 
     def test_a_rolled_back_transaction_nudges_nothing(
         self, db_session, make_model, make_file, work_engine
@@ -475,6 +488,7 @@ class TestProducerAdmission:
             make_model(),
             filename={
                 JobKind.DERIVATIVES_MESH: "part.stl",
+                JobKind.DERIVATIVES_PREVIEWS: "part.stl",
                 JobKind.DERIVATIVES_GCODE: "part.bgcode",
                 JobKind.DERIVATIVES_TOOLPATH: "part.bgcode",
                 JobKind.DERIVATIVES_VIEWER_STL: "part.3mf",

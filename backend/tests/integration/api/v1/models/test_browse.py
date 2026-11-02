@@ -7,6 +7,8 @@ from sqlalchemy import text
 
 from app.db.models import CollectionRole, FileType, PrintJobState
 
+# Models without a live mesh Artifact expose only their cover.
+NO_PREVIEWS = {"kind": "none", "cover_camera": "unknown"}
 BROWSE = "/api/v1/models/browse"
 TIED = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -687,8 +689,12 @@ class TestBrowseThumbnails:
         )
         assert response.status_code == 200, response.text
         assert response.json()["items"] == [
-            {"model_id": second.id, "thumbnail_url": "/api/v1/files/123/thumbnail"},
-            {"model_id": first.id, "thumbnail_url": None},
+            {
+                "model_id": second.id,
+                "thumbnail_url": "/api/v1/files/123/thumbnail",
+                "previews": NO_PREVIEWS,
+            },
+            {"model_id": first.id, "thumbnail_url": None, "previews": NO_PREVIEWS},
         ]
         authority = client.get(BROWSE + "/revision", headers=auth_headers).json()
         assert (
@@ -732,7 +738,7 @@ class TestBrowseThumbnails:
         )
         assert response.status_code == 200, response.text
         assert response.json()["items"] == [
-            {"model_id": allowed.id, "thumbnail_url": None}
+            {"model_id": allowed.id, "thumbnail_url": None, "previews": NO_PREVIEWS}
         ]
 
     def test_superuser_omits_models_in_trashed_folders(
@@ -772,6 +778,7 @@ class TestBrowseThumbnails:
                 {
                     "model_id": model.id,
                     "thumbnail_url": f"/api/v1/files/{file.id}/thumbnail?v={version}",
+                    "previews": NO_PREVIEWS,
                 }
             ],
             "authorization_revision": original["authorization_revision"],

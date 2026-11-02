@@ -148,7 +148,11 @@ class TestCrashRecovery:
 
         states = _converge(vault_env, file_id)
 
-        assert states == {"metadata": "ready", "thumbnail": "ready"}
+        assert states == {
+            "metadata": "ready",
+            "thumbnail": "ready",
+            "previews": "ready",
+        }
 
     def test_a_restarted_api_reruns_its_predecessors_work_at_once(
         self, vault_env: dict[str, str], tmp_path: Path
@@ -166,7 +170,11 @@ class TestCrashRecovery:
 
         states = _converge(restarted, file_id)
 
-        assert states == {"metadata": "ready", "thumbnail": "ready"}
+        assert states == {
+            "metadata": "ready",
+            "thumbnail": "ready",
+            "previews": "ready",
+        }
 
     def test_a_new_version_reruns_what_the_old_one_left_running(
         self, vault_env: dict[str, str], tmp_path: Path
@@ -187,7 +195,11 @@ class TestCrashRecovery:
 
         states = _converge(new, file_id)
 
-        assert states == {"metadata": "ready", "thumbnail": "ready"}
+        assert states == {
+            "metadata": "ready",
+            "thumbnail": "ready",
+            "previews": "ready",
+        }
 
 
 class TestEngineStateLoss:
@@ -203,7 +215,11 @@ class TestEngineStateLoss:
 
         states = _converge(vault_env, file_id)
 
-        assert states == {"metadata": "ready", "thumbnail": "ready"}
+        assert states == {
+            "metadata": "ready",
+            "thumbnail": "ready",
+            "previews": "ready",
+        }
 
 
 def _lose_artifact_bytes(environment: dict[str, str], file_id: int) -> None:
@@ -255,7 +271,11 @@ class TestRestore:
             str(held["file_id"]),
         )
 
-        assert outcome["states"] == {"metadata": "ready", "thumbnail": "ready"}
+        assert outcome["states"] == {
+            "metadata": "ready",
+            "thumbnail": "ready",
+            "previews": "ready",
+        }
 
 
 @pytest.fixture

@@ -230,6 +230,7 @@ def _list_related_queries():
                     FileType.GLTF,
                     FileType.THREE_DM,
                     FileType.FBX,
+                    FileType.STEP,
                 ]
             ),
             live(File),
@@ -313,6 +314,9 @@ def _hydrate_list_rows(
     ) = _list_related_queries()
     parameters = {"model_ids": model_ids, "user_id": user.id}
     tags_by_model = _model_tag_names(session, model_ids)
+    from .previews import summaries as preview_summaries
+
+    previews = preview_summaries(session, model_ids)
     similarity = similarity_summaries(session, user, model_ids)
     starred_ids = set(session.exec(stars_query, params=parameters).all())
 
@@ -380,6 +384,7 @@ def _hydrate_list_rows(
         rec_status, rec_label = recommended.get(model.id, (None, None))
         out.append(
             ModelListItem(
+                previews=previews[model.id],
                 edit_epoch=model.edit_epoch,
                 edit_version=model.edit_version,
                 id=model.id,

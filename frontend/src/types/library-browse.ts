@@ -1,3 +1,4 @@
+import type { ModelPreviews } from "./previews";
 import type { LibraryViewMode, ListModelsParams, ModelListItem, ModelSort } from "./models";
 import type { MultipartModelListItem } from "./multipart-models";
 
@@ -24,6 +25,6 @@ export interface LibraryBrowseParams extends Omit<ListModelsParams, "offset" | "
 }
 
 export interface LibraryThumbnailProjection {
-  items: { model_id: number; thumbnail_url: string | null }[];
+  items: { model_id: number; thumbnail_url: string | null; previews: ModelPreviews }[];
   authorization_revision: string;
 }

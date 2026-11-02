@@ -1,3 +1,4 @@
+import { NO_PREVIEWS } from "@/types/previews";
 /*
  * The revision badge on a model card, when the user has renamed the revision.
  *
@@ -31,6 +32,7 @@ const model: ModelListItem = {
   effective_role: "admin",
   tags: [],
   thumbnail_url: null,
+  previews: NO_PREVIEWS,
   file_count: 2,
   mesh_file_id: null,
   printer_presence: [],

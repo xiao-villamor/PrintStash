@@ -106,6 +106,7 @@ from app.modules.library.trash import (
 from app.modules.library.trash import (
     restore_model as trash_restore_model,
 )
+from app.modules.media.preview_contracts import ViewId
 from app.modules.media.source_cover_processing import MAX_SOURCE_COVER_BYTES
 from app.modules.printing import job_import, print_results
 from app.modules.printing.moonraker import MoonrakerError
@@ -1893,3 +1894,32 @@ def delete_model(
     m = _require_model_role(session, current_user, model_id, CollectionRole.EDIT)
     soft_delete_model(session, m)
     return Response(status_code=204)
+
+
+@router.get("/{model_id}/previews/{generation}")
+def get_model_preview_manifest(
+    model_id: int,
+    generation: str,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    from app.modules.library.model_views import previews
+
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    return previews.resolve(session, model_id, generation)[1]
+
+
+@router.get("/{model_id}/previews/{generation}/{view_id}")
+def get_model_preview_image(
+    model_id: int,
+    generation: str,
+    view_id: ViewId,
+    current_user: User = Depends(require_user),
+    session: Session = Depends(get_session),
+):
+    from app.api.preview_response import preview_response
+    from app.modules.library.model_views import previews
+
+    _require_model_role(session, current_user, model_id, CollectionRole.VIEW)
+    row, manifest = previews.resolve(session, model_id, generation)
+    return preview_response(row, manifest, view_id)

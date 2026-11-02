@@ -16,7 +16,7 @@ class TestProducerErrors:
     def test_an_unrelated_operation_error_remains_a_failure(self, derivative_group):
         failure = OperationError("storage_unavailable")
 
-        def refuse(_file_id, *, execution):
+        def refuse(_file_id, *, execution, **kwargs):
             raise failure
 
         context = ExecutionContext(

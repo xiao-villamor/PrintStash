@@ -1,3 +1,4 @@
+import { NO_PREVIEWS } from "@/types/previews";
 /**
  * A grid of Models refreshes when a thumbnail it is showing a placeholder for
  * lands, so a fresh upload's preview appears without a reload.
@@ -35,7 +36,7 @@ class FakeSocket implements EventSocket {
 let socket: FakeSocket;
 
 function card(id: number, thumbnail: string | null = null) {
-  return { id, thumbnail_url: thumbnail };
+  return { id, thumbnail_url: thumbnail, previews: NO_PREVIEWS };
 }
 
 async function opened(): Promise<void> {

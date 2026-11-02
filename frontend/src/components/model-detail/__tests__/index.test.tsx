@@ -1,3 +1,4 @@
+import { NO_PREVIEWS } from "@/types/previews";
 /*
  * One model's page: six tabs over the artifacts, the settings that produced
  * them, and the prints that came out.
@@ -57,6 +58,7 @@ function aFile(over: Partial<FileRead> = {}): FileRead {
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    previews: NO_PREVIEWS,
     has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,

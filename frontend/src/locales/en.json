@@ -4664,5 +4664,21 @@
   "modelCover.captureFailed": "The current 3D view could not be captured.",
   "modelCover.saveFailed": "The cover could not be saved. Check your image and editing permissions.",
   "modelCover.reviewFailed": "The latest Model could not be loaded.",
-  "modelCover.applyReviewed": "Apply my cover to this version"
+  "modelCover.applyReviewed": "Apply my cover to this version",
+  "modelPreview.cover": "Cover · camera unknown",
+  "modelPreview.orbit0": "Orbit 1 · −35°",
+  "modelPreview.orbit1": "Orbit 2 · 55°",
+  "modelPreview.orbit2": "Orbit 3 · 145°",
+  "modelPreview.orbit3": "Orbit 4 · 235°",
+  "modelPreview.top": "Top",
+  "modelPreview.bottom": "Bottom",
+  "modelPreview.face": "Broad face",
+  "modelPreview.reverse": "Reverse face",
+  "modelPreview.edge": "Oblique edge",
+  "modelPreview.previous": "Previous preview",
+  "modelPreview.next": "Next preview",
+  "modelPreview.gallery": "Model views",
+  "modelPreview.views": "{count} views",
+  "modelPreview.retry": "Retry preview",
+  "modelPreview.discrete": "Discrete views in the imported orientation. Open the 3D viewer for detailed inspection."
 }

@@ -1,3 +1,4 @@
+import { NO_PREVIEWS } from "@/types/previews";
 /*
  * The query hooks, and the two properties that decide whether the vault feels
  * broken.
@@ -166,6 +167,7 @@ function makeListItem(id: number, name: string): ModelListItem {
     effective_role: null,
     tags: [],
     thumbnail_url: null,
+    previews: NO_PREVIEWS,
     file_count: 1,
     mesh_file_id: null,
     printer_presence: [],

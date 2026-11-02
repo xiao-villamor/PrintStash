@@ -1,3 +1,4 @@
+import { NO_PREVIEWS } from "@/types/previews";
 /*
  * What actually happens after the user presses Upload.
  *
@@ -67,6 +68,7 @@ function aJob(over: Partial<JobStatus> = {}): JobStatus {
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    previews: NO_PREVIEWS,
     has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,

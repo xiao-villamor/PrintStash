@@ -1,3 +1,4 @@
+import type { ModelPreviews } from "./previews";
 import type { EditingBase } from "./editing";
 import type {
   PrintJobIdentityRead,
@@ -133,6 +134,7 @@ export interface ModelSimilarityRead {
 }
 
 export interface ModelRead {
+  previews: ModelPreviews;
   has_custom_cover: boolean;
   edit_epoch: string;
   edit_version: number;
@@ -232,6 +234,7 @@ export interface PrintSummaryRead {
 }
 
 export interface ModelListItem {
+  previews: ModelPreviews;
   edit_epoch: string;
   edit_version: number;
   similarity?: ModelSimilarityRead;
@@ -478,6 +481,7 @@ export type JobKind =
   | "backups.trash_gc"
   | "derivatives.gcode"
   | "derivatives.mesh"
+  | "derivatives.previews"
   | "derivatives.plates"
   | "derivatives.toolpath"
   | "derivatives.viewer_stl"
@@ -529,7 +533,13 @@ export type LaneName =
   | "similarity";
 
 /** An output derived from an Artifact's bytes: the backend's `DerivativeKind`. */
-export type DerivativeKind = "metadata" | "plates" | "thumbnail" | "toolpath" | "viewer_stl";
+export type DerivativeKind =
+  | "metadata"
+  | "plates"
+  | "previews"
+  | "thumbnail"
+  | "toolpath"
+  | "viewer_stl";
 
 export type WorkPriority = "interactive" | "backfill";
 

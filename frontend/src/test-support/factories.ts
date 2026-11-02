@@ -1,3 +1,4 @@
+import { NO_PREVIEWS } from "@/types/previews";
 import type { SlicerProfileRead } from "@/types/slicer-profiles";
 import type { ComputeStatus } from "@/types/system";
 import type { GcPlan } from "@/lib/api/gc";
@@ -309,6 +310,7 @@ export function aModelListItem(override?: Partial<ModelListItem>): ModelListItem
     effective_role: null,
     tags: [],
     thumbnail_url: null,
+    previews: NO_PREVIEWS,
     file_count: 1,
     mesh_file_id: null,
     printer_presence: [],
@@ -325,6 +327,7 @@ export function aModel(
   override?: Partial<import("@/types").ModelRead>,
 ): import("@/types").ModelRead {
   return {
+    previews: NO_PREVIEWS,
     has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,

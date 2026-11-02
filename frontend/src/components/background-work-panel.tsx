@@ -65,6 +65,8 @@ function derivativeLabel(kind: DerivativeKind): string {
       return uiText("Model images");
     case "viewer_stl":
       return uiText("3D preview");
+    case "previews":
+      return uiText("modelPreview.gallery");
     case "plates":
       return uiText("3MF plates");
     case "toolpath":
@@ -74,6 +76,7 @@ function derivativeLabel(kind: DerivativeKind): string {
 
 const POLICY_SETTINGS = {
   "derivatives.mesh": "derivatives_mesh_enabled",
+  "derivatives.previews": "derivatives_mesh_enabled",
   "derivatives.viewer_stl": "derivatives_mesh_enabled",
   "derivatives.plates": "derivatives_mesh_enabled",
   "derivatives.gcode": "derivatives_gcode_enabled",

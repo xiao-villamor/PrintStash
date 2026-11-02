@@ -1,3 +1,4 @@
+import { NO_PREVIEWS } from "@/types/previews";
 /*
  * A model's G-code revisions: the versions somebody actually prints from.
  *
@@ -52,6 +53,7 @@ function aRevision(over: Partial<FileRead> = {}): FileRead {
 /** The model the batch re-reads once its labels have landed. */
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    previews: NO_PREVIEWS,
     has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,

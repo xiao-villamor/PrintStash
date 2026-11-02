@@ -242,6 +242,61 @@
         "title": "ArtifactOutcomeRead",
         "type": "object"
       },
+      "ArtifactPreviews": {
+        "description": "The view set of the one mesh Artifact selected for this Model.",
+        "properties": {
+          "cover_camera": {
+            "const": "unknown",
+            "default": "unknown",
+            "title": "Cover Camera",
+            "type": "string"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "artifact",
+            "default": "artifact",
+            "title": "Kind",
+            "type": "string"
+          },
+          "published": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublishedPreviewRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PreviewState"
+          }
+        },
+        "required": [
+          "kind",
+          "cover_camera",
+          "file_id",
+          "state",
+          "reason",
+          "published"
+        ],
+        "title": "ArtifactPreviews",
+        "type": "object"
+      },
       "ArtifactRequirementRead": {
         "properties": {
           "color_hex": {
@@ -1940,6 +1995,24 @@
             "title": "Model Id",
             "type": "integer"
           },
+          "previews": {
+            "discriminator": {
+              "mapping": {
+                "artifact": "#/components/schemas/ArtifactPreviews",
+                "none": "#/components/schemas/NoPreviewSubject"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoPreviewSubject"
+              },
+              {
+                "$ref": "#/components/schemas/ArtifactPreviews"
+              }
+            ],
+            "title": "Previews"
+          },
           "thumbnail_url": {
             "anyOf": [
               {
@@ -1953,6 +2026,7 @@
           }
         },
         "required": [
+          "previews",
           "model_id",
           "thumbnail_url"
         ],
@@ -4802,6 +4876,7 @@
         "enum": [
           "metadata",
           "plates",
+          "previews",
           "thumbnail",
           "toolpath",
           "viewer_stl"
@@ -7719,6 +7794,7 @@
           "backups.trash_gc",
           "derivatives.gcode",
           "derivatives.mesh",
+          "derivatives.previews",
           "derivatives.plates",
           "derivatives.toolpath",
           "derivatives.viewer_stl",
@@ -11090,6 +11166,24 @@
             "title": "Name",
             "type": "string"
           },
+          "previews": {
+            "discriminator": {
+              "mapping": {
+                "artifact": "#/components/schemas/ArtifactPreviews",
+                "none": "#/components/schemas/NoPreviewSubject"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoPreviewSubject"
+              },
+              {
+                "$ref": "#/components/schemas/ArtifactPreviews"
+              }
+            ],
+            "title": "Previews"
+          },
           "print_summary": {
             "anyOf": [
               {
@@ -11180,6 +11274,7 @@
         "required": [
           "edit_epoch",
           "edit_version",
+          "previews",
           "id",
           "name",
           "slug",
@@ -11719,6 +11814,24 @@
             "title": "Name",
             "type": "string"
           },
+          "previews": {
+            "discriminator": {
+              "mapping": {
+                "artifact": "#/components/schemas/ArtifactPreviews",
+                "none": "#/components/schemas/NoPreviewSubject"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoPreviewSubject"
+              },
+              {
+                "$ref": "#/components/schemas/ArtifactPreviews"
+              }
+            ],
+            "title": "Previews"
+          },
           "similarity": {
             "$ref": "#/components/schemas/ModelSimilarityRead"
           },
@@ -11778,6 +11891,7 @@
         "required": [
           "edit_epoch",
           "edit_version",
+          "previews",
           "has_custom_cover",
           "id",
           "name",
@@ -12861,6 +12975,29 @@
           "purged_multipart_model_ids"
         ],
         "title": "MultipartTrashPurgeRead",
+        "type": "object"
+      },
+      "NoPreviewSubject": {
+        "description": "The Model has no live mesh Artifact; only its cover can be shown.",
+        "properties": {
+          "cover_camera": {
+            "const": "unknown",
+            "default": "unknown",
+            "title": "Cover Camera",
+            "type": "string"
+          },
+          "kind": {
+            "const": "none",
+            "default": "none",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "cover_camera"
+        ],
+        "title": "NoPreviewSubject",
         "type": "object"
       },
       "NotCalculatedVolumeRead": {
@@ -14441,6 +14578,40 @@
         ],
         "title": "PreflightRequest",
         "type": "object"
+      },
+      "PreviewImageRead": {
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ViewId"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ViewRole"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "url"
+        ],
+        "title": "PreviewImageRead",
+        "type": "object"
+      },
+      "PreviewState": {
+        "enum": [
+          "pending",
+          "queued",
+          "running",
+          "ready",
+          "failed",
+          "cancelled",
+          "unsupported"
+        ],
+        "title": "PreviewState",
+        "type": "string"
       },
       "PrintArtifactFormat": {
         "description": "Stored print formats a provider can accept without conversion.",
@@ -17422,6 +17593,33 @@
           }
         },
         "title": "ProviderDelivery",
+        "type": "object"
+      },
+      "PublishedPreviewRead": {
+        "properties": {
+          "manifest_url": {
+            "title": "Manifest Url",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ViewProfile"
+          },
+          "views": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewImageRead"
+            },
+            "maxItems": 6,
+            "minItems": 1,
+            "title": "Views",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile",
+          "manifest_url",
+          "views"
+        ],
+        "title": "PublishedPreviewRead",
         "type": "object"
       },
       "QueueJobCreate": {
@@ -22529,6 +22727,41 @@
         ],
         "title": "VaultStatsRead",
         "type": "object"
+      },
+      "ViewId": {
+        "enum": [
+          "orbit-0",
+          "orbit-1",
+          "orbit-2",
+          "orbit-3",
+          "top",
+          "bottom",
+          "face",
+          "reverse",
+          "edge"
+        ],
+        "title": "ViewId",
+        "type": "string"
+      },
+      "ViewProfile": {
+        "enum": [
+          "orbit",
+          "planar"
+        ],
+        "title": "ViewProfile",
+        "type": "string"
+      },
+      "ViewRole": {
+        "enum": [
+          "orbit",
+          "top",
+          "bottom",
+          "face",
+          "reverse",
+          "edge"
+        ],
+        "title": "ViewRole",
+        "type": "string"
       },
       "VolumeEvidence": {
         "properties": {
@@ -36480,6 +36713,122 @@
         ]
       }
     },
+    "/api/v1/models/{model_id}/previews/{generation}": {
+      "get": {
+        "operationId": "get_model_preview_manifest_api_v1_models__model_id__previews__generation__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Model Preview Manifest",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/previews/{generation}/{view_id}": {
+      "get": {
+        "operationId": "get_model_preview_image_api_v1_models__model_id__previews__generation___view_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ViewId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Model Preview Image",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/{model_id}/print-jobs": {
       "get": {
         "operationId": "get_model_print_jobs_api_v1_models__model_id__print_jobs_get",
@@ -44573,6 +44922,112 @@
           }
         },
         "summary": "Toolpath only for download-authorized shares",
+        "tags": [
+          "share"
+        ]
+      }
+    },
+    "/api/v1/share/{token}/previews/{generation}": {
+      "get": {
+        "operationId": "get_shared_preview_manifest_api_v1_share__token__previews__generation__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Shared Preview Manifest",
+        "tags": [
+          "share"
+        ]
+      }
+    },
+    "/api/v1/share/{token}/previews/{generation}/{view_id}": {
+      "get": {
+        "operationId": "get_shared_preview_image_api_v1_share__token__previews__generation___view_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ViewId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Shared Preview Image",
         "tags": [
           "share"
         ]

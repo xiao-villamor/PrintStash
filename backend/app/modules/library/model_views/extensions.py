@@ -25,6 +25,8 @@ class ModelAnnotations(Protocol):
 
 
 _annotations: ModelAnnotations | None = None
+
+
 def bind_annotations(provider: ModelAnnotations | None) -> None:
     global _annotations
     _annotations = provider
