@@ -17,6 +17,7 @@
  * repoint every send at an untested slice, so it starts off and travels
  * explicitly either way.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
@@ -31,6 +32,8 @@ const FROZEN_NOW = "2026-01-01T00:00:00Z";
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    previews: NO_PREVIEWS,
+    has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,

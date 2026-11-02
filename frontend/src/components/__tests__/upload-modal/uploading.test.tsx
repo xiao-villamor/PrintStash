@@ -19,6 +19,7 @@
  * ZIP preparation queues a Job and closes the modal. Review resumes from Tasks
  * after that Job finishes, so a large archive never holds this form open.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -67,6 +68,8 @@ function aJob(over: Partial<JobStatus> = {}): JobStatus {
 
 function aModel(over: Partial<ModelRead> = {}): ModelRead {
   return {
+    previews: NO_PREVIEWS,
+    has_custom_cover: false,
     edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     edit_version: 1,
     id: 1,

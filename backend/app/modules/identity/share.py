@@ -20,6 +20,7 @@ from app.core.time import utcnow
 from app.db.models import File, FileType, Metadata, Model, ShareLink
 from app.db.scopes import live
 from app.modules.identity.auth import _as_utc, _token_hash
+from app.schemas.previews import ModelPreviewRead
 from app.schemas.share import PublicFileRead, PublicModelRead, ShareLinkRead
 
 _TOKEN_BYTES = 32
@@ -147,7 +148,9 @@ def record_access(session: Session, link: ShareLink) -> None:
     session.commit()
 
 
-def public_detail(session: Session, link: ShareLink) -> PublicModelRead:
+def public_detail(
+    session: Session, link: ShareLink, previews: ModelPreviewRead
+) -> PublicModelRead:
     """Build the read-only projection for the model behind *link*."""
     model = session.get(Model, link.model_id)
     assert model is not None  # resolve_share already validated liveness
@@ -198,9 +201,10 @@ def public_detail(session: Session, link: ShareLink) -> PublicModelRead:
         if _file_allowed(link, f, selected_ids)
     ]
     return PublicModelRead(
+        previews=previews,
         name=model.name,
         description=model.description,
-        has_thumbnail=bool(model.thumbnail_file_id or model.thumbnail_path),
+        has_thumbnail=bool(model.cover_filename or model.thumbnail_file_id or model.thumbnail_path),
         allow_download=link.allow_download,
         files=files,
     )

@@ -2,6 +2,7 @@
  * Source-file tags are direct Artifact metadata. Saving them must call the
  * Artifact endpoint and replace the surrounding Model with the server response.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 import "@testing-library/jest-dom/vitest";
 
 import { screen, waitFor, within } from "@testing-library/react";
@@ -35,6 +36,8 @@ const artifact: FileRead = {
 };
 
 const updatedModel: ModelRead = {
+  previews: NO_PREVIEWS,
+  has_custom_cover: false,
   edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   edit_version: 1,
   id: 1,

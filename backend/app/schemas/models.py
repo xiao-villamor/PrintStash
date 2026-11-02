@@ -12,6 +12,7 @@ from app.db.models import CollectionRole, FileRevisionStatus, FileType, PrintJob
 from app.schemas.editing import EditingBase
 from app.schemas.mesh_measurements import VolumeMeasurementRead
 from app.schemas.orca import OrcaNativeContext
+from app.schemas.previews import ModelPreviewRead
 from app.schemas.printers import (
     PrintJobIdentityRead,
     PrintJobReportedMetadataRead,
@@ -158,6 +159,8 @@ class ModelSimilarityRead(BaseModel):
 
 
 class ModelRead(EditingBase):
+    previews: ModelPreviewRead
+    has_custom_cover: bool
     similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
     id: int
     name: str
@@ -264,6 +267,7 @@ class PrintSummaryRead(BaseModel):
 
 
 class ModelListItem(EditingBase):
+    previews: ModelPreviewRead
     similarity: ModelSimilarityRead = Field(default_factory=ModelSimilarityRead)
     id: int
     name: str
@@ -555,6 +559,12 @@ class PrintStatisticsRead(BaseModel):
     top_models: List[ModelStatRead] = []
     top_printers: List[PrinterStatRead] = []
     cost_over_time: List[TimeBucketRead] = []
+
+
+class ModelCoverSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_id: int = Field(gt=0)
 
 
 class ModelUpdate(BaseModel):

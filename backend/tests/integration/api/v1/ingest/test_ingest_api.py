@@ -991,7 +991,8 @@ class TestIngestModel:
         assert purged.json() == {
             "purged_model_ids": [model_id],
             "purged_count": 1,
-            "storage_completed": 2,
+            # Original bytes, primary cover and the multi-angle preview bundle.
+            "storage_completed": 3,
             "storage_pending": 0,
             "storage_blocked": 0,
             "storage_cleanup_status": "completed",

@@ -559,7 +559,7 @@ class TestPublicationBoundaries:
             output.mkdir()
         before = output.stat()
         with pytest.raises(MeshWorkerError) as error:
-            stl_isolation._open_output(output)
+            stl_isolation.open_worker_output(output)
         assert error.value.reason is ThumbnailFailureReason.WORKER_FAILED
         after = output.stat()
         assert after.st_ino == before.st_ino

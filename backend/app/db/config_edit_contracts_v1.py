@@ -4,11 +4,12 @@ This version covers fields edited by PUT /config, including legacy/provider
 projections. Operational timestamps, initialization markers and independently
 owned settings deliberately do not invalidate that form's editing base.
 Add a new contract version to change this installed field set after release.
+Fresh schemas now install ``config_edit_contracts_v2``; this version remains
+for the migrations that installed and later replaced it.
 """
 
-from sqlalchemy import DDL, Connection, event, inspect
+from sqlalchemy import DDL, Connection
 from sqlalchemy.engine.mock import MockConnection
-from sqlmodel import SQLModel
 
 EDIT_FIELDS = (
     "currency",
@@ -108,14 +109,3 @@ def uninstall(connection: Connection | MockConnection) -> None:
         connection.execute(DDL("DROP TRIGGER IF EXISTS ps_vault_config_edit_v1"))
     else:
         raise ValueError("config_edit_contract_dialect_unsupported")
-
-
-def _fresh_contract(metadata, connection: Connection, **_kwargs) -> None:
-    if (
-        isinstance(connection, Connection)
-        and "system_config" in inspect(connection).get_table_names()
-    ):
-        install(connection)
-
-
-event.listen(SQLModel.metadata, "after_create", _fresh_contract)

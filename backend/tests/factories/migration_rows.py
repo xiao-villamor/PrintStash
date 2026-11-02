@@ -361,6 +361,7 @@ def create_pre_derivative_controls_schema(connection) -> None:
         "derivatives_mesh_enabled",
         "derivatives_gcode_enabled",
         "derivatives_toolpath_enabled",
+        "derivatives_previews_enabled",
     ):
         config._columns.remove(config.c[column])
     files = metadata.tables["files"]

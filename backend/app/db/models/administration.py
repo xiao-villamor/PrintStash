@@ -169,6 +169,7 @@ class SystemConfig(SQLModel, table=True):
     derivatives_mesh_enabled: Optional[bool] = None
     derivatives_gcode_enabled: Optional[bool] = None
     derivatives_toolpath_enabled: Optional[bool] = None
+    derivatives_previews_enabled: Optional[bool] = None
 
     # Behaviour toggles
     # When true, a file's revision is auto-marked known_good after its first

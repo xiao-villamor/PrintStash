@@ -427,8 +427,24 @@ else:
         self.case(
             "after-restart.stl", content.binary_stl(offset=(2, 3, 4)), must_succeed=True
         )
-        after = self.rows(f"SELECT * FROM artifact_derivatives WHERE file_id={refused}")
-        assert before == after, "restart/nudges renewed terminal derivatives"
+        after = {
+            row["kind"]: row
+            for row in self.rows(
+                f"SELECT * FROM artifact_derivatives WHERE file_id={refused}"
+            )
+        }
+        # Secondary previews become owed only once the primary outcome is
+        # terminal, so they may start after `before` was captured. Every row
+        # that was already terminal must be exactly as it was.
+        terminal = [
+            row
+            for row in before
+            if row["state"] in ("ready", "skipped", "failed", "cancelled")
+        ]
+        assert {row["kind"] for row in terminal} >= {"metadata", "thumbnail"}, before
+        assert all(after.get(row["kind"]) == row for row in terminal), (
+            "restart/nudges renewed terminal derivatives"
+        )
         self.report["terminal_restart"] = "unchanged"
         # Concurrent public uploads exercise admission and the real job engine.
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:

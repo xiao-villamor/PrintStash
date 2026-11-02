@@ -839,6 +839,7 @@ class TestStepTessellation:
             for row in derivatives.json()
         } == {
             "metadata": ("ready", kinds.STEP_GEOMETRY_RECIPE),
+            "previews": ("ready", kinds.PREVIEWS_RECIPE),
             "thumbnail": ("ready", kinds.STEP_THUMBNAIL_RECIPE),
         }
 
@@ -867,6 +868,7 @@ class TestThreeMFReader:
         } == {
             "metadata": ("ready", kinds.THREE_MF_GEOMETRY_RECIPE),
             "plates": ("skipped", kinds.PLATES_RECIPE),
+            "previews": ("ready", kinds.PREVIEWS_RECIPE),
             "thumbnail": ("ready", kinds.THREE_MF_THUMBNAIL_RECIPE),
         }
 

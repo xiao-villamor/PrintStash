@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas.models import ModelFilters, ModelListItem, ModelSort
 from app.schemas.multipart_models import MultipartModelListItem
+from app.schemas.previews import ModelPreviewRead
 
 
 class LibraryView(str, Enum):
@@ -64,6 +65,7 @@ class BrowseThumbnailQuery(BaseModel):
 
 
 class BrowseThumbnail(BaseModel):
+    previews: ModelPreviewRead
     model_id: int
     thumbnail_url: str | None
 

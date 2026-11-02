@@ -91,6 +91,7 @@ import { SourceTab } from "./source-tab";
 import { useDerivativeRefresh } from "./use-derivative-refresh";
 import { useRevisionUpdater } from "./use-revision-updater";
 import { ViewerToolbar } from "./viewer-toolbar";
+import { ModelCoverEditor } from "./cover-editor";
 import { PlatePicker } from "./plate-picker";
 import { useFilePlates } from "@/lib/queries/file-plates";
 import { Localized } from "@/components/ui/localized";
@@ -209,6 +210,7 @@ function ModelDetailPresentation({
   const reviewPublication = useRef<typeof setModel | null>(null);
   const [reviewedModel, setReviewedModel] = useState<ModelRead | null>(null);
   const [reviewing, setReviewing] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [tagDialogSession, setTagDialogSession] = useState(0);
@@ -677,6 +679,22 @@ function ModelDetailPresentation({
             }}
           />
         )}
+        {coverOpen && canEditModel && auth.isAuthenticated && (
+          <ModelCoverEditor
+            model={model}
+            publish={setModel}
+            capture={
+              viewerReady && viewerMode === "model" && meshFile
+                ? async () => {
+                    const controls = viewerControls.current;
+                    if (!controls) throw new Error("preview_not_ready");
+                    return controls.captureImage();
+                  }
+                : null
+            }
+            onClose={() => setCoverOpen(false)}
+          />
+        )}
         <ShareDialog
           modelId={model.id}
           files={model.files}
@@ -947,6 +965,11 @@ function ModelDetailPresentation({
               </>
             ) : (
               <>
+                {canEditModel && auth.isAuthenticated && (
+                  <Button variant="outline" size="sm" onClick={() => setCoverOpen(true)}>
+                    {uiText("modelCover.edit")}
+                  </Button>
+                )}
                 {canEditModel && (
                   <Button
                     type="button"

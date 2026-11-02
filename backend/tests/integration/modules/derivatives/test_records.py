@@ -174,7 +174,7 @@ class TestNeeded:
             now=utcnow(),
         )
 
-        assert needed == {DerivativeKind.THUMBNAIL}
+        assert needed == {DerivativeKind.THUMBNAIL, DerivativeKind.PREVIEWS}
 
     def test_a_row_at_an_older_recipe_does_not_count(
         self, db_session: Session, mesh, make_derivative
@@ -472,6 +472,7 @@ class TestWithdrawAndRetry:
         assert states == {
             DerivativeKind.METADATA: DerivativeState.READY,
             DerivativeKind.THUMBNAIL: DerivativeState.CANCELLED,
+            DerivativeKind.PREVIEWS: DerivativeState.CANCELLED,
         }
 
     def test_a_retry_forgets_every_unsuccessful_attempt(

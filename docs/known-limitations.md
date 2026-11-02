@@ -412,3 +412,7 @@ remains downloadable. CTB files without an embedded preview have no thumbnail.
 
 Other resin formats, spreadsheets and Word documents can be stored in collection
 Documents and downloaded unchanged. Their contents do not have an in-app preview.
+
+## Multi-angle Model previews
+
+Generated card views are discrete recognition aids, not complete geometry inspection. Recipe 1 follows the shared mesh limits (`VAULT_MESH_MAX_LOAD_MB`, default 200; `VAULT_MESH_MAX_RENDER_TRIANGLES`, default 2,000,000) and produces five or six 480 × 360 images; native memory admission also applies. Unsupported or refused optional views leave the original Artifact and primary cover usable. Primary work gets scheduling priority, with a finite grace period to keep continuous ingestion from starving secondary views. See [behavior and limits](model-previews.md).

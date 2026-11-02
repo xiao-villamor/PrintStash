@@ -196,6 +196,7 @@ class JobKind(StrEnum):
     BACKUPS_TRASH_GC = "backups.trash_gc"
     DERIVATIVES_GCODE = "derivatives.gcode"
     DERIVATIVES_MESH = "derivatives.mesh"
+    DERIVATIVES_PREVIEWS = "derivatives.previews"
     DERIVATIVES_PLATES = "derivatives.plates"
     DERIVATIVES_TOOLPATH = "derivatives.toolpath"
     DERIVATIVES_VIEWER_STL = "derivatives.viewer_stl"
@@ -254,6 +255,7 @@ class DerivativeKind(StrEnum):
 
     METADATA = "metadata"
     PLATES = "plates"
+    PREVIEWS = "previews"
     THUMBNAIL = "thumbnail"
     TOOLPATH = "toolpath"
     VIEWER_STL = "viewer_stl"

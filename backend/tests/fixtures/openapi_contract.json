@@ -242,6 +242,61 @@
         "title": "ArtifactOutcomeRead",
         "type": "object"
       },
+      "ArtifactPreviews": {
+        "description": "The view set of the one mesh Artifact selected for this Model.",
+        "properties": {
+          "cover_camera": {
+            "const": "unknown",
+            "default": "unknown",
+            "title": "Cover Camera",
+            "type": "string"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "integer"
+          },
+          "kind": {
+            "const": "artifact",
+            "default": "artifact",
+            "title": "Kind",
+            "type": "string"
+          },
+          "published": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublishedPreviewRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PreviewState"
+          }
+        },
+        "required": [
+          "kind",
+          "cover_camera",
+          "file_id",
+          "state",
+          "reason",
+          "published"
+        ],
+        "title": "ArtifactPreviews",
+        "type": "object"
+      },
       "ArtifactRequirementRead": {
         "properties": {
           "color_hex": {
@@ -1689,6 +1744,20 @@
         "title": "Body_inspect_archive_background_api_v1_ingest_archive_inspect_post",
         "type": "object"
       },
+      "Body_put_model_cover_api_v1_models__model_id__cover_put": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_put_model_cover_api_v1_models__model_id__cover_put",
+        "type": "object"
+      },
       "Body_put_model_source_cover_api_v1_models__model_id__provenance__source_id__cover_put": {
         "properties": {
           "file": {
@@ -1926,6 +1995,24 @@
             "title": "Model Id",
             "type": "integer"
           },
+          "previews": {
+            "discriminator": {
+              "mapping": {
+                "artifact": "#/components/schemas/ArtifactPreviews",
+                "none": "#/components/schemas/NoPreviewSubject"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoPreviewSubject"
+              },
+              {
+                "$ref": "#/components/schemas/ArtifactPreviews"
+              }
+            ],
+            "title": "Previews"
+          },
           "thumbnail_url": {
             "anyOf": [
               {
@@ -1939,6 +2026,7 @@
           }
         },
         "required": [
+          "previews",
           "model_id",
           "thumbnail_url"
         ],
@@ -4788,6 +4876,7 @@
         "enum": [
           "metadata",
           "plates",
+          "previews",
           "thumbnail",
           "toolpath",
           "viewer_stl"
@@ -7705,6 +7794,7 @@
           "backups.trash_gc",
           "derivatives.gcode",
           "derivatives.mesh",
+          "derivatives.previews",
           "derivatives.plates",
           "derivatives.toolpath",
           "derivatives.viewer_stl",
@@ -10638,6 +10728,21 @@
         "title": "ModelBatchTags",
         "type": "object"
       },
+      "ModelCoverSource": {
+        "additionalProperties": false,
+        "properties": {
+          "source_id": {
+            "exclusiveMinimum": 0.0,
+            "title": "Source Id",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "source_id"
+        ],
+        "title": "ModelCoverSource",
+        "type": "object"
+      },
       "ModelEditBatchResult": {
         "properties": {
           "failed": {
@@ -11061,6 +11166,24 @@
             "title": "Name",
             "type": "string"
           },
+          "previews": {
+            "discriminator": {
+              "mapping": {
+                "artifact": "#/components/schemas/ArtifactPreviews",
+                "none": "#/components/schemas/NoPreviewSubject"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoPreviewSubject"
+              },
+              {
+                "$ref": "#/components/schemas/ArtifactPreviews"
+              }
+            ],
+            "title": "Previews"
+          },
           "print_summary": {
             "anyOf": [
               {
@@ -11151,6 +11274,7 @@
         "required": [
           "edit_epoch",
           "edit_version",
+          "previews",
           "id",
           "name",
           "slug",
@@ -11674,6 +11798,10 @@
             "title": "Files",
             "type": "array"
           },
+          "has_custom_cover": {
+            "title": "Has Custom Cover",
+            "type": "boolean"
+          },
           "hash": {
             "title": "Hash",
             "type": "string"
@@ -11685,6 +11813,24 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "previews": {
+            "discriminator": {
+              "mapping": {
+                "artifact": "#/components/schemas/ArtifactPreviews",
+                "none": "#/components/schemas/NoPreviewSubject"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NoPreviewSubject"
+              },
+              {
+                "$ref": "#/components/schemas/ArtifactPreviews"
+              }
+            ],
+            "title": "Previews"
           },
           "similarity": {
             "$ref": "#/components/schemas/ModelSimilarityRead"
@@ -11745,6 +11891,8 @@
         "required": [
           "edit_epoch",
           "edit_version",
+          "previews",
+          "has_custom_cover",
           "id",
           "name",
           "slug",
@@ -12827,6 +12975,29 @@
           "purged_multipart_model_ids"
         ],
         "title": "MultipartTrashPurgeRead",
+        "type": "object"
+      },
+      "NoPreviewSubject": {
+        "description": "The Model has no live mesh Artifact; only its cover can be shown.",
+        "properties": {
+          "cover_camera": {
+            "const": "unknown",
+            "default": "unknown",
+            "title": "Cover Camera",
+            "type": "string"
+          },
+          "kind": {
+            "const": "none",
+            "default": "none",
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "cover_camera"
+        ],
+        "title": "NoPreviewSubject",
         "type": "object"
       },
       "NotCalculatedVolumeRead": {
@@ -14407,6 +14578,40 @@
         ],
         "title": "PreflightRequest",
         "type": "object"
+      },
+      "PreviewImageRead": {
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ViewId"
+          },
+          "role": {
+            "$ref": "#/components/schemas/ViewRole"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "role",
+          "url"
+        ],
+        "title": "PreviewImageRead",
+        "type": "object"
+      },
+      "PreviewState": {
+        "enum": [
+          "pending",
+          "queued",
+          "running",
+          "ready",
+          "failed",
+          "cancelled",
+          "unsupported"
+        ],
+        "title": "PreviewState",
+        "type": "string"
       },
       "PrintArtifactFormat": {
         "description": "Stored print formats a provider can accept without conversion.",
@@ -17388,6 +17593,33 @@
           }
         },
         "title": "ProviderDelivery",
+        "type": "object"
+      },
+      "PublishedPreviewRead": {
+        "properties": {
+          "manifest_url": {
+            "title": "Manifest Url",
+            "type": "string"
+          },
+          "profile": {
+            "$ref": "#/components/schemas/ViewProfile"
+          },
+          "views": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewImageRead"
+            },
+            "maxItems": 6,
+            "minItems": 1,
+            "title": "Views",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile",
+          "manifest_url",
+          "views"
+        ],
+        "title": "PublishedPreviewRead",
         "type": "object"
       },
       "QueueJobCreate": {
@@ -21768,6 +22000,10 @@
             "title": "Derivatives Mesh Enabled",
             "type": "boolean"
           },
+          "derivatives_previews_enabled": {
+            "title": "Derivatives Previews Enabled",
+            "type": "boolean"
+          },
           "derivatives_toolpath_enabled": {
             "title": "Derivatives Toolpath Enabled",
             "type": "boolean"
@@ -21970,7 +22206,8 @@
           "edit_version",
           "derivatives_mesh_enabled",
           "derivatives_gcode_enabled",
-          "derivatives_toolpath_enabled"
+          "derivatives_toolpath_enabled",
+          "derivatives_previews_enabled"
         ],
         "title": "VaultConfigRead",
         "type": "object"
@@ -22135,6 +22372,17 @@
               }
             ],
             "title": "Derivatives Mesh Enabled"
+          },
+          "derivatives_previews_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivatives Previews Enabled"
           },
           "derivatives_toolpath_enabled": {
             "anyOf": [
@@ -22495,6 +22743,41 @@
         ],
         "title": "VaultStatsRead",
         "type": "object"
+      },
+      "ViewId": {
+        "enum": [
+          "orbit-0",
+          "orbit-1",
+          "orbit-2",
+          "orbit-3",
+          "top",
+          "bottom",
+          "face",
+          "reverse",
+          "edge"
+        ],
+        "title": "ViewId",
+        "type": "string"
+      },
+      "ViewProfile": {
+        "enum": [
+          "orbit",
+          "planar"
+        ],
+        "title": "ViewProfile",
+        "type": "string"
+      },
+      "ViewRole": {
+        "enum": [
+          "orbit",
+          "top",
+          "bottom",
+          "face",
+          "reverse",
+          "edge"
+        ],
+        "title": "ViewRole",
+        "type": "string"
       },
       "VolumeEvidence": {
         "properties": {
@@ -35776,6 +36059,318 @@
         ]
       }
     },
+    "/api/v1/models/{model_id}/cover": {
+      "delete": {
+        "operationId": "reset_model_cover_api_v1_models__model_id__cover_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Reset the Model cover to automatic",
+        "tags": [
+          "models"
+        ]
+      },
+      "put": {
+        "operationId": "put_model_cover_api_v1_models__model_id__cover_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_put_model_cover_api_v1_models__model_id__cover_put"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Choose an uploaded Model cover",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/cover/content": {
+      "get": {
+        "operationId": "get_model_cover_api_v1_models__model_id__cover_content_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Read the Model's chosen cover",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/cover/source": {
+      "post": {
+        "operationId": "select_model_cover_source_api_v1_models__model_id__cover_source_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Strong aggregate ETag from the detail response.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Strong aggregate ETag from the detail response.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+            "in": "header",
+            "name": "X-PrintStash-Edit-Contract",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "conditional-v1 requires If-Match. Omission retains unprotected legacy compatibility.",
+              "title": "X-Printstash-Edit-Contract"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelCoverSource"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Choose a source image as the Model cover",
+        "tags": [
+          "models"
+        ]
+      }
+    },
     "/api/v1/models/{model_id}/files/{file_id}": {
       "delete": {
         "operationId": "trash_source_file_api_v1_models__model_id__files__file_id__delete",
@@ -36129,6 +36724,122 @@
           }
         ],
         "summary": "Add a G-code revision to an existing model",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/previews/{generation}": {
+      "get": {
+        "operationId": "get_model_preview_manifest_api_v1_models__model_id__previews__generation__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Model Preview Manifest",
+        "tags": [
+          "models"
+        ]
+      }
+    },
+    "/api/v1/models/{model_id}/previews/{generation}/{view_id}": {
+      "get": {
+        "operationId": "get_model_preview_image_api_v1_models__model_id__previews__generation___view_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "model_id",
+            "required": true,
+            "schema": {
+              "title": "Model Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ViewId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Get Model Preview Image",
         "tags": [
           "models"
         ]
@@ -44227,6 +44938,112 @@
           }
         },
         "summary": "Toolpath only for download-authorized shares",
+        "tags": [
+          "share"
+        ]
+      }
+    },
+    "/api/v1/share/{token}/previews/{generation}": {
+      "get": {
+        "operationId": "get_shared_preview_manifest_api_v1_share__token__previews__generation__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Shared Preview Manifest",
+        "tags": [
+          "share"
+        ]
+      }
+    },
+    "/api/v1/share/{token}/previews/{generation}/{view_id}": {
+      "get": {
+        "operationId": "get_shared_preview_image_api_v1_share__token__previews__generation___view_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "generation",
+            "required": true,
+            "schema": {
+              "title": "Generation",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ViewId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Shared Preview Image",
         "tags": [
           "share"
         ]

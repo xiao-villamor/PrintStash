@@ -156,6 +156,15 @@ def _begin(
             return None
         kinds = group(definition).recipes_for(file_row.file_type)
         needed = records.needed(session, file_row, kinds, now=now)
+        if definition is JobKind.DERIVATIVES_PREVIEWS and execution is not None:
+            # This exact Job execution owns the active-subject claim. A DBOS
+            # replay after process death must fence its stranded RUNNING token,
+            # rather than treating it as somebody else's recent work.
+            needed.update(
+                kind
+                for kind, row in records.rows_for(session, file_row).items()
+                if kind in kinds and row.state is DerivativeState.RUNNING
+            )
         attempts = {}
         for kind in needed:
             row = records.begin(session, file_row, kind, kinds[kind], now=now)

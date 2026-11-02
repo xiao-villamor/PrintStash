@@ -58,6 +58,7 @@ from app.db.models import (
     MeshFingerprintContinuation,
     Metadata,
     Model,
+    ModelCover,
     ModelProvenanceSource,
     ModelSourceCover,
     MultipartBuild,
@@ -175,6 +176,10 @@ class GrantRole(Protocol):
         collection: Collection,
         role: CollectionRole = ...,
     ) -> CollectionPermission: ...
+
+
+class MakeModelCover(Protocol):
+    def __call__(self, model: Model, **overrides: Any) -> ModelCover: ...
 
 
 class MakeModel(Protocol):
@@ -515,6 +520,7 @@ __all__ = [
     "MakeMetadata",
     "MakeInboxItem",
     "MakeModel",
+    "MakeModelCover",
     "MakeMultipartModel",
     "MakeMultipartModelStar",
     "MakeOwnedStorageObject",

@@ -111,6 +111,7 @@ class TestConfigurationEditVersion:
                     "derivatives_mesh_enabled",
                     "derivatives_gcode_enabled",
                     "derivatives_toolpath_enabled",
+                    "derivatives_previews_enabled",
                 )
             ],
             *[
@@ -145,6 +146,23 @@ class TestConfigurationEditVersion:
             session.commit()
         with Session(config_db) as session:
             assert _version(session) > before
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [("currency", "EUR"), ("derivatives_previews_enabled", False)],
+    )
+    def test_an_edit_advances_the_version_exactly_once(
+        self, config_db: Engine, field: str, value: object
+    ) -> None:
+        # Only one installed contract may count an edit.
+        with Session(config_db) as session:
+            before = _version(session)
+            session.execute(
+                update(SystemConfig).where(SystemConfig.id == 1).values({field: value})
+            )
+            session.commit()
+        with Session(config_db) as session:
+            assert _version(session) == before + 1
 
     def test_operational_bookkeeping_preserves_the_editing_base(
         self, config_db: Engine

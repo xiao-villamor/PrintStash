@@ -231,3 +231,5 @@ sends no further setup probe.
 
 - `resin.spec.ts`: CTB/GOO source upload, persisted print metadata, rendered embedded preview, original-byte download.
 - `documents.spec.ts`: collection spreadsheets and binary resin attachments remain downloadable with their original filenames and bytes.
+
+- `model-covers.spec.ts`: source selection, upload, real 3D-view capture, preservation through thumbnail regeneration, and reset to automatic.

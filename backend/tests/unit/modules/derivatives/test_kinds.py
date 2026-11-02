@@ -15,12 +15,13 @@ from app.db.models import SENTINEL_FILE_HASH, DerivativeKind, File, FileType, Jo
 from app.modules.derivatives import kinds
 from tests.factories.library import detached_file
 
-METADATA, PLATES, THUMBNAIL, TOOLPATH, VIEWER_STL = (
+METADATA, PLATES, THUMBNAIL, TOOLPATH, VIEWER_STL, PREVIEWS = (
     DerivativeKind.METADATA,
     DerivativeKind.PLATES,
     DerivativeKind.THUMBNAIL,
     DerivativeKind.TOOLPATH,
     DerivativeKind.VIEWER_STL,
+    DerivativeKind.PREVIEWS,
 )
 
 
@@ -43,13 +44,18 @@ class TestRecipesFor:
         ],
     )
     def test_a_mesh_gets_every_mesh_kind(self, file_type: FileType) -> None:
-        assert set(kinds.recipes_for(_file(file_type))) == {METADATA, THUMBNAIL}
+        assert set(kinds.recipes_for(_file(file_type))) == {
+            METADATA,
+            THUMBNAIL,
+            PREVIEWS,
+        }
 
     def test_a_3mf_also_gets_its_plates(self) -> None:
         assert set(kinds.recipes_for(_file(FileType.THREE_MF))) == {
             METADATA,
             PLATES,
             THUMBNAIL,
+            PREVIEWS,
         }
 
     def test_plain_gcode_gets_what_its_header_holds(self) -> None:
@@ -72,6 +78,7 @@ class TestRecipesFor:
             METADATA: kinds.THREE_MF_GEOMETRY_RECIPE,
             PLATES: kinds.PLATES_RECIPE,
             THUMBNAIL: kinds.THREE_MF_THUMBNAIL_RECIPE,
+            PREVIEWS: kinds.PREVIEWS_RECIPE,
         }
 
     def test_a_step_gets_its_own_mesh_recipes(self) -> None:
@@ -79,6 +86,7 @@ class TestRecipesFor:
         assert kinds.recipes_for(_file(FileType.STEP)) == {
             METADATA: kinds.STEP_GEOMETRY_RECIPE,
             THUMBNAIL: kinds.STEP_THUMBNAIL_RECIPE,
+            PREVIEWS: kinds.PREVIEWS_RECIPE,
         }
 
     @pytest.mark.parametrize(
@@ -92,6 +100,7 @@ class TestRecipesFor:
         assert kinds.recipes_for(_file(file_type)) == {
             METADATA: kinds.MESH_GEOMETRY_RECIPE,
             THUMBNAIL: kinds.MESH_THUMBNAIL_RECIPE,
+            PREVIEWS: kinds.PREVIEWS_RECIPE,
         }
 
     def test_a_sentinel_row_gets_nothing(self) -> None:
@@ -176,4 +185,5 @@ class TestGroups:
             JobKind.DERIVATIVES_GCODE,
             JobKind.DERIVATIVES_TOOLPATH,
             JobKind.DERIVATIVES_VIEWER_STL,
+            JobKind.DERIVATIVES_PREVIEWS,
         }
