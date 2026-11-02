@@ -1,4 +1,3 @@
-import { NO_PREVIEWS } from "@/types/previews";
 /*
  * A model's G-code revisions: the versions somebody actually prints from.
  *
@@ -16,6 +15,7 @@ import { NO_PREVIEWS } from "@/types/previews";
  * recent because that is the comparison a user almost always wants; a default of
  * "nothing selected" makes them do the work twice.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { screen, waitFor, within } from "@testing-library/react";

@@ -1,4 +1,3 @@
-import { NO_PREVIEWS } from "@/types/previews";
 /*
  * The query hooks, and the two properties that decide whether the vault feels
  * broken.
@@ -26,6 +25,7 @@ import { NO_PREVIEWS } from "@/types/previews";
  * requested only on demand. A client that re-sorted locally would paginate a
  * different order than the one it displays.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 import { anEditingBase } from "@/test-support/factories";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

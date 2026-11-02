@@ -1,4 +1,3 @@
-import { NO_PREVIEWS } from "@/types/previews";
 /*
  * The revision badge on a model card, when the user has renamed the revision.
  *
@@ -8,6 +7,7 @@ import { NO_PREVIEWS } from "@/types/previews";
  * displays the custom label alone hides that the revision was never verified,
  * which is exactly the information somebody about to print it needs.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor } from "@testing-library/react";

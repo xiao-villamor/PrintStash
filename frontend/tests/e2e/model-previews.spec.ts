@@ -227,7 +227,7 @@ test.describe("Model preview browsing", () => {
     await expect(card.getByRole("button", { name: "Model views" })).toHaveCount(0);
   });
 
-  test("exposes named top and bottom views in the gallery", async ({ page }) => {
+  test("exposes named Top/Bottom views in the gallery", async ({ page }) => {
     const { card } = await library(page);
     await card.getByRole("button", { name: "Model views", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Model views" });

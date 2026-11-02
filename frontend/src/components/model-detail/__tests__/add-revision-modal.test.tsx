@@ -1,4 +1,3 @@
-import { NO_PREVIEWS } from "@/types/previews";
 /*
  * Adding another slice of a model without losing the ones before it.
  *
@@ -18,6 +17,7 @@ import { NO_PREVIEWS } from "@/types/previews";
  * repoint every send at an untested slice, so it starts off and travels
  * explicitly either way.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";

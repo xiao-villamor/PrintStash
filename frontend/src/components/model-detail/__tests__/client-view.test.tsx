@@ -1,5 +1,5 @@
-import { NO_PREVIEWS } from "@/types/previews";
 /** The SPA route shares one authorized Model read and distinguishes recovery from lost access. */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";

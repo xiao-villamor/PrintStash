@@ -1,5 +1,5 @@
-import { NO_PREVIEWS, type ArtifactPreviews } from "@/types/previews";
 /** Thumbnail completion cannot replace the displayed browse snapshot. */
+import { NO_PREVIEWS, type ArtifactPreviews } from "@/types/previews";
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";

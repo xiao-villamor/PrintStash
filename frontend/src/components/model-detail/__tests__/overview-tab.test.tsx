@@ -1,4 +1,3 @@
-import { NO_PREVIEWS } from "@/types/previews";
 /*
  * The legacy source link on the overview tab, and the scheme check on it.
  *
@@ -10,6 +9,7 @@ import { NO_PREVIEWS } from "@/types/previews";
  * Safe URLs are normalized rather than passed through, so the two cases here are
  * the whole contract: `http`/`https` become links, everything else becomes text.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";

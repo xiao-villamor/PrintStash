@@ -1,4 +1,3 @@
-import { NO_PREVIEWS } from "@/types/previews";
 /**
  * A grid of Models refreshes when a thumbnail it is showing a placeholder for
  * lands, so a fresh upload's preview appears without a reload.
@@ -8,6 +7,7 @@ import { NO_PREVIEWS } from "@/types/previews";
  * card that already has its preview has nothing to wait for. A thumbnail that
  * merely started, or a different kind, is not an arrival.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 import { renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 

@@ -1,4 +1,3 @@
-import { NO_PREVIEWS } from "@/types/previews";
 /*
  * One model's page: six tabs over the artifacts, the settings that produced
  * them, and the prints that came out.
@@ -17,6 +16,7 @@ import { NO_PREVIEWS } from "@/types/previews";
  * Favouriting publishes the confirmed server state. A failed write must leave
  * the earlier star visible rather than claim something was saved.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";

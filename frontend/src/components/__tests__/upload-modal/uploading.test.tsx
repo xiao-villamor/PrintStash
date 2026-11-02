@@ -1,4 +1,3 @@
-import { NO_PREVIEWS } from "@/types/previews";
 /*
  * What actually happens after the user presses Upload.
  *
@@ -20,6 +19,7 @@ import { NO_PREVIEWS } from "@/types/previews";
  * ZIP preparation queues a Job and closes the modal. Review resumes from Tasks
  * after that Job finishes, so a large archive never holds this form open.
  */
+import { NO_PREVIEWS } from "@/types/previews";
 
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
