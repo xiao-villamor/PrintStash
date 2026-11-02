@@ -8,18 +8,22 @@ from collections.abc import Callable
 from pathlib import Path
 
 from printstash_core.mesh.similarity import GeometryError
+from printstash_core.mesh.similarity.budgets import MAX_ANALYSIS_FACES
 
+from app.core.config import settings
 from app.modules.media import mesh_policy
 from app.modules.media.geometry_analysis import _load
 from app.modules.media.mesh_contracts import ThumbnailFailureReason
 from app.modules.media.mesh_isolation import MeshWorkerError, read_spec
-from app.modules.media.preview_contracts import (
-    MAX_FACES,
-    MAX_SOURCE_BYTES,
-    PreviewLimitError,
-)
+from app.modules.media.mesh_resources import load_3mf_within_ram
+from app.modules.media.preview_contracts import PreviewLimitError
 from app.modules.media.preview_views import render_views
 from app.modules.media.stl_isolation import FileIdentity, manifest_for
+
+
+def face_limit() -> int:
+    """Generated views follow the shared triangle ceiling, never a stricter one."""
+    return min(int(settings.mesh_max_render_triangles), MAX_ANALYSIS_FACES)
 
 
 def produce(
@@ -32,16 +36,21 @@ def produce(
     recipe: int = 1,
 ) -> bytes:
     identity = FileIdentity.of(path.stat())
-    if identity.size > MAX_SOURCE_BYTES:
+    # The same size and triangle ceilings as every other mesh path.
+    if mesh_policy.exceeds_cap(path, file_type=file_type):
         raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
     with path.open("rb") as source:
         if manifest_for(source).sha256 != source_sha256:
             raise MeshWorkerError(ThumbnailFailureReason.SOURCE_CHANGED)
-    estimate = mesh_policy.estimate_triangle_count(path, file_type=file_type)
-    if estimate is not None and estimate > MAX_FACES:
-        raise MeshWorkerError(ThumbnailFailureReason.RESOURCE_LIMIT)
+    limit = face_limit()
     with mesh_policy.render_admission():
-        prepared = _load(path, file_type, triangle_cap=MAX_FACES, include_brep=False)
+        prepared = (
+            # The admitted claim is weighted by the 3MF reader that can read the
+            # package; only the reader-aware loader derives the same face budget.
+            load_3mf_within_ram(path)
+            if file_type == "3mf"
+            else _load(path, file_type, triangle_cap=limit, include_brep=False)
+        )
         # The loader may offer a sampled oversized STL for AI; galleries never do.
         from app.modules.media.mesh_facts import CompleteGeometry
 
@@ -50,6 +59,7 @@ def produce(
         manifest, images = render_views(
             prepared.whole_mesh,
             source_sha256=source_sha256,
+            max_faces=limit,
             progress=progress,
             recipe=recipe,
         )

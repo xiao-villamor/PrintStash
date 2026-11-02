@@ -7,8 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 WIDTH = 480
 HEIGHT = 360
-MAX_FACES = 500_000
-MAX_SOURCE_BYTES = 128 * 1024 * 1024
+# Source size and face count follow the shared mesh limits
+# (VAULT_MESH_MAX_LOAD_MB, VAULT_MESH_MAX_RENDER_TRIANGLES); see preview_worker.
 MAX_IMAGE_BYTES = 1024 * 1024
 MAX_BUNDLE_BYTES = 6 * MAX_IMAGE_BYTES
 MAX_MANIFEST_BYTES = 32 * 1024

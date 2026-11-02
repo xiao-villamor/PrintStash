@@ -15,7 +15,9 @@ from app.modules.storage.storage_backend.runtime import get_backend
 @pytest.fixture(scope="module")
 def rendered():
     return render_views(
-        trimesh.creation.box(extents=(10, 12, 14)), source_sha256="a" * 64
+        trimesh.creation.box(extents=(10, 12, 14)),
+        source_sha256="a" * 64,
+        max_faces=2_000_000,
     )
 
 

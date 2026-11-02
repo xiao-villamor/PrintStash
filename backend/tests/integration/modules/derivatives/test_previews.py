@@ -516,9 +516,10 @@ class TestPreviewLimits:
     def test_refuses_oversized_sources_without_invalidating_artifact(
         self, db_session, artifact
     ):
-        from app.modules.media.preview_contracts import MAX_SOURCE_BYTES
+        from app.core.config import settings
 
-        artifact.size_bytes = MAX_SOURCE_BYTES + 1
+        # VAULT_MESH_MAX_LOAD_MB, shared with every other mesh path.
+        artifact.size_bytes = settings.mesh_max_load_mb * 1024 * 1024 + 1
         db_session.add(artifact)
         db_session.commit()
         assert (

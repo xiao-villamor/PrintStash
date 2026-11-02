@@ -58,9 +58,12 @@ edge view is 65° from the face. 3MF build/component transforms are applied befo
 analysis. No candidates are pruned by silhouette or presumed symmetry.
 
 Recipe 1 produces lossless 480 × 360 WebPs: six views for solids, five for planar
-objects, including Top and Bottom. Limits are 128 MiB source bytes, 500,000 faces,
-1 MiB per image, 6 MiB per bundle, and a 32 KiB manifest. Native memory and timeout
-admission also apply. Oversized sources receive an explicit resource-limit
+objects, including Top and Bottom. Sources follow the same limits as covers and
+every other mesh path: `VAULT_MESH_MAX_LOAD_MB` (default 200) and
+`VAULT_MESH_MAX_RENDER_TRIANGLES` (default 2,000,000). Raise them in your
+environment to include larger files. Output is bounded at 1 MiB per image, 6 MiB
+per bundle and a 32 KiB manifest. Native memory and timeout admission also apply,
+so on small hosts keep `VAULT_MAX_RENDER_JOBS` low. Oversized sources receive an explicit resource-limit
 outcome; optional unavailable converters are unsupported. Neither outcome
 invalidates the original Artifact or its primary thumbnail. These discrete
 views help recognition; they do not promise complete geometric coverage.

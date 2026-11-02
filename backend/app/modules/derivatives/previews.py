@@ -15,6 +15,7 @@ from functools import partial
 from pydantic import ValidationError
 
 from app.core.cancellation import checkpoint
+from app.core.config import settings
 from app.core.time import utcnow
 from app.db.models import DerivativeKind, DerivativeState, JobKind
 from app.db.session import get_session_factory
@@ -26,7 +27,6 @@ from app.modules.media.preview_contracts import (
     HEIGHT,
     MAX_BUNDLE_BYTES,
     MAX_MANIFEST_BYTES,
-    MAX_SOURCE_BYTES,
     WIDTH,
     PreviewManifest,
 )
@@ -56,7 +56,8 @@ def _derive(
         return Outcome({})
     file, attempts = begun
     attempt = attempts[DerivativeKind.PREVIEWS]
-    if file.size_bytes > MAX_SOURCE_BYTES:
+    # VAULT_MESH_MAX_LOAD_MB: the same source-size ceiling as every mesh path.
+    if file.size_bytes > settings.mesh_max_load_mb * 1024 * 1024:
         _fail(attempt, "resource_limit", deterministic=True)
         return Outcome({DerivativeKind.PREVIEWS: DerivativeState.FAILED})
     started = time.monotonic()

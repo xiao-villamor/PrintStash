@@ -16,7 +16,6 @@ from app.core.cancellation import checkpoint
 from app.modules.media import thumbnail
 from app.modules.media.preview_contracts import (
     HEIGHT,
-    MAX_FACES,
     MAX_IMAGE_BYTES,
     WIDTH,
     CameraView,
@@ -61,8 +60,10 @@ def _orbit(azimuth: float) -> Matrix:
     return _matrix(np.array([[1, 0, 0], [0, ct, -st], [0, st, ct]]) @ base @ spin)
 
 
-def candidates(mesh: Trimesh) -> tuple[ViewProfile, tuple[CameraView, ...]]:
-    if not 0 < len(mesh.faces) <= MAX_FACES:
+def candidates(
+    mesh: Trimesh, *, max_faces: int
+) -> tuple[ViewProfile, tuple[CameraView, ...]]:
+    if not 0 < len(mesh.faces) <= max_faces:
         raise PreviewLimitError
     surface = prepare_surface(mesh.vertices, mesh.faces)
     values = surface.eigenvalues
@@ -125,10 +126,11 @@ def render_views(
     mesh: Trimesh,
     *,
     source_sha256: str,
+    max_faces: int,
     recipe: int = 1,
     progress: Callable[[int, int], None] | None = None,
 ) -> tuple[PreviewManifest, list[bytes]]:
-    profile, views = candidates(mesh)
+    profile, views = candidates(mesh, max_faces=max_faces)
     geometry = prepare_mesh(mesh)
     if geometry is None:
         raise ValueError("preview_no_geometry")
