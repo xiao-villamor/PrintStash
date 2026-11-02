@@ -1115,6 +1115,10 @@ def run_worker(args: argparse.Namespace) -> int:
         private_slots = min(requested_slots, cpu_slots)
         os.environ["VAULT_MAX_RENDER_JOBS"] = str(private_slots)
         os.environ["VAULT_JOBS_DERIVE_NATIVE_CONCURRENCY"] = str(private_slots)
+    # Qualification measures the primary pipeline (import, metadata, cover).
+    # Optional multi-angle previews follow each cover on the same native
+    # lane, so they would both lengthen the drain and contend with it.
+    os.environ["VAULT_DERIVATIVES_PREVIEWS_ENABLED"] = "false"
     os.environ["TMPDIR"] = str(workspace)
     tempfile.tempdir = str(workspace)
     report: dict[str, object] = {
@@ -1177,6 +1181,10 @@ def run_worker(args: argparse.Namespace) -> int:
                 "qualified_parallel_workers": min(
                     capacity.slots, capacity.bytes // MIN_ANALYSIS_MEMORY
                 ),
+            }
+            # Recorded from the live control, not from this harness's intent.
+            report["optional_derivatives"] = {
+                "previews_enabled": settings.derivatives_previews_enabled
             }
             if args.mode == Mode.LOAD:
                 report["load_admission_profile"] = {

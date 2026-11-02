@@ -22000,6 +22000,10 @@
             "title": "Derivatives Mesh Enabled",
             "type": "boolean"
           },
+          "derivatives_previews_enabled": {
+            "title": "Derivatives Previews Enabled",
+            "type": "boolean"
+          },
           "derivatives_toolpath_enabled": {
             "title": "Derivatives Toolpath Enabled",
             "type": "boolean"
@@ -22202,7 +22206,8 @@
           "edit_version",
           "derivatives_mesh_enabled",
           "derivatives_gcode_enabled",
-          "derivatives_toolpath_enabled"
+          "derivatives_toolpath_enabled",
+          "derivatives_previews_enabled"
         ],
         "title": "VaultConfigRead",
         "type": "object"
@@ -22367,6 +22372,17 @@
               }
             ],
             "title": "Derivatives Mesh Enabled"
+          },
+          "derivatives_previews_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derivatives Previews Enabled"
           },
           "derivatives_toolpath_enabled": {
             "anyOf": [

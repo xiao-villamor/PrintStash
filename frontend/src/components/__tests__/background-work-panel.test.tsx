@@ -540,6 +540,36 @@ describe("derivative controls", () => {
     );
   });
 
+  it("controls multi-angle previews apart from mesh covers", async () => {
+    const user = userEvent.setup();
+    const overview = aWorkOverview();
+    const [mesh] = overview.definitions;
+    const withPreviews = {
+      ...overview,
+      definitions: [
+        mesh,
+        {
+          ...mesh,
+          name: "derivatives.previews" as const,
+          label: "Multi-angle previews",
+          derivative_kinds: ["previews" as const],
+        },
+      ],
+    };
+    const api = stubApi(withPreviews);
+    renderPanel(api);
+    await user.click(await screen.findByRole("checkbox", { name: "Multi-angle Model card views" }));
+    await waitFor(() =>
+      expect(api.setPolicy).toHaveBeenCalledWith(
+        { derivatives_previews_enabled: false },
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      ),
+    );
+    expect(
+      screen.getByRole("checkbox", { name: "Mesh metadata and preview images" }),
+    ).toBeChecked();
+  });
+
   it("restores the server value after a failed save", async () => {
     const user = userEvent.setup();
     const api = stubApi(aWorkOverview(), {

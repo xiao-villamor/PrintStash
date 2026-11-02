@@ -4254,6 +4254,7 @@
   "Staged input ownership could not be verified. Its capacity remains reserved.": "Staged input ownership could not be verified. Its capacity remains reserved.",
   "Wait for this import to finish before discarding its staged input.": "Wait for this import to finish before discarding its staged input.",
   "Mesh metadata and preview images": "Mesh metadata and preview images",
+  "Multi-angle Model card views": "Multi-angle Model card views",
   "G-code metadata and embedded thumbnails": "G-code metadata and embedded thumbnails",
   "Binary G-code toolpath previews": "Binary G-code toolpath previews",
   "Derivative processing": "Derivative processing",

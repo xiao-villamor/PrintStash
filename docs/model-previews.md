@@ -77,7 +77,9 @@ replacement, cancellation, and retry.
 ## Scheduling and reuse
 
 `derivatives.previews` is an independent, durable derivative Job and Work Source.
-It shares the mesh-processing enable/disable control. It uses backfill priority,
+It has its own control, **Multi-angle Model card views** in Settings →
+Background work (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). Views follow covers,
+so they also need mesh processing enabled. It uses backfill priority,
 one queued/running batch at a time, and requires a terminal primary-thumbnail
 attempt. Active mesh/G-code primary work gets a two-minute grace period. That
 grace is persisted and does not move when fresh imports arrive; afterwards one

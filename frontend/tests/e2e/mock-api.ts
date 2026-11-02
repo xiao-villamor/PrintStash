@@ -2018,6 +2018,7 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
           derivatives_mesh_enabled,
           derivatives_gcode_enabled,
           derivatives_toolpath_enabled,
+          derivatives_previews_enabled,
           ...publicFields
         } = update;
         configuration = {
@@ -2036,6 +2037,10 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
             derivatives_toolpath_enabled === undefined
               ? configuration.derivatives_toolpath_enabled
               : (derivatives_toolpath_enabled ?? true),
+          derivatives_previews_enabled:
+            derivatives_previews_enabled === undefined
+              ? configuration.derivatives_previews_enabled
+              : (derivatives_previews_enabled ?? true),
           has_oidc_client_secret:
             oidc_client_secret === undefined
               ? configuration.has_oidc_client_secret

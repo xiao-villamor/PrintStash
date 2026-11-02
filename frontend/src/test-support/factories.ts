@@ -823,6 +823,7 @@ export function aVaultConfig(
     derivatives_mesh_enabled: true,
     derivatives_gcode_enabled: true,
     derivatives_toolpath_enabled: true,
+    derivatives_previews_enabled: true,
     storage_backend: "local",
     storage_provider: "local",
     storage_provider_config: {

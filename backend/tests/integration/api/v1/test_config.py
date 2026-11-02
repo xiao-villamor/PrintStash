@@ -1034,3 +1034,42 @@ class TestConfigurationTransaction:
         assert row is not None
         assert row.backup_retention_days is None
         assert row.oidc_client_id is None
+
+
+class TestPreviewControl:
+    def test_saves_previews_apart_from_mesh_processing(
+        self, client: TestClient, auth_headers: dict[str, str], db_session: Session
+    ) -> None:
+        saved = client.put(
+            "/api/v1/config",
+            headers=auth_headers,
+            json={"derivatives_previews_enabled": False},
+        )
+        assert saved.status_code == 200, saved.text
+        current = client.get("/api/v1/config", headers=auth_headers).json()
+        assert (
+            current["derivatives_previews_enabled"],
+            current["derivatives_mesh_enabled"],
+        ) == (False, True)
+        row = db_session.get(SystemConfig, 1)
+        assert row is not None
+        assert (row.derivatives_previews_enabled, row.derivatives_mesh_enabled) == (
+            False,
+            None,
+        )
+
+    def test_restores_the_deployment_default(
+        self, client: TestClient, auth_headers: dict[str, str], db_session: Session
+    ) -> None:
+        for value in (False, None):
+            response = client.put(
+                "/api/v1/config",
+                headers=auth_headers,
+                json={"derivatives_previews_enabled": value},
+            )
+            assert response.status_code == 200, response.text
+        assert response.json()["derivatives_previews_enabled"] is True
+        db_session.expire_all()
+        row = db_session.get(SystemConfig, 1)
+        assert row is not None
+        assert row.derivatives_previews_enabled is None

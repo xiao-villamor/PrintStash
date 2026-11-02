@@ -262,7 +262,8 @@ class TestNudgeWithCommit:
 
         db_session.commit()
 
-        assert _pass_sources(work_engine) == []
+        # Previews have their own control; they stay owed only behind a cover.
+        assert _pass_sources(work_engine) == [JobKind.DERIVATIVES_PREVIEWS]
 
 
 class TestCancel:

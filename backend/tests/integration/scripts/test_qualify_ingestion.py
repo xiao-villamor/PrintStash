@@ -346,6 +346,8 @@ class TestMain:
         assert report["throughput_gate"]["qualification"] == "not_qualified_N/A"
         assert report["throughput_gate"]["gate_passed"] is None
         assert report["physical_budget"]["native_slots"] == 1
+        # Optional previews would extend the drain past the measured pipeline.
+        assert report["optional_derivatives"] == {"previews_enabled": False}
         assert report["load_admission_profile"] == {
             "requested_concurrency": [1, 2, 4, 8],
             "staging_max_active_per_user": 8,

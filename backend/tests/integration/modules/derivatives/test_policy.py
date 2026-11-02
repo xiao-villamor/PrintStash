@@ -75,6 +75,28 @@ class TestResolution:
             True,
         )
 
+    @pytest.mark.parametrize(
+        ("setting", "disabled", "enabled"),
+        [
+            (
+                "derivatives_previews_enabled",
+                JobKind.DERIVATIVES_PREVIEWS,
+                JobKind.DERIVATIVES_MESH,
+            ),
+            (
+                "derivatives_mesh_enabled",
+                JobKind.DERIVATIVES_MESH,
+                JobKind.DERIVATIVES_PREVIEWS,
+            ),
+        ],
+    )
+    def test_previews_are_controlled_apart_from_covers(
+        self, db_session, make_system_config, setting, disabled, enabled
+    ):
+        make_system_config(**{setting: False})
+        controls = policy.resolve(db_session)
+        assert (controls[disabled].enabled, controls[enabled].enabled) == (False, True)
+
     def test_independent_sessions_read_the_saved_policy(
         self, db_session, producer_group
     ):

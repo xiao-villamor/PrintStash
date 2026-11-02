@@ -4,7 +4,7 @@
 
 ### Added
 
-- Model cards offer lightweight multi-angle previews with deliberate arrows and an expanded gallery, including Top/Bottom and shape-aware planar views. Visible-image admission, intent-based prefetching and bounded background generation preserve primary covers and avoid hover-triggered geometry downloads. See [preview behavior and limits](docs/model-previews.md).
+- Model cards offer lightweight multi-angle previews with deliberate arrows and an expanded gallery, including Top/Bottom and shape-aware planar views. Visible-image admission, intent-based prefetching and bounded background generation preserve primary covers and avoid hover-triggered geometry downloads. Generation has its own Background work control (`VAULT_DERIVATIVES_PREVIEWS_ENABLED`). See [preview behavior and limits](docs/model-previews.md).
 
 - Model covers can use an uploaded PNG/JPEG/WebP, the current 3D view, or an available source image. Chosen covers survive thumbnail regeneration and source-image changes; Reset to automatic restores the latest generated thumbnail. Cover edits support conflict review and are included in backup, storage migration, and purge.
 
