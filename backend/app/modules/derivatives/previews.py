@@ -69,8 +69,13 @@ def _derive(
         while b"\n" in buffered:
             line, _, remainder = buffered.partition(b"\n")
             buffered[:] = remainder
-            prefix, done, total = line.decode("ascii").split(":")
-            count, size = int(done), int(total)
+            # A garbled stream is the worker's fault, never the Artifact's:
+            # it must stay retryable rather than become a deterministic failure.
+            try:
+                prefix, done, total = line.decode("ascii").split(":")
+                count, size = int(done), int(total)
+            except ValueError as exc:  # UnicodeDecodeError is a ValueError
+                raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED) from exc
             if prefix != "P" or not completed < count <= size <= 6:
                 raise MeshWorkerError(ThumbnailFailureReason.WORKER_FAILED)
             completed = count

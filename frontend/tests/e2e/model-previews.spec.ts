@@ -65,7 +65,10 @@ async function library(page: Page, previews: ModelPreviews = views, count = 1) {
   await page.route("**/api/v1/files/*/thumbnail", fulfillImage);
   await page.route("**/api/v1/models/*/previews/**", fulfillImage);
   await page.goto("/");
-  const card = page.locator('[data-model-preview="Bracket 1"]');
+  // Controls sit beside the card's link, over its image: scope to the card.
+  const card = page
+    .locator("main article")
+    .filter({ has: page.locator('[data-model-preview="Bracket 1"]') });
   await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
   return {
     card,

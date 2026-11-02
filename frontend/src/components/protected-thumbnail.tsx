@@ -12,6 +12,7 @@ export function ProtectedThumbnail({
   className,
   imageClassName,
   fade = false,
+  previewView,
   children,
 }: {
   path: string | null | undefined;
@@ -20,6 +21,8 @@ export function ProtectedThumbnail({
   className?: string;
   imageClassName?: string;
   fade?: boolean;
+  /** Names the presented Model view, when this image is one of several. */
+  previewView?: string;
   children?: ReactNode;
 }) {
   const { ref, admitted } = useViewportAdmission();
@@ -81,6 +84,7 @@ export function ProtectedThumbnail({
           key={url}
           src={url}
           alt={alt}
+          data-preview-view={previewView}
           draggable={false}
           loading="eager"
           decoding="async"

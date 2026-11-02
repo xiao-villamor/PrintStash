@@ -52,7 +52,9 @@ test.describe("Generated Model views", () => {
       const transferred: string[] = [];
       page.on("request", (request) => transferred.push(new URL(request.url()).pathname));
       await page.goto(`/?q=${name}`);
-      const card = page.locator(`[data-model-preview="${name}"]`);
+      const card = page
+        .locator("main article")
+        .filter({ has: page.locator(`[data-model-preview="${name}"]`) });
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", "cover");
       await card.getByRole("button", { name: "Next preview", exact: true }).click();
       await expect(card.locator("img")).toHaveAttribute("data-preview-view", "orbit-0");

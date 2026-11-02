@@ -1,15 +1,14 @@
-import { useState, type MouseEvent, type ReactNode } from "react";
+import { type MouseEvent, type PointerEvent, type ReactNode, type Ref } from "react";
 import { ChevronLeft, ChevronRight, FileText, Images } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
-import { LibraryItemLink } from "@/features/library/navigation";
-import type { LibraryEntry } from "@/features/library/navigation-state";
-import { useModelPreviews, previewTransferPolicy } from "@/lib/use-model-previews";
-import { useViewportAdmission } from "@/lib/use-viewport-admission";
+import { previewTransferPolicy } from "@/lib/use-model-previews";
+import { useModelPreviewCard, type PreviewCard } from "@/lib/use-model-preview-card";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-import { publishedViews, type ModelPreviews, type PreviewViewId } from "@/types/previews";
+import { cn } from "@/lib/utils";
+import type { ModelPreviews, PreviewViewId } from "@/types/previews";
 
 const labels = {
   cover: "modelPreview.cover",
@@ -23,114 +22,149 @@ const labels = {
   reverse: "modelPreview.reverse",
   edge: "modelPreview.edge",
 } as const satisfies Record<PreviewViewId | "cover", string>;
+
 function stop(event: MouseEvent) {
   event.preventDefault();
   event.stopPropagation();
 }
 
-export function ModelPreview({
+function PreviewImage({
   name,
-  cover,
-  previews,
-  link,
-  children,
-  expanded = false,
+  state,
+  expanded,
 }: {
   name: string;
-  cover: string | null;
-  previews: ModelPreviews;
-  link?: {
-    href: string;
-    origin?: LibraryEntry;
-    onClick: (event: MouseEvent<HTMLAnchorElement>) => void;
-    onIntent?: (active: boolean) => void;
-  };
-  children?: ReactNode;
-  expanded?: boolean;
+  state: PreviewCard;
+  expanded: boolean;
 }) {
-  useUiLocale();
-  const [open, setOpen] = useState(false);
-  const { ref, admitted } = useViewportAdmission();
-  const views = publishedViews(previews);
-  const preview = useModelPreviews(cover, views, admitted);
-  const orbit = views.filter((view) => view.role === "orbit");
-  const multiple = views.length >= 2;
-  const previous = preview.destination(-1);
-  const next = preview.destination(1);
-  const image = preview.displayed ? (
-    <img
-      src={preview.displayed.url}
-      alt={name}
-      data-preview-view={preview.displayed.id}
-      draggable={false}
-      className="h-full w-full object-contain"
-    />
+  return state.view ? (
+    <div className="h-full w-full" data-library-thumbnail="ready">
+      <img
+        src={state.view.url}
+        alt={name}
+        data-preview-view={state.view.id}
+        draggable={false}
+        className="h-full w-full object-contain"
+      />
+    </div>
   ) : (
-    <div className="flex h-full w-full items-center justify-center">
-      <FileText className="h-10 w-10 text-muted-foreground/40" />
+    // The cover keeps the library's reveal, cached reuse and readiness contract.
+    <ProtectedThumbnail
+      path={state.cover}
+      alt={name}
+      fade
+      previewView="cover"
+      className="h-full w-full"
+      imageClassName={expanded ? "h-full w-full object-contain" : "h-full w-full object-cover"}
+      placeholder={
+        <div className="flex h-full w-full items-center justify-center">
+          <FileText className="h-10 w-10 text-muted-foreground/40" />
+        </div>
+      }
+    />
+  );
+}
+
+function ViewIndicator({ state }: { state: PreviewCard }) {
+  const orbit = state.views.filter((view) => view.role === "orbit");
+  const shown = state.view?.id ?? "cover";
+  if (state.views.length < 2) return null;
+  return (
+    <div
+      className="pointer-events-none absolute right-1 bottom-1 rounded bg-card/90 px-2 py-1 text-2xs text-foreground"
+      aria-live="polite"
+      aria-atomic="true"
+    >
+      <span>{uiText(labels[shown])}</span>
+      {orbit.length >= 2 && (
+        <span aria-hidden="true" className="ml-2 inline-flex gap-1">
+          {orbit.map((view) => (
+            <span
+              key={view.id}
+              className={`h-1.5 w-1.5 rounded-full ${shown === view.id ? "bg-primary" : "bg-muted-foreground/40"}`}
+            />
+          ))}
+        </span>
+      )}
     </div>
   );
+}
+
+/** The card's image area; it belongs inside the card's own link. */
+export function ModelPreviewFrame({
+  name,
+  state,
+  admission,
+  children,
+}: {
+  name: string;
+  state: PreviewCard;
+  /** Viewport admission for this card's primary image. */
+  admission: Ref<HTMLDivElement>;
+  children?: ReactNode;
+}) {
+  useUiLocale();
+  return (
+    <div
+      ref={admission}
+      className="relative h-48 shrink-0 overflow-hidden border-b border-border bg-muted"
+      data-model-preview={name}
+      onPointerEnter={state.enter}
+      onPointerLeave={state.leave}
+    >
+      <PreviewImage name={name} state={state} expanded={false} />
+      {children}
+      <ViewIndicator state={state} />
+    </div>
+  );
+}
+
+const keepOffCard = {
+  draggable: false,
+  onPointerDown: (event: PointerEvent) => event.stopPropagation(),
+  onDragStart: (event: { preventDefault(): void; stopPropagation(): void }) => {
+    event.preventDefault();
+    event.stopPropagation();
+  },
+};
+
+/** Arrows, gallery and retry: siblings of the card's link, laid over its image. */
+export function ModelPreviewControls({ name, state }: { name: string; state: PreviewCard }) {
+  useUiLocale();
+  const { preview, views } = state;
+  const orbit = views.filter((view) => view.role === "orbit");
+  const previous = preview.destination(-1);
+  const next = preview.destination(1);
   return (
     <>
       <div
-        ref={ref}
-        className={
-          expanded
-            ? "group/preview relative aspect-[4/3] bg-muted"
-            : "group/preview relative h-48 shrink-0 overflow-hidden border-b border-border bg-muted"
-        }
-        data-model-preview={name}
-        data-library-thumbnail={
-          !cover && !preview.displayed
-            ? "missing"
-            : preview.displayed
-              ? "ready"
-              : preview.failed
-                ? "failed"
-                : "pending"
-        }
-        onPointerEnter={preview.hover}
-        onPointerLeave={preview.cancelIntent}
-      >
-        {link ? (
-          <LibraryItemLink
-            aria-label={uiText("Open model")}
-            href={link.href}
-            origin={link.origin}
-            draggable={false}
-            onClick={link.onClick}
-            onFocus={() => link.onIntent?.(true)}
-            onBlur={() => link.onIntent?.(false)}
-            className="block h-full w-full"
-          >
-            {image}
-          </LibraryItemLink>
-        ) : (
-          image
+        data-model-preview-controls={name}
+        className={cn(
+          "pointer-events-none absolute inset-x-0 top-0 z-10 h-48 transition-opacity duration-fast ease-out focus-within:opacity-100",
+          state.hovered ? "opacity-100" : "opacity-100 [@media(hover:hover)]:opacity-0",
         )}
-        {children}
-        {multiple && !expanded && (
-          <div className="pointer-events-none absolute inset-0 opacity-100 transition-opacity duration-fast ease-out [@media(hover:hover)]:opacity-0 group-hover/preview:opacity-100 group-focus-within/preview:opacity-100">
+      >
+        {views.length >= 2 && (
+          <>
             {orbit.length >= 2 &&
               [previous, next].map(
                 (view, index) =>
                   view && (
                     <Button
                       key={index}
+                      {...keepOffCard}
                       variant="secondary"
                       size="icon"
-                      draggable={false}
                       className={`pointer-events-auto absolute top-1/2 h-11 w-11 -translate-y-1/2 bg-card/90 ${index === 0 ? "left-1" : "right-1"}`}
                       aria-label={uiText(
                         index === 0 ? "modelPreview.previous" : "modelPreview.next",
                       )}
                       title={uiText(labels[view.id])}
-                      onPointerDown={(event) => event.stopPropagation()}
-                      onDragStart={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
+                      onPointerEnter={() => {
+                        state.enter();
+                        preview.prioritize(view);
                       }}
-                      onPointerEnter={() => preview.prioritize(view)}
+                      onPointerLeave={state.leave}
                       onFocus={() => preview.prioritize(view)}
                       onClick={(event) => {
                         stop(event);
@@ -146,48 +180,27 @@ export function ModelPreview({
                   ),
               )}
             <Button
+              {...keepOffCard}
               variant="secondary"
               className="pointer-events-auto absolute bottom-1 left-1 h-11 bg-card/90"
-              draggable={false}
               aria-label={uiText("modelPreview.gallery")}
-              onPointerDown={(event) => event.stopPropagation()}
-              onDragStart={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-              }}
+              onPointerEnter={state.enter}
+              onPointerLeave={state.leave}
               onClick={(event) => {
                 stop(event);
-                setOpen(true);
+                state.setOpen(true);
               }}
             >
               <Images className="h-4 w-4" />
               <span>{uiText("modelPreview.views", { count: views.length })}</span>
             </Button>
-          </div>
-        )}
-        {preview.displayed && multiple && (
-          <div
-            className="pointer-events-none absolute right-1 bottom-1 rounded bg-card/90 px-2 py-1 text-2xs text-foreground"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <span>{uiText(labels[preview.displayed.id])}</span>
-            {orbit.length >= 2 && (
-              <span aria-hidden="true" className="ml-2 inline-flex gap-1">
-                {orbit.map((view) => (
-                  <span
-                    key={view.id}
-                    className={`h-1.5 w-1.5 rounded-full ${preview.displayed?.id === view.id ? "bg-primary" : "bg-muted-foreground/40"}`}
-                  />
-                ))}
-              </span>
-            )}
-          </div>
+          </>
         )}
         {preview.failed && (
           <Button
+            {...keepOffCard}
             variant="secondary"
-            className="absolute left-1 top-1 h-11"
+            className="pointer-events-auto absolute left-1 top-1 h-11"
             onClick={(event) => {
               stop(event);
               preview.retry();
@@ -197,44 +210,78 @@ export function ModelPreview({
           </Button>
         )}
       </div>
-      {expanded && (
-        <div className="space-y-2">
-          <p className="text-sm text-muted-foreground">{uiText("modelPreview.discrete")}</p>
-          <div
-            className="flex gap-2 overflow-x-auto pb-2"
-            aria-label={uiText("modelPreview.gallery")}
-          >
-            {[...(cover ? [{ id: "cover" as const, url: cover }] : []), ...views].map((view) => (
-              <Button
-                key={view.id}
-                variant="ghost"
-                aria-pressed={preview.selected === view.id}
-                className={`h-auto min-w-24 flex-col p-2 ${preview.selected === view.id ? "bg-accent text-accent-foreground" : ""}`}
-                onFocus={() => preview.prioritize(views.find((image) => image.id === view.id))}
-                onClick={() => preview.select(view.id)}
-              >
-                <ProtectedThumbnail
-                  path={
-                    previewTransferPolicy().neighbor || preview.selected === view.id
-                      ? view.url
-                      : null
-                  }
-                  alt=""
-                  placeholder={<Images className="h-8 w-8" />}
-                  className="h-16 w-20"
-                  imageClassName="h-full w-full object-contain"
-                />
-                <span>{uiText(labels[view.id])}</span>
-              </Button>
-            ))}
-          </div>
-        </div>
-      )}
-      {open && (
-        <Modal open title={uiText("modelPreview.gallery")} onClose={() => setOpen(false)}>
-          <ModelPreview name={name} cover={cover} previews={previews} expanded />
+      {state.open && (
+        <Modal open title={uiText("modelPreview.gallery")} onClose={() => state.setOpen(false)}>
+          <ModelPreviewGallery name={name} cover={state.cover} previews={state.previews} />
         </Modal>
       )}
+    </>
+  );
+}
+
+/** Expanded quick preview: the large image plus a directly selectable strip. */
+export function ModelPreviewGallery({
+  name,
+  cover,
+  previews,
+}: {
+  name: string;
+  cover: string | null;
+  previews: ModelPreviews;
+}) {
+  useUiLocale();
+  const [admission, state] = useModelPreviewCard(cover, previews);
+  const { preview, views } = state;
+  return (
+    <>
+      <div
+        ref={admission}
+        className="relative aspect-[4/3] bg-muted"
+        data-model-preview={name}
+        onPointerEnter={state.enter}
+        onPointerLeave={state.leave}
+      >
+        <PreviewImage name={name} state={state} expanded />
+        <ViewIndicator state={state} />
+        {preview.failed && (
+          <Button
+            variant="secondary"
+            className="absolute left-1 top-1 h-11"
+            onClick={preview.retry}
+          >
+            {uiText("modelPreview.retry")}
+          </Button>
+        )}
+      </div>
+      <div className="space-y-2">
+        <p className="text-sm text-muted-foreground">{uiText("modelPreview.discrete")}</p>
+        <div
+          className="flex gap-2 overflow-x-auto pb-2"
+          aria-label={uiText("modelPreview.gallery")}
+        >
+          {[...(cover ? [{ id: "cover" as const, url: cover }] : []), ...views].map((view) => (
+            <Button
+              key={view.id}
+              variant="ghost"
+              aria-pressed={preview.selected === view.id}
+              className={`h-auto min-w-24 flex-col p-2 ${preview.selected === view.id ? "bg-accent text-accent-foreground" : ""}`}
+              onFocus={() => preview.prioritize(views.find((image) => image.id === view.id))}
+              onClick={() => preview.select(view.id)}
+            >
+              <ProtectedThumbnail
+                path={
+                  previewTransferPolicy().neighbor || preview.selected === view.id ? view.url : null
+                }
+                alt=""
+                placeholder={<Images className="h-8 w-8" />}
+                className="h-16 w-20"
+                imageClassName="h-full w-full object-contain"
+              />
+              <span>{uiText(labels[view.id])}</span>
+            </Button>
+          ))}
+        </div>
+      </div>
     </>
   );
 }

@@ -41,7 +41,10 @@ async function decode(url: string) {
   if (image.decode) await image.decode();
 }
 
-/** Keeps the displayed lease until the latest selected image has decoded. */
+/**
+ * Owns generated views only; the cover is presented by `ProtectedThumbnail`.
+ * The displayed view lease stays until the latest selected view has decoded.
+ */
 export function useModelPreviews(cover: string | null, views: PreviewImage[], admitted: boolean) {
   const [mountedSession] = useState(getSessionVersion);
   const session = useSyncExternalStore(onAuthChange, getSessionVersion, getSessionVersion);
@@ -63,7 +66,7 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
       : cover
         ? "cover"
         : (views[0]?.id ?? "cover");
-  const path = selected === "cover" ? cover : views.find((view) => view.id === selected)?.url;
+  const path = selected === "cover" ? null : views.find((view) => view.id === selected)?.url;
   const active = session === mountedSession;
 
   useEffect(() => {
@@ -130,6 +133,12 @@ export function useModelPreviews(cover: string | null, views: PreviewImage[], ad
       });
   }
   function select(id: PreviewSelection) {
+    if (id === "cover") {
+      // The cover presents itself; a retained view must not reappear later.
+      displayedLease.current?.release();
+      displayedLease.current = null;
+      setDisplayed(null);
+    }
     warm(
       views.find((view) => view.id === id),
       "intent",

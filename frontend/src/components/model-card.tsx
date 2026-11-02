@@ -14,8 +14,8 @@ import { Button } from "@/components/ui/button";
 import { useLibraryStar } from "@/features/library/mutations";
 import { toast } from "@/lib/toast";
 import { timeAgoShort } from "@/lib/format";
-import { ModelPreview } from "@/components/model-preview";
-import { previewArtifact } from "@/types/previews";
+import { ModelPreviewControls, ModelPreviewFrame } from "@/components/model-preview";
+import { useModelPreviewCard } from "@/lib/use-model-preview-card";
 import { Localized } from "@/components/ui/localized";
 import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
 
@@ -198,6 +198,7 @@ function ModelCardInner({
   const starBusy = starMutation.isPending;
   const printerPresence = model.printer_presence ?? [];
   const hasPrinter = printerPresence.length > 0;
+  const [previewAdmission, preview] = useModelPreviewCard(model.thumbnail_url, model.previews);
   const ps = model.print_summary;
   const canEditTags = model.effective_role === "edit" || model.effective_role === "admin";
 
@@ -278,29 +279,7 @@ function ModelCardInner({
             <Tags className="h-4 w-4" />
           </Button>
         )}
-        <ModelPreview
-          key={previewArtifact(model.previews)}
-          name={model.name}
-          cover={model.thumbnail_url}
-          previews={model.previews}
-          link={{
-            href: `/models/${model.id}`,
-            onIntent: (active) => onIntent?.(!selectable && active ? model.id : null),
-            origin,
-            onClick: (event) => {
-              if (selectable) {
-                event.preventDefault();
-                onToggleSelect?.(model.id, event.shiftKey);
-              }
-            },
-          }}
-        >
-          {hasPrinter && (
-            <span className="absolute top-2 left-2 rounded-sm border border-green-200 bg-green-50 px-1.5 py-0.5 text-3xs font-bold uppercase text-green-700 dark:bg-green-950/60">
-              {uiText("On printer")}
-            </span>
-          )}
-        </ModelPreview>
+        <ModelPreviewControls name={model.name} state={preview} />
         <LibraryItemLink
           origin={origin}
           href={`/models/${model.id}`}
@@ -317,6 +296,14 @@ function ModelCardInner({
             }
           }}
         >
+          <ModelPreviewFrame name={model.name} state={preview} admission={previewAdmission}>
+            {hasPrinter && (
+              <span className="absolute top-2 left-2 rounded-sm border border-green-200 bg-green-50 px-1.5 py-0.5 text-3xs font-bold uppercase text-green-700 dark:bg-green-950/60">
+                {uiText("On printer")}
+              </span>
+            )}
+          </ModelPreviewFrame>
+
           {/* Title + revision */}
           <div className="px-3 pt-3 pb-1 flex items-start justify-between gap-2">
             <h2

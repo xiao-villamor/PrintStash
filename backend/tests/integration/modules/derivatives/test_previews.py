@@ -11,6 +11,7 @@ from sqlmodel import select
 
 from app.core.time import utcnow
 from app.db.models import ArtifactDerivative, DerivativeKind, DerivativeState, JobKind
+from app.db.session import get_session_factory
 from app.modules.derivatives import previews, producers, records
 from app.modules.derivatives.kinds import group
 from app.modules.derivatives.preview_source import PreviewSource
@@ -69,6 +70,77 @@ def malformed_worker_image(monkeypatch):
     monkeypatch.setattr(mesh_isolation, "prepared_worker_result", corrupt_image)
 
 
+def _tamper(monkeypatch, change):
+    """Let the real worker run, then alter what it hands to the publisher."""
+    from app.modules.media import mesh_isolation
+    from app.modules.media.preview_contracts import PreviewManifest
+
+    original = mesh_isolation.prepared_worker_result
+
+    @contextmanager
+    def altered(*args, **kwargs):
+        with original(*args, **kwargs) as (reply, directory):
+            manifest = PreviewManifest.model_validate_json(
+                reply.payload.rsplit(b"\n", 1)[-1]
+            )
+            bundle = directory / "views.bin"
+            manifest = change(manifest, bundle, kwargs)
+            yield replace(reply, payload=manifest.model_dump_json().encode()), directory
+
+    monkeypatch.setattr(mesh_isolation, "prepared_worker_result", altered)
+
+
+def _other_source(manifest, bundle, kwargs):
+    return manifest.model_copy(update={"source_sha256": "b" * 64})
+
+
+def _other_recipe(manifest, bundle, kwargs):
+    return manifest.model_copy(update={"recipe": manifest.recipe + 1})
+
+
+def _extra_bundle_byte(manifest, bundle, kwargs):
+    bundle.write_bytes(bundle.read_bytes() + b"x")
+    return manifest
+
+
+def _flipped_image_byte(manifest, bundle, kwargs):
+    data = bytearray(bundle.read_bytes())
+    data[manifest.views[0].offset + 20] ^= 0xFF
+    bundle.write_bytes(bytes(data))
+    return manifest
+
+
+def _noncanonical_image(manifest, bundle, kwargs):
+    """A valid image whose bytes the canonical seam would not have kept."""
+    import io
+
+    from PIL import Image
+
+    data = bundle.read_bytes()
+    first = manifest.views[0]
+    output = io.BytesIO()
+    # Same frame and alpha, but not the WebP the canonical seam would keep.
+    Image.open(io.BytesIO(data[: first.size])).save(output, "PNG")
+    image = output.getvalue()
+    rest = data[first.size :]
+    bundle.write_bytes(image + rest)
+    views = [
+        first.model_copy(
+            update={"size": len(image), "sha256": hashlib.sha256(image).hexdigest()}
+        )
+    ]
+    position = len(image)
+    for view in manifest.views[1:]:
+        views.append(view.model_copy(update={"offset": position}))
+        position += view.size
+    return manifest.model_copy(update={"views": tuple(views), "size": position})
+
+
+def _garbled_progress(manifest, bundle, kwargs):
+    kwargs["on_chunk"](b"\n\xff:1:6\n")
+    return manifest
+
+
 class TestPreviewPublication:
     def test_rejects_invalid_advertised_image(
         self, db_session, artifact, malformed_worker_image
@@ -86,6 +158,62 @@ class TestPreviewPublication:
             records.rows_for(db_session, artifact)[DerivativeKind.PREVIEWS].storage_key
             is None
         )
+
+    @pytest.mark.parametrize(
+        ("change", "reason"),
+        [
+            (_other_source, "invalid_source"),
+            (_other_recipe, "invalid_source"),
+            (_extra_bundle_byte, "invalid_source"),
+            (_flipped_image_byte, "invalid_source"),
+            (_noncanonical_image, "invalid_source"),
+            (_garbled_progress, "worker_failed"),
+        ],
+        ids=[
+            "source",
+            "recipe",
+            "bundle-size",
+            "image-digest",
+            "noncanonical-image",
+            "garbled-progress",
+        ],
+    )
+    def test_publishes_nothing_the_worker_cannot_vouch_for(
+        self, db_session, artifact, monkeypatch, change, reason
+    ):
+        _tamper(monkeypatch, change)
+        assert (
+            previews.derive(artifact.id).kinds[DerivativeKind.PREVIEWS]
+            is DerivativeState.FAILED
+        )
+        db_session.expire_all()
+        row = records.rows_for(db_session, artifact)[DerivativeKind.PREVIEWS]
+        assert (row.failure_reason, row.storage_key) == (reason, None)
+
+    def test_does_not_rederive_a_ready_set(self, db_session, artifact, ready):
+        assert previews.derive(artifact.id).kinds == {}
+        db_session.expire_all()
+        assert (
+            records.rows_for(db_session, artifact)[DerivativeKind.PREVIEWS].storage_key
+            == ready.storage_key
+        )
+
+    def test_yields_to_a_superseding_attempt(self, db_session, artifact, monkeypatch):
+        def supersede(manifest, bundle, kwargs):
+            # A reset or retry claims the subject while this batch renders.
+            with get_session_factory().scoped_session() as session:
+                file = session.get(type(artifact), artifact.id)
+                records.reset(session, file, {DerivativeKind.PREVIEWS: 1})
+                session.commit()
+                records.begin(session, file, DerivativeKind.PREVIEWS, 1, now=utcnow())
+                session.commit()
+            return manifest
+
+        _tamper(monkeypatch, supersede)
+        assert previews.derive(artifact.id).kinds == {}
+        db_session.expire_all()
+        row = records.rows_for(db_session, artifact)[DerivativeKind.PREVIEWS]
+        assert (row.state, row.storage_key) == (DerivativeState.RUNNING, None)
 
     def test_keeps_previous_recipe_images_during_replacement(
         self, db_session, artifact, ready, monkeypatch
