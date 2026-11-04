@@ -29,7 +29,7 @@ testkit = [
 mesh = [
     "scipy>=1.18.1,<2",
     "numpy>=2.5.3,<3",
-    "pillow>=12.3.0,<13",
+    "pillow>=12.3.0,<14",
 ]
 bambu = [
     "paho-mqtt>=2.1,<3",
