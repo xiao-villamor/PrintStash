@@ -44,3 +44,9 @@ class FilePlatesRead(BaseModel):
         if (self.state is DerivativeStatus.READY) != bool(self.plates):
             raise ValueError("plates_require_a_ready_layout")
         return self
+
+
+class GcodePlatesRead(BaseModel):
+    """Numbers of the sliced plates actually present in a 3MF archive."""
+
+    plates: list[int]

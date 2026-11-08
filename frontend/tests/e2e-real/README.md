@@ -231,3 +231,5 @@ sends no further setup probe.
 
 - `resin.spec.ts`: CTB/GOO source upload, persisted print metadata, rendered embedded preview, original-byte download.
 - `documents.spec.ts`: collection spreadsheets and binary resin attachments remain downloadable with their original filenames and bytes.
+
+- `gcode-plates.spec.ts`: upload sliced 3MF exports with or without meshes, then switch between distinct plate toolpaths in the real viewer.

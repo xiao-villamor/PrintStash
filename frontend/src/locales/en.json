@@ -1243,7 +1243,6 @@
   "No configured printer supports Vault upload/send.": "No configured printer supports Vault upload/send.",
   "No editable collections.": "No editable collections.",
   "No findings in this category.": "No findings in this category.",
-  "No G-code file": "No G-code file",
   "No importable 3D files in this archive.": "No importable 3D files in this archive.",
   "No previewable mesh or G-code in this share.": "No previewable mesh or G-code in this share.",
   "No print history yet. Add a record manually or import from a printer.": "No print history yet. Add a record manually or import from a printer.",
@@ -1409,7 +1408,6 @@
   "Uploading": "Uploading",
   "Success": "Success",
   "No revision is marked as recommended yet. Mark a known-good G-code as recommended.": "No revision is marked as recommended yet. Mark a known-good G-code as recommended.",
-  "No sliced G-code yet. Add a revision to capture the settings that worked.": "No sliced G-code yet. Add a revision to capture the settings that worked.",
   "Layer height": "Layer height",
   "File count": "File count",
   "Printer profile": "Printer profile",
@@ -4645,5 +4643,11 @@
   ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo": ".stl .3mf .obj .glb .gltf .ply .3dm .fbx .step .dxf .ctb .goo",
   "LAYERS": "LAYERS",
   "EXPOSURE": "EXPOSURE",
-  "RESIN VOLUME": "RESIN VOLUME"
+  "RESIN VOLUME": "RESIN VOLUME",
+  "Couldn’t load sliced plates": "Couldn’t load sliced plates",
+  "Loading sliced plates…": "Loading sliced plates…",
+  "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.": "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.",
+  "Sliced plates": "Sliced plates",
+  "No G-code revision yet. Add a revision to capture the settings that worked.": "No G-code revision yet. Add a revision to capture the settings that worked.",
+  "No G-code revision": "No G-code revision"
 }
