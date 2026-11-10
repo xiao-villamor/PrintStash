@@ -32,8 +32,8 @@ import re
 import sys
 import time
 import uuid
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import Iterator, Mapping
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
 from zipfile import BadZipFile, ZipFile, is_zipfile
@@ -145,7 +145,7 @@ def _native_lines(path: Path) -> Iterator[str]:
                 with archive.open(member) as stream:
                     for raw_line in stream:
                         yield raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
-        except BadZipFile, OSError:
+        except (BadZipFile, OSError):
             return
         return
     try:
@@ -169,7 +169,7 @@ def _archive_project_name(path: Path) -> str | None:
                     match = re.search(r'<metadata key="name" value="([^"]+)"', text)
                     if match:
                         return _clean(match.group(1))
-    except BadZipFile, KeyError, OSError:
+    except (BadZipFile, KeyError, OSError):
         return None
     return None
 
@@ -409,9 +409,14 @@ def output_name(path: Path, environ: Mapping[str, str]) -> str:
     return path.name.removesuffix(".pp")
 
 
-def build_multipart(fields: dict, file_path: Path) -> tuple[bytes, str]:
+def build_multipart(
+    fields: dict, file_path: Path, *, filename: str | None = None
+) -> tuple[bytes, str]:
     """Build a multipart/form-data body using stdlib only."""
-    filename = output_name(file_path, os.environ)
+    if filename is None:
+        filename = output_name(file_path, os.environ)
+    # Preserve the multipart header when a slicer output name contains quotes.
+    filename = filename.replace("\r", "%0D").replace("\n", "%0A").replace('"', "%22")
     boundary = f"----PrintStash{uuid.uuid4().hex}"
     crlf = "\r\n"
     body = bytearray()
@@ -471,9 +476,17 @@ def login(
     return None
 
 
-def push(url: str, token: str, gcode: Path, fields: dict, retries: int = 3) -> bool:
+def push(
+    url: str,
+    token: str,
+    gcode: Path,
+    fields: dict,
+    retries: int = 3,
+    *,
+    filename: str | None = None,
+) -> bool:
     endpoint = url.rstrip("/") + "/api/v1/ingest/orca"
-    body, content_type = build_multipart(fields, gcode)
+    body, content_type = build_multipart(fields, gcode, filename=filename)
 
     for attempt in range(1, retries + 1):
         req = urlrequest.Request(endpoint, data=body, method="POST")
@@ -498,7 +511,8 @@ def push(url: str, token: str, gcode: Path, fields: dict, retries: int = 3) -> b
         except Exception as e:  # noqa: BLE001 — defensive: never crash the slicer
             log.error("unexpected error attempt %d: %s", attempt, e)
 
-        time.sleep(2**attempt)
+        if attempt < retries:
+            time.sleep(2**attempt)
 
     return False
 

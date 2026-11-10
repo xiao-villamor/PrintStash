@@ -1,12 +1,78 @@
-# OrcaSlicer native upload hook
+# OrcaSlicer integration
 
-PrintStash's dependency-free OrcaSlicer hook uploads an exported G-code file and,
-when Orca identifies exactly one source object, attaches it to the existing Model
+PrintStash can upload exported G-code directly from an OrcaSlicer 2.5 plugin.
+The plugin runs in Orca's embedded Python; no external Python installation or
+post-processing command is needed. Earlier Orca versions can use the legacy
+[post-processing script](#legacy-post-processing-script).
+
+Both integrations attach a single identified source object to its existing Model
 as a new G-code Revision. The source STL, 3MF, OBJ, STEP/STP, or DXF must already
-exist in PrintStash. The hook never creates source lineage from the output G-code
+exist in PrintStash. Neither integration guesses lineage from the output G-code
 name, a fuzzy match, or a user-maintained mapping file.
 
-## Configure OrcaSlicer
+## Install the native plugin (OrcaSlicer 2.5)
+
+1. Download `printstash_orca_plugin-0.1.0-py3-none-any.whl` from the
+   `printstash-orca-plugin` artifact of a successful PrintStash CI run, or build
+   it using the command below. Extract the CI artifact ZIP to get the wheel.
+2. Open Orca's **Plugins** dialog. Use **Browse plugins → Install local plugin**
+   and select the wheel. Activate the plugin and its **Upload to PrintStash**
+   capability.
+3. Open the capability's **Config** tab. Enter the PrintStash server URL,
+   username and API key, set any collection or revision options, enable
+   **Upload exports to PrintStash**, and save.
+4. In the Process preset's advanced options, select **Upload to PrintStash** in
+   **Slicing Pipeline Plugin** (`slicing_pipeline_plugin`). Save the preset.
+5. Remove the old `printstash_orca_push.py` command from that preset's
+   **Post-processing scripts** field, then slice and export or send the G-code.
+   Use only one PrintStash integration per preset.
+
+The plugin only acts at `psGCodePostProcess`, after normal post-processing
+scripts. It reads the completed working G-code and the output filename provided
+by Orca. It does not change G-code or depend on global `SLIC3R_*` variables.
+Native G-code object labels and the optional markers below supply source identity;
+keep **Label objects** enabled for source matching without markers. Resolved
+printer, process and filament settings come from this export's plugin context.
+
+Orca asks before allowing network access. Approve access to your PrintStash
+server when prompted. On a slicing worker, Orca denies the current operation
+while showing a permission prompt; **export again after approving**. HTTP URLs
+and socket addresses are separate grants, so first setup may require more than
+one attempt. Reinstalling a plugin resets its grants. The plugin does not bypass
+this permission system or open dialogs from the slicing worker.
+
+Uploads start disabled. Configuration is stored by Orca, including the API key;
+it is not an encrypted credential vault. Keep credentials in the global plugin
+configuration and avoid sharing configurations or preset overrides containing
+keys. Create a dedicated revocable key in PrintStash Settings.
+
+PrintStash failures return a skipped plugin result and let export continue.
+Diagnostics go to Orca's log. Each callback makes one login and one upload
+attempt, each with a 30-second socket timeout. Export waits for these requests;
+there is no durable offline queue. Exporting again retries using the existing
+deterministic submission ID. A success means PrintStash accepted the upload;
+check PrintStash for the ingestion job's final result.
+
+### Build the wheel
+
+From the PrintStash checkout:
+
+```sh
+uv build --wheel --out-dir dist/orca-plugin integrations/orcaslicer
+python3 integrations/orcaslicer/test_wheel.py dist/orca-plugin/*.whl
+```
+
+The wheel includes both the native plugin and the shared upload/parser module.
+It has no third-party runtime dependencies and supports Python 3.12 or newer.
+Its host API targets the released OrcaSlicer 2.5.0 bindings. Automated tests
+exercise an Orca host fake against a real PrintStash HTTP server; they do not
+replace a smoke test of installation, permissions and export in the Orca GUI.
+
+Upstream references: [plugin development](https://www.orcaslicer.com/wiki/developer_reference/plugin_development/plugin_development),
+[slicing capability](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.5.0/src/slic3r/plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.cpp),
+and [export result handling](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.5.0/src/slic3r/GUI/PostProcessor.cpp).
+
+## Legacy post-processing script
 
 Use Python 3 to run [`scripts/printstash_orca_push.py`](../scripts/printstash_orca_push.py)
 as a post-processing script under **Process → Others**. Orca appends the exported

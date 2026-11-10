@@ -4,6 +4,10 @@
 
 ### Added
 
+- **Native OrcaSlicer 2.5 plugin.** Install a wheel and configure PrintStash inside Orca to upload exported G-code without an external post-processing command. The plugin preserves source-model matching and retry deduplication, leaves G-code unchanged, and lets export continue when PrintStash is unavailable.
+
+### Added
+
 - CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.
 - Collection Documents accepts spreadsheets, Word files and arbitrary binary attachments, including other resin formats, with original-byte downloads.
 
