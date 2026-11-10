@@ -1,5 +1,9 @@
 "use client";
 
+import { LibraryStatusFilters } from "@/components/library-status-filters";
+import { CollectionHeaderTags } from "@/components/collection-header-tags";
+import "./library-header.css";
+
 import { arrivingKeys, entryKeys } from "@/lib/library-arrivals";
 import {
   FOLDER_CARDS_CLASS,
@@ -95,7 +99,7 @@ import { TabBar } from "@/components/ui/tabs";
 import { FavoriteSavedViewRow } from "@/components/favorite-saved-view-row";
 import { ModelCard } from "@/components/model-card";
 import { LibraryModelInspector } from "@/components/library-model-inspector";
-import { TitleEditor } from "@/components/title-editor";
+import { CollectionTitleEditor } from "@/components/collection-title-editor";
 import { DeferredDialog } from "@/components/deferred-dialog";
 import { lazyImport } from "@/lib/lazy-component";
 import { useModelMoves } from "@/features/library/moves";
@@ -106,7 +110,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
 import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
-import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { DocumentBrowser } from "@/components/document-browser";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
 import {
@@ -132,8 +135,8 @@ import { translateUiText } from "@/lib/locale";
 import { useI18n } from "@/lib/i18n";
 import { useMobileFilterDrawer } from "@/lib/mobile-filter-context";
 import {
-  SlidersHorizontal,
   Grid,
+  LayoutGrid,
   List,
   FileText,
   X,
@@ -150,7 +153,6 @@ import {
   MoreHorizontal,
   Boxes,
   Box,
-  Pencil,
 } from "lucide-react";
 import {
   listCollectionChildren,
@@ -657,6 +659,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const [displayOpen, setDisplayOpen] = useState(false);
   const [desktopSortOpen, setDesktopSortOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const toolbarMenuOpener = useRef<HTMLElement | null>(null);
   const [filtersExpanded, setFiltersExpanded] = useState<boolean | null>(null);
   const [favoritesPanel, setFavoritesPanel] = useState<"favorites" | "views">("favorites");
   const [compact, setCompact] = useState(
@@ -2204,12 +2207,14 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   }
 
   async function saveCollectionTags(collection: CollectionRead, nextTags: string[]) {
+    const session = getSessionVersion();
     try {
       // The write invalidates every loaded collection query (request.ts).
-      await replaceCollectionTags(collection.id, nextTags);
+      const confirmed = await replaceCollectionTags(collection.id, nextTags);
       toast.success(uiText("Tags updated for {value1}", { value1: String(collection.name) }));
+      return confirmed.tags;
     } catch (error) {
-      toast.error(error);
+      if (session === getSessionVersion()) toast.error(error);
       throw error;
     }
   }
@@ -2434,100 +2439,192 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     </div>
   );
 
-  const libraryToolbar = (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <h2 className="mr-2 w-full shrink-0 text-base font-semibold @3xl/library:w-auto">
-        {t("vault.models")}
-      </h2>
+  const libraryMoreActions = (
+    <>
+      <Button
+        variant="ghost"
+        role="menuitem"
+        className="w-full justify-start"
+        onClick={() => {
+          setMoreOpen(false);
+          const params = new URLSearchParams(searchParams.toString());
+          params.set("v", "docs");
+          router.replace(`/?${params}`);
+        }}
+      >
+        {t("vault.documents")}
+      </Button>
       {docView === "models" && (
-        <div
-          className="order-1 flex w-full min-w-0 items-center gap-1 overflow-x-auto @3xl/library:w-auto"
-          onFocusCapture={() => startup.request("filters")}
-          onPointerDownCapture={() => startup.request("filters")}
+        <Button
+          variant="ghost"
+          role="menuitem"
+          className="w-full justify-start"
+          disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
+          onClick={() => {
+            setMoreOpen(false);
+            setMultipartCreateOpen(true);
+          }}
         >
+          <Plus className="h-4 w-4" aria-hidden />
+          {t("multipart.new")}
+        </Button>
+      )}
+      {auth.isAuthenticated && (
+        <>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={favoritesOnly}
+            onClick={() => {
+              toggleFavorites();
+              setMoreOpen(false);
+            }}
+            className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${favoritesOnly ? "bg-accent text-accent-foreground" : ""}`}
+          >
+            <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />
+            <span className="flex-1">{uiText("Favorites")}</span>
+            {favoritesOnly && <Check className="h-3.5 w-3.5" />}
+          </button>
+          <SavedViewSelector
+            key={savedViewsOwner.session}
+            readState={savedViewReadState}
+            views={savedViews}
+            activeId={activeSavedViewId}
+            modified={savedViewModified}
+            onSelect={(view) => {
+              applySavedView(view);
+              setMoreOpen(false);
+            }}
+            onCreate={() => {
+              setMoreOpen(false);
+              openSaveView();
+            }}
+            onUpdate={(view) =>
+              manageSavedView(
+                {
+                  kind: "update",
+                  id: view.id,
+                  payload: { filters: currentFilters },
+                },
+                "savedView.updateSuccess",
+              )
+            }
+            onRename={(view, name) =>
+              manageSavedView(
+                { kind: "update", id: view.id, payload: { name } },
+                "savedView.renameSuccess",
+              )
+            }
+            onDuplicate={(view) =>
+              manageSavedView(
+                {
+                  kind: "create",
+                  name: duplicateViewName(view.name),
+                  filters: effectiveLibraryView(view.filters, canViewPrinters),
+                },
+                "savedView.duplicateSuccess",
+              )
+            }
+            onDelete={(view) =>
+              manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
+            }
+            triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
+            triggerRole="menuitem"
+            triggerSize="sm"
+            triggerVariant="ghost"
+          />
+        </>
+      )}
+      <DisplayMenu
+        open={displayOpen}
+        onOpenChange={setDisplayOpen}
+        viewMode={viewMode}
+        compact={compact}
+        onSelectMode={selectViewMode}
+        onSelectDensity={selectDensity}
+        labelFor={ui}
+        triggerSize="sm"
+        triggerVariant="ghost"
+        triggerRole="menuitem"
+        triggerClassName="w-full justify-start"
+        onSelectComplete={() => setMoreOpen(false)}
+      />
+    </>
+  );
+
+  const libraryToolbar = (
+    <DropdownMenu
+      open={moreOpen}
+      returnFocusRef={toolbarMenuOpener}
+      onOpenChange={setMoreOpen}
+      align="end"
+      contentClassName="w-64 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+      trigger={
+        <div
+          onContextMenu={(event) => {
+            event.preventDefault();
+            toolbarMenuOpener.current =
+              document.activeElement instanceof HTMLElement ? document.activeElement : null;
+            setMoreOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.shiftKey && event.key === "F10") {
+              event.preventDefault();
+              toolbarMenuOpener.current = event.target instanceof HTMLElement ? event.target : null;
+              setMoreOpen(true);
+            }
+          }}
+          className="library-model-toolbar flex min-w-0 flex-wrap items-center gap-2"
+        >
+          <h2 className="mr-2 w-full shrink-0 text-base font-semibold @3xl/library:w-auto">
+            {t("vault.models")}
+          </h2>
+          {docView === "models" && (
+            <LibraryStatusFilters
+              value={structured.revision_status}
+              counts={facetQuery.data?.revision_status}
+              total={displayCount}
+              onChange={(value) => setStructuredFilter("revision_status", value)}
+              onIntent={() => startup.request("filters")}
+            />
+          )}
           <Button
             type="button"
-            variant="ghost"
-            size="xs"
-            aria-pressed={!structured.revision_status?.length}
-            onClick={() => setStructuredFilter("revision_status", [])}
-            className={!structured.revision_status?.length ? "bg-accent" : undefined}
+            variant="outline"
+            onClick={toggleStructuredFilters}
+            className="order-2 h-10 min-w-0 flex-1 px-2 md:hidden"
           >
-            {uiText("All")}{" "}
-            <span className="font-mono text-3xs text-muted-foreground">{displayCount}</span>
+            <span className="min-w-0 truncate">{uiText("Filters")}</span>
           </Button>
-          {(["known_good", "needs_test"] as const).map((status) => {
-            const facet = facetQuery.data?.revision_status.find((value) => value.value === status);
-            if (facet?.count === 0) return null;
-            const active = structured.revision_status?.includes(status) ?? false;
-            return (
-              <Button
-                key={status}
-                type="button"
-                variant="ghost"
-                size="xs"
-                aria-pressed={active}
-                onClick={() => setStructuredFilter("revision_status", active ? [] : [status])}
-                className={active ? "bg-accent" : undefined}
-              >
-                <span
-                  className={cn(
-                    "h-1.5 w-1.5 rounded-full",
-                    status === "known_good" ? "bg-muted-foreground" : "bg-warning",
-                  )}
-                />
-                {uiText(status === "known_good" ? "Ready" : "Needs Test")}
-                <span className="font-mono text-3xs text-muted-foreground">{facet?.count}</span>
-              </Button>
-            );
-          })}
-        </div>
-      )}
-      <Button
-        type="button"
-        variant="outline"
-        onClick={toggleStructuredFilters}
-        className="order-2 h-10 min-w-0 flex-1 px-2 md:hidden"
-      >
-        <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-        <span className="min-w-0 truncate">{uiText("Filters")}</span>
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="xs"
-        onClick={toggleStructuredFilters}
-        aria-expanded={!!filtersExpanded}
-        aria-controls="library-filter-panel"
-        className="order-1 hidden h-10 min-w-0 flex-1 px-2 md:inline-flex @3xl/library:h-8 @3xl/library:flex-none @3xl/library:px-3"
-      >
-        <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-        <span className="min-w-0 truncate">{uiText("Filters")}</span>
-        {activeFilterItems.length > Number(!!query.trim()) && (
-          <span className="font-mono tabular-nums">
-            {activeFilterItems.length - Number(!!query.trim())}
-          </span>
-        )}
-      </Button>
-      <div className="order-2 ml-auto grid min-w-0 flex-2 grid-cols-2 items-center gap-2 @3xl/library:order-5 @3xl/library:ml-0 @3xl/library:flex @3xl/library:flex-none">
-        <div className="min-w-0 @3xl/library:hidden">
-          <SortMenu
-            open={sortOpen}
-            onOpenChange={setSortOpen}
-            sortKey={sortKey}
-            onSelect={selectSort}
-            labelFor={ui}
-            triggerSize="sm"
-            triggerClassName="h-10 w-full min-w-0 px-2 text-xs"
-            wrapperClassName="min-w-0"
-          />
-        </div>
-        <DropdownMenu
-          open={moreOpen}
-          onOpenChange={setMoreOpen}
-          align="end"
-          className="min-w-0"
-          trigger={
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={toggleStructuredFilters}
+            aria-expanded={!!filtersExpanded}
+            aria-controls="library-filter-panel"
+            className="order-1 hidden h-10 min-w-0 flex-1 px-2 md:inline-flex @3xl/library:h-8 @3xl/library:flex-none @3xl/library:px-3"
+          >
+            <span className="min-w-0 truncate">{uiText("Filters")}</span>
+            {activeFilterItems.length > Number(!!query.trim()) && (
+              <span className="font-mono tabular-nums">
+                {activeFilterItems.length - Number(!!query.trim())}
+              </span>
+            )}
+          </Button>
+          <div className="library-secondary-tools order-2 ml-auto grid min-w-0 flex-2 grid-cols-2 items-center gap-2 @3xl/library:hidden">
+            <div className="min-w-0 @3xl/library:hidden">
+              <SortMenu
+                open={sortOpen}
+                onOpenChange={setSortOpen}
+                sortKey={sortKey}
+                onSelect={selectSort}
+                labelFor={ui}
+                triggerSize="sm"
+                triggerClassName="h-10 w-full min-w-0 px-2 text-xs"
+                wrapperClassName="min-w-0"
+              />
+            </div>
             <Button
               type="button"
               variant="outline"
@@ -2535,193 +2632,92 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               aria-haspopup="menu"
               aria-expanded={moreOpen}
               aria-label={t("nav.more")}
-              onClick={() => setMoreOpen(!moreOpen)}
+              onClick={(event) => {
+                toolbarMenuOpener.current = event.currentTarget;
+                setMoreOpen(!moreOpen);
+              }}
               className="h-10 min-w-0 px-2 @3xl/library:h-8 @3xl/library:w-8 @3xl/library:[&>span]:sr-only @3xl/library:[&>svg:last-child]:hidden"
             >
               <MoreHorizontal className="h-4 w-4 shrink-0" />
               <span className="min-w-0 flex-1 truncate">{t("nav.more")}</span>
               <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             </Button>
-          }
-          contentClassName="w-64 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-        >
-          <Button
-            variant="ghost"
-            role="menuitem"
-            className="w-full justify-start"
-            onClick={() => {
-              setMoreOpen(false);
-              const params = new URLSearchParams(searchParams.toString());
-              params.set("v", "docs");
-              router.replace(`/?${params}`);
-            }}
-          >
-            {t("vault.documents")}
-          </Button>
-          {docView === "models" && (
-            <Button
-              variant="ghost"
-              role="menuitem"
-              className="w-full justify-start"
-              disabled={!user?.is_superuser && !canWriteCollection(selectedCollectionRow)}
-              onClick={() => {
-                setMoreOpen(false);
-                setMultipartCreateOpen(true);
-              }}
-            >
-              <Plus className="h-4 w-4" aria-hidden />
-              {t("multipart.new")}
-            </Button>
-          )}
-          {auth.isAuthenticated && (
-            <>
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={favoritesOnly}
-                onClick={() => {
-                  toggleFavorites();
-                  setMoreOpen(false);
-                }}
-                className={`flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${favoritesOnly ? "bg-accent text-accent-foreground" : ""}`}
-              >
-                <Star className={`h-4 w-4 ${favoritesOnly ? "fill-current" : ""}`} />
-                <span className="flex-1">{uiText("Favorites")}</span>
-                {favoritesOnly && <Check className="h-3.5 w-3.5" />}
-              </button>
-              <SavedViewSelector
-                key={savedViewsOwner.session}
-                readState={savedViewReadState}
-                views={savedViews}
-                activeId={activeSavedViewId}
-                modified={savedViewModified}
-                onSelect={(view) => {
-                  applySavedView(view);
-                  setMoreOpen(false);
-                }}
-                onCreate={() => {
-                  setMoreOpen(false);
-                  openSaveView();
-                }}
-                onUpdate={(view) =>
-                  manageSavedView(
-                    {
-                      kind: "update",
-                      id: view.id,
-                      payload: { filters: currentFilters },
-                    },
-                    "savedView.updateSuccess",
-                  )
-                }
-                onRename={(view, name) =>
-                  manageSavedView(
-                    { kind: "update", id: view.id, payload: { name } },
-                    "savedView.renameSuccess",
-                  )
-                }
-                onDuplicate={(view) =>
-                  manageSavedView(
-                    {
-                      kind: "create",
-                      name: duplicateViewName(view.name),
-                      filters: effectiveLibraryView(view.filters, canViewPrinters),
-                    },
-                    "savedView.duplicateSuccess",
-                  )
-                }
-                onDelete={(view) =>
-                  manageSavedView({ kind: "delete", id: view.id }, "savedView.deleteSuccess")
-                }
-                triggerClassName="max-w-none w-full justify-start px-2.5 py-2 text-sm"
-                triggerRole="menuitem"
-                triggerSize="sm"
-                triggerVariant="ghost"
-              />
-            </>
-          )}
-          <DisplayMenu
-            open={displayOpen}
-            onOpenChange={setDisplayOpen}
-            viewMode={viewMode}
-            compact={compact}
-            onSelectMode={selectViewMode}
-            onSelectDensity={selectDensity}
-            labelFor={ui}
-            triggerSize="sm"
-            triggerVariant="ghost"
-            triggerRole="menuitem"
-            triggerClassName="w-full justify-start"
-            onSelectComplete={() => setMoreOpen(false)}
-          />
-        </DropdownMenu>
-      </div>
-      {libraryActions}
-      <div className="order-4 ml-auto hidden shrink-0 items-center gap-2 @3xl/library:flex">
-        {canViewPrinters && (
-          <label className="flex h-8 items-center gap-2 border border-input bg-card px-2 text-xs text-muted-foreground">
-            <Printer className="h-3.5 w-3.5" aria-hidden />
-            <select
-              aria-label={uiText("Printer")}
-              value={
-                selectedPrinterId !== null
-                  ? String(selectedPrinterId)
-                  : (selectedPrinterPresence ?? "")
-              }
-              className="w-32 bg-transparent text-foreground focus-visible:outline-none"
-              onFocus={() => startup.request("filters")}
-              onPointerDown={() => startup.request("filters")}
-              onChange={(event) => {
-                const value = event.target.value;
-                if (value === "any" || value === "none") setSelectedPrinterPresence(value);
-                else setSelectedPrinterId(value ? Number(value) : null);
-              }}
-            >
-              <option value="">{uiText("Any printer")}</option>
-              <option value="any">{uiText("On a printer")}</option>
-              <option value="none">{uiText("Vault only")}</option>
-              {printers.map((printer) => (
-                <option key={printer.id} value={printer.id}>
-                  {printer.name}
-                </option>
+          </div>
+          {libraryActions}
+          <div className="order-4 ml-auto hidden shrink-0 items-center gap-2 @3xl/library:flex">
+            {canViewPrinters && (
+              <label className="relative flex h-8 items-center gap-2 border border-border bg-card px-2 text-xs text-muted-foreground">
+                <Printer className="h-3.5 w-3.5" aria-hidden />
+                <select
+                  aria-label={uiText("Printer")}
+                  value={
+                    selectedPrinterId !== null
+                      ? String(selectedPrinterId)
+                      : (selectedPrinterPresence ?? "")
+                  }
+                  className="w-32 bg-transparent pr-6 text-secondary focus-visible:outline-none"
+                  onFocus={() => startup.request("filters")}
+                  onPointerDown={() => startup.request("filters")}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value === "any" || value === "none") setSelectedPrinterPresence(value);
+                    else setSelectedPrinterId(value ? Number(value) : null);
+                  }}
+                >
+                  <option value="">{uiText("Any printer")}</option>
+                  <option value="any">{uiText("On a printer")}</option>
+                  <option value="none">{uiText("Vault only")}</option>
+                  {printers.map((printer) => (
+                    <option key={printer.id} value={printer.id}>
+                      {printer.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  aria-hidden
+                  className="pointer-events-none absolute right-2 h-3.5 w-3.5"
+                />
+              </label>
+            )}
+            <SortMenu
+              open={desktopSortOpen}
+              onOpenChange={setDesktopSortOpen}
+              sortKey={sortKey}
+              onSelect={selectSort}
+              labelFor={ui}
+              triggerSize="xs"
+              triggerClassName="h-8 w-40"
+            />
+            <div className="flex items-center bg-muted/50">
+              {(["grid", "list"] as const).map((mode) => (
+                <Button
+                  key={mode}
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={uiText("{value1} View", {
+                    value1: ui(mode === "grid" ? "Grid" : "List"),
+                  })}
+                  aria-pressed={viewMode === mode}
+                  onClick={() => selectViewMode(mode)}
+                  className={
+                    viewMode === mode ? "bg-accent text-accent-foreground" : "text-muted-foreground"
+                  }
+                >
+                  {mode === "grid" ? (
+                    <LayoutGrid className="h-3.5 w-3.5" />
+                  ) : (
+                    <List className="h-3.5 w-3.5" />
+                  )}
+                </Button>
               ))}
-            </select>
-          </label>
-        )}
-        <SortMenu
-          open={desktopSortOpen}
-          onOpenChange={setDesktopSortOpen}
-          sortKey={sortKey}
-          onSelect={selectSort}
-          labelFor={ui}
-          triggerSize="xs"
-          triggerClassName="h-8 w-40"
-        />
-        <div className="flex items-center bg-muted/50">
-          {(["grid", "list"] as const).map((mode) => (
-            <Button
-              key={mode}
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={uiText("{value1} View", {
-                value1: ui(mode === "grid" ? "Grid" : "List"),
-              })}
-              aria-pressed={viewMode === mode}
-              onClick={() => selectViewMode(mode)}
-              className={
-                viewMode === mode ? "bg-accent text-accent-foreground" : "text-muted-foreground"
-              }
-            >
-              {mode === "grid" ? (
-                <Grid className="h-3.5 w-3.5" />
-              ) : (
-                <List className="h-3.5 w-3.5" />
-              )}
-            </Button>
-          ))}
+            </div>
+          </div>
         </div>
-      </div>
-    </div>
+      }
+    >
+      {libraryMoreActions}
+    </DropdownMenu>
   );
 
   return (
@@ -3050,54 +3046,26 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
           </LibraryBreadcrumbs>
 
           {/* The pane owns breakpoints: an open outliner also consumes horizontal room. */}
-          <div className="flex flex-col gap-3 px-4 pb-1 pt-6 sm:px-6">
+          <div className="library-collection-header flex flex-col gap-3 px-4 sm:px-6">
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0 flex-1 basis-full space-y-1 @3xl/library:basis-0">
-                <TitleEditor
+              <div className="library-collection-identity min-w-0 flex-1 basis-full @3xl/library:basis-0">
+                <CollectionTitleEditor
+                  title={
+                    unavailableCollection
+                      ? uiText("library.collectionUnavailable")
+                      : (selectedName ??
+                        uiText(favoritesOnly ? "Favorites & saved views" : "All Models"))
+                  }
+                  canEdit={canRenameCollection}
                   open={collectionRename !== null}
-                  onOpenChange={(open) => {
-                    if (open) openCollectionRename();
-                    else if (!collectionRenameBusy) setCollectionRename(null);
+                  onOpen={openCollectionRename}
+                  onCancel={() => {
+                    if (!collectionRenameBusy) setCollectionRename(null);
                   }}
-                  label={uiText("Rename {value1}", { value1: selectedName ?? "" })}
-                  fieldLabel={uiText("inbox.collectionName")}
                   value={collectionRenameName}
                   onValueChange={setCollectionRenameName}
-                  onSave={() => void saveCollectionRename()}
+                  onSave={saveCollectionRename}
                   busy={collectionRenameBusy}
-                  maxLength={100}
-                  requiredMessage={uiText("{field} is required.", {
-                    field: uiText("inbox.collectionName"),
-                  })}
-                  trigger={
-                    <div className="flex min-w-0 items-center gap-1">
-                      <h1
-                        onDoubleClick={openCollectionRename}
-                        className="min-w-0 break-words text-xl font-semibold tracking-tight text-foreground sm:text-2xl"
-                      >
-                        {unavailableCollection
-                          ? uiText("library.collectionUnavailable")
-                          : (selectedName ??
-                            uiText(favoritesOnly ? "Favorites & saved views" : "All Models"))}
-                      </h1>
-                      {canRenameCollection && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          className="shrink-0 text-muted-foreground"
-                          data-menu-trigger
-                          aria-haspopup="dialog"
-                          aria-expanded={collectionRename !== null}
-                          aria-label={uiText("Rename {value1}", { value1: selectedName ?? "" })}
-                          title={uiText("Rename")}
-                          onClick={openCollectionRename}
-                        >
-                          <Pencil className="h-3.5 w-3.5" aria-hidden />
-                        </Button>
-                      )}
-                    </div>
-                  }
                 />
                 {selectedCollection !== null && !displayedCollection ? (
                   <CollectionHeaderSkeleton />
@@ -3106,13 +3074,22 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     <CollectionReadme
                       key={displayedCollection.id}
                       collectionId={displayedCollection.id}
+                      compact
                       hasReadme={displayedCollection.has_readme}
                       canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
                       disabled={!browseReady}
                     />
                   )
                 )}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div className="library-collection-meta flex flex-wrap items-center">
+                  {displayedCollection && displayedCollection.child_count > 0 && (
+                    <span>
+                      {uiText("library.header.collections", {
+                        count: displayedCollection.child_count,
+                      })}{" "}
+                      ·
+                    </span>
+                  )}
                   <p className="text-sm text-muted-foreground">
                     {unavailableCollection
                       ? uiText("library.collectionUnavailableHelp")
@@ -3120,9 +3097,16 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                         ? uiText("Your frequently used Models and Multipart Models, kept together.")
                         : loading
                           ? uiText("Loading...")
-                          : uiText(selectedName ? "counts.collectionItems" : "counts.items", {
-                              count: displayCount,
-                            })}
+                          : uiText(
+                              selectedName
+                                ? visibleMultipartModels.length
+                                  ? "library.header.itemsHere"
+                                  : "library.header.modelsHere"
+                                : "counts.items",
+                              {
+                                count: displayCount,
+                              },
+                            )}
                     {refreshing && (
                       <span className="ml-2 font-mono text-xs text-muted-foreground">
                         {uiText("Updating...")}
@@ -3130,14 +3114,15 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     )}
                   </p>
                   {displayedCollection && (
-                    <EntityTagsDialog
-                      entityLabel={displayedCollection.name}
+                    <span>
+                      · {uiText("{count} in total", { count: displayedCollection.model_count })}
+                    </span>
+                  )}
+                  {displayedCollection && (
+                    <CollectionHeaderTags
+                      key={displayedCollection.id}
                       tags={displayedCollection.tags}
-                      availableTags={tags}
                       canEdit={!!user?.is_superuser || canWriteCollection(displayedCollection)}
-                      help={uiText(
-                        "Collection tags are inherited by Models in this collection and every descendant for search and filtering.",
-                      )}
                       onSave={(nextTags) => saveCollectionTags(displayedCollection, nextTags)}
                     />
                   )}
@@ -3562,7 +3547,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
               )}
 
               {viewMode === "grid" && !loading && visibleCollections.length > 0 && (
-                <section className="mx-4 mb-3 mt-5 sm:mx-6" aria-label={uiText("Collections")}>
+                <section
+                  className="library-subcollections mx-4 sm:mx-6"
+                  aria-label={uiText("Collections")}
+                >
                   <h2 className="mb-2 text-xs font-medium text-foreground">
                     {uiText("Collections")}{" "}
                     <span className="font-mono font-normal">{visibleCollections.length}</span>
@@ -3600,7 +3588,9 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </section>
               )}
 
-              {!favoritesOnly && <div className="px-4 pb-0 pt-3 sm:px-6">{libraryToolbar}</div>}
+              {!favoritesOnly && (
+                <div className="library-model-toolbar-wrap px-4 sm:px-6">{libraryToolbar}</div>
+              )}
 
               {favoritesOnly && favoritesPanel === "views" ? (
                 <section

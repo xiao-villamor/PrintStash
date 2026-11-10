@@ -5,7 +5,7 @@ import { useTaxonomyCommands } from "@/features/library/taxonomy";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { FileText, Loader2, Pencil } from "lucide-react";
 
 import { useQueryClient } from "@tanstack/react-query";
@@ -23,6 +23,7 @@ export function CollectionReadme({
   canEdit,
   disabled = false,
   hasReadme,
+  compact = false,
 }: {
   collectionId: number;
   canEdit: boolean;
@@ -30,6 +31,7 @@ export function CollectionReadme({
   disabled?: boolean;
   /** From `CollectionRead.has_readme`; false skips the request entirely. */
   hasReadme: boolean;
+  compact?: boolean;
 }) {
   useUiLocale();
   const queryClient = useQueryClient();
@@ -47,6 +49,10 @@ export function CollectionReadme({
   const [overflows, setOverflows] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const focusEditor = useCallback((textarea: HTMLTextAreaElement | null) => {
+    textareaRef.current = textarea;
+    textarea?.focus();
+  }, []);
 
   // Collapse tall descriptions so a long/technical one doesn't bury the model
   // list. CLAMP_PX must match the max-h-* class below.
@@ -133,9 +139,11 @@ export function CollectionReadme({
 
   if (editing) {
     return (
-      <div className="min-w-0 basis-full space-y-2">
+      <div
+        className={`${compact ? "collection-description-editor" : ""} min-w-0 basis-full space-y-2`}
+      >
         <textarea
-          ref={textareaRef}
+          ref={focusEditor}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onPaste={(e) => {
@@ -150,15 +158,27 @@ export function CollectionReadme({
               handleFiles(e.dataTransfer.files);
             }
           }}
-          rows={8}
+          rows={compact ? 3 : 8}
+          disabled={saving}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || saving || uploading) return;
+            if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+              event.preventDefault();
+              void save();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+              setEditing(false);
+            }
+          }}
           aria-label={uiText("Description")}
           placeholder={uiText(
             "A short description of this collection. Markdown — paste or drop images.",
           )}
-          className="w-full bg-surface text-on-surface font-mono text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring"
+          className={`${compact ? "" : "font-mono"} w-full bg-surface text-on-surface text-sm border border-border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring`}
         />
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Button type="button" size="sm" onClick={save} loading={saving}>
+        <div className="collection-description-actions flex min-w-0 flex-wrap items-center gap-2">
+          <Button type="button" size="sm" onClick={save} loading={saving} disabled={uploading}>
             {uiText("Save")}
           </Button>
           <Button
@@ -185,7 +205,9 @@ export function CollectionReadme({
   }
 
   return (
-    <div className={readme ? "min-w-0 basis-full" : "min-w-0"}>
+    <div
+      className={`${compact ? "collection-header-readme" : ""} ${readme ? "min-w-0 basis-full" : "min-w-0"}`}
+    >
       {readme ? (
         <div>
           <div
@@ -197,7 +219,13 @@ export function CollectionReadme({
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-background to-transparent" />
             )}
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <div
+            className={
+              compact && !overflows
+                ? "collection-readme-actions"
+                : "mt-2 flex flex-wrap items-center gap-2"
+            }
+          >
             {overflows && (
               <Button
                 type="button"

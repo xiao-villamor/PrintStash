@@ -203,6 +203,36 @@ describe("CollectionReadme", () => {
   });
 
   describe("writing one", () => {
+    it("focuses the compact editor and saves with Control+Enter", async () => {
+      const user = userEvent.setup();
+      const app = renderApp(
+        <CollectionReadme collectionId={5} canEdit hasReadme={false} compact />,
+        {
+          routes: { "PUT /api/v1/collections/5/readme": json({ readme: "Print upright." }) },
+        },
+      );
+      await user.click(await screen.findByRole("button", { name: /Add a description/ }));
+      const input = screen.getByRole("textbox", { name: "Description" });
+      expect(input).toHaveFocus();
+      await user.type(input, " Print upright. ");
+      await user.keyboard("{Control>}{Enter}{/Control}");
+      expect(await screen.findByText("Print upright.")).toBeVisible();
+      expect(JSON.parse(app.requestsWithMethod("PUT")[0].body ?? "{}")).toEqual({
+        readme: "Print upright.",
+      });
+    });
+
+    it("discards a description draft with Escape", async () => {
+      const user = userEvent.setup();
+      const app = renderReadme({ readme: "Original description." });
+      await user.click(await screen.findByRole("button", { name: "Edit" }));
+      await user.type(screen.getByRole("textbox", { name: "Description" }), " Discard me.");
+      await user.keyboard("{Escape}");
+      expect(screen.queryByRole("textbox", { name: "Description" })).toBeNull();
+      expect(screen.getByText("Original description.")).toBeVisible();
+      expect(app.requestsWithMethod("PUT")).toHaveLength(0);
+    });
+
     it("saves what the user wrote", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderReadme();

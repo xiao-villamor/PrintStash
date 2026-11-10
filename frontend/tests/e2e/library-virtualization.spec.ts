@@ -308,7 +308,7 @@ test.describe("Loaded Library surfaces", () => {
       }),
     );
     await page.goto("/?type=all");
-    await expect(page.getByRole("button", { name: /^Ready/ })).toBeVisible();
+    await expect(page.getByRole("radio", { name: /^Ready/ })).toBeVisible();
     expect(
       await page.getByRole("main").evaluate((main) => main.scrollWidth <= main.clientWidth),
     ).toBe(true);

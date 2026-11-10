@@ -2329,10 +2329,7 @@ describe("ModelBrowser", () => {
       const name = await screen.findByRole("textbox", { name: "Collection name" });
       expect(name).toHaveValue("Parts");
       expect(name).toHaveFocus();
-      expect(screen.getByRole("dialog", { name: "Rename Parts" })).not.toHaveAttribute(
-        "aria-modal",
-        "true",
-      );
+      expect(screen.queryByRole("dialog")).toBeNull();
       expect(screen.getByRole("heading", { name: "Parts", level: 1 })).toBeVisible();
     });
 
@@ -2473,11 +2470,16 @@ describe("ModelBrowser", () => {
     it("can rename after returning from a retired pending save", async () => {
       const user = userEvent.setup();
       const pending = Promise.withResolvers<Response>();
+      const nextPending = Promise.withResolvers<Response>();
+      let attempts = 0;
       const app = renderVault({
         at: "/?c=parts",
         collections: [aCollectionNode()],
         historyProbe: true,
-        routes: { "PATCH /api/v1/collections/1": () => pending.promise },
+        routes: {
+          "PATCH /api/v1/collections/1": () =>
+            ++attempts === 1 ? pending.promise : nextPending.promise,
+        },
       });
       await user.click(
         await screen.findByRole("button", { name: "Rename Parts" }, { timeout: 3000 }),
@@ -2496,12 +2498,21 @@ describe("ModelBrowser", () => {
       const name = await screen.findByRole("textbox", { name: "Collection name" });
       expect(name).toBeEnabled();
       expect(name).toHaveValue("Parts");
+      await user.clear(name);
+      await user.type(name, "New draft{Enter}");
+      await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(2));
       await act(async () => {
         pending.resolve(json({ detail: "collection_already_exists" }, 409));
         await pending.promise;
       });
-      expect(name).toBeEnabled();
-      expect(name).toHaveValue("Parts");
+      expect(name).toHaveAttribute("readonly");
+      expect(name).toHaveValue("New draft");
+      await act(async () => {
+        nextPending.resolve(json({ detail: "collection_already_exists" }, 409));
+        await nextPending.promise;
+      });
+      await waitFor(() => expect(name).not.toHaveAttribute("readonly"));
+      expect(name).toHaveValue("New draft");
     });
 
     it("retires a pending collection receipt when edit access is lost", async () => {
@@ -2563,36 +2574,38 @@ describe("ModelBrowser", () => {
       expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
     });
 
-    it("discards a collection draft through Cancel", async () => {
+    it("closes an unchanged inline collection name without writing", async () => {
       const user = userEvent.setup();
       const app = renderVault({ at: "/?c=parts", collections: [aCollectionNode()] });
       const pencil = await screen.findByRole("button", { name: "Rename Parts" }, { timeout: 3000 });
       await user.click(pencil);
-      await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
-      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Discard me");
-
-      await user.click(screen.getByRole("button", { name: "Cancel" }));
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-      await user.click(pencil);
-
-      expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue("Parts");
+      await user.keyboard("{Enter}");
+      expect(screen.queryByRole("textbox", { name: "Collection name" })).toBeNull();
+      expect(pencil).toHaveFocus();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
     });
 
-    it("discards a collection draft when clicking outside", async () => {
+    it("saves an inline collection name on blur", async () => {
       const user = userEvent.setup();
-      const app = renderVault({ at: "/?c=parts", collections: [aCollectionNode()] });
-      const pencil = await screen.findByRole("button", { name: "Rename Parts" }, { timeout: 3000 });
-      await user.click(pencil);
+      const collection = aCollectionNode();
+      const app = renderVault({
+        at: "/?c=parts",
+        collections: [collection],
+        routes: {
+          "PATCH /api/v1/collections/1": () => {
+            Object.assign(collection, { name: "Spares", path: "spares", slug: "spares" });
+            return json(collection);
+          },
+        },
+      });
+      await user.click(
+        await screen.findByRole("button", { name: "Rename Parts" }, { timeout: 3000 }),
+      );
       await user.clear(screen.getByRole("textbox", { name: "Collection name" }));
-      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Discard me");
-
+      await user.type(screen.getByRole("textbox", { name: "Collection name" }), "Spares");
       await user.click(document.body);
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-      await user.click(pencil);
-
-      expect(screen.getByRole("textbox", { name: "Collection name" })).toHaveValue("Parts");
-      expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+      expect(await screen.findByRole("heading", { name: "Spares", level: 1 })).toBeVisible();
+      expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
 
     it("refuses a blank collection name", async () => {
@@ -2605,7 +2618,8 @@ describe("ModelBrowser", () => {
       await user.clear(name);
       await user.type(name, "   {Enter}");
 
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.queryByRole("textbox", { name: "Collection name" })).toBeNull();
+      expect(screen.getByRole("heading", { name: "Parts", level: 1 })).toBeVisible();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
     });
 
@@ -2624,19 +2638,17 @@ describe("ModelBrowser", () => {
       await user.type(name, "Spares{Enter}");
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
 
-      await user.click(pencil);
-      await user.dblClick(screen.getByRole("heading", { name: "Parts", level: 1 }));
-      await user.keyboard("{Enter}");
+      await user.keyboard("{Enter}{Escape}");
+      fireEvent.blur(name);
 
-      expect(name).toBeDisabled();
+      expect(name).toHaveAttribute("readonly");
       expect(name).toHaveValue("Spares");
-      expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
       await act(async () => {
         pending.resolve(json({ detail: "collection_already_exists" }, 409));
         await pending.promise;
       });
-      await waitFor(() => expect(name).toBeEnabled());
+      await waitFor(() => expect(name).not.toHaveAttribute("readonly"));
     });
 
     it("retains the collection name after a rejected rename", async () => {
@@ -2656,10 +2668,10 @@ describe("ModelBrowser", () => {
       await user.type(name, "Duplicate{Enter}");
 
       await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
-      await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeEnabled());
+      await waitFor(() => expect(name).not.toHaveAttribute("readonly"));
       expect(name).toHaveValue("Duplicate");
-      expect(screen.getByRole("heading", { name: "Parts", level: 1 })).toBeVisible();
-      expect(screen.getByRole("dialog", { name: "Rename Parts" })).toBeVisible();
+      expect(name).toHaveFocus();
+      expect(screen.queryByRole("dialog")).toBeNull();
     });
 
     it.each(["view", "edit"] as const)("hides collection rename from %s members", async (role) => {
@@ -4852,7 +4864,7 @@ describe("OpenDesign Library strip", () => {
         }),
       },
     });
-    await user.click(await screen.findByRole("button", { name: /^Ready/ }));
+    await user.click(await screen.findByRole("radio", { name: /^Ready/ }));
     await waitFor(() =>
       expect(lastModelsQuery(app.requests).getAll("revision_status")).toEqual(["known_good"]),
     );
@@ -4864,7 +4876,7 @@ describe("OpenDesign Library strip", () => {
       models: [aModelListItem({ name: "Retained tag Model" })],
     });
     await screen.findByText("Retained tag Model");
-    await user.click(screen.getByRole("button", { name: /^All(?: \d+)?$/ }));
+    await user.click(screen.getByRole("radio", { name: /^All(?: \d+)?$/ }));
     await waitFor(() =>
       expect(lastModelsQuery(app.requests).getAll("revision_status")).toEqual([]),
     );

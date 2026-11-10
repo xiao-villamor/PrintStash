@@ -5102,5 +5102,22 @@
   "No G-code yet": "No G-code yet",
   "Not printed yet": "Not printed yet",
   "library.cardOutcome": "{result} {count}× on {printer}",
-  "No G-code": "No G-code"
+  "No G-code": "No G-code",
+  "Filter models by status": "Filter models by status",
+  "This filter is not available yet.": "This filter is not available yet.",
+  "New tag": "New tag",
+  "Remove tag {value1}": "Remove tag {value1}",
+  "{count} in total": "{count} in total",
+  "library.header.collections": {
+    "one": "{count} collection",
+    "other": "{count} collections"
+  },
+  "library.header.modelsHere": {
+    "one": "{count} model here",
+    "other": "{count} models here"
+  },
+  "library.header.itemsHere": {
+    "one": "{count} item here",
+    "other": "{count} items here"
+  }
 }

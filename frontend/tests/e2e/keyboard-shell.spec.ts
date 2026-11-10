@@ -173,11 +173,7 @@ test.describe("Shared keyboard commands", () => {
       page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
     ).toBeVisible();
     await page.keyboard.press("F2");
-    await expect(
-      page
-        .getByRole("dialog", { name: "Rename maraio", exact: true })
-        .getByRole("textbox", { name: "Collection name" }),
-    ).toBeFocused();
+    await expect(page.getByRole("textbox", { name: "Collection name" })).toBeFocused();
     expect(new URL(page.url()).searchParams.get("c")).toBe("maraio");
   });
 });
