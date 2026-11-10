@@ -111,6 +111,8 @@ export function RevisionCompare({
   onSelectRight,
   onClose,
   initialMode,
+  mode: controlledMode,
+  onModeChange,
 }: {
   left: FileRead;
   right: FileRead;
@@ -120,9 +122,11 @@ export function RevisionCompare({
   onSelectRight?: (id: number) => void;
   onClose?: () => void;
   initialMode?: ComparisonMode;
+  mode?: ComparisonMode;
+  onModeChange?: (mode: ComparisonMode) => void;
 }) {
   useUiLocale();
-  const [mode, setMode] = useState<ComparisonMode>(
+  const [localMode, setLocalMode] = useState<ComparisonMode>(
     initialMode ??
       (left.file_type === "gcode" && right.file_type === "gcode"
         ? "gcode"
@@ -130,6 +134,7 @@ export function RevisionCompare({
           ? "source"
           : "all"),
   );
+  const mode = controlledMode ?? localMode;
   function candidates(kind: ComparisonMode) {
     return files.filter(
       (file) => kind === "all" || (file.file_type === "gcode") === (kind === "gcode"),
@@ -142,7 +147,8 @@ export function RevisionCompare({
     const second =
       next.find((file) => file.id === right.id && file.id !== first?.id) ??
       next.find((file) => file.id !== first?.id);
-    setMode(kind);
+    setLocalMode(kind);
+    onModeChange?.(kind);
     if (first) onSelectLeft?.(first.id);
     if (second) onSelectRight?.(second.id);
   }

@@ -3,7 +3,9 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { onAuthChange } from "@/lib/auth-store";
+import { getSessionVersion } from "@/lib/session-transport";
 import { Check, Loader2, Plus, Star, Wifi } from "lucide-react";
 
 import {
@@ -26,7 +28,7 @@ import {
 } from "@/types";
 
 import { PRINT_JOB_PRESENTATION, revisionStatusLabel } from "./presentation";
-import { RevisionCompare } from "./revision-compare";
+import { RevisionCompare, type ComparisonMode } from "./revision-compare";
 import { HashValue } from "./file-hashes";
 import { Localized } from "@/components/ui/localized";
 import { useRevisionUpdater } from "./use-revision-updater";
@@ -104,7 +106,7 @@ export function RevisionsTab({
   inspectedFileId?: number;
   onInspect?: (id: number) => void;
   startComparing?: boolean;
-  comparisonMode?: "gcode" | "source" | "all";
+  comparisonMode?: ComparisonMode;
   onSend?: (mode: "send" | "queue") => void;
   onSettings?: () => void;
   jobs?: ModelPrintJobRead[] | null;
@@ -132,40 +134,61 @@ export function RevisionsTab({
   const [selectedRevisionIds, setSelectedRevisionIds] = useState<Set<number>>(new Set());
   const [batchLabel, setBatchLabel] = useState("");
   const [batchBusy, setBatchBusy] = useState(false);
-  const [fetchedOutcomes, setFetchedOutcomes] = useState<ArtifactOutcomeRead[]>([]);
+  const [fetchedOutcomes, setFetchedOutcomes] = useState<{
+    key: string;
+    rows: ArtifactOutcomeRead[];
+  } | null>(null);
 
-  // Compare selection — local to this tab.
-  const sourceFiles = allFiles.filter((file) => file.file_type !== "gcode");
-  const [compareLeftId, setCompareLeftId] = useState<number>(
-    comparisonMode === "source"
-      ? (sourceFiles[0]?.id ?? 0)
-      : (inspectedFileId ?? allFiles.at(-1)?.id ?? 0),
+  // This owner controls both visible mode and the exact pair used for outcome reads.
+  const [scope, setScope] = useState({ intent: comparisonMode, mode: comparisonMode });
+  if (scope.intent !== comparisonMode) setScope({ intent: comparisonMode, mode: comparisonMode });
+  const mode = scope.intent === comparisonMode ? scope.mode : comparisonMode;
+  const candidates = allFiles.filter(
+    (file) => mode === "all" || (file.file_type === "gcode") === (mode === "gcode"),
   );
-  const [compareRightId, setCompareRightId] = useState<number>(
+  const [compareLeftId, setCompareLeftId] = useState<number | null>(
     comparisonMode === "source"
-      ? (sourceFiles[1]?.id ?? 0)
-      : inspectedFileId === undefined
-        ? (allFiles.at(-2)?.id ?? allFiles.at(-1)?.id ?? 0)
-        : (gcodeFiles.find((file) => file.is_recommended && file.id !== inspectedFileId)?.id ??
-          allFiles.findLast((file) => file.id !== inspectedFileId)?.id ??
-          0),
+      ? (candidates[0]?.id ?? null)
+      : (inspectedFileId ?? allFiles.at(-1)?.id ?? null),
+  );
+  const [compareRightId, setCompareRightId] = useState<number | null>(
+    comparisonMode === "source"
+      ? (candidates[1]?.id ?? null)
+      : (allFiles.findLast((file) => file.id !== (inspectedFileId ?? allFiles.at(-1)?.id))?.id ??
+          null),
   );
   const compareLeft =
-    allFiles.find((f) => f.id === compareLeftId) ?? allFiles[allFiles.length - 1] ?? null;
+    candidates.find((file) => file.id === compareLeftId) ?? candidates.at(-1) ?? null;
   const compareRight =
-    allFiles.find((f) => f.id === compareRightId) ?? allFiles[allFiles.length - 2] ?? null;
-
-  // With nothing selected on both sides there is nothing to compare, so the
-  // empty outcome list is derived here instead of being cleared by the effect.
-  const hasComparePair = compareLeftId !== 0 && compareRightId !== 0;
-  const outcomes = hasComparePair ? fetchedOutcomes : NO_OUTCOMES;
+    candidates.find((file) => file.id === compareRightId && file.id !== compareLeft?.id) ??
+    candidates.findLast((file) => file.id !== compareLeft?.id) ??
+    null;
+  const fallback = allFiles[0] ?? null;
+  const leftId = compareLeft?.id ?? null;
+  const rightId = compareRight?.id ?? null;
+  const [session] = useState(getSessionVersion);
+  const currentSession = useSyncExternalStore(onAuthChange, getSessionVersion);
+  const outcomeKey =
+    auth.isAuthenticated && session === currentSession && leftId !== null && rightId !== null
+      ? `${session}:${modelId}:${leftId}:${rightId}`
+      : null;
+  const outcomes =
+    outcomeKey !== null && fetchedOutcomes?.key === outcomeKey ? fetchedOutcomes.rows : NO_OUTCOMES;
 
   useEffect(() => {
-    if (!hasComparePair) return;
-    getArtifactOutcomes(modelId, [compareLeftId, compareRightId])
-      .then(setFetchedOutcomes)
-      .catch(() => setFetchedOutcomes([]));
-  }, [modelId, compareLeftId, compareRightId, hasComparePair]);
+    if (outcomeKey === null || leftId === null || rightId === null) return;
+    let retired = false;
+    const publish = (rows: ArtifactOutcomeRead[]) => {
+      if (!retired && session === getSessionVersion())
+        setFetchedOutcomes({ key: outcomeKey, rows });
+    };
+    getArtifactOutcomes(modelId, [leftId, rightId])
+      .then(publish)
+      .catch(() => publish([]));
+    return () => {
+      retired = true;
+    };
+  }, [modelId, leftId, rightId, outcomeKey, session]);
 
   function startRevisionEdit(file: FileRead) {
     if (!auth.isAuthenticated) {
@@ -616,16 +639,25 @@ export function RevisionsTab({
           </div>
         </section>
 
-        {comparing && allFiles.length >= 2 && compareLeft && compareRight && (
+        {comparing && !fallback && (
+          <div className="space-y-3">
+            <p>{uiText("Add a second file to compare recorded information.")}</p>
+            <Button variant="ghost" onClick={() => setComparing(false)}>
+              {uiText("Back to revisions")}
+            </Button>
+          </div>
+        )}
+        {comparing && fallback && (
           <RevisionCompare
-            left={compareLeft}
-            right={compareRight}
+            left={compareLeft ?? fallback}
+            right={compareRight ?? compareLeft ?? fallback}
             outcomes={outcomes}
             files={allFiles}
             onSelectLeft={setCompareLeftId}
             onSelectRight={setCompareRightId}
             onClose={() => setComparing(false)}
-            initialMode={comparisonMode}
+            mode={mode}
+            onModeChange={(next) => setScope({ intent: comparisonMode, mode: next })}
           />
         )}
       </>

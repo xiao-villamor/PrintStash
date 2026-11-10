@@ -99,7 +99,7 @@ describe("SettingsTab recorded values", () => {
     expect(screen.getByRole("heading", { name: "Estimates" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Layers & structure" })).toBeVisible();
   });
-  it("preserves recorded zero measurements and estimates", () => {
+  it("preserves recorded zero settings", () => {
     renderSettings(
       aMetadata({
         layer_height_mm: 0,

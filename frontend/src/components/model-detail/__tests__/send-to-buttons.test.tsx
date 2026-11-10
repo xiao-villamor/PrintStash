@@ -502,13 +502,13 @@ describe("SendToQueue", () => {
 
     expect(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)).toBeDisabled();
   });
-});
 
-it("opens the overview queue action with the queue mode selected", async () => {
-  renderPanel({ initialDeliveryMode: "queue", open: true });
-  await waitFor(() =>
-    expect(screen.getByRole("button", { name: "Add to queue", pressed: true })).toBeVisible(),
-  );
-  expect(screen.queryByRole("button", { name: "Send to printer" })).not.toBeInTheDocument();
-  expect(enqueueFleetJob).not.toHaveBeenCalled();
+  it("opens the overview queue action with the queue mode selected", async () => {
+    renderPanel({ initialDeliveryMode: "queue", open: true });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Add to queue", pressed: true })).toBeVisible(),
+    );
+    expect(screen.queryByRole("button", { name: "Send to printer" })).not.toBeInTheDocument();
+    expect(enqueueFleetJob).not.toHaveBeenCalled();
+  });
 });

@@ -1,6 +1,5 @@
 "use client";
 
-import type { EditingBase } from "@/types/editing";
 import type { LibraryEntry } from "@/features/library/navigation-state";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { useMultipartPublication } from "@/features/library/multipart";
@@ -8,10 +7,9 @@ import { useLibraryStar } from "@/features/library/mutations";
 import { uiText } from "@/lib/locale";
 import { useUiLocale, useI18n } from "@/lib/i18n";
 import { LibraryCardSelection } from "@/components/library-card-selection";
-import { Star } from "lucide-react";
-import type { TagsReview } from "@/components/entity-tags-editor";
-import { EntityTagsDialog } from "@/components/entity-tags-dialog";
-import { getMultipartModel, replaceMultipartModelTags } from "@/lib/api";
+import { Star, Tags } from "lucide-react";
+import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
+import { Button } from "@/components/ui/button";
 import type { MultipartModelListItem, TagRead } from "@/types";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -26,6 +24,7 @@ export function MultipartModelCard({
   returnTo,
   availableTags = [],
   onDataChange,
+  onEditTags,
   selectable = false,
   selected = false,
   onToggleSelect,
@@ -37,6 +36,7 @@ export function MultipartModelCard({
   returnTo?: string;
   availableTags?: TagRead[];
   onDataChange?: () => void;
+  onEditTags?: (item: MultipartModelListItem) => void;
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
@@ -44,7 +44,7 @@ export function MultipartModelCard({
   useUiLocale();
   const { t } = useI18n();
   const starMutation = useLibraryStar();
-  const { publish, isCurrent } = useMultipartPublication(item.id);
+  const { isCurrent } = useMultipartPublication(item.id);
   const starBusy = starMutation.isPending;
   const starred =
     starMutation.isPending && starMutation.variables
@@ -59,30 +59,6 @@ export function MultipartModelCard({
     } catch (cause) {
       if (isCurrent()) toast.error(multipartError(cause, t, "multipart.favoriteError"));
     }
-  }
-
-  async function saveCardTags(
-    nextTags: string[],
-    signal: AbortSignal,
-    version: EditingBase = item,
-  ) {
-    if (!isCurrent() || signal.aborted) throw new DOMException("Editor retired", "AbortError");
-    const saved = await replaceMultipartModelTags(item.id, nextTags, version);
-    if (!(await publish(saved, signal)) || !isCurrent()) return;
-    onDataChange?.();
-    toast.success(t("multipart.tagsSaved"));
-  }
-
-  async function reviewCardTags(signal: AbortSignal): Promise<TagsReview> {
-    const latest = await getMultipartModel(item.id, { signal });
-    return {
-      tags: latest.tags,
-      canEdit: latest.effective_role === "edit" || latest.effective_role === "admin",
-      save: (tags, commandSignal) => saveCardTags(tags, commandSignal, latest),
-      adopt: async (commandSignal) => {
-        if (await publish(latest, commandSignal)) onDataChange?.();
-      },
-    };
   }
 
   return (
@@ -115,17 +91,29 @@ export function MultipartModelCard({
       </button>
       {canEditTags && (
         <div className="absolute right-2 top-12 z-10">
-          <EntityTagsDialog
-            entityLabel={item.name}
-            tags={item.tags}
-            availableTags={availableTags}
-            canEdit
-            help={t("multipart.tagsHelp")}
-            onSave={saveCardTags}
-            reviewLatest={reviewCardTags}
-            triggerMode="icon"
-            triggerClassName="bg-card/90 text-muted-foreground shadow-sm hover:bg-card hover:text-primary"
-          />
+          {onEditTags ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={
+                item.tags.length
+                  ? uiText("Edit tags for {value1}", { value1: item.name })
+                  : uiText("Add tags to {value1}", { value1: item.name })
+              }
+              title={item.tags.length ? uiText("Edit tags") : uiText("Add tags")}
+              onClick={() => onEditTags(item)}
+              className="bg-card/90 text-muted-foreground shadow-sm hover:bg-card hover:text-primary"
+            >
+              <Tags className="h-4 w-4" />
+            </Button>
+          ) : (
+            <MultipartModelTagsDialog
+              item={item}
+              availableTags={availableTags}
+              onDataChange={onDataChange}
+            />
+          )}
         </div>
       )}
       <LibraryItemLink

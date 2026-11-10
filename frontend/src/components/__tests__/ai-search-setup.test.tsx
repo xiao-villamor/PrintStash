@@ -494,10 +494,10 @@ describe("AiSearchSetup", () => {
         "GET /api/v1/config/ai-search/generations": json([aSearchGeneration({ state: "active" })]),
       },
     });
-    expect(await screen.findByRole("link", { name: "Try AI Search" })).toHaveAttribute(
-      "href",
-      "/search?q=a%20holder%20for%20my%20tools",
-    );
+    const href = (await screen.findByRole("link", { name: "Try AI Search" })).getAttribute("href");
+    const target = new URL(href ?? "", "http://test");
+    expect(target.pathname).toBe("/search");
+    expect(target.searchParams.get("q")).toBe("a holder for my tools");
     expect(screen.queryByRole("button", { name: "Prepare my library" })).not.toBeInTheDocument();
   });
   it("shows the check of the index in use", async () => {

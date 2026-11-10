@@ -26,14 +26,25 @@ describe("PageFailure", () => {
     expect(screen.getByText("403")).toBeVisible();
     expect(screen.queryByText("Sign in required")).not.toBeInTheDocument();
   });
-  it("retries the read and prevents duplicate submissions", async () => {
+  it("retries an unavailable read", async () => {
     const retry = vi.fn<() => void>();
     const user = userEvent.setup();
-    const view = render(<PageFailure kind="offline" onRetry={retry} />);
+    render(<PageFailure kind="offline" onRetry={retry} />);
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalledTimes(1);
-    view.rerender(<PageFailure kind="offline" onRetry={retry} retrying />);
-    expect(screen.getByRole("button", { name: "Retry" })).toBeDisabled();
+  });
+  it("prevents duplicate retries while a read is pending", async () => {
+    const retry = vi.fn<() => void>();
+    const user = userEvent.setup();
+    render(<PageFailure kind="offline" onRetry={retry} retrying />);
+    const button = screen.getByRole("button", { name: "Retry" });
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(retry).not.toHaveBeenCalled();
+  });
+  it("does not invent an HTTP status for a network failure", () => {
+    render(<PageFailure kind="offline" />);
+    expect(screen.getByRole("heading", { name: "Unable to connect" })).toBeVisible();
     expect(screen.queryByText("500")).not.toBeInTheDocument();
   });
   it("renders route recovery without router, session or query providers", () => {

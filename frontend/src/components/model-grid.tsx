@@ -94,6 +94,7 @@ import { MODEL_DND_MIME, captureModelDrag, readModelDrag, type ModelDrag } from 
 import { BatchToolbar } from "@/components/batch-toolbar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CollectionReadme } from "@/components/collection-readme";
+import { MultipartModelTagsDialog } from "@/components/multipart-model-tags-dialog";
 import { MultipartModelCard } from "@/components/multipart-model-card";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
 import { DocumentBrowser } from "@/components/document-browser";
@@ -503,6 +504,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   } = useTaxonomyCommands();
   const startup = useLibraryStartup();
   const settleStartup = startup.settle;
+  const requestStartup = startup.request;
   const filtersEnabled = startup.canLoad("filters");
   const savedViewsEnabled = startup.canLoad("saved-views");
   // Shared taxonomy facets from the TanStack Query cache: one cache entry shared
@@ -1398,6 +1400,17 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   const lastSelectedModelId = useRef<number | null>(null);
   const selectedModelSnapshot = useRef<Map<number, ModelListItem>>(new Map());
   const sortedModels = visibleModels;
+  const [multipartTagTarget, setMultipartTagTarget] = useState<{
+    item: MultipartModelListItem;
+    intent: number;
+  } | null>(null);
+  const openMultipartTagEditor = useCallback(
+    (item: MultipartModelListItem) => {
+      requestStartup("filters");
+      setMultipartTagTarget((previous) => ({ item, intent: (previous?.intent ?? 0) + 1 }));
+    },
+    [requestStartup],
+  );
   const openTagEditor = useCallback(
     (model: ModelListItem) => {
       setTagTarget(model);
@@ -3304,6 +3317,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                           origin={snapshot?.entry}
                           availableTags={tags}
                           onDataChange={refresh}
+                          onEditTags={openMultipartTagEditor}
                           selectable={selectMode}
                           selected={selectedMultipartRows.has(item.value.id)}
                           onToggleSelect={auth.isAuthenticated ? toggleMultipartSelect : undefined}
@@ -3484,6 +3498,24 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             onApplyTags={tagSelection}
             onDeleteSelection={deleteSelection}
             onClear={clearSelection}
+          />
+        )}
+        {multipartTagTarget && (
+          <MultipartModelTagsDialog
+            key={`${multipartTagTarget.item.id}:${multipartTagTarget.intent}`}
+            item={multipartTagTarget.item}
+            availableTags={tags}
+            onDataChange={refresh}
+            canEdit={
+              !authority.authorizationChanged &&
+              visibleMultipartModels.some(
+                (item) =>
+                  item.id === multipartTagTarget.item.id &&
+                  (item.effective_role === "edit" || item.effective_role === "admin"),
+              )
+            }
+            initialOpen
+            triggerMode="none"
           />
         )}
         {tagTarget && (

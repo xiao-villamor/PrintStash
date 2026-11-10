@@ -82,7 +82,7 @@ afterEach(() => {
 });
 
 describe("StatisticsPage", () => {
-  it("switches between overview and rankings while retaining the chart choice", async () => {
+  it("retains the chart choice after visiting Rankings", async () => {
     const user = userEvent.setup();
     renderStatistics();
     await screen.findByText("Most printed models");

@@ -9,13 +9,11 @@
 import { test, expect } from "./helpers";
 import { modelCard, uploadGcodeModel } from "./util";
 
-// A revision row scoped by its "Rev N" label + the per-row Edit control.
+// The compact table keeps one row group per Revision; its selected actionbar owns editing.
 function revRow(page: import("@playwright/test").Page, n: number) {
   return page
-    .locator("div")
-    .filter({ has: page.getByText(`Rev ${n}`, { exact: true }) })
-    .filter({ has: page.getByTitle("Edit revision") })
-    .last();
+    .locator("tbody")
+    .filter({ has: page.getByRole("button", { name: new RegExp(`^Rev ${n}\\b`) }) });
 }
 
 test.describe("revisions", () => {
@@ -45,18 +43,28 @@ test.describe("revisions", () => {
 
     // Promote Rev 2 to recommended + known-good; Rev 1 loses the marker. Only one
     // revision edits at a time, so the form's controls are unambiguous page-wide.
-    await revRow(page, 2).getByTitle("Edit revision").click();
-    await page.getByRole("checkbox").check();
+    await revRow(page, 2)
+      .getByRole("button", { name: /^Rev 2/ })
+      .click();
+    await page.getByRole("button", { name: "Edit revision", exact: true }).click();
+    await page
+      .getByRole("checkbox", { name: "Mark as recommended G-code for this model", exact: true })
+      .check();
     await page
       .getByRole("combobox")
       .filter({ has: page.getByRole("option", { name: "Known good" }) })
       .selectOption("known_good");
-    await page.getByRole("button", { name: "Save" }).click();
+    await page.getByRole("button", { name: "Save", exact: true }).click();
 
     await expect(revRow(page, 2).getByText("Recommended")).toBeVisible();
     await expect(revRow(page, 1).getByText("Recommended")).toHaveCount(0);
 
-    // With two revisions, the compare panel appears.
-    await expect(page.getByRole("heading", { name: /Compare Artifacts/ })).toBeVisible();
+    await expect(revRow(page, 2).getByText("Known good", { exact: true })).toBeVisible();
+
+    // Comparison is an explicit command in the compact Revisions toolbar.
+    await page.getByRole("button", { name: "Compare", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Compare revisions", exact: true }),
+    ).toBeVisible();
   });
 });

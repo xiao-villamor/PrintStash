@@ -433,7 +433,8 @@ jobs:
 
   browser-mock:
     name: Mock-API browser suite
-    runs-on: ubuntu-latest
+    # Playwright 1.60 cannot install Chromium on Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
@@ -467,7 +468,8 @@ jobs:
 
   browser-real:
     name: Real-backend browser (${{ matrix.suite }}, ${{ matrix.shard }}/${{ matrix.shards }})
-    runs-on: ubuntu-latest
+    # Playwright 1.60 cannot install Chromium on Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -708,7 +710,8 @@ jobs:
 
   library-startup:
     name: Production library startup (${{ matrix.distribution }})
-    runs-on: ubuntu-latest
+    # Playwright 1.60 cannot install Chromium on Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false

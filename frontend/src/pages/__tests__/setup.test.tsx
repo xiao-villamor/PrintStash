@@ -240,7 +240,7 @@ beforeEach(() => {
 });
 
 describe("SetupPage", () => {
-  it("shows the current setup step and the account fields in reading order", async () => {
+  it("presents the account setup step in reading order", async () => {
     renderSetup();
     await screen.findByLabelText("Username");
 

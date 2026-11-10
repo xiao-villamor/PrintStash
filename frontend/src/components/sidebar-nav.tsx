@@ -149,12 +149,28 @@ export function SidebarNav() {
     const label = t(item.labelKey);
     const active = isActive(item.id);
     return (
-      <Link
+      <a
         key={item.id}
         href={item.href}
         title={label}
         aria-current={active ? "page" : undefined}
         className={railClass(active)}
+        onClick={(event) => {
+          const target = event.currentTarget.getAttribute("target");
+          if (
+            event.defaultPrevented ||
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey ||
+            (target && target !== "_self") ||
+            event.currentTarget.hasAttribute("download")
+          )
+            return;
+          event.preventDefault();
+          router.push(item.href);
+        }}
       >
         <item.icon className="h-5 w-5" strokeWidth={1.6} aria-hidden />
         <span className="sr-only">{label}</span>
@@ -163,7 +179,7 @@ export function SidebarNav() {
             {pendingCount}
           </span>
         )}
-      </Link>
+      </a>
     );
   }
 

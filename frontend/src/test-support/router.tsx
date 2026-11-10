@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { parseAppSearch, stringifyAppSearch } from "@/lib/router-search";
+import { RouteError } from "@/components/route-error";
 
 export interface TestRoute {
   path: string;
@@ -41,7 +42,10 @@ export function TestRouter({
   const [router] = useState(() => {
     const history = createMemoryHistory({ initialEntries });
     if (initialIndex !== undefined) history.go(initialIndex - initialEntries.length + 1);
-    const root = createRootRoute({ component: routePath ? Outlet : Content });
+    const root = createRootRoute({
+      component: routePath ? Outlet : Content,
+      errorComponent: RouteError,
+    });
     const definitions = routes ?? [{ path: routePath ?? "/$", element: null }];
     const tree = root.addChildren(
       definitions.map(({ path }, index) =>

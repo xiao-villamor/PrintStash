@@ -1930,7 +1930,7 @@ describe("ModelBrowser", () => {
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
     });
 
-    it("waits for a member's permission and dismisses an unauthorized intent", async () => {
+    it("rejects an upload intent without verified edit access", async () => {
       const permission = Promise.withResolvers<Response>();
       const app = renderVault({
         at: "/?upload=1",

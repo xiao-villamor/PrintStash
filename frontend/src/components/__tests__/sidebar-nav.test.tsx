@@ -14,11 +14,12 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SidebarNav } from "@/components/sidebar-nav";
+import { usePathname, useSearchParams } from "@/lib/navigation";
 import {
   adminSession,
   json,
@@ -32,12 +33,29 @@ function anInboxItem(state = "review") {
   return { id: 1, state, source_kind: "url", display_title: "Benchy", results: [] };
 }
 
+function CurrentLocation() {
+  const pathname = usePathname();
+  const search = useSearchParams().toString();
+  return (
+    <output data-testid="rail-location">
+      {pathname}
+      {search ? `?${search}` : ""}
+    </output>
+  );
+}
+
 function renderNav(options: RenderAppOptions & { pending?: unknown[] } = {}) {
   const { pending = [], routes = {}, ...rest } = options;
-  return renderApp(<SidebarNav />, {
-    routes: { "GET /api/v1/inbox": json(pending), ...routes },
-    ...rest,
-  });
+  return renderApp(
+    <>
+      <SidebarNav />
+      <CurrentLocation />
+    </>,
+    {
+      routes: { "GET /api/v1/inbox": json(pending), ...routes },
+      ...rest,
+    },
+  );
 }
 
 beforeEach(() => {
@@ -69,6 +87,32 @@ describe("SidebarNav", () => {
         "href",
         "/?favorites=true",
       );
+    });
+
+    it("navigates to Favorites through the client router", async () => {
+      const user = userEvent.setup();
+      renderNav({ at: "/inbox" });
+      await user.click(screen.getByRole("link", { name: "Favorites" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("rail-location")).toHaveTextContent("/?favorites=true"),
+      );
+    });
+
+    it("leaves modified link clicks to the browser", () => {
+      renderNav({ at: "/inbox" });
+      const link = screen.getByRole("link", { name: "Favorites" });
+      let intercepted: boolean | undefined;
+      document.addEventListener(
+        "click",
+        (event) => {
+          intercepted = event.defaultPrevented;
+          event.preventDefault();
+        },
+        { once: true },
+      );
+      fireEvent.click(link, { button: 0, ctrlKey: true });
+      expect(intercepted).toBe(false);
+      expect(screen.getByTestId("rail-location")).toHaveTextContent("/inbox");
     });
 
     it("opens Trash through its settings section", () => {

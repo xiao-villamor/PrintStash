@@ -106,9 +106,15 @@ describe("formatPercent, formatTemperature, formatGrams, formatMillimeters, form
     expect(formatTemperature(0)).toBe("0°C");
   });
 
-  it("preserve recorded zero measurements and cost", () => {
+  it("preserves recorded zero weight", () => {
     expect(formatGrams(0)).toBe("0g");
+  });
+
+  it("preserves recorded zero length", () => {
     expect(formatMillimeters(0)).toBe("0mm");
+  });
+
+  it("preserves recorded zero cost", () => {
     expect(formatCost(0)).toBe("0.00");
     expect(formatCost(0, "es")).toBe("0,00");
   });

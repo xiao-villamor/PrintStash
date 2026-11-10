@@ -2251,7 +2251,7 @@ describe("SettingsPanel", () => {
   });
 
   describe("retention configuration editing", () => {
-    it("presents Trash as its own workspace and can return to Settings", async () => {
+    it("returns from the Trash workspace to Settings", async () => {
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=trash" });
       expect(await screen.findByRole("heading", { name: "Trash" })).toBeVisible();

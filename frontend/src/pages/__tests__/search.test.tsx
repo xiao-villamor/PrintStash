@@ -158,7 +158,7 @@ describe("Search results", () => {
       ).toBeGreaterThan(1),
     );
   });
-  it("shows available revision and print facts on a model result", async () => {
+  it("renders the available model result facts", async () => {
     results({
       routes: {
         "GET /api/v1/search?": json(

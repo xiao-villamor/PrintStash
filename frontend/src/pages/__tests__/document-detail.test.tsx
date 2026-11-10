@@ -134,7 +134,7 @@ describe("DocumentDetailPage", () => {
       expect(screen.queryByPlaceholderText(/Write markdown/)).toBeNull();
     });
 
-    it("exposes the selected mode while switching between editing and preview", async () => {
+    it("announces the active document mode", async () => {
       const user = userEvent.setup();
       renderDocument();
       const edit = await screen.findByRole("button", { name: "Edit" });
