@@ -645,8 +645,31 @@ describe("ModelDetail", () => {
       expect(await screen.findByText("2.5 ml", { exact: true })).toBeVisible();
       expect(screen.getByText("120", { exact: true })).toBeVisible();
       expect(screen.getByText("2.5 s", { exact: true })).toBeVisible();
-      expect(screen.queryByText(/No sliced G-code yet/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/No G-code revision yet/)).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Send to printer" })).not.toBeInTheDocument();
+    });
+
+    it("offers G-code preview for a 3MF without ordinary revisions", async () => {
+      const view = renderDetail({
+        model: aModel({
+          files: [aFile({ file_type: "3mf", original_filename: "sliced.gcode.3mf" })],
+        }),
+        routes: { "GET /api/v1/files/10/plates": json({ state: "skipped", plates: [] }) },
+      });
+
+      expect(await screen.findByRole("button", { name: "GCode" })).toBeVisible();
+      expect(view.requests().some(({ url }) => url.endsWith("/gcode-plates"))).toBe(false);
+    });
+
+    it("labels a sliced archive without a separate revision accurately", async () => {
+      renderDetail({
+        model: aModel({
+          files: [aFile({ file_type: "3mf", original_filename: "sliced.gcode.3mf" })],
+        }),
+        routes: { "GET /api/v1/files/10/plates": json({ state: "skipped", plates: [] }) },
+      });
+
+      expect(await screen.findByText("No G-code revision", { exact: true })).toBeVisible();
     });
 
     it("offers each plate of a multi-plate 3MF", async () => {

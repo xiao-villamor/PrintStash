@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Multi-plate G-code previews.** Browse the sliced plates inside Bambu Studio and OrcaSlicer `.3mf` and `.gcode.3mf` files, including exports without source meshes. Choose a file and a plate in the G-code viewer; ordinary G-code revisions keep their existing preview.
+
 - CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.
 - Collection Documents accepts spreadsheets, Word files and arbitrary binary attachments, including other resin formats, with original-byte downloads.
 

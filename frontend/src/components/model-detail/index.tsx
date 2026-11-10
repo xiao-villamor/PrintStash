@@ -100,8 +100,8 @@ const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
 );
 
-const GcodeViewer = lazy(() =>
-  import("@/components/gcode-viewer").then((m) => ({ default: m.GcodeViewer })),
+const GcodePreview = lazy(() =>
+  import("./gcode-preview").then((m) => ({ default: m.GcodePreview })),
 );
 
 const ViewerFallback = <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />;
@@ -590,6 +590,7 @@ function ModelDetailPresentation({
       f.file_type === "step",
   );
   const hasGcode = gcodeFiles.length > 0;
+  const hasToolpathPreview = hasGcode || sourceFiles.some((file) => file.file_type === "3mf");
   const filePlates = useFilePlates(model.id, meshFile?.file_type === "3mf" ? meshFile.id : null);
   // A single plate is the whole build; only a multi-plate project offers a choice.
   const plates = filePlates !== null && filePlates.plates.length > 1 ? filePlates.plates : [];
@@ -1055,12 +1056,11 @@ function ModelDetailPresentation({
             style={{ boxShadow: "inset 0 0 0 1px var(--outline-variant)" }}
           >
             <div className="relative flex min-h-80 w-full flex-1 items-center justify-center md:min-h-0">
-              {viewerMode === "gcode" && hasGcode ? (
+              {viewerMode === "gcode" && hasToolpathPreview ? (
                 <Suspense fallback={ViewerFallback}>
-                  <GcodeViewer
-                    url={`/api/v1/files/${(recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])!.id}/toolpath`}
-                    printerBedMm={getBedSize(meta?.printer_model)}
-                    screenshotName={model.slug || model.name}
+                  <GcodePreview
+                    files={sortedFiles}
+                    bedSizeFor={(file) => getBedSize(file.metadata?.printer_model)}
                   />
                 </Suspense>
               ) : meshFile ? (
@@ -1113,7 +1113,7 @@ function ModelDetailPresentation({
             )}
             {/* On phones the toolbar owns space above the preview. Desktop
                 keeps the overlay without taking space from the 3D canvas. */}
-            {(meshFile || hasGcode) && (
+            {(meshFile || hasToolpathPreview) && (
               <div className="pointer-events-none relative order-first m-3 flex min-w-0 self-stretch flex-col gap-2 md:absolute md:inset-x-4 md:top-4 md:z-10 md:m-0 xl:flex-row xl:items-start xl:justify-between">
                 <ViewerToolbar
                   displayMode={displayMode}
@@ -1123,45 +1123,28 @@ function ModelDetailPresentation({
                   controls={viewerControls}
                   viewerMode={viewerMode}
                   setViewerMode={setViewerMode}
-                  hasGcode={hasGcode}
+                  hasGcode={hasToolpathPreview}
                   viewerReady={viewerReady}
                 />
-                {(meshFile || (viewerMode === "gcode" && hasGcode)) && (
+                {meshFile && viewerMode === "model" && (
                   <div className="min-w-0 max-w-full self-stretch xl:max-w-[60%] xl:self-start">
                     <div className="rounded border border-outline-variant bg-surface-container-lowest/90 px-2.5 py-1.5 text-right backdrop-blur">
-                      {viewerMode === "gcode" ? (
-                        <>
-                          <p className="truncate font-mono text-2xs text-on-surface">
-                            {
-                              (recommendedGcode ?? gcodeFiles[gcodeFiles.length - 1])
-                                ?.original_filename
-                            }
-                          </p>
-                          <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                            {uiText("G-code toolpath")}
-                          </p>
-                        </>
-                      ) : (
-                        <>
-                          <p className="truncate font-mono text-2xs text-on-surface">
-                            {uiText("Viewing: ")}
-                            {meshFile?.original_filename}
-                            {shownPlate &&
-                              uiText(" · Plate {value1}", { value1: plateLabel(shownPlate) })}
-                          </p>
-                          <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                            {uiText("Source model")}
-                            {recommendedGcode
-                              ? uiText(" · Recommended G-code: Rev {value1}", {
-                                  value1: String(
-                                    recommendedGcode.gcode_revision_number ??
-                                      recommendedGcode.version,
-                                  ),
-                                })
-                              : ""}
-                          </p>
-                        </>
-                      )}
+                      <p className="truncate font-mono text-2xs text-on-surface">
+                        {uiText("Viewing: ")}
+                        {meshFile?.original_filename}
+                        {shownPlate &&
+                          uiText(" · Plate {value1}", { value1: plateLabel(shownPlate) })}
+                      </p>
+                      <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
+                        {uiText("Source model")}
+                        {recommendedGcode
+                          ? uiText(" · Recommended G-code: Rev {value1}", {
+                              value1: String(
+                                recommendedGcode.gcode_revision_number ?? recommendedGcode.version,
+                              ),
+                            })
+                          : ""}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -1418,7 +1401,7 @@ function ModelDetailPresentation({
                     <div className="flex items-center gap-1.5 px-2 py-1 bg-surface-container-lowest border border-outline-variant rounded">
                       <Wifi className="h-3 w-3 text-on-surface-variant" />
                       <span className="font-mono text-xs text-on-surface-variant">
-                        {uiText("No G-code file")}
+                        {uiText("No G-code revision")}
                       </span>
                     </div>
                   </div>
