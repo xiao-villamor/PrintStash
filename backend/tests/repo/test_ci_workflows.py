@@ -71,6 +71,9 @@ def _api_run(
 
 
 class TestQuickGate:
+    def test_browser_smoke_uses_supported_runner(self) -> None:
+        assert _workflow("ci.yml")["jobs"]["browser-smoke"]["runs-on"] == "ubuntu-24.04"
+
     def test_builds_native_orca_artifact(self) -> None:
         steps = _workflow("ci.yml")["jobs"]["backend"]["steps"]
         build = next(
