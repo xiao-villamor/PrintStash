@@ -57,8 +57,6 @@ describe("test entry points", () => {
       "deep-ci.yml:library-startup",
       "tooling-experiments.yml:frontend",
     ]);
-    expect(
-      jobs.filter((job) => !/^    runs-on: ubuntu-24\.04[ \t]*$/m.test(job.body)),
-    ).toEqual([]);
+    expect(jobs.filter((job) => !/^    runs-on: ubuntu-24\.04[ \t]*$/m.test(job.body))).toEqual([]);
   });
 });
