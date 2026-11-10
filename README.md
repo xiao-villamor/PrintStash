@@ -121,7 +121,7 @@ for setup, firmware limits, and unsupported actions.
 | --- | --- |
 | Installation | [Setup](https://www.printstash.org/en/docs/getting-started/installation/) · [First run](https://www.printstash.org/en/docs/getting-started/first-run/) · [Upgrading](https://www.printstash.org/en/docs/guides/upgrading/) |
 | Library | [Folders and NAS](https://www.printstash.org/en/docs/guides/shared-volumes/) · [Multipart models](https://www.printstash.org/en/docs/guides/multipart-models/) |
-| Printing | [Printers](https://www.printstash.org/en/docs/guides/printers/) · [OrcaSlicer](https://www.printstash.org/en/docs/guides/user-guide/#skip-the-manual-upload-the-orcaslicer-hook) |
+| Printing | [Printers](https://www.printstash.org/en/docs/guides/printers/) · [OrcaSlicer](docs/orcaslicer.md) |
 | Storage | [Provider support](https://www.printstash.org/en/docs/guides/storage-providers/) · [Backups](https://www.printstash.org/en/docs/guides/backup-and-restore/) · [Data safety](https://www.printstash.org/en/docs/guides/data-safety/) |
 | Access | [Users and permissions](https://www.printstash.org/en/docs/guides/users-and-access/) |
 | Development | [Developer guide](https://www.printstash.org/en/docs/contributing/development/) · [API](https://www.printstash.org/en/docs/reference/api/) |

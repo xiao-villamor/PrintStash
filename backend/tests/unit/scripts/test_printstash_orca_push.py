@@ -12,6 +12,7 @@ import importlib.util
 import json
 import sys
 from types import ModuleType
+from urllib.error import URLError
 from zipfile import ZipFile
 
 import pytest
@@ -461,3 +462,54 @@ class TestSlicerTempFile:
 
         assert orca_hook.main() == 0
         assert b'filename="bracket_PLA.gcode"' in sent[0]
+
+
+class TestMultipartFilename:
+    def test_uses_explicit_host_filename(self, orca_hook, tmp_path, monkeypatch):
+        path = tmp_path / "temporary.pp"
+        path.write_bytes(b"G28\n")
+        monkeypatch.setenv("SLIC3R_PP_OUTPUT_NAME", "stale.gcode")
+
+        body, _ = orca_hook.build_multipart({}, path, filename="actual.gcode")
+
+        assert b'filename="actual.gcode"' in body
+        assert b"stale.gcode" not in body
+
+    def test_escapes_multipart_filename(self, orca_hook, tmp_path):
+        path = tmp_path / "temporary.pp"
+        path.write_bytes(b"G28\n")
+
+        body, _ = orca_hook.build_multipart(
+            {}, path, filename='part"\r\nInjected.gcode'
+        )
+
+        assert b'filename="part%22%0D%0AInjected.gcode"' in body
+
+
+class TestPush:
+    @pytest.mark.parametrize(
+        ("retries", "delays"),
+        [
+            pytest.param(1, [], id="one-attempt"),
+            pytest.param(3, [2, 4], id="three-attempts"),
+        ],
+    )
+    def test_waits_only_between_retry_attempts(
+        self, orca_hook, tmp_path, monkeypatch, retries, delays
+    ):
+        path = tmp_path / "part.gcode"
+        path.write_bytes(b"G28\n")
+        slept = []
+
+        def unavailable(*args, **kwargs):
+            raise URLError("offline")
+
+        monkeypatch.setattr(orca_hook.urlrequest, "urlopen", unavailable)
+        monkeypatch.setattr(orca_hook.time, "sleep", slept.append)
+
+        result = orca_hook.push(
+            "https://example.test", "fake-token", path, {}, retries=retries
+        )
+
+        assert result is False
+        assert slept == delays
