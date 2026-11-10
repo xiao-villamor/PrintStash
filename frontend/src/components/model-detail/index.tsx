@@ -1126,7 +1126,7 @@ function ModelDetailPresentation({
           active={activeTab}
           onChange={selectTab}
           showIndicator={false}
-          className="model-detail-tabs shrink-0 overflow-x-auto border-b border-outline-variant"
+          className="model-detail-tabs shrink-0 overflow-x-auto border-b"
           tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           activeTabClassName="text-foreground font-semibold"
         />

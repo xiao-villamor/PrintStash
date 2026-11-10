@@ -140,6 +140,7 @@
   gap: 24px;
   justify-content: flex-start;
   margin-inline: 20px;
+  border-bottom-color: var(--border-strong);
 }
 .model-detail-layout {
   padding: 16px 20px 20px;
@@ -773,7 +774,7 @@
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -1px;
+  bottom: 0;
   height: 2px;
   background: var(--foreground);
 }
