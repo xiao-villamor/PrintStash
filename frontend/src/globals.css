@@ -50,6 +50,7 @@
     --success: #067647;
     --success-foreground: #ffffff;
     --warning: #b54708;
+    --status-test-dot: #f79009;
     --warning-foreground: #ffffff;
 
     /* Data visualisation palette. Stable semantic order across themes. */

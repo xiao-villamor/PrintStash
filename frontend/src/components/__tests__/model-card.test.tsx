@@ -9,13 +9,16 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLocation } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelCard } from "@/components/model-card";
 import { json, renderApp, type RouteTable } from "@/test-support/render";
+import { aModel, aRevision } from "@/test-support/factories";
+import type { ReactElement } from "react";
+import type { RenderAppOptions } from "@/test-support/render";
 import type { ModelListItem, PrintSummaryRead } from "@/types";
 
 const model: ModelListItem = {
@@ -52,9 +55,31 @@ function printSummary(over: Partial<PrintSummaryRead> = {}): PrintSummaryRead {
   };
 }
 
+function renderModelCard(element: ReactElement, options: RenderAppOptions = {}) {
+  return renderApp(element, {
+    ...options,
+    routes: {
+      "GET /api/v1/models/1": json(
+        aModel({
+          ...model,
+          files: [
+            aRevision({ revision_label: "a", revision_status: "needs_test", is_recommended: true }),
+          ],
+        }),
+      ),
+      "GET /api/v1/models/1/print-jobs": json([]),
+      ...options.routes,
+    },
+  });
+}
+async function openCardMenu(name = model.name) {
+  fireEvent.contextMenu(screen.getByRole("link", { name }));
+  await screen.findByRole("menu");
+}
+
 /** The card in the app shell, which is what its star button talks through. */
 function renderCard(over: Partial<ModelListItem> = {}, routes: RouteTable = {}) {
-  return renderApp(<ModelCard model={{ ...model, ...over }} />, {
+  return renderModelCard(<ModelCard model={{ ...model, ...over }} />, {
     routes: {
       "PUT /api/v1/models/1/star": json({ model_id: 1, starred: true }),
       "DELETE /api/v1/models/1/star": json({ model_id: 1, starred: false }),
@@ -80,7 +105,7 @@ describe("ModelCard", () => {
   it("selects from the checkbox without opening the Model", async () => {
     const user = userEvent.setup();
     const onToggleSelect = vi.fn<(id: number, range?: boolean) => void>();
-    renderApp(
+    renderModelCard(
       <>
         <ModelCard model={model} onToggleSelect={onToggleSelect} />
         <CardLocation />
@@ -96,7 +121,7 @@ describe("ModelCard", () => {
 
   it("opens the Model detail from its card", async () => {
     const user = userEvent.setup();
-    renderApp(
+    renderModelCard(
       <>
         <ModelCard model={model} />
         <CardLocation />
@@ -122,7 +147,7 @@ describe("ModelCard", () => {
     it("reports the Model under the pointer", async () => {
       const user = userEvent.setup();
       const onIntent = vi.fn<(id: number | null) => void>();
-      renderApp(<ModelCard model={model} onIntent={onIntent} />);
+      renderModelCard(<ModelCard model={model} onIntent={onIntent} />);
 
       await user.hover(screen.getByRole("link", { name: /Cam Holder v4/ }));
 
@@ -132,7 +157,7 @@ describe("ModelCard", () => {
     it("reports that the pointer left", async () => {
       const user = userEvent.setup();
       const onIntent = vi.fn<(id: number | null) => void>();
-      renderApp(<ModelCard model={model} onIntent={onIntent} />);
+      renderModelCard(<ModelCard model={model} onIntent={onIntent} />);
       const link = screen.getByRole("link", { name: /Cam Holder v4/ });
       await user.hover(link);
 
@@ -144,7 +169,7 @@ describe("ModelCard", () => {
     it("reports the Model that receives keyboard focus", async () => {
       const user = userEvent.setup();
       const onIntent = vi.fn<(id: number | null) => void>();
-      renderApp(<ModelCard model={model} onIntent={onIntent} />);
+      renderModelCard(<ModelCard model={model} onIntent={onIntent} />);
 
       await user.tab();
       while (document.activeElement?.getAttribute("href") !== "/models/1") await user.tab();
@@ -155,7 +180,7 @@ describe("ModelCard", () => {
     it("stays silent while cards are being selected", async () => {
       const user = userEvent.setup();
       const onIntent = vi.fn<(id: number | null) => void>();
-      renderApp(<ModelCard model={model} selectable onIntent={onIntent} />);
+      renderModelCard(<ModelCard model={model} selectable onIntent={onIntent} />);
 
       await user.hover(screen.getByRole("link", { name: /Cam Holder v4/ }));
 
@@ -165,7 +190,7 @@ describe("ModelCard", () => {
 
   it("opens inline inspection while retaining its native full-page fallback", async () => {
     const onInspect = vi.fn<(id: number, opener: HTMLElement) => void>();
-    renderApp(
+    renderModelCard(
       <>
         <ModelCard model={model} onInspect={onInspect} />
         <CardLocation />
@@ -179,44 +204,49 @@ describe("ModelCard", () => {
   });
 
   describe("quick tag access", () => {
-    it("offers adding tags on an editable untagged card", () => {
-      renderApp(<ModelCard model={model} onEditTags={vi.fn<(item: ModelListItem) => void>()} />);
+    it("offers adding tags on an editable untagged card", async () => {
+      renderModelCard(
+        <ModelCard model={model} onEditTags={vi.fn<(item: ModelListItem) => void>()} />,
+      );
 
-      expect(screen.getByRole("button", { name: "Add tags to Cam Holder v4" })).toBeVisible();
+      await openCardMenu();
+      expect(screen.getByRole("menuitem", { name: "Add tags to Cam Holder v4" })).toBeVisible();
     });
 
-    it("offers editing tags when the card already has one", () => {
-      renderApp(
+    it("offers editing tags when the card already has one", async () => {
+      renderModelCard(
         <ModelCard
           model={{ ...model, tags: ["Workshop"] }}
           onEditTags={vi.fn<(item: ModelListItem) => void>()}
         />,
       );
 
-      expect(screen.getByRole("button", { name: "Edit tags for Cam Holder v4" })).toBeVisible();
+      await openCardMenu();
+      expect(screen.getByRole("menuitem", { name: "Edit tags for Cam Holder v4" })).toBeVisible();
     });
 
-    it("hides tag editing from a view-only card", () => {
-      renderApp(
+    it("hides tag editing from a view-only card", async () => {
+      renderModelCard(
         <ModelCard
           model={{ ...model, effective_role: "view" }}
           onEditTags={vi.fn<(item: ModelListItem) => void>()}
         />,
       );
 
-      expect(screen.queryByRole("button", { name: /tags (to|for) Cam Holder v4/ })).toBeNull();
+      await openCardMenu();
+      expect(screen.queryByRole("menuitem", { name: /tags (to|for) Cam Holder v4/ })).toBeNull();
     });
   });
 
   it("shows revision status alongside a custom revision label", () => {
     // The card links to the model detail route, so it needs a real router.
     // `thumbnail_url: null` keeps the thumbnail hook from touching the network.
-    renderApp(<ModelCard model={model} />);
+    renderModelCard(<ModelCard model={model} />);
 
     expect(screen.getByLabelText("Revision status: Needs Test; label: a")).toHaveTextContent(
-      "Needs Test",
+      "Needs test",
     );
-    expect(screen.getByText("a")).toBeVisible();
+    expect(screen.getByTitle("a")).toBeVisible();
   });
   describe("the metrics on the face of the card", () => {
     it("shows the layer height the slicer recorded", () => {
@@ -272,7 +302,8 @@ describe("ModelCard", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard();
 
-      await user.click(screen.getByRole("button", { name: "Add Cam Holder v4 to favorites" }));
+      await openCardMenu();
+      await user.click(screen.getByRole("menuitem", { name: "Add Cam Holder v4 to favorites" }));
 
       await waitFor(() =>
         expect(requestsWithMethod("PUT").some((call) => call.url.endsWith("/star"))).toBe(true),
@@ -284,10 +315,11 @@ describe("ModelCard", () => {
       const pending = Promise.withResolvers<Response>();
       renderCard({}, { "PUT /api/v1/models/1/star": () => pending.promise });
 
-      await user.click(screen.getByRole("button", { name: "Add Cam Holder v4 to favorites" }));
+      await openCardMenu();
+      await user.click(screen.getByRole("menuitem", { name: "Add Cam Holder v4 to favorites" }));
 
       expect(
-        screen.getByRole("button", { name: "Remove Cam Holder v4 from favorites" }),
+        screen.getByRole("menuitem", { name: "Remove Cam Holder v4 from favorites" }),
       ).toBeDisabled();
       await act(async () => pending.resolve(json({ model_id: 1, starred: true })));
     });
@@ -298,11 +330,12 @@ describe("ModelCard", () => {
       const user = userEvent.setup();
       renderCard({}, { "PUT /api/v1/models/1/star": json({ detail: "forbidden" }, 403) });
 
-      await user.click(screen.getByRole("button", { name: "Add Cam Holder v4 to favorites" }));
+      await openCardMenu();
+      await user.click(screen.getByRole("menuitem", { name: "Add Cam Holder v4 to favorites" }));
 
       await waitFor(() =>
         expect(
-          screen.getByRole("button", { name: "Add Cam Holder v4 to favorites" }),
+          screen.getByRole("menuitem", { name: "Add Cam Holder v4 to favorites" }),
         ).toBeInTheDocument(),
       );
     });
@@ -311,7 +344,10 @@ describe("ModelCard", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderCard({ starred: true });
 
-      await user.click(screen.getByRole("button", { name: "Remove Cam Holder v4 from favorites" }));
+      await openCardMenu();
+      await user.click(
+        screen.getByRole("menuitem", { name: "Remove Cam Holder v4 from favorites" }),
+      );
 
       await waitFor(() =>
         expect(requestsWithMethod("DELETE").some((call) => call.url.endsWith("/star"))).toBe(true),
@@ -327,26 +363,30 @@ describe("localized model card", () => {
       "printstash.card.metrics",
       JSON.stringify(["layer_height", "material", "file_count"]),
     );
-    renderApp(<ModelCard model={{ ...model, name: "Files", print_summary: printSummary() }} />, {
-      locale: "es",
-    });
+    renderModelCard(
+      <ModelCard model={{ ...model, name: "Files", print_summary: printSummary() }} />,
+      {
+        locale: "es",
+      },
+    );
     expect(screen.getByText("Files", { exact: true })).toBeVisible();
     expect(screen.getByLabelText("CAPA: 0,20 mm")).toBeVisible();
     expect(screen.getByLabelText("ARCH: 2")).toBeVisible();
     expect(screen.getByText("0,20 mm", { exact: true })).toBeVisible();
     expect(screen.getByText("PLA", { exact: true })).toBeVisible();
   });
-  it("localizes card actions while preserving the model name", () => {
+  it("localizes card actions while preserving the model name", async () => {
     localStorage.setItem("printstash.locale", "es");
-    renderApp(
+    renderModelCard(
       <ModelCard
         model={{ ...model, name: "Files" }}
         onEditTags={vi.fn<(item: ModelListItem) => void>()}
       />,
       { locale: "es" },
     );
-    expect(screen.getByRole("button", { name: "Añadir Files a favoritos" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Añadir etiquetas a Files" })).toBeVisible();
+    await openCardMenu("Files");
+    expect(screen.getByRole("menuitem", { name: "Añadir Files a favoritos" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Añadir etiquetas a Files" })).toBeVisible();
   });
 });
 
@@ -369,8 +409,9 @@ describe("OpenDesign Model card facts", () => {
   it("keeps the full tag set in the card's edit action", async () => {
     const tag = "An intentionally long library tag that exceeds a narrow card";
     const onEditTags = vi.fn<(item: ModelListItem) => void>();
-    renderApp(<ModelCard model={{ ...model, tags: [tag] }} onEditTags={onEditTags} />);
-    await userEvent.click(screen.getByRole("button", { name: "Edit tags for Cam Holder v4" }));
+    renderModelCard(<ModelCard model={{ ...model, tags: [tag] }} onEditTags={onEditTags} />);
+    await openCardMenu();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Edit tags for Cam Holder v4" }));
     expect(onEditTags).toHaveBeenCalledWith(expect.objectContaining({ tags: [tag] }));
   });
 });

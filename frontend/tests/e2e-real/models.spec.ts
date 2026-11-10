@@ -25,6 +25,17 @@ test.describe("model library", () => {
       // ── Upload ────────────────────────────────────────────────────────────────
       await uploadModel(page, name, { gcode: true, tag });
 
+      // Resolve the uploaded revision through the existing API from the card.
+      const card = modelCard(page, name).locator("xpath=ancestor::article");
+      const download = page.waitForEvent("download");
+      await card.getByRole("button", { name: "Download Rev 1", exact: true }).click();
+      expect((await download).suggestedFilename()).toContain(name);
+      await card.getByRole("button", { name: "Print Rev 1", exact: true }).click();
+      await expect(
+        page.getByRole("dialog", { name: "Send Rev 1 to printer", exact: true }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+
       // ── Quick rename keeps the existing Model and its tags ────────────────────
       await openModelPage(page, name);
       const modelUrl = page.url();

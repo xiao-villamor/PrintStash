@@ -41,6 +41,80 @@ async function openToolpath(page: Page) {
 }
 
 test.describe("model detail route", () => {
+  test("renders prototype card actions outside the navigation link", async ({ page }) => {
+    const problems = await collectPageProblems(page);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.route("**/api/v1/models/1", async (route) => {
+      const response = await route.fetch();
+      const model: ModelRead = await response.json();
+      model.files = model.files.map((file) =>
+        file.file_type === "stl"
+          ? {
+              ...file,
+              metadata: aMetadata({ bbox_x_mm: 210, bbox_y_mm: 110, bbox_z_mm: 40 }),
+            }
+          : file,
+      );
+      await route.fulfill({ response, json: model });
+    });
+    await page.goto("/");
+    const link = page.getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true });
+    const card = link.locator("xpath=ancestor::article");
+    await expect(card.getByText("210 × 110 × 40 mm", { exact: true })).toBeVisible();
+    await expect(card.getByText("Rev 1", { exact: true })).toBeVisible();
+    const thumbnail = link.getByRole("img", { name: "skadis_kitchen-roll_screw", exact: true });
+    await expect(thumbnail).toBeVisible();
+    const thumbnailScale = await thumbnail.evaluate(
+      (image) =>
+        image.getBoundingClientRect().width / image.parentElement!.getBoundingClientRect().width,
+    );
+    expect(thumbnailScale).toBeCloseTo(0.3, 2);
+    await expect(card.getByText("OK 2× on ender", { exact: true })).toBeVisible();
+    const print = card.getByRole("button", { name: "Print Rev 1", exact: true });
+    const download = card.getByRole("button", { name: "Download Rev 1", exact: true });
+    const printBox = await print.boundingBox();
+    const downloadBox = await download.boundingBox();
+    expect(printBox?.width).toBe(28);
+    expect(downloadBox?.y).toBe(printBox?.y);
+    expect(await print.evaluate((button) => button.closest("a"))).toBeNull();
+    await expect(card.getByText("On printer", { exact: true })).toHaveCount(0);
+    await print.click();
+    await expect(
+      page.getByRole("dialog", { name: "Send Rev 1 to printer", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    const completed = page.waitForEvent("download");
+    await download.click();
+    expect((await completed).suggestedFilename()).toMatch(/\.gcode$/);
+    await expect(page).toHaveURL((url) => url.pathname === "/");
+    await link.focus();
+    await page.keyboard.press("Shift+F10");
+    await expect(
+      page.getByRole("menuitem", { name: "Edit tags for skadis_kitchen-roll_screw", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(link).toBeFocused();
+    expect(problems).toEqual([]);
+  });
+
+  test("keeps the prototype detail header free of added icon controls", async ({ page }) => {
+    await page.goto("/models/1");
+    const title = page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true });
+    const header = title.locator("xpath=ancestor::header");
+    await expect(header.getByRole("button", { name: "Favorite", exact: true })).toBeVisible();
+    await expect(header.getByRole("button", { name: "Share", exact: true })).toBeVisible();
+    await expect(header.locator("svg")).toHaveCount(0);
+    const rename = header.getByRole("button", {
+      name: "Rename skadis_kitchen-roll_screw",
+      exact: true,
+    });
+    await rename.focus();
+    await page.keyboard.press("Shift+F10");
+    await expect(page.getByRole("menuitem", { name: "Edit details", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(rename).toBeFocused();
+  });
+
   test("downloads a rendered toolpath capture", async ({ page }) => {
     const preview = await openToolpath(page);
     const completed = page.waitForEvent("download");
@@ -257,7 +331,7 @@ test.describe("model detail route", () => {
     const title = page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true });
     const tags = page.getByRole("button", { name: "Edit tags for skadis_kitchen-roll_screw" });
     const favorite = page.getByRole("button", { name: "Favorite", exact: true });
-    const actions = page.getByRole("button", { name: "Model actions", exact: true });
+    const actions = page.getByRole("button", { name: "Share", exact: true });
     await expect(tags).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
     const header = title.locator("xpath=ancestor::header");
@@ -294,7 +368,9 @@ test.describe("model detail route", () => {
     // An ordinary header action remains usable while the title editor is open.
     await actions.click();
     await expect(editor).toHaveCount(0);
-    await expect(page.getByRole("menuitem", { name: /Edit details/ })).toBeVisible();
+    await expect(
+      page.getByRole("dialog", { name: "Share skadis_kitchen-roll_screw", exact: true }),
+    ).toBeVisible();
   });
 
   test("keeps missing-name feedback inside the compact title editor", async ({ page }) => {
@@ -397,7 +473,7 @@ test.describe("model detail route", () => {
 
     await page.getByRole("button", { name: "Retry", exact: true }).click();
 
-    await expect(page.getByRole("button", { name: "Model actions" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Share", exact: true })).toBeVisible();
     await expect(page.getByText("Couldn’t load this model")).toHaveCount(0);
     await expect(page).toHaveURL((url) => url.pathname === "/models/1");
   });
@@ -424,7 +500,7 @@ test.describe("model detail route", () => {
       });
     });
     await page.goto("/models/1");
-    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
     await page.getByRole("menuitem", { name: /Edit details/ }).click();
     await page.getByRole("textbox", { name: "Name (required)" }).fill("Saved draft");
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
@@ -470,7 +546,7 @@ test.describe("model detail route", () => {
       });
     });
     await page.goto("/models/1");
-    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
     await page.getByRole("menuitem", { name: /Edit details/ }).click();
     await page.getByRole("textbox", { name: "Name (required)" }).fill("My browser draft");
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
@@ -913,7 +989,7 @@ test.describe("model detail route", () => {
   test("model detail uses focused send dialog and compact actions", async ({ page }) => {
     await page.goto("/models/1");
 
-    await page.getByRole("button", { name: "Model actions" }).click();
+    await page.getByRole("heading", { level: 1 }).click({ button: "right" });
     await expect(page.getByRole("menuitem", { name: "Share" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Edit details" })).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "Delete model" })).toBeVisible();

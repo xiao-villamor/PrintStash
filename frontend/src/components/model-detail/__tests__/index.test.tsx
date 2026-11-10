@@ -141,7 +141,7 @@ function renderDetail(
 /** Open the header's actions menu, which is where every write action lives. */
 async function openActions(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText("Benchy");
-  await user.click(screen.getByRole("button", { name: "Model actions" }));
+  await user.pointer({ target: screen.getByRole("heading", { level: 1 }), keys: "[MouseRight]" });
 }
 
 /** Open the metadata drawer while the Model page remains visible. */
@@ -230,7 +230,7 @@ describe("ModelDetail", () => {
       expect(screen.getByRole("heading", { level: 1, name: "Benchy" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Add tags to Benchy" })).toBeVisible();
       expect(screen.getByRole("button", { name: "Favorite" })).toBeVisible();
-      expect(screen.getByRole("button", { name: "Model actions" })).toBeVisible();
+      expect(screen.getByRole("button", { name: "Share" })).toBeVisible();
       expect(screen.queryByPlaceholderText("Add a description…")).not.toBeInTheDocument();
     });
 
@@ -368,7 +368,10 @@ describe("ModelDetail", () => {
       await user.dblClick(screen.getByRole("heading", { level: 1, name: "Benchy" }));
       expect(screen.getByRole("textbox", { name: "Model name" })).toHaveValue("Saved title");
       expect(screen.getByRole("textbox", { name: "Model name" })).toBeDisabled();
-      await user.click(screen.getByRole("button", { name: "Model actions" }));
+      await user.pointer({
+        target: screen.getByRole("heading", { level: 1 }),
+        keys: "[MouseRight]",
+      });
       await user.click(screen.getByRole("menuitem", { name: "Edit details" }));
       expect(screen.getByRole("textbox", { name: "Model name" })).toBeDisabled();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);

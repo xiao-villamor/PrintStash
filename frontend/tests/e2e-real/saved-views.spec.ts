@@ -118,12 +118,12 @@ test.describe("saved views", () => {
     await uploadModel(page, plain);
 
     await page.goto("/");
-    // The star button is a sibling of the card's `<a>`, not a descendant of it
-    // (both live under the same `<article>`) — scope through the article so
-    // `getByLabel` can actually find it.
-    const starredArticle = modelCard(page, starred).locator("xpath=ancestor::article");
-    await starredArticle.getByLabel(`Add ${starred} to favorites`).click();
-    await expect(starredArticle.getByLabel(`Remove ${starred} from favorites`)).toBeVisible();
+    await modelCard(page, starred).click({ button: "right" });
+    await page.getByRole("menuitem", { name: `Add ${starred} to favorites` }).click();
+    await expect(
+      page.getByRole("menuitem", { name: `Remove ${starred} from favorites` }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
 
     const favorites = page
       .getByRole("navigation", { name: "Quick access", exact: true })
@@ -138,6 +138,7 @@ test.describe("saved views", () => {
     await expect(modelCard(page, plain)).toBeVisible();
 
     // Cleanup: unstar so the shared DB doesn't drift the favorites facet.
-    await starredArticle.getByLabel(`Remove ${starred} from favorites`).click();
+    await modelCard(page, starred).click({ button: "right" });
+    await page.getByRole("menuitem", { name: `Remove ${starred} from favorites` }).click();
   });
 });

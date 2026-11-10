@@ -31,7 +31,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { useLocation } from "@tanstack/react-router";
-import { FileText, Link2, Loader2, MoreHorizontal, Pencil, Star, Trash2, Wifi } from "lucide-react";
+import { FileText, Link2, Loader2, Pencil, Trash2, Wifi } from "lucide-react";
 
 import type {
   STLViewerControls,
@@ -901,207 +901,208 @@ function ModelDetailPresentation({
           </div>
         </Modal>
         {/* Detail Header */}
-        <header className="model-detail-heading flex flex-wrap items-center justify-between px-5 pt-4 pb-2.5 gap-2 bg-background shrink-0">
-          <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
-            <div className="min-w-0 flex-1">
-              <TitleEditor
-                open={renaming && canEditModel && auth.isAuthenticated}
-                onOpenChange={(open) => {
-                  if (!open) cancelEdit();
-                }}
-                label={uiText("Rename {value1}", { value1: model.name })}
-                fieldLabel={uiText("Model name")}
-                value={editName}
-                onValueChange={setEditName}
-                onSave={() => void saveEdit()}
-                busy={saving}
-                requiredMessage={uiText("Model name is required.")}
-                saveDisabled={editProblem !== null || !canEditModel}
-                trigger={
-                  <div className="flex min-w-0 items-center gap-1">
-                    <h1
-                      onDoubleClick={() => {
-                        if (auth.isAuthenticated && canEditModel) enterEdit("name");
-                      }}
-                      className="min-w-0 break-words text-2xl font-semibold text-on-surface leading-tight"
-                    >
-                      {model.name}
-                    </h1>
-                    {auth.isAuthenticated && canEditModel && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="shrink-0 text-on-surface-variant"
-                        aria-label={uiText("Rename {value1}", { value1: model.name })}
-                        title={uiText("Rename")}
-                        onClick={() => {
-                          if (!saving) {
-                            if (renaming) cancelEdit();
-                            else enterEdit("name");
-                          }
-                        }}
-                        data-menu-trigger
-                        aria-haspopup="dialog"
-                        aria-expanded={renaming}
-                      >
-                        <Pencil className="h-3.5 w-3.5" aria-hidden />
-                      </Button>
-                    )}
-                  </div>
+        <DropdownMenu
+          open={actionsOpen}
+          onOpenChange={setActionsOpen}
+          portal
+          className="shrink-0"
+          aria-label={uiText("Model actions")}
+          contentClassName="w-48 border border-border bg-popover p-1 text-popover-foreground shadow-lg"
+          trigger={
+            <header
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setActionsOpen(true);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+                  event.preventDefault();
+                  setActionsOpen(true);
                 }
-              >
-                {renaming && editProblem && (
-                  <div className="space-y-2 border-t border-border pt-3 text-xs">
-                    <p role="alert">
-                      {uiText(
-                        editProblem === "conflict"
-                          ? "library.editConflict"
-                          : "library.saveUnconfirmed",
-                      )}
-                    </p>
-                    {reviewedModel ? (
-                      <>
-                        <p className="font-medium">{uiText("library.latestVersion")}</p>
-                        <p className="break-words">{reviewedModel.name}</p>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={useReviewedVersion}
-                            disabled={saving}
-                          >
-                            {uiText("library.useLatest")}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setReviewedModel(null)}
-                            disabled={saving}
-                          >
-                            {uiText("library.keepDraft")}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="h-auto min-h-9 whitespace-normal"
-                            loading={saving}
-                            disabled={
-                              reviewedModel.effective_role !== "edit" &&
-                              reviewedModel.effective_role !== "admin"
-                            }
-                            onClick={() => void saveEdit(reviewedModel)}
-                          >
-                            {uiText("library.retryDraft")}
-                          </Button>
-                        </div>
-                      </>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void reviewLatest()}
-                        loading={reviewing}
+              }}
+              className="model-detail-heading flex flex-wrap items-center justify-between px-5 pt-4 pb-2.5 gap-2 bg-background shrink-0"
+            >
+              <div className="flex w-full min-w-0 items-start gap-3 md:w-auto md:flex-1 md:gap-4">
+                <div className="min-w-0 flex-1">
+                  <TitleEditor
+                    open={renaming && canEditModel && auth.isAuthenticated}
+                    onOpenChange={(open) => {
+                      if (!open) cancelEdit();
+                    }}
+                    label={uiText("Rename {value1}", { value1: model.name })}
+                    fieldLabel={uiText("Model name")}
+                    value={editName}
+                    onValueChange={setEditName}
+                    onSave={() => void saveEdit()}
+                    busy={saving}
+                    requiredMessage={uiText("Model name is required.")}
+                    saveDisabled={editProblem !== null || !canEditModel}
+                    trigger={
+                      <h1
+                        onDoubleClick={() => {
+                          if (auth.isAuthenticated && canEditModel && !renaming) enterEdit("name");
+                        }}
+                        aria-label={model.name}
+                        tabIndex={auth.isAuthenticated && canEditModel ? undefined : 0}
+                        data-menu-trigger={auth.isAuthenticated && canEditModel ? undefined : true}
+                        className="min-w-0 break-words text-2xl font-semibold text-on-surface leading-tight tracking-tight"
                       >
-                        {uiText("library.reviewLatest")}
-                      </Button>
+                        {auth.isAuthenticated && canEditModel ? (
+                          <button
+                            type="button"
+                            className="text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                            aria-label={uiText("Rename {value1}", { value1: model.name })}
+                            title={uiText("Rename")}
+                            onClick={() => {
+                              if (!saving) {
+                                if (!renaming) enterEdit("name");
+                              }
+                            }}
+                            data-menu-trigger
+                            aria-haspopup="dialog"
+                            aria-expanded={renaming}
+                          >
+                            {model.name}
+                          </button>
+                        ) : (
+                          model.name
+                        )}
+                      </h1>
+                    }
+                  >
+                    {renaming && editProblem && (
+                      <div className="space-y-2 border-t border-border pt-3 text-xs">
+                        <p role="alert">
+                          {uiText(
+                            editProblem === "conflict"
+                              ? "library.editConflict"
+                              : "library.saveUnconfirmed",
+                          )}
+                        </p>
+                        {reviewedModel ? (
+                          <>
+                            <p className="font-medium">{uiText("library.latestVersion")}</p>
+                            <p className="break-words">{reviewedModel.name}</p>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={useReviewedVersion}
+                                disabled={saving}
+                              >
+                                {uiText("library.useLatest")}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setReviewedModel(null)}
+                                disabled={saving}
+                              >
+                                {uiText("library.keepDraft")}
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-auto min-h-9 whitespace-normal"
+                                loading={saving}
+                                disabled={
+                                  reviewedModel.effective_role !== "edit" &&
+                                  reviewedModel.effective_role !== "admin"
+                                }
+                                onClick={() => void saveEdit(reviewedModel)}
+                              >
+                                {uiText("library.retryDraft")}
+                              </Button>
+                            </div>
+                          </>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void reviewLatest()}
+                            loading={reviewing}
+                          >
+                            {uiText("library.reviewLatest")}
+                          </Button>
+                        )}
+                      </div>
                     )}
-                  </div>
-                )}
-              </TitleEditor>
-            </div>
-          </div>
-          <div
-            className={`flex items-center gap-2 ${editing ? "w-full justify-end md:w-auto md:self-start" : ""}`}
-          >
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => void toggleFavorite()}
-                disabled={starBusy || !auth.isAuthenticated}
+                  </TitleEditor>
+                </div>
+              </div>
+              <div
+                className={`flex items-center gap-2 ${editing ? "w-full justify-end md:w-auto md:self-start" : ""}`}
               >
-                <Star className={`h-4 w-4 ${model.starred ? "fill-current text-primary" : ""}`} />
-                {model.starred ? uiText("Favorited") : uiText("Favorite")}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!auth.isAuthenticated || !canEditModel}
-                onClick={() => setShareOpen(true)}
-              >
-                {uiText("Share")}
-              </Button>
-              <DropdownMenu
-                open={actionsOpen}
-                onOpenChange={setActionsOpen}
-                trigger={
+                <>
                   <Button
                     type="button"
-                    data-menu-trigger
                     variant="outline"
-                    size="icon-sm"
-                    onClick={() => setActionsOpen((open) => !open)}
-                    aria-haspopup="menu"
-                    aria-expanded={actionsOpen}
-                    aria-label={uiText("Model actions")}
+                    size="sm"
+                    onClick={() => void toggleFavorite()}
+                    disabled={starBusy || !auth.isAuthenticated}
                   >
-                    <MoreHorizontal className="h-4 w-4" />
+                    {model.starred ? uiText("Favorited") : uiText("Favorite")}
                   </Button>
-                }
-                contentClassName="w-48 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg"
-              >
-                <ModelSearchAction modelId={model.id} onSelect={() => setActionsOpen(false)} />
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setActionsOpen(false);
-                    if (auth.isAuthenticated && canEditModel) setShareOpen(true);
-                    else auth.showAuthRequiredToast();
-                  }}
-                  disabled={!auth.isAuthenticated || !canEditModel}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-                >
-                  <Link2 className="h-4 w-4" />
-                  {uiText(" Share")}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setActionsOpen(false);
-                    if (auth.isAuthenticated && canEditModel) enterEdit();
-                    else auth.showAuthRequiredToast();
-                  }}
-                  disabled={!auth.isAuthenticated || !canEditModel}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-                >
-                  <Pencil className="h-4 w-4" />
-                  {uiText(" Edit details")}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setActionsOpen(false);
-                    if (auth.isAuthenticated && canEditModel) setConfirmDeleteOpen(true);
-                    else auth.showAuthRequiredToast();
-                  }}
-                  disabled={deleting || !auth.isAuthenticated || !canEditModel}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
-                >
-                  <Trash2 className="h-4 w-4" />
-                  {uiText(" Delete model")}
-                </button>
-              </DropdownMenu>
-            </>
-          </div>
-        </header>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!auth.isAuthenticated || !canEditModel}
+                    onClick={() => setShareOpen(true)}
+                  >
+                    {uiText("Share")}
+                  </Button>
+                </>
+              </div>
+            </header>
+          }
+        >
+          <ModelSearchAction modelId={model.id} onSelect={() => setActionsOpen(false)} />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setActionsOpen(false);
+              if (auth.isAuthenticated && canEditModel) setShareOpen(true);
+              else auth.showAuthRequiredToast();
+            }}
+            disabled={!auth.isAuthenticated || !canEditModel}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Link2 className="h-4 w-4" />
+            {uiText(" Share")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setActionsOpen(false);
+              if (auth.isAuthenticated && canEditModel) enterEdit();
+              else auth.showAuthRequiredToast();
+            }}
+            disabled={!auth.isAuthenticated || !canEditModel}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Pencil className="h-4 w-4" />
+            {uiText(" Edit details")}
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setActionsOpen(false);
+              if (auth.isAuthenticated && canEditModel) setConfirmDeleteOpen(true);
+              else auth.showAuthRequiredToast();
+            }}
+            disabled={deleting || !auth.isAuthenticated || !canEditModel}
+            className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            {uiText(" Delete model")}
+          </button>
+        </DropdownMenu>
 
         {/* Segmented tab navigation */}
         <TabBar
@@ -1111,13 +1112,13 @@ function ModelDetailPresentation({
               <>
                 {tab.label}
                 {tab.key === "revisions" && gcodeFiles.length > 0 && (
-                  <span className="ml-1 opacity-60">{gcodeFiles.length}</span>
+                  <span className="model-detail-tab-count">{gcodeFiles.length}</span>
                 )}
                 {tab.key === "files" && sourceFiles.length > 0 && (
-                  <span className="ml-1 opacity-60">{sourceFiles.length}</span>
+                  <span className="model-detail-tab-count">{sourceFiles.length}</span>
                 )}
                 {tab.key === "history" && printJobs.length > 0 && (
-                  <span className="ml-1 opacity-60">{printJobs.length}</span>
+                  <span className="model-detail-tab-count">{printJobs.length}</span>
                 )}
               </>
             ),
@@ -1126,8 +1127,8 @@ function ModelDetailPresentation({
           onChange={selectTab}
           showIndicator={false}
           className="model-detail-tabs shrink-0 overflow-x-auto border-b border-outline-variant"
-          tabClassName="h-10 min-w-max whitespace-nowrap border-b-2 border-transparent px-0 py-2 text-sm font-medium text-on-surface-variant hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          activeTabClassName="border-foreground text-foreground"
+          tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          activeTabClassName="text-foreground font-semibold"
         />
 
         {/* Two-Column Layout. On mobile the panels stack and the whole area

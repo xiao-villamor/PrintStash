@@ -176,7 +176,7 @@ export async function clickModelAction(
   page: Page,
   name: "Share" | "Edit details" | "Delete model",
 ): Promise<void> {
-  await page.getByRole("button", { name: "Model actions" }).click();
+  await page.getByRole("heading", { level: 1 }).click({ button: "right" });
   await modelActionItem(page, name).click();
 }
 

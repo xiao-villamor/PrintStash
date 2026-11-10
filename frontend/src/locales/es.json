@@ -5098,5 +5098,9 @@
   "This 3MF has no sliced G-code. Slice it in Bambu Studio or OrcaSlicer, then upload the sliced file.": "Este 3MF no contiene G-code laminado. Lamínalo en Bambu Studio u OrcaSlicer y sube el archivo laminado.",
   "Sliced plates": "Placas laminadas",
   "No G-code revision yet. Add a revision to capture the settings that worked.": "Todavía no hay revisiones G-code. Añade una revisión para guardar los ajustes que funcionaron.",
-  "No G-code revision": "Sin revisión G-code"
+  "No G-code revision": "Sin revisión G-code",
+  "No G-code yet": "Sin G-code todavía",
+  "Not printed yet": "Todavía no se ha impreso",
+  "library.cardOutcome": "{result} {count}× en {printer}",
+  "No G-code": "Sin G-code"
 }

@@ -128,7 +128,7 @@ test.describe("AI Search", () => {
           modelDocuments.push(request.url());
       });
       await page.goto(`/models/${ids[0]}`);
-      await page.getByRole("button", { name: "Model actions" }).click();
+      await page.getByRole("heading", { level: 1 }).click({ button: "right" });
       await page.getByRole("menuitem", { name: "Find related Models" }).click();
       await expect(page.getByRole("link", { name: names[1], exact: true })).toBeVisible();
       await expect(page.getByRole("link", { name: names[0], exact: true })).toHaveCount(0);

@@ -745,3 +745,35 @@
 .detail-delivery-mode .detail-visible-choices > label {
   padding: 6px 8px;
 }
+
+.model-detail-heading {
+  min-height: 62px;
+}
+.model-detail-heading > div:first-child {
+  min-height: 36px;
+  align-items: center;
+}
+.model-detail-heading > div:last-child > button {
+  height: 34px;
+  padding-inline: 14px;
+}
+.model-detail-tab-count {
+  margin-left: 3px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+
+.model-detail-heading h1,
+.model-detail-tabs [role="tab"] {
+  line-height: 1.4;
+}
+.model-detail-tabs [data-active="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--foreground);
+}

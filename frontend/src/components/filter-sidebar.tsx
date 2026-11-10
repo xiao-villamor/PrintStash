@@ -1506,9 +1506,9 @@ export function FilterSidebar(props: FilterSidebarProps) {
   const [collapseVersion, setCollapseVersion] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
-      return parseInt(localStorage.getItem("ps-sidebar-width") ?? "321", 10);
+      return parseInt(localStorage.getItem("ps-sidebar-width") ?? "256", 10);
     } catch {
-      return 321;
+      return 256;
     }
   });
 

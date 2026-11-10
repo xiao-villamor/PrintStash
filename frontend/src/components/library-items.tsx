@@ -55,7 +55,7 @@ export function LibraryItems<T>({
   const restore = useRef<{ key: string; offset: number } | null>(null);
   const readyGeometry = useRef<typeof geometry | null>(null);
   const gap = layout === "list" ? 0 : compact ? 8 : 14;
-  const minWidth = compact ? 200 : 260;
+  const minWidth = compact ? 200 : 256;
   // Production-card measurements favor native rows for short loaded snapshots.
   // Larger snapshots bound their DOM while retaining the same row/card identities.
   const virtual =

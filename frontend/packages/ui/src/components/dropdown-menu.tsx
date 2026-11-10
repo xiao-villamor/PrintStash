@@ -194,6 +194,10 @@ export function DropdownMenu({
   }, [open, role]);
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    // Portaled dialogs can bubble through a card's closed contextual menu.
+    // Only an open panel owns Escape or roving focus; otherwise its child
+    // dialog and the page's keyboard commands must receive the event.
+    if (!open) return;
     const triggerElement = wrapperRef.current?.querySelector<HTMLElement>("[data-menu-trigger]");
     if (e.key === "Escape") {
       e.stopPropagation();

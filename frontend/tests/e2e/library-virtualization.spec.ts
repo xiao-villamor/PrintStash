@@ -1,9 +1,23 @@
 /** Loaded pages keep their cursor order while measured rows bound the mounted cards. */
 import { expect, test, type Page } from "@playwright/test";
-import { aModelListItem, aMultipartModel, aCollectionNode } from "../../src/test-support/factories";
+import {
+  aModel,
+  aModelListItem,
+  aMultipartModel,
+  aCollectionNode,
+} from "../../src/test-support/factories";
 import { useMockApi, collectPageProblems } from "./_setup";
 
 useMockApi();
+
+// These specs supply synthetic list pages. Supply their matching detail reads
+// too, since visible cards now display revision/geometry evidence from them.
+test.beforeEach(async ({ page }) => {
+  await page.route(/\/api\/v1\/models\/\d+$/, (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split("/").at(-1));
+    return id >= 100 ? route.fulfill({ json: aModel({ id }) }) : route.fallback();
+  });
+});
 
 async function scrollLibrary(page: Page, offset: "start" | "end") {
   await page.locator("main").evaluate((main, end) => {

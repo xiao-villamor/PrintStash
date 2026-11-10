@@ -7,6 +7,15 @@ import { aModel, aModelListItem, aMultipartModel } from "../../src/test-support/
 
 useMockApi();
 
+// These specs supply synthetic list pages. Supply their matching detail reads
+// too, since visible cards now display revision/geometry evidence from them.
+test.beforeEach(async ({ page }) => {
+  await page.route(/\/api\/v1\/models\/\d+$/, (route) => {
+    const id = Number(new URL(route.request().url()).pathname.split("/").at(-1));
+    return id >= 100 ? route.fulfill({ json: aModel({ id }) }) : route.fallback();
+  });
+});
+
 test.describe("Library navigation", () => {
   test("recovers an unaccepted Library read through explicit refresh", async ({ page }) => {
     const model = aModelListItem({ id: 1, name: "Recovered initial read" });
@@ -407,9 +416,15 @@ test.describe("Library navigation", () => {
             .first(),
         ).toBeAttached();
         const anchor = page.locator(`[data-library-entry="${bookmark.key}"]`).first();
+        // Grid rows can have fractional heights. Restore the same card within
+        // one CSS pixel rather than requiring a particular subpixel rounding.
         await expect
-          .poll(async () => anchor.evaluate((node) => node.getBoundingClientRect().top))
-          .toBeCloseTo(bookmark.top, 0);
+          .poll(async () =>
+            Math.abs(
+              (await anchor.evaluate((node) => node.getBoundingClientRect().top)) - bookmark.top,
+            ),
+          )
+          .toBeLessThanOrEqual(1);
       } else
         await expect(
           page.getByText(

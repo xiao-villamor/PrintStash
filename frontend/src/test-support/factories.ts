@@ -371,6 +371,23 @@ export function aRevision(
   };
 }
 
+/** The Model history projection adds printer and revision display fields. */
+export function aModelPrintJob(
+  override: Partial<import("@/types").ModelPrintJobRead> = {},
+): import("@/types").ModelPrintJobRead {
+  return {
+    ...aPrintJob(),
+    printer_name: "Workshop",
+    gcode_revision_number: 1,
+    revision_label: null,
+    material_type: null,
+    filament_used_g: null,
+    actual_duration_s: null,
+    filament_cost: null,
+    ...override,
+  };
+}
+
 /** Scalar-only overrides retain legacy provenance; certified values require evidence. */
 export function aMetadata(
   override: Partial<import("@/types").MetadataRead> = {},

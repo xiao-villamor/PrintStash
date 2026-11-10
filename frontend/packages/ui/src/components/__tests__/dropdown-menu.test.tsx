@@ -276,6 +276,27 @@ describe("DropdownMenu", () => {
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
 
+    it("lets Escape close a dialog opened from a closed menu's trigger", () => {
+      const closeDialog = vi.fn<() => void>();
+      const changeMenu = vi.fn<(open: boolean) => void>();
+      openMenu(
+        <DropdownMenu
+          open={false}
+          onOpenChange={changeMenu}
+          trigger={
+            <Modal open onClose={closeDialog} title="Print revision" closeLabel="Close">
+              <button type="button">Printer options</button>
+            </Modal>
+          }
+        >
+          <MenuItems />
+        </DropdownMenu>,
+      );
+      fireEvent.keyDown(screen.getByRole("button", { name: "Printer options" }), { key: "Escape" });
+      expect(closeDialog).toHaveBeenCalledOnce();
+      expect(changeMenu).not.toHaveBeenCalled();
+    });
+
     it("returns focus to the trigger on Escape", () => {
       openMenu(
         <DropdownMenu open={true} onOpenChange={vi.fn<(open: boolean) => void>()} trigger={TRIGGER}>
