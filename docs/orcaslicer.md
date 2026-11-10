@@ -15,7 +15,7 @@ name, a fuzzy match, or a user-maintained mapping file.
 1. Download `printstash_orca_plugin-0.1.0-py3-none-any.whl` from the
    `printstash-orca-plugin` artifact of a successful PrintStash CI run, or build
    it using the command below. Extract the CI artifact ZIP to get the wheel.
-2. Open Orca's **Plugins** dialog. Use **Browse plugins → Install local plugin**
+2. Open Orca's **Plugins** dialog. Use the arrow beside **Install plugin → Install local plugin**
    and select the wheel. Activate the plugin and its **Upload to PrintStash**
    capability.
 3. Open the capability's **Config** tab. Enter the PrintStash server URL,
@@ -26,6 +26,18 @@ name, a fuzzy match, or a user-maintained mapping file.
 5. Remove the old `printstash_orca_push.py` command from that preset's
    **Post-processing scripts** field, then slice and export or send the G-code.
    Use only one PrintStash integration per preset.
+
+The configuration screen labels its scope. Use **Global settings** for the shared
+connection. The pencil beside the process's plugin selection opens **This process
+preset**, whose saved values override the global configuration. **Use global
+settings** removes that preset override. Optional revision fields are under
+**Revision defaults**. The form follows Orca's theme, marks unsaved edits, and
+reports **Settings saved** only when Orca acknowledges the save.
+
+Each exported standalone G-code file also supplies available printer, filament
+and process settings to PrintStash's **Profiles** view after background processing.
+This is a snapshot of the exported print. It does not synchronize unused Orca
+presets, replace saved profile notes or costs, or copy edits back into Orca.
 
 The plugin only acts at `psGCodePostProcess`, after normal post-processing
 scripts. It reads the completed working G-code and the output filename provided
@@ -67,6 +79,14 @@ It has no third-party runtime dependencies and supports Python 3.12 or newer.
 Its host API targets the released OrcaSlicer 2.5.0 bindings. Automated tests
 exercise an Orca host fake against a real PrintStash HTTP server; they do not
 replace a smoke test of installation, permissions and export in the Orca GUI.
+The settings form has a Chromium check as well:
+
+```sh
+node --test integrations/orcaslicer/test_settings.cjs
+```
+
+Run this from the repository root after installing frontend dependencies and
+Playwright Chromium. Python 3.12 or newer must be available as `python3`.
 
 Upstream references: [plugin development](https://www.orcaslicer.com/wiki/developer_reference/plugin_development/plugin_development),
 [slicing capability](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.5.0/src/slic3r/plugin/pluginTypes/slicingPipeline/SlicingPipelinePluginCapability.cpp),

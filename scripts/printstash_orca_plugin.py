@@ -73,65 +73,205 @@ def parse_config(raw: str) -> dict:
 
 
 def config_ui() -> str:
-    """Use Orca's host-owned configuration bridge and native theme defaults."""
-    return (
-        """<!doctype html><html lang="en"><meta charset="utf-8">
+    """Render the settings form through Orca's configuration and theme bridge."""
+    return r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PrintStash settings</title>
 <style>
-body { margin: 20px; font-family: var(--orca-font, sans-serif); }
-form { display: grid; gap: 14px; max-width: 640px; }
-label { display: grid; gap: 5px; }
-.check { display: flex; align-items: center; gap: 8px; }
-input:not([type=checkbox]), select, textarea { box-sizing: border-box; width: 100%; }
-small { color: var(--orca-muted); }
-button { justify-self: start; }
-</style>
-<h1>PrintStash</h1><p>Save exported G-code in your print library.</p>
-<form id="settings">
-<label class="check"><input id="enabled" type="checkbox">Upload exports to PrintStash</label>
-<label>Server URL<input id="url" type="url" placeholder="https://printstash.example.com"></label>
-<label>Username<input id="username" autocomplete="off"></label>
-<label>API key<input id="api_key" type="password" autocomplete="off"></label>
-<small>Create a key in PrintStash Settings. Orca stores it in its plugin configuration;
-keep configurations containing credentials private.</small>
-<label>Collection (optional)<input id="collection" placeholder="Functional/Brackets"></label>
-<label class="check"><input id="strict_mapping" type="checkbox">Only upload a single matched source model</label>
-<small>Otherwise, plates with multiple objects or no source identity become standalone models.</small>
-<label>Revision label (optional)<input id="revision_label"></label>
-<label>Revision notes (optional)<textarea id="revision_notes" rows="3"></textarea></label>
-<label>Revision status<select id="revision_status">
-<option value="needs_test">Needs test</option><option value="known_good">Known good</option>
-<option value="failed">Failed</option><option value="archived">Archived</option></select></label>
-<label class="check"><input id="recommended" type="checkbox">Make this revision recommended</label>
-<button type="submit">Save settings</button><p id="status" role="status"></p>
-</form><script>
-const defaults = """
-        + json.dumps(DEFAULT_CONFIG)
-        + """;
-const current = {...defaults, ...window.orca.getConfig()};
-for (const key of Object.keys(defaults)) {
-  const input = document.getElementById(key);
-  if (input.type === 'checkbox') input.checked = current[key];
-  else input.value = current[key] ?? '';
+:root {
+  --background: var(--orca-bg, #ffffff);
+  --foreground: var(--orca-fg, #202938);
+  --muted: var(--orca-muted, #596578);
+  --border: var(--orca-border, #dce1e8);
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --surface: color-mix(in srgb, var(--foreground) 4%, var(--background));
+  --ring: var(--orca-accent, #2563eb);
+  --radius: 6px;
+  color-scheme: light;
 }
-document.getElementById('settings').onsubmit = (event) => {
-  event.preventDefault();
+html[data-orca-theme="dark"] { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--foreground); font: 14px/1.5 var(--orca-font, "Segoe UI", sans-serif); }
+main { max-width: 820px; margin: 0 auto; padding: 20px; }
+h1, h2, p { margin: 0; }
+h1 { font-size: 23px; font-weight: 650; line-height: 1.2; }
+h2 { font-size: 15px; font-weight: 600; }
+header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.mark { width: 36px; height: 36px; color: var(--primary); flex-shrink: 0; }
+.subtitle, .hint, .scope, .section-description { color: var(--muted); }
+.subtitle { margin-top: 5px; }
+.scope { padding: 8px 12px; border-left: 3px solid var(--border); background: var(--surface); margin-bottom: 16px; font-size: 12px; }
+.scope strong { color: var(--foreground); font-weight: 600; }
+fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.enable { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.enable label { font-weight: 600; }
+.switch { appearance: none; width: 38px; height: 22px; flex-shrink: 0; margin: 0; border: 1px solid var(--border); border-radius: 20px; background: var(--muted); position: relative; }
+.switch::after { content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; background: var(--primary-foreground); border-radius: 50%; }
+.switch:checked { background: var(--primary); border-color: var(--primary); }
+.switch:checked::after { transform: translateX(16px); }
+section { padding: 16px 0; border-bottom: 1px solid var(--border); }
+.section-description { margin: 3px 0 12px; font-size: 12px; }
+.fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 12px 16px; }
+.full { grid-column: 1 / -1; }
+.field { display: grid; gap: 6px; min-width: 0; }
+.field > label { font-size: 12px; font-weight: 600; }
+.optional { color: var(--muted); font-weight: 400; }
+input:not([type=checkbox]), select, textarea { width: 100%; min-width: 0; min-height: 36px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--background); color: var(--foreground); font: inherit; padding: 7px 10px; }
+textarea { resize: vertical; min-height: 72px; }
+input::placeholder, textarea::placeholder { color: var(--muted); opacity: 0.8; }
+:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.key-field { display: flex; position: relative; }
+.key-field input { padding-right: 60px; }
+.key-field button { position: absolute; right: 4px; top: 4px; min-height: 28px; border: 0; padding: 3px 8px; font-size: 12px; background: transparent; }
+.hint { font-size: 12px; line-height: 1.5; }
+.check { display: flex; align-items: flex-start; gap: 8px; }
+.check input { margin: 4px 0 0; accent-color: var(--primary); flex-shrink: 0; }
+.check label { font-size: 13px; }
+.check .hint { display: block; margin-top: 2px; }
+.profile-note { background: var(--surface); padding: 10px; margin-top: 12px; border-radius: var(--radius); }
+.profile-note strong { display: block; font-size: 12px; font-weight: 600; margin-bottom: 3px; }
+details { padding-top: 14px; }
+summary { font-weight: 600; font-size: 13px; }
+details .fields { margin-top: 16px; }
+footer { position: sticky; bottom: 0; background: var(--background); padding: 12px 0 0; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+button { font: inherit; font-weight: 600; min-height: 36px; padding: 7px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--background); color: var(--foreground); }
+button:active:not(:disabled) { transform: scale(0.98); }
+.primary { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+button:disabled, input:disabled, select:disabled, textarea:disabled { opacity: 0.6; }
+#status { font-size: 12px; color: var(--muted); flex: 1; min-width: 160px; }
+[hidden] { display: none !important; }
+@media (max-width: 540px) { main { padding: 16px; } .fields { grid-template-columns: minmax(0, 1fr); } h1 { font-size: 21px; } footer { align-items: stretch; } #status { flex-basis: 100%; } }
+</style>
+</head>
+<body><main>
+<header>
+<svg class="mark" viewBox="0 0 36 36" fill="none" aria-hidden="true"><path d="m18 3 13 7.5v15L18 33 5 25.5v-15L18 3Z" stroke="currentColor" stroke-width="2"/><path d="m5 10.5 13 7.5 13-7.5M18 18v15M11.5 6.75l13 7.5v7.5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+<div><h1>PrintStash</h1><p class="subtitle">Save each export in your print library.</p></div>
+</header>
+<div class="scope" id="scope"></div>
+<form id="settings" novalidate>
+<fieldset id="controls">
+<div class="enable"><div><label for="enabled">Upload exports to PrintStash</label><p class="hint">Runs when you export G-code from this process.</p></div><input class="switch" id="enabled" type="checkbox"></div>
+<section aria-labelledby="connection-heading">
+<h2 id="connection-heading">Connection</h2>
+<p class="section-description">Use the same server and account as your PrintStash app.</p>
+<div class="fields">
+<div class="field full"><label for="url">Server URL</label><input id="url" type="url" placeholder="http://localhost:3000" spellcheck="false" autocomplete="off"></div>
+<div class="field"><label for="username">Username</label><input id="username" autocomplete="off" spellcheck="false"></div>
+<div class="field"><label for="api_key">API key</label><div class="key-field"><input id="api_key" type="password" autocomplete="off" spellcheck="false" aria-describedby="key-help"><button id="show-key" type="button" aria-label="Show API key" aria-pressed="false">Show</button></div></div>
+<p class="hint full" id="key-help">Create a key in PrintStash Settings → API keys. Keep connection credentials in global plugin settings when sharing presets.</p>
+</div>
+</section>
+<section aria-labelledby="export-heading">
+<h2 id="export-heading">Export options</h2>
+<p class="section-description">Choose where exports go and how they match your models.</p>
+<div class="fields">
+<div class="field full"><label for="collection">Collection <span class="optional">(optional)</span></label><input id="collection" placeholder="Functional/Brackets"></div>
+<div class="check full"><input id="strict_mapping" type="checkbox"><div><label for="strict_mapping">Require a single matching source model</label><span class="hint">When off, multi-object plates or exports without source identity can become standalone models.</span></div></div>
+</div>
+<aside class="profile-note"><strong>Print settings travel with your G-code</strong><p class="hint">PrintStash captures available printer, filament and process settings in Profiles. These are snapshots from each export; unused Orca presets are not synchronized.</p></aside>
+</section>
+<details id="revision-options"><summary>Revision defaults</summary>
+<div class="fields">
+<div class="field"><label for="revision_label">Revision label <span class="optional">(optional)</span></label><input id="revision_label" placeholder="e.g. Stronger walls"></div>
+<div class="field"><label for="revision_status">Revision status</label><select id="revision_status"><option value="needs_test">Needs test</option><option value="known_good">Known good</option><option value="failed">Failed</option><option value="archived">Archived</option></select></div>
+<div class="field full"><label for="revision_notes">Revision notes <span class="optional">(optional)</span></label><textarea id="revision_notes" rows="2" placeholder="What changed in this print?"></textarea></div>
+<div class="check full"><input id="recommended" type="checkbox"><label for="recommended">Make this revision recommended</label></div>
+</div></details>
+<footer><button class="primary" type="submit">Save settings</button><button id="restore-global" type="button" hidden>Use global settings</button><p id="status" role="status" aria-live="polite"></p></footer>
+</fieldset>
+</form>
+<script>
+const defaults = __DEFAULT_CONFIG__;
+const host = window.orca;
+const form = document.getElementById('settings');
+const status = document.getElementById('status');
+let baseline;
+let pending = false;
+let restoring = false;
+
+function readForm() {
   const value = {};
   for (const key of Object.keys(defaults)) {
     const input = document.getElementById(key);
     value[key] = input.type === 'checkbox' ? input.checked : (input.value.trim() || null);
   }
-  const status = document.getElementById('status');
-  if (value.enabled && (!value.url || !value.username || !value.api_key)) {
-    status.textContent = 'Enter the server URL, username and API key.';
-    return;
+  return value;
+}
+function showConfig(saved) {
+  const current = {...defaults, ...saved};
+  for (const key of Object.keys(defaults)) {
+    const input = document.getElementById(key);
+    if (input.type === 'checkbox') input.checked = current[key];
+    else input.value = current[key] ?? '';
   }
-  window.orca.saveConfig(value);
-  status.textContent = 'Settings sent to OrcaSlicer for saving.';
+  baseline = JSON.stringify(readForm());
+  const context = host.getContext();
+  const preset = context.scope === 'preset';
+  const scope = document.getElementById('scope');
+  scope.replaceChildren();
+  const title = document.createElement('strong');
+  title.textContent = preset ? 'This process preset. ' : 'Global settings. ';
+  scope.append(title, preset
+    ? 'Changes here override global settings. Configure your shared connection in Plugins → Upload to PrintStash → Config.'
+    : 'Used by every preset without its own override.');
+  document.getElementById('controls').disabled = context.readOnly === true;
+  document.getElementById('restore-global').hidden = !preset || !context.hasPresetOverride;
+  document.getElementById('revision-options').open = Boolean(current.revision_label || current.revision_notes || current.recommended || current.revision_status !== defaults.revision_status);
+  status.textContent = context.readOnly ? 'These settings are read-only.'
+    : restoring ? 'Using global settings.' : pending ? 'Settings saved.'
+    : current.enabled ? 'Uploads enabled.' : 'Uploads paused.';
+  pending = false;
+  restoring = false;
+}
+host.onConfig(showConfig);
+form.addEventListener('input', () => {
+  status.textContent = JSON.stringify(readForm()) === baseline ? 'No unsaved changes.' : 'Unsaved changes.';
+});
+document.getElementById('show-key').onclick = (event) => {
+  const input = document.getElementById('api_key');
+  const visible = input.type === 'password';
+  input.type = visible ? 'text' : 'password';
+  event.currentTarget.textContent = visible ? 'Hide' : 'Show';
+  event.currentTarget.setAttribute('aria-label', visible ? 'Hide API key' : 'Show API key');
+  event.currentTarget.setAttribute('aria-pressed', String(visible));
 };
-</script></html>"""
-    )
+document.getElementById('restore-global').onclick = () => {
+  restoring = true;
+  status.textContent = 'Asking Orca to restore global settings…';
+  host.restoreDefaults();
+};
+form.onsubmit = (event) => {
+  event.preventDefault();
+  if (host.getContext().readOnly) return;
+  const value = readForm();
+  if (value.enabled) {
+    const missing = ['url', 'username', 'api_key'].find(key => !value[key]);
+    if (missing) {
+      status.textContent = 'Enter the server URL, username and API key.';
+      document.getElementById(missing).focus();
+      return;
+    }
+    try {
+      const url = new URL(value.url);
+      if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.search || url.hash) throw new Error('invalid-url');
+    } catch {
+      status.textContent = 'Use an HTTP(S) server URL without credentials, query or fragment.';
+      document.getElementById('url').focus();
+      return;
+    }
+  }
+  pending = true;
+  status.textContent = 'Sent to OrcaSlicer for saving…';
+  host.saveConfig(value);
+};
+</script>
+</main></body></html>
+""".replace("__DEFAULT_CONFIG__", json.dumps(DEFAULT_CONFIG))
 
 
 class PrintStashUpload(orca.slicing.SlicingPipelineCapabilityBase):

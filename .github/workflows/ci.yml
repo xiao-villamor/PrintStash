@@ -223,6 +223,8 @@ jobs:
       - name: Install Chromium
         working-directory: frontend
         run: pnpm exec playwright install --with-deps chromium
+      - name: Verify OrcaSlicer settings UI
+        run: node --test integrations/orcaslicer/test_settings.cjs
       - name: Verify native mesh renderer contracts
         working-directory: frontend
         run: pnpm test:mesh

@@ -74,6 +74,40 @@ async def native_export(api, superuser_headers, e2e_db, tmp_path):
 
 @pytest.mark.asyncio
 class TestNativeExport:
+    @pytest.mark.parametrize(
+        ("kind", "expected"),
+        [
+            pytest.param(
+                "printer",
+                {"printer_model": "Creality Ender-3 V3 SE", "nozzle_diameter": "0.4"},
+                id="printer",
+            ),
+            pytest.param(
+                "filament",
+                {"filament_type": "PLA", "filament_density": "1.24"},
+                id="filament",
+            ),
+            pytest.param(
+                "process",
+                {"layer_height": "0.2", "sparse_infill_density": "15%"},
+                id="process",
+            ),
+        ],
+    )
+    async def test_captures_exported_profile(self, native_export, api, kind, expected):
+        result = native_export.capability.execute(native_export.ctx)
+        settle()
+
+        response = await api.get(
+            "/api/v1/slicer-profiles", headers=native_export.headers
+        )
+        assert result.status == "success", result.message
+        assert response.status_code == 200, response.text
+        rows = response.json()["items"]
+        assert len(rows) == 1, response.text
+        assert rows[0]["model_id"] == native_export.model_id
+        assert rows[0]["settings"][kind].items() >= expected.items()
+
     async def test_uploads_revision_to_exact_source(self, native_export, api):
         result = native_export.capability.execute(native_export.ctx)
         settle()

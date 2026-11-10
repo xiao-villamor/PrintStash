@@ -71,6 +71,16 @@ def _api_run(
 
 
 class TestQuickGate:
+    def test_qualifies_orca_settings_in_browser_gate(self) -> None:
+        steps = _workflow("ci.yml")["jobs"]["browser-smoke"]["steps"]
+        step = next(
+            step
+            for step in steps
+            if step.get("name") == "Verify OrcaSlicer settings UI"
+        )
+
+        assert step["run"] == "node --test integrations/orcaslicer/test_settings.cjs"
+
     def test_browser_smoke_uses_supported_runner(self) -> None:
         assert _workflow("ci.yml")["jobs"]["browser-smoke"]["runs-on"] == "ubuntu-24.04"
 
