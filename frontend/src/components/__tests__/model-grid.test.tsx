@@ -39,7 +39,13 @@ import type {
   TagRead,
 } from "@/types";
 import { collectionTreeRoutes } from "@/test-support/collection-tree";
-import { anEditingBase, aCollectionNode, aModelListItem, aPrinter } from "@/test-support/factories";
+import {
+  anEditingBase,
+  aCollectionNode,
+  aModel,
+  aModelListItem,
+  aPrinter,
+} from "@/test-support/factories";
 import {
   adminSession,
   json,
@@ -197,6 +203,14 @@ function renderVault(
           }),
         "GET /api/v1/models/outliner": json([]),
         "GET /api/v1/models": json(models),
+        // Card admission reads the detail contract, not the list projection.
+        "GET /api/v1/models/": (url) => {
+          const path = new URL(url, "http://printstash.test").pathname;
+          const detail = path.match(/^\/api\/v1\/models\/(\d+)$/);
+          if (!detail) return json({ detail: "not_found" }, 404);
+          const id = Number(detail[1]);
+          return json(aModel({ ...models.find((model) => model.id === id), id }));
+        },
         "GET /api/v1/saved-views": json([]),
         "GET /api/v1/documents": json([]),
         "GET /api/v1/multipart-models": json(multipartModels),
