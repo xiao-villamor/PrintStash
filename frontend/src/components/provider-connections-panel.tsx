@@ -3,9 +3,10 @@
 import { currentLocale } from "@/lib/locale";
 
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, Link, Pencil, Plus, Trash2 } from "lucide-react";
+import { CloudUpload, ExternalLink, KeyRound, Link, Pencil, Plus, Trash2 } from "lucide-react";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -86,6 +87,7 @@ export function ProviderConnectionsPanel({
   const [pairing, setPairing] = useState<BrowserPairingCreateRead | null>(null);
   const [cultsUsername, setCultsUsername] = useState("");
   const [cultsPassword, setCultsPassword] = useState("");
+  const [cultsOpen, setCultsOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [disconnectTarget, setDisconnectTarget] = useState<CaptureProvider | null>(null);
@@ -97,6 +99,7 @@ export function ProviderConnectionsPanel({
       setPairing(null);
       setCultsUsername("");
       setCultsPassword("");
+      setCultsOpen(false);
       setBusy(null);
       setError("");
       setDisconnectTarget(null);
@@ -132,6 +135,7 @@ export function ProviderConnectionsPanel({
       if (current(session)) {
         setCultsUsername("");
         setCultsPassword("");
+        setCultsOpen(false);
       }
     } catch (cause) {
       if (current(session)) setError(userMessage(cause));
@@ -229,26 +233,31 @@ export function ProviderConnectionsPanel({
   return (
     <div className="space-y-3">
       {loadFailure}
-      <fieldset disabled={busy !== null || Boolean(loadError)} className="min-w-0 space-y-6">
+      <fieldset disabled={busy !== null || Boolean(loadError)} className="min-w-0">
         <section
           aria-labelledby="provider-connections-title"
           className="overflow-hidden rounded border border-border bg-card"
         >
-          <div className="border-b border-border px-4 py-4 sm:px-5">
-            <h2 id="provider-connections-title" className="text-sm font-semibold text-foreground">
-              {t("settings.providerConnections.title")}
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t("settings.providerConnections.description")}
-            </p>
+          <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-muted-foreground">
+              <CloudUpload className="h-4 w-4" aria-hidden />
+            </span>
+            <div>
+              <h2 id="provider-connections-title" className="text-sm font-semibold text-foreground">
+                {t("settings.providerConnections.title")}
+              </h2>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {t("settings.providerConnections.description")}
+              </p>
+            </div>
           </div>
-          <div className="space-y-4 p-4 sm:p-5">
+          <div className="space-y-0 px-4 pb-4 sm:pl-16 sm:pr-5">
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}
               </p>
             )}
-            <div className="rounded border border-border p-3">
+            <div className="border-b border-border py-3">
               <ConnectionHeader
                 label={t("settings.providerConnections.mmf")}
                 connected={mmf.connected}
@@ -281,10 +290,7 @@ export function ProviderConnectionsPanel({
                 )}
               </div>
             </div>
-            <form
-              className="rounded border border-border p-3"
-              onSubmit={(event) => void submitCults(event)}
-            >
+            <div className="py-3">
               <ConnectionHeader
                 label={t("settings.providerConnections.cults")}
                 connected={cults.connected}
@@ -293,29 +299,6 @@ export function ProviderConnectionsPanel({
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
                 {t("settings.providerConnections.cultsDescription")}
               </p>
-              {!cults.connected && (
-                <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                  <Input
-                    aria-label={t("settings.providerConnections.cultsUsername")}
-                    value={cultsUsername}
-                    onChange={(event) => setCultsUsername(event.target.value)}
-                    autoComplete="username"
-                    maxLength={255}
-                    placeholder={t("settings.providerConnections.cultsUsername")}
-                    required
-                  />
-                  <Input
-                    aria-label={t("settings.providerConnections.cultsPassword")}
-                    value={cultsPassword}
-                    onChange={(event) => setCultsPassword(event.target.value)}
-                    type="password"
-                    autoComplete="current-password"
-                    maxLength={1024}
-                    placeholder={t("settings.providerConnections.cultsPassword")}
-                    required
-                  />
-                </div>
-              )}
               <div className="mt-3">
                 {cults.connected ? (
                   <Button
@@ -329,13 +312,54 @@ export function ProviderConnectionsPanel({
                     {t("settings.providerConnections.disconnect")}
                   </Button>
                 ) : (
-                  <Button type="submit" size="sm" loading={busy === "cults"}>
+                  <Button type="button" size="sm" onClick={() => setCultsOpen(true)}>
                     <Link className="h-3.5 w-3.5" />
                     {t("settings.providerConnections.connectCults")}
                   </Button>
                 )}
               </div>
-            </form>
+              <Modal
+                open={cultsOpen && !cults.connected}
+                onClose={() => {
+                  if (busy !== "cults") setCultsOpen(false);
+                }}
+                title={t("settings.providerConnections.connectCults")}
+              >
+                <form className="space-y-4" onSubmit={(event) => void submitCults(event)}>
+                  <fieldset disabled={busy !== null || Boolean(loadError)} className="space-y-3">
+                    <Input
+                      aria-label={t("settings.providerConnections.cultsUsername")}
+                      value={cultsUsername}
+                      onChange={(event) => setCultsUsername(event.target.value)}
+                      autoComplete="username"
+                      maxLength={255}
+                      placeholder={t("settings.providerConnections.cultsUsername")}
+                      required
+                    />
+                    <Input
+                      aria-label={t("settings.providerConnections.cultsPassword")}
+                      value={cultsPassword}
+                      onChange={(event) => setCultsPassword(event.target.value)}
+                      type="password"
+                      autoComplete="current-password"
+                      maxLength={1024}
+                      placeholder={t("settings.providerConnections.cultsPassword")}
+                      required
+                    />
+                    {error && (
+                      <p role="alert" className="text-sm text-destructive">
+                        {error}
+                      </p>
+                    )}
+                    <div className="flex justify-end">
+                      <Button type="submit" size="sm" loading={busy === "cults"}>
+                        {t("settings.providerConnections.connectCults")}
+                      </Button>
+                    </div>
+                  </fieldset>
+                </form>
+              </Modal>
+            </div>
           </div>
         </section>
 
@@ -343,21 +367,26 @@ export function ProviderConnectionsPanel({
           aria-labelledby="paired-browsers-title"
           className="overflow-hidden rounded border border-border bg-card"
         >
-          <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5">
-            <div>
-              <h2 id="paired-browsers-title" className="text-sm font-semibold text-foreground">
-                {t("settings.pairedBrowsers.title")}
-              </h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {t("settings.pairedBrowsers.description")}
-              </p>
+          <div className="flex items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-5">
+            <div className="flex items-start gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-muted-foreground">
+                <ExternalLink className="h-4 w-4" aria-hidden />
+              </span>
+              <div>
+                <h2 id="paired-browsers-title" className="text-sm font-semibold text-foreground">
+                  {t("settings.pairedBrowsers.title")}
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {t("settings.pairedBrowsers.description")}
+                </p>
+              </div>
             </div>
             <Button size="sm" onClick={() => void createPairing()} loading={busy === "pairing"}>
               <Plus className="h-3.5 w-3.5" />
               {t("settings.pairedBrowsers.createCode")}
             </Button>
           </div>
-          <div className="space-y-4 p-4 sm:p-5">
+          <div className="space-y-4 px-4 pb-4 sm:pl-16 sm:pr-5">
             {pairing && (
               <div className="rounded border border-primary/40 bg-primary-soft p-3" role="status">
                 <p className="text-xs text-muted-foreground">

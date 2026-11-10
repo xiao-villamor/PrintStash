@@ -144,6 +144,18 @@ function renderSettings(options: RenderAppOptions = {}) {
   });
 }
 
+async function openCreateUser() {
+  const button = await screen.findByRole("button", { name: "Create user" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await userEvent.click(button);
+}
+
+async function openPasswordReset() {
+  const button = await screen.findByRole("button", { name: "Reset password" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await userEvent.click(button);
+}
+
 beforeEach(() => {
   window.localStorage.clear();
 });
@@ -390,6 +402,7 @@ describe("SettingsPanel", () => {
         routes: { "POST /api/v1/admin/users": json(aUser({ id: 2, username: "maker" })) },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
+      await openCreateUser();
       await user.click(screen.getByLabelText("Username"));
       await user.paste("maker");
       await user.click(screen.getByLabelText("Initial password"));
@@ -411,6 +424,7 @@ describe("SettingsPanel", () => {
         routes: { "POST /api/v1/admin/users": json(aUser({ id: 2, username: "maker" })) },
       });
       await screen.findByRole("navigation", { name: "Settings sections" });
+      await openCreateUser();
       await user.click(screen.getByLabelText("Username"));
       await user.paste("maker");
       await user.click(screen.getByLabelText("Email"));
@@ -433,6 +447,7 @@ describe("SettingsPanel", () => {
       const user = userEvent.setup();
       renderSettings({ at: "/settings?section=access" });
       await screen.findByRole("navigation", { name: "Settings sections" });
+      await openCreateUser();
       await user.click(screen.getByLabelText("Username"));
       await user.paste("maker");
 
@@ -543,9 +558,14 @@ describe("SettingsPanel", () => {
           "POST /api/v1/admin/users/2/password": json(aUser({ id: 2 })),
         },
       });
+      await openPasswordReset();
       await user.type(await screen.findByPlaceholderText("New password"), "Password123");
 
-      await user.click(screen.getByRole("button", { name: "Reset password" }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
+          name: "Reset password",
+        }),
+      );
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
@@ -561,9 +581,14 @@ describe("SettingsPanel", () => {
         routes: { "GET /api/v1/admin/users": json([aUser({ id: 2 })]) },
       });
 
+      await openPasswordReset();
       await user.type(await screen.findByPlaceholderText("New password"), "short");
 
-      expect(screen.getByRole("button", { name: "Reset password" })).toBeDisabled();
+      expect(
+        within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
+          name: "Reset password",
+        }),
+      ).toBeDisabled();
     });
 
     it("hides administration from a non-admin", async () => {
@@ -1269,13 +1294,10 @@ describe("SettingsPanel", () => {
     it("keeps backup controls out of the storage section", async () => {
       renderSettings({ at: "/settings?section=storage" });
 
-      expect(await screen.findByRole("button", { name: "Move storage" })).toBeVisible();
+      expect(await screen.findByRole("button", { name: "Plan migration" })).toBeVisible();
       expect(screen.queryByRole("button", { name: /Backup now/ })).toBeNull();
-      const move = screen.getByRole("region", { name: "Move Vault storage" });
-      const insights = screen.getByRole("heading", { name: "Storage insights" });
-      expect(
-        insights.compareDocumentPosition(move) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
+      await userEvent.click(screen.getByRole("tab", { name: "Usage" }));
+      expect(screen.getByRole("heading", { name: "Storage insights" })).toBeVisible();
     });
 
     it("opens backup controls in their own section", async () => {
@@ -2371,7 +2393,7 @@ describe("SettingsPanel", () => {
       await userEvent.clear(input);
       await userEvent.type(input, "14");
       const reads = app.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/config").length;
-      await userEvent.click(screen.getByTitle("Refresh trash"));
+      await userEvent.click(screen.getByRole("button", { name: /^Refresh$/ }));
       await waitFor(() =>
         expect(
           app.requestsWithMethod("GET").filter((r) => r.url === "/api/v1/models/trash"),
@@ -2803,7 +2825,7 @@ describe("SettingsPanel", () => {
       renderSettings();
       const nav = await screen.findByRole("navigation", { name: "Settings sections" });
 
-      await user.click(within(nav).getByRole("button", { name: /^GPU$/ }));
+      await user.click(within(nav).getByRole("button", { name: "GPU & rendering" }));
 
       expect(await screen.findByRole("combobox", { name: "Mesh renderer" })).toHaveValue("webgl");
     });
@@ -2867,14 +2889,14 @@ describe("SettingsPanel", () => {
         routes: { "GET /api/v1/models/trash": json([TRASHED]) },
       });
 
-      expect(await screen.findByLabelText("Trash size")).toBeInTheDocument();
+      expect(await screen.findByText(/Known model storage:/)).toBeVisible();
     });
 
     it("says so when the trash is empty", async () => {
       renderSettings({ at: "/settings?section=trash" });
 
-      expect(await screen.findByText("Deleted models and multipart sets")).toBeInTheDocument();
-      expect(screen.queryByLabelText("Trash size")).toBeNull();
+      expect(await screen.findByText("Trash is empty.")).toBeVisible();
+      expect(screen.queryByText(/Known model storage:/)).toBeNull();
     });
   });
 
@@ -3425,6 +3447,7 @@ describe("Settings account intent", () => {
         "POST /api/v1/admin/users": json({ detail: "User creation unavailable" }, 503),
       },
     });
+    await openCreateUser();
     const username = await screen.findByLabelText("Username");
     fireEvent.change(username, { target: { value: "retry-maker" } });
     fireEvent.change(screen.getByLabelText("Initial password"), {
@@ -3468,6 +3491,7 @@ describe("Settings account draft lifetime", () => {
         "GET /api/v1/admin/users": json([aUser()]),
       },
     });
+    await openCreateUser();
     const username = await screen.findByLabelText("Username");
     await userEvent.type(username, "new-maker");
     await userEvent.type(screen.getByLabelText("Initial password"), "FakePassword123");
@@ -3487,6 +3511,7 @@ describe("Settings account draft lifetime", () => {
         "POST /api/v1/admin/users": () => pending.promise,
       },
     });
+    await openCreateUser();
     const username = await screen.findByLabelText("Username");
     fireEvent.change(username, { target: { value: "original-maker" } });
     fireEvent.change(screen.getByLabelText("Initial password"), {
@@ -3499,7 +3524,11 @@ describe("Settings account draft lifetime", () => {
       pending.resolve(json(aUser({ username: "original-maker" })));
     });
     expect(await screen.findByText("original-maker", { selector: "p" })).toBeVisible();
-    expect(username).toHaveValue("next-maker");
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Create user" })).not.toBeInTheDocument(),
+    );
+    await openCreateUser();
+    expect(await screen.findByLabelText("Username")).toHaveValue("next-maker");
     expect(screen.getByLabelText("Initial password")).toHaveValue("FakePassword123");
     expect(JSON.parse(app.requestsWithMethod("POST")[0].body).username).toBe("original-maker");
   });
@@ -3512,18 +3541,24 @@ describe("Settings account draft lifetime", () => {
         "POST /api/v1/admin/users/2/password": () => pending.promise,
       },
     });
+    await openPasswordReset();
     const field = await screen.findByPlaceholderText("New password");
     fireEvent.change(field, { target: { value: "OldFakePassword123" } });
-    await userEvent.click(screen.getByRole("button", { name: "Reset password" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog", { name: "Reset password" })).getByRole("button", {
+        name: "Reset password",
+      }),
+    );
     await waitFor(() => expect(app.requestsWithMethod("POST")).toHaveLength(1));
     fireEvent.change(field, { target: { value: "NextFakePassword123" } });
     await act(async () => {
       pending.resolve(json(aUser()));
     });
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Reset password" })).toBeEnabled(),
+      expect(screen.queryByRole("dialog", { name: "Reset password" })).not.toBeInTheDocument(),
     );
-    expect(field).toHaveValue("NextFakePassword123");
+    await openPasswordReset();
+    expect(await screen.findByPlaceholderText("New password")).toHaveValue("NextFakePassword123");
     expect(JSON.parse(app.requestsWithMethod("POST")[0].body).password).toBe("OldFakePassword123");
   });
   it("dismisses the one-time key receipt without revoking its key", async () => {
@@ -3924,7 +3959,7 @@ describe("Settings remote read recovery", () => {
     expect(await screen.findByText("Trash could not be loaded.")).toBeVisible();
     expect(screen.queryByText("Trash is empty.")).not.toBeInTheDocument();
     app.route({ "GET /api/v1/models/trash": json([TRASHED_MODEL]) });
-    await userEvent.click(screen.getByTitle("Refresh trash"));
+    await userEvent.click(screen.getByRole("button", { name: /^Refresh$/ }));
     expect(await screen.findByText(TRASHED_MODEL.name)).toBeVisible();
   });
   it("keeps trash available when the GC read fails", async () => {

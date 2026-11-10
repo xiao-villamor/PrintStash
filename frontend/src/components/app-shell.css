@@ -1,0 +1,105 @@
+/* Shared OpenDesign workbench chrome. Feature panes keep their data and commands. */
+.desktop-workspace-popover {
+  left: 54px !important;
+  top: auto !important;
+  bottom: 10px;
+  transform-origin: bottom left !important;
+}
+.shell-topbar .shell-search input {
+  padding-left: 34px;
+}
+.collections-sidebar .collection-tree-row {
+  height: 30px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.collections-sidebar [data-outliner-collection] {
+  font-size: 13px;
+  font-weight: 400;
+}
+.collections-sidebar [data-outliner-collection][aria-selected="true"] {
+  font-weight: 500;
+}
+.collections-sidebar [data-tree-count] {
+  padding: 0;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+}
+.collections-sidebar [data-outliner-entry] {
+  min-height: 30px;
+  font-size: 13px;
+}
+@media (max-width: 767px) {
+  .shell-topbar {
+    gap: 8px;
+    padding: 0 8px;
+  }
+  .shell-topbar .shell-search {
+    flex: 0 0 40px;
+    width: 40px;
+  }
+  .shell-topbar .shell-search form {
+    height: 36px;
+  }
+  .shell-topbar .shell-search input {
+    width: 40px;
+    padding: 0;
+    color: transparent;
+    cursor: pointer;
+  }
+  .shell-topbar .shell-search input::placeholder {
+    color: transparent;
+  }
+  .shell-topbar .shell-search form > div {
+    display: none;
+  }
+  .shell-topbar .shell-search:focus-within {
+    position: absolute;
+    z-index: 5;
+    left: 8px;
+    right: 8px;
+    width: auto;
+  }
+  .shell-topbar .shell-search:focus-within input {
+    width: 100%;
+    padding-left: 34px;
+    font-size: 16px;
+    color: var(--foreground);
+    cursor: text;
+  }
+  .shell-topbar .shell-search:focus-within input::placeholder {
+    color: var(--muted-foreground);
+  }
+  .shell-topbar .shell-search:focus-within form > div {
+    display: flex;
+  }
+  .workspace-menu {
+    width: 100%;
+    max-width: none;
+  }
+  .mobile-workspace-popover {
+    left: 8px !important;
+    top: auto !important;
+    right: 8px !important;
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    max-width: none !important;
+  }
+}
+.keyboard-help {
+  box-shadow: 0 24px 60px var(--dialog-shadow);
+}
+.keyboard-help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  column-gap: 28px;
+}
+.shell-route-viewport {
+  padding-bottom: calc(64px + env(safe-area-inset-bottom));
+}
+@media (min-width: 768px) {
+  .shell-route-viewport {
+    padding-bottom: 0;
+  }
+}

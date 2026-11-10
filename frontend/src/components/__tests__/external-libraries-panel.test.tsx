@@ -156,6 +156,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+async function openSourceForm() {
+  const button = await screen.findByRole("button", { name: "Add source" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await userEvent.click(button);
+  return screen.findByRole("dialog", { name: "Add a library source" });
+}
+
 describe("ExternalLibrariesPanel", () => {
   describe("turning the feature on", () => {
     it("shows nothing until it knows whether the feature is on", () => {
@@ -182,17 +189,15 @@ describe("ExternalLibrariesPanel", () => {
     });
 
     it("presents sources as externally owned indexes", async () => {
-      renderPanel({
+      const { api } = renderPanel({
         getConfig: vi
           .fn<ExternalLibrariesApi["getConfig"]>()
           .mockResolvedValue(aVaultConfig({ external_libraries_enabled: false })),
       });
 
       expect(await screen.findByText("Library sources")).toBeInTheDocument();
-      expect(
-        await screen.findByText(/without copying them into Vault storage/),
-      ).toBeInTheDocument();
-      expect(screen.getByText(/never deleted by PrintStash/)).toBeInTheDocument();
+      expect(await screen.findByText(/source files stay in their original location/)).toBeVisible();
+      expect(api.remove).not.toHaveBeenCalled();
     });
 
     it("lists nothing while the feature is off", async () => {
@@ -962,6 +967,7 @@ describe("ExternalLibrariesPanel", () => {
         listConnections: vi.fn<() => Promise<StorageConnection[]>>().mockResolvedValue([]),
       });
 
+      await openSourceForm();
       const sourceType = await screen.findByLabelText("Library source type");
       expect(sourceType).toHaveTextContent("Mounted folder (SMB/NFS/local)");
       expect(sourceType).toHaveTextContent("S3 / compatible");
@@ -975,16 +981,22 @@ describe("ExternalLibrariesPanel", () => {
         listConnections: vi.fn<() => Promise<StorageConnection[]>>().mockResolvedValue([]),
       });
 
+      await openSourceForm();
       expect(await screen.findByText(/managed in Settings → Remote storage/)).toBeInTheDocument();
     });
 
     it("refuses a folder with no name", async () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
+      await openSourceForm();
       await screen.findByText("NAS models");
       await user.type(screen.getByLabelText("Mounted folder path"), "/mnt/x");
 
-      await user.click(screen.getByRole("button", { name: /Add source/ }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: /Add source/,
+        }),
+      );
 
       expect(api.create).not.toHaveBeenCalled();
     });
@@ -992,10 +1004,15 @@ describe("ExternalLibrariesPanel", () => {
     it("refuses a name with no folder", async () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
+      await openSourceForm();
       await screen.findByText("NAS models");
       await user.type(screen.getByLabelText("Source name"), "NAS");
 
-      await user.click(screen.getByRole("button", { name: /Add source/ }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: /Add source/,
+        }),
+      );
 
       expect(api.create).not.toHaveBeenCalled();
     });
@@ -1003,11 +1020,16 @@ describe("ExternalLibrariesPanel", () => {
     it("adds the folder the operator described", async () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
+      await openSourceForm();
       await screen.findByText("NAS models");
       await user.type(screen.getByLabelText("Source name"), "Attic NAS");
       await user.type(screen.getByLabelText("Mounted folder path"), "/mnt/attic");
 
-      await user.click(screen.getByRole("button", { name: /Add source/ }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: /Add source/,
+        }),
+      );
 
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
@@ -1030,11 +1052,16 @@ describe("ExternalLibrariesPanel", () => {
           .fn<(body: ExternalLibraryCreate) => Promise<ExternalLibrary>>()
           .mockRejectedValue(new ApiError(409, "root_marker_unwritable", "")),
       });
+      await openSourceForm();
       await screen.findByText("NAS models");
       await user.type(screen.getByLabelText("Source name"), "Attic NAS");
       await user.type(screen.getByLabelText("Mounted folder path"), "/mnt/attic");
 
-      await user.click(screen.getByRole("button", { name: /Add source/ }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: /Add source/,
+        }),
+      );
 
       expect(await screen.findByText(/must be writable during enrollment/i)).toBeVisible();
     });
@@ -1050,13 +1077,18 @@ describe("ExternalLibrariesPanel", () => {
       const { api } = renderPanel({
         listConnections: vi.fn<() => Promise<StorageConnection[]>>().mockResolvedValue([profile]),
       });
+      await openSourceForm();
       await screen.findByText("NAS models");
       await user.selectOptions(await screen.findByLabelText("Library source type"), "s3");
       await user.type(screen.getByLabelText("Source name"), "Remote catalogue");
       await user.selectOptions(screen.getByLabelText("Remote source connection"), "41");
       await user.type(screen.getByLabelText("Source path within connection"), "production");
 
-      await user.click(screen.getByRole("button", { name: /Add source/ }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: /Add source/,
+        }),
+      );
 
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
@@ -1080,11 +1112,16 @@ describe("ExternalLibrariesPanel", () => {
       // failure surfaces much later as an empty scan.
       const user = userEvent.setup();
       const { api } = renderPanel();
+      await openSourceForm();
       await screen.findByText("NAS models");
       await user.type(screen.getByLabelText("Source name"), "  Attic  ");
       await user.type(screen.getByLabelText("Mounted folder path"), "  /mnt/attic  ");
 
-      await user.click(screen.getByRole("button", { name: /Add source/ }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: /Add source/,
+        }),
+      );
 
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
@@ -1097,12 +1134,17 @@ describe("ExternalLibrariesPanel", () => {
     it("carries the collection layout the operator chose", async () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
+      await openSourceForm();
       await screen.findByText("NAS models");
       await user.type(screen.getByLabelText("Source name"), "Attic");
       await user.type(screen.getByLabelText("Mounted folder path"), "/mnt/attic");
       await user.selectOptions(screen.getByLabelText("Collection layout"), "single");
 
-      await user.click(screen.getByRole("button", { name: /Add source/ }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: /Add source/,
+        }),
+      );
 
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
@@ -1115,12 +1157,17 @@ describe("ExternalLibrariesPanel", () => {
     it("lets the operator write a cron the presets do not cover", async () => {
       const user = userEvent.setup();
       const { api } = renderPanel();
+      await openSourceForm();
       await screen.findByText("NAS models");
       await user.type(screen.getByLabelText("Source name"), "Attic");
       await user.type(screen.getByLabelText("Mounted folder path"), "/mnt/attic");
       await user.selectOptions(screen.getByLabelText("Scan schedule"), "__custom__");
 
-      await user.click(screen.getByRole("button", { name: /Add source/ }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: /Add source/,
+        }),
+      );
 
       await waitFor(() =>
         expect(api.create).toHaveBeenCalledWith(
@@ -1137,11 +1184,16 @@ describe("ExternalLibrariesPanel", () => {
           .fn<(body: ExternalLibraryCreate) => Promise<ExternalLibrary>>()
           .mockRejectedValue(new Error("path_not_allowed")),
       });
+      await openSourceForm();
       await screen.findByText("NAS models");
       await user.type(screen.getByLabelText("Source name"), "Attic");
       await user.type(screen.getByLabelText("Mounted folder path"), "/etc");
 
-      await user.click(screen.getByRole("button", { name: /Add source/ }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: /Add source/,
+        }),
+      );
 
       expect(await screen.findByText("Path not allowed.")).toBeInTheDocument();
     });
@@ -1293,6 +1345,7 @@ describe("ExternalLibrariesPanel", () => {
       });
       const app = renderApp(<ExternalLibrariesPanel canEdit api={api} />);
       await screen.findByText("NAS models");
+      await openSourceForm();
       await userEvent.selectOptions(screen.getByLabelText("Library source type"), "s3");
       expect(await screen.findByRole("option", { name: "Old connection" })).toBeInTheDocument();
 
@@ -1349,9 +1402,14 @@ describe("ExternalLibrariesPanel", () => {
         create: vi.fn<ExternalLibrariesApi["create"]>().mockReturnValue(receipt.promise),
       });
       await screen.findByText("NAS models");
+      await openSourceForm();
       await userEvent.type(screen.getByLabelText("Source name"), "First source");
       await userEvent.type(screen.getByLabelText("Mounted folder path"), "/mnt/first");
-      await userEvent.click(screen.getByRole("button", { name: "Add source" }));
+      await userEvent.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: "Add source",
+        }),
+      );
       await userEvent.clear(screen.getByLabelText("Source name"));
       await userEvent.type(screen.getByLabelText("Source name"), "Next source");
 
@@ -1366,9 +1424,14 @@ describe("ExternalLibrariesPanel", () => {
         create: vi.fn<ExternalLibrariesApi["create"]>().mockReturnValue(receipt.promise),
       });
       await screen.findByText("NAS models");
+      await openSourceForm();
       await userEvent.type(screen.getByLabelText("Source name"), "Retired source");
       await userEvent.type(screen.getByLabelText("Mounted folder path"), "/mnt/old");
-      await userEvent.click(screen.getByRole("button", { name: "Add source" }));
+      await userEvent.click(
+        within(screen.getByRole("dialog", { name: "Add a library source" })).getByRole("button", {
+          name: "Add source",
+        }),
+      );
 
       await act(async () => {
         clearLogin();

@@ -173,10 +173,14 @@ export function useMaintenanceMutation(api = maintenanceApi) {
   });
 }
 
-export function printerDetailOptions(id: number) {
+export function printerDetailOptions(id: number | null) {
   return queryOptions({
-    queryKey: printerKeys.detail(id),
-    queryFn: ({ signal }) => getPrinter(id, { signal }),
+    queryKey: id === null ? [...printerKeys.all, "detail", "empty"] : printerKeys.detail(id),
+    queryFn: ({ signal }) => {
+      if (id === null) throw new Error("Printer id is required");
+      return getPrinter(id, { signal });
+    },
+    enabled: id !== null,
     staleTime: 30_000,
   });
 }

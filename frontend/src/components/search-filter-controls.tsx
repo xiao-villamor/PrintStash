@@ -4,6 +4,7 @@ import { PrintHistoryFields } from "@/components/print-history-fields";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { uiText } from "@/lib/locale";
 import { useI18n } from "@/lib/i18n";
 import { filterValueText } from "@/lib/filter-labels";
 import {
@@ -57,6 +58,9 @@ export function SearchFilterControls({
   const { t } = useI18n();
   const [query, setQuery] = useState(q);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addKey, setAddKey] = useState("tag");
+  const [addValue, setAddValue] = useState("");
   const [draft, setDraft] = useState(new URLSearchParams());
   const [editing, setEditing] = useState<{ key: string; value: string; index: number } | null>(
     null,
@@ -76,7 +80,7 @@ export function SearchFilterControls({
     <div className="space-y-3">
       <form
         key={q}
-        className="flex flex-wrap gap-2"
+        className="flex flex-wrap items-center gap-2"
         onSubmit={(event) => {
           event.preventDefault();
           onChange(filters, query, sort);
@@ -92,34 +96,51 @@ export function SearchFilterControls({
           />
         )}
         {showQuery && <Button type="submit">{t("aiSearch.applySearch")}</Button>}
+        {!showQuery && (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={() => {
+              setAddValue("");
+              setAddOpen(true);
+            }}
+          >
+            {uiText("Add filter")}
+          </Button>
+        )}
         <Button
           type="button"
-          variant="ghost"
+          variant="outline"
+          size="xs"
           onClick={() => {
             setDraft(params);
             setHistoryOpen(true);
           }}
         >
-          {t("aiSearch.printHistory")}
+          {uiText("Print history")}
         </Button>
-        <select
-          aria-label={t("aiSearch.sort")}
-          className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-          value={sort}
-          onChange={(event) =>
-            onChange(
-              filters,
-              q,
-              searchSorts.find((value) => value === event.target.value) ?? "relevance",
-            )
-          }
-        >
-          {searchSorts.map((value) => (
-            <option key={value} value={value}>
-              {t(`aiSearch.sort.${value}`)}
-            </option>
-          ))}
-        </select>
+        <label className="flex items-center gap-2 text-xs">
+          {t("aiSearch.sort")}
+          <select
+            aria-label={t("aiSearch.sort")}
+            className="h-9 rounded-md border border-input bg-card px-3 text-xs"
+            value={sort}
+            onChange={(event) =>
+              onChange(
+                filters,
+                q,
+                searchSorts.find((value) => value === event.target.value) ?? "relevance",
+              )
+            }
+          >
+            {searchSorts.map((value) => (
+              <option key={value} value={value}>
+                {t(`aiSearch.sort.${value}`)}
+              </option>
+            ))}
+          </select>
+        </label>
       </form>
       {chips.length > 0 && (
         <div className="flex flex-wrap gap-2" aria-label={t("aiSearch.activeFilters")}>
@@ -160,6 +181,84 @@ export function SearchFilterControls({
           })}
         </div>
       )}
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title={uiText("Add filter")}>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!addValue.trim()) return;
+            const next = new URLSearchParams(params);
+            next.append(addKey, addValue.trim());
+            onChange(readSearchFilters(next), q, sort);
+            setAddOpen(false);
+          }}
+        >
+          <select
+            aria-label={t("aiSearch.activeFilters")}
+            className="h-10 w-full border border-input bg-background px-3 text-sm"
+            value={addKey}
+            onChange={(event) => {
+              setAddKey(event.target.value);
+              setAddValue("");
+            }}
+          >
+            {[
+              "tag",
+              "c",
+              "material_type",
+              "file_type",
+              "revision_status",
+              "printer_presence",
+              "printed",
+              "print_outcome",
+              "storage",
+              "slicer_name",
+              "printer_model",
+            ].map((key) => (
+              <option key={key} value={key}>
+                {t(filterLabel(key))}
+              </option>
+            ))}
+          </select>
+          <label className="block space-y-1 text-sm">
+            {t(filterLabel(addKey))}
+            {["revision_status", "printer_presence", "printed", "print_outcome"].includes(
+              addKey,
+            ) ? (
+              <select
+                className="h-10 w-full border border-input bg-background px-3"
+                value={addValue}
+                required
+                onChange={(event) => setAddValue(event.target.value)}
+              >
+                <option value="">—</option>
+                {(addKey === "revision_status"
+                  ? ["known_good", "needs_test", "failed", "archived"]
+                  : addKey === "printer_presence"
+                    ? ["any", "none"]
+                    : addKey === "printed"
+                      ? ["yes", "no"]
+                      : ["completed", "failed", "cancelled"]
+                ).map((value) => (
+                  <option key={value} value={value}>
+                    {filterValueText(addKey, value)}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <Input
+                value={addValue}
+                required
+                maxLength={512}
+                onChange={(event) => setAddValue(event.target.value)}
+              />
+            )}
+          </label>
+          <Button type="submit" disabled={!addValue.trim()}>
+            {t("aiSearch.applyFilters")}
+          </Button>
+        </form>
+      </Modal>
       <Modal
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}

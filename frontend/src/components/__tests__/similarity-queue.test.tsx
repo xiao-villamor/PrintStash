@@ -51,6 +51,24 @@ afterEach(() => {
 });
 
 describe("SimilarityQueue", () => {
+  it("requests every review state from Model details", async () => {
+    const user = userEvent.setup();
+    const view = renderQueue({ at: "/models/1?tab=similar" }, 1);
+    await screen.findByRole("tab", { name: "All" });
+
+    await user.click(screen.getByRole("tab", { name: "All" }));
+
+    await waitFor(() => {
+      const reads = view
+        .requestsWithMethod("GET")
+        .filter((request) => request.url.includes("/similarity/candidates"));
+      expect(reads.length).toBeGreaterThan(0);
+      const params = new URL(reads.at(-1)!.url, "http://test").searchParams;
+      expect(params.get("model_id")).toBe("1");
+      expect(params.has("review_state")).toBe(false);
+    });
+  });
+
   it("keeps a new Model actionable while an old find resolves", async () => {
     function Subject() {
       const [id, setId] = useState(7);

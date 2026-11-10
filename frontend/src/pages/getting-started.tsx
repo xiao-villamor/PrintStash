@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Box, Check, FolderOpen, Loader2, Upload } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Box,
+  Check,
+  ChevronRight,
+  Clock3,
+  FolderOpen,
+  Loader2,
+  Printer,
+  Upload,
+} from "lucide-react";
 import { Link } from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { useAuth } from "@/lib/auth-context";
@@ -99,15 +110,15 @@ export default function GettingStartedPage() {
   if (!user?.is_superuser) return null;
   return (
     <div className="h-full overflow-y-auto bg-background">
-      <div className="mx-auto max-w-screen-2xl space-y-5 p-4 sm:p-6">
+      <div className="w-full space-y-5 p-4 sm:p-6">
         <header>
           <h1 className="text-xl font-semibold tracking-tight">{t("nav.gettingStarted")}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t("setup.startHelp")}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t("setup.guideSubtitle")}</p>
         </header>
         <div
           className={
             !folder && !choosing && storage === "ready"
-              ? "grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_280px]"
+              ? "grid max-w-[1120px] items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]"
               : "grid items-start gap-4"
           }
         >
@@ -125,10 +136,17 @@ export default function GettingStartedPage() {
             )}
             <div className="space-y-3">
               {!folder && storage === "ready" && (
-                <p className="flex items-center gap-2 border border-success/30 bg-success/10 px-3 py-2 text-xs font-medium text-foreground">
+                <div className="flex items-start gap-2 border border-success/30 bg-success/10 px-3 py-2 text-xs text-foreground">
                   <Check className="h-4 w-4 text-success" aria-hidden />
-                  {t("setup.accountReady")}
-                </p>
+                  <div>
+                    <p className="font-medium">{t("setup.accountReady")}</p>
+                    {catalog.data && !catalog.isError && (
+                      <p className="mt-1 text-muted-foreground">
+                        {t("setup.modelsReady", { count: String(modelCount) })}
+                      </p>
+                    )}
+                  </div>
+                </div>
               )}
               <h2
                 ref={heading}
@@ -262,12 +280,7 @@ export default function GettingStartedPage() {
                             {t("Choose files")}
                           </Button>
                         </section>
-                        <Button
-                          variant="ghost"
-                          disabled={uploading}
-                          className="h-auto min-h-16 w-full justify-start gap-3 whitespace-normal px-2 text-left"
-                          onClick={() => setFolder(true)}
-                        >
+                        <div className="flex min-h-16 flex-wrap items-center gap-3 px-2 text-left">
                           <FolderOpen
                             className="h-5 w-5 shrink-0 text-muted-foreground"
                             aria-hidden
@@ -278,11 +291,14 @@ export default function GettingStartedPage() {
                               {t("setup.connectHelp")}
                             </span>
                           </span>
-                          <ArrowRight
-                            className="h-4 w-4 shrink-0 text-muted-foreground"
-                            aria-hidden
-                          />
-                        </Button>
+                          <Button
+                            variant="outline"
+                            disabled={uploading}
+                            onClick={() => setFolder(true)}
+                          >
+                            {t("Connect folder")}
+                          </Button>
+                        </div>
                       </div>
                     )}
                     {uploading && (
@@ -326,13 +342,20 @@ export default function GettingStartedPage() {
               <h2 className="font-semibold">{t("setup.nextOptional")}</h2>
               <nav className="flex flex-col divide-y divide-border">
                 <Link
-                  className="py-3 text-foreground hover:text-primary"
+                  className="flex items-center gap-3 py-3 text-foreground hover:text-primary"
                   href="/settings?section=backup"
                 >
-                  {t("setup.backup")}
+                  <Clock3 className="h-4 w-4 text-muted-foreground" aria-hidden />
+                  <span className="flex-1">{t("setup.backup")}</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
                 </Link>
-                <Link className="py-3 text-foreground hover:text-primary" href="/printers">
-                  {t("setup.printer")}
+                <Link
+                  className="flex items-center gap-3 py-3 text-foreground hover:text-primary"
+                  href="/printers"
+                >
+                  <Printer className="h-4 w-4 text-muted-foreground" aria-hidden />
+                  <span className="flex-1">{t("setup.printer")}</span>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden />
                 </Link>
               </nav>
               <p className="text-xs leading-relaxed text-muted-foreground">

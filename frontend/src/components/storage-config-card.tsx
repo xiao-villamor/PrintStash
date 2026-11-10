@@ -5,7 +5,7 @@ import { useUiLocale } from "@/lib/i18n";
 
 import { providerFormError } from "@/lib/storage-provider-form";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertTriangle, Save, ShieldAlert, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Folder, Save } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { vaultConfigOptions, useVaultConfigCommand } from "@/lib/queries/settings-config";
 import { storageProvidersOptions, storageReadDenied } from "@/lib/queries/settings-storage";
@@ -322,11 +322,21 @@ export function StorageConfigCard({
   return (
     <Localized>
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="border-b border-border px-4 py-4 sm:px-5">
-          <h3 className="text-sm font-semibold text-foreground">{t("settings.currentStorage")}</h3>
+        <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-muted-foreground">
+            <Folder className="h-4 w-4" aria-hidden />
+          </span>
+          <div>
+            <h3 className="text-sm font-semibold text-foreground">
+              {t("settings.currentStorage")}
+            </h3>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t("Where PrintStash keeps your Vault files.")}
+            </p>
+          </div>
         </div>
 
-        <div className="space-y-5 p-4 sm:p-5 lg:p-6">
+        <div className="space-y-5 px-4 pb-4 sm:pl-16 sm:pr-5">
           {readError && enabled && (
             <div role="alert" className="space-y-2 text-sm text-destructive">
               <p>{t("settings.storageReadFailed")}</p>
@@ -513,59 +523,32 @@ export function StorageConfigCard({
             <div className="space-y-4">
               {currentProvider && (
                 <>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-lg font-semibold text-foreground">
-                      {knownUiText(currentProvider.label)}
-                    </p>
+                  <dl className="settings-storage-summary">
+                    <div>
+                      <dt>{t("Provider")}</dt>
+                      <dd>{knownUiText(currentProvider.label)}</dd>
+                    </div>
                     {cfg?.storage_tier && (
-                      <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                        {cfg.storage_tier === "verified" ? (
-                          <ShieldCheck className="h-4 w-4 text-success" aria-hidden />
-                        ) : (
-                          <ShieldAlert className="h-4 w-4 text-warning" aria-hidden />
-                        )}
-                        {t("settings.storageSafety", {
-                          tier: knownUiText(cfg.storage_tier),
-                        })}
-                      </p>
+                      <div>
+                        <dt>{t("Storage safety")}</dt>
+                        <dd>{knownUiText(cfg.storage_tier)}</dd>
+                      </div>
                     )}
-                  </div>
-                  {(locationFields.length > 0 || currentProvider.expected_tier === "guarded") && (
-                    <section
-                      aria-label={t("settings.storageConnectionDetails")}
-                      className="border-t border-border pt-3"
-                    >
-                      {locationFields.length > 0 && (
-                        <dl className="flex flex-wrap gap-x-8 gap-y-2 text-xs">
-                          {locationFields.map((field) => (
-                            <div key={field.name} className="min-w-0">
-                              <dt className="text-muted-foreground">{field.label}</dt>
-                              <dd className="break-all font-medium text-foreground">
-                                {field.value}
-                              </dd>
-                            </div>
-                          ))}
-                        </dl>
-                      )}
-                      <StorageProviderSummary
-                        provider={currentProvider}
-                        activeTier={cfg?.storage_tier}
-                        context="current"
-                      />
-                    </section>
+                    {locationFields.map((field) => (
+                      <div key={field.name}>
+                        <dt>{field.label}</dt>
+                        <dd>{field.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {currentProvider.expected_tier === "guarded" && (
+                    <StorageProviderSummary
+                      provider={currentProvider}
+                      activeTier={cfg?.storage_tier}
+                      context="current"
+                    />
                   )}
                 </>
-              )}
-              {user?.is_superuser && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    document.getElementById("vault-migration")?.scrollIntoView({ block: "start" })
-                  }
-                >
-                  {t("migration.changeEntry")}
-                </Button>
               )}
               {currentProvider && credentialFields.length > 0 && (
                 <StorageProviderFields

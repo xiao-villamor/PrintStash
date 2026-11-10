@@ -6,21 +6,20 @@ import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter, usePathname, useSearchParams } from "@/lib/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@/lib/link";
-import { ArrowLeft, Bell, ChevronDown, BookOpen, PanelLeft, Upload } from "lucide-react";
+import { ArrowLeft, Bell, PanelLeft, PanelRight, Upload } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
 import { useCollectionSearch } from "@/lib/queries";
 import { modelDetailOptions } from "@/features/library/model-detail";
+import { multipartDetailOptions } from "@/features/library/multipart";
+import { printerDetailOptions } from "@/features/printers/queries";
+import { documentDetailOptions } from "@/lib/queries/documents";
 import { LibraryBackLink } from "@/features/library/navigation";
 import { uiText } from "@/lib/locale";
 import { userMessage } from "@/lib/errors";
 import { lastVaultHref } from "@/lib/last-collection";
 import { LibrarySearch } from "@/components/library-search";
-import { BrandMark } from "@/components/brand-mark";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { WorkspaceMenu } from "@/components/workspace-menu";
-import { LocaleToggle } from "@/components/locale-toggle";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { TaskList } from "@/components/task-list";
 import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
@@ -35,8 +34,6 @@ import {
   startImportJobSync,
   TaskItem,
 } from "@/lib/task-center";
-
-const WIKI_URL = "https://www.printstash.org/docs/";
 
 function pageTitle(pathname: string): MessageKey | null {
   if (pathname === "/") return "nav.vault";
@@ -71,12 +68,14 @@ export function TopBar() {
   const pane = useCollectionsPane();
   const attachBreadcrumbs = pane?.attachBreadcrumbs;
   const titleKey =
-    pathname === "/settings" && searchParams.get("section") === "trash"
+    pathname === "/settings" &&
+    searchParams.get("section") === "trash" &&
+    searchParams.get("view") !== "settings"
       ? "settings.trash"
       : pageTitle(pathname);
   const desktop = useMediaQuery("(min-width: 768px)");
   const router = useRouter();
-  const { user, loading, logout } = useAuth();
+  const { user } = useAuth();
   const startup = useLibraryStartup();
   const modelMatch = /^\/models\/(\d+)\/?$/.exec(pathname);
   const parsedModelId = modelMatch ? Number(modelMatch[1]) : null;
@@ -85,6 +84,42 @@ export function TopBar() {
       ? parsedModelId
       : null;
   const detail = useQuery({ ...modelDetailOptions(modelId), enabled: false });
+  const multipartMatch = /^\/multipart-models\/(\d+)\/?$/.exec(pathname);
+  const parsedMultipartId = multipartMatch ? Number(multipartMatch[1]) : null;
+  const multipartId =
+    parsedMultipartId !== null && Number.isSafeInteger(parsedMultipartId) && parsedMultipartId > 0
+      ? parsedMultipartId
+      : null;
+  const multipart = useQuery({ ...multipartDetailOptions(multipartId), enabled: false });
+  const documentMatch = /^\/documents\/(\d+)\/?$/.exec(pathname);
+  const parsedDocumentId = documentMatch ? Number(documentMatch[1]) : null;
+  const documentId =
+    parsedDocumentId !== null && Number.isSafeInteger(parsedDocumentId) && parsedDocumentId > 0
+      ? parsedDocumentId
+      : null;
+  const documentDetail = useQuery({ ...documentDetailOptions(documentId), enabled: false });
+  const record =
+    modelId !== null
+      ? detail.isError
+        ? null
+        : detail.data
+      : multipartId !== null
+        ? multipart.isError
+          ? null
+          : multipart.data
+        : documentId !== null && !documentDetail.isError
+          ? documentDetail.data
+          : null;
+  const recordRoute = modelId !== null || multipartId !== null || documentId !== null;
+  const printerMatch = /^\/printers\/(\d+)\/?$/.exec(pathname);
+  const parsedPrinterId = printerMatch ? Number(printerMatch[1]) : null;
+  const printerId =
+    parsedPrinterId !== null && Number.isSafeInteger(parsedPrinterId) && parsedPrinterId > 0
+      ? parsedPrinterId
+      : null;
+  const printerDetail = useQuery({ ...printerDetailOptions(printerId), enabled: false });
+  const printerName =
+    printerId !== null && !printerDetail.isError ? printerDetail.data?.name : null;
   // Library already owns this exact probe. Off-library the header keeps one
   // observer active so members do not get an upload action without edit access.
   const writableProbe = useCollectionSearch("", "edit", {
@@ -97,14 +132,28 @@ export function TopBar() {
   const activityEnabled = startup.canLoad("activity");
   const [tasks, setTasks] = useState<TaskItem[]>(() => listTasks());
   const [tasksOpen, setTasksOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
+  const [inspector, setInspector] = useState({ available: false, open: false });
+  useEffect(() => {
+    function update(event: Event) {
+      if (!(event instanceof CustomEvent)) return;
+      const detail: unknown = event.detail;
+      if (!(detail instanceof Object) || !("available" in detail) || !("open" in detail)) return;
+      if (
+        (detail.available === true || detail.available === false) &&
+        (detail.open === true || detail.open === false)
+      )
+        setInspector({ available: detail.available, open: detail.open });
+    }
+    window.addEventListener("printstash:library-inspector-state", update);
+    return () => window.removeEventListener("printstash:library-inspector-state", update);
+  }, []);
   // The logo returns to the model browser, restoring the last folder the user
   // was in rather than always resetting to "All Models", so it reflects the
   // remembered collection at click time.
   const homeHref = useSyncExternalStore(subscribeLastVaultHref, lastVaultHref);
-  const modelBackHref = detail.data?.collection
-    ? `/?c=${encodeURIComponent(detail.data.collection)}`
-    : detail.data
+  const modelBackHref = record?.collection
+    ? `/?c=${encodeURIComponent(record.collection)}`
+    : record
       ? "/"
       : homeHref;
 
@@ -129,16 +178,16 @@ export function TopBar() {
     router.push(`${target.pathname}?${target.searchParams}`);
   }
 
-  async function handleLogout() {
-    await logout();
-    setProfileOpen(false);
-    router.push("/login");
-  }
-
   return (
-    <header className="relative z-dropdown flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:gap-3 sm:px-3">
-      {!desktop && modelId !== null && (
+    <header
+      data-current-collection={
+        recordRoute ? record?.collection : pathname === "/" ? searchParams.get("c") : undefined
+      }
+      className="shell-topbar relative z-dropdown flex h-[57px] shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:gap-3 sm:px-3"
+    >
+      {!desktop && recordRoute && (
         <LibraryBackLink
+          data-shell-back
           href={modelBackHref}
           aria-label={uiText("Back")}
           className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
@@ -146,27 +195,38 @@ export function TopBar() {
           <ArrowLeft className="h-4 w-4" aria-hidden />
         </LibraryBackLink>
       )}
-      {/* Logo */}
-      <Link
-        href={homeHref}
-        className="flex shrink-0 items-center space-x-2 transition-opacity hover:opacity-80 md:hidden"
-      >
-        <div className="w-8 h-8 bg-primary rounded flex items-center justify-center flex-shrink-0">
-          <BrandMark className="h-6 w-6 text-primary-foreground" />
-        </div>
-        <span className="text-xl font-bold text-foreground tracking-tight hidden sm:block">
-          PrintStash
-        </span>
-      </Link>
+      {!desktop && printerId !== null && (
+        <Link
+          href="/printers"
+          aria-label={uiText("Back")}
+          className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+        </Link>
+      )}
+      <span className="min-w-0 flex-1 truncate text-[13px] font-semibold md:hidden">
+        {printerName
+          ? printerName
+          : recordRoute && record
+            ? record.name
+            : pathname === "/"
+              ? searchParams.get("favorites") === "true"
+                ? uiText("Favorites")
+                : (searchParams.get("c")?.split("/").at(-1) ?? uiText("Library"))
+              : titleKey
+                ? t(titleKey)
+                : t("Page not found")}
+      </span>
 
       {pane && (
         <button
           type="button"
-          aria-label={uiText("Collections")}
+          aria-label={uiText("Toggle sidebar")}
+          title={uiText("Toggle sidebar")}
           aria-controls="collections-pane"
           aria-expanded={pane.open}
           onClick={pane.toggle}
-          className="hidden h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex"
+          className={`hidden h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex ${pane.open ? "bg-muted text-foreground" : ""}`}
         >
           <PanelLeft className="h-4 w-4" aria-hidden />
         </button>
@@ -179,28 +239,49 @@ export function TopBar() {
           aria-hidden={!desktop || undefined}
           className="hidden min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap text-sm md:flex"
         >
-          {modelId !== null ? (
-            <LibraryBackLink
-              href={modelBackHref}
-              aria-label={uiText("Back")}
-              className="shrink-0 text-muted-foreground hover:text-foreground"
-            >
-              {uiText("Collections")}
-            </LibraryBackLink>
-          ) : (
-            <Link href={homeHref} className="shrink-0 text-muted-foreground hover:text-foreground">
-              PrintStash
-            </Link>
+          <Link href={homeHref} className="shrink-0 text-muted-foreground hover:text-foreground">
+            PrintStash
+          </Link>
+          {recordRoute && (
+            <>
+              <span aria-hidden className="text-muted-foreground">
+                /
+              </span>
+              <LibraryBackLink
+                data-shell-back
+                href={modelBackHref}
+                aria-label={uiText("Back")}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                {uiText("Collections")}
+              </LibraryBackLink>
+            </>
+          )}
+          {printerId !== null && (
+            <>
+              <span aria-hidden className="text-muted-foreground">
+                /
+              </span>
+              <Link
+                href="/printers"
+                aria-label={uiText("Back")}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                {uiText("nav.printers")}
+              </Link>
+            </>
           )}
           <span aria-hidden className="text-muted-foreground">
             /
           </span>
           <span className="min-w-0 truncate font-medium text-foreground" aria-current="page">
-            {modelId !== null && detail.data
-              ? detail.data.name
-              : titleKey
-                ? t(titleKey)
-                : t("Page not found")}
+            {printerName
+              ? printerName
+              : recordRoute && record
+                ? record.name
+                : titleKey
+                  ? t(titleKey)
+                  : t("Page not found")}
           </span>
         </nav>
       )}
@@ -215,6 +296,7 @@ export function TopBar() {
         <Button
           type="button"
           size="sm"
+          className="h-[34px]"
           onClick={openUpload}
           disabled={!canUpload}
           aria-label={uiText("Upload")}
@@ -229,17 +311,6 @@ export function TopBar() {
           <Upload className="h-4 w-4" aria-hidden />
           <span className="hidden sm:inline">{uiText("Upload")}</span>
         </Button>
-        <a
-          href={WIKI_URL}
-          className="hidden h-8 w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:flex md:hidden"
-        >
-          <BookOpen className="h-4 w-4" />
-          <span className="sr-only">{t("nav.wiki")}</span>
-        </a>
-        <div className="flex md:hidden">
-          <ThemeToggle />
-          <LocaleToggle />
-        </div>
         <DropdownMenu
           open={tasksOpen}
           onOpenChange={(open) => {
@@ -248,7 +319,7 @@ export function TopBar() {
           }}
           align="end"
           role="dialog"
-          className="hidden sm:flex"
+          className="flex"
           trigger={
             <button
               type="button"
@@ -281,58 +352,18 @@ export function TopBar() {
             }}
           />
         </DropdownMenu>
-
-        {/* Profile — hidden on mobile, where the bottom nav's "More" sheet owns
-            the account actions (the avatar menu only duplicated nav links). */}
-        {!loading && !user ? (
-          <div className="relative hidden sm:block">
-            <Link
-              href="/login"
-              className="flex items-center px-3 py-1.5 text-sm font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover transition-colors"
-            >
-              {t("nav.logIn")}
-            </Link>
-          </div>
-        ) : (
-          <DropdownMenu
-            open={profileOpen}
-            onOpenChange={setProfileOpen}
-            align="end"
-            role="menu"
-            className="hidden sm:block md:hidden"
-            trigger={
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                data-menu-trigger
-                onClick={() => setProfileOpen((v) => !v)}
-                className="group"
-                aria-haspopup="menu"
-                aria-expanded={profileOpen}
-              >
-                <div
-                  aria-hidden="true"
-                  className="flex h-7 w-7 items-center justify-center rounded-full border border-input bg-accent text-xs font-semibold text-accent-foreground"
-                >
-                  {user?.username.charAt(0).toUpperCase() ?? "…"}
-                </div>
-                <span className="sr-only">{t("nav.myWorkspace")}</span>
-                <ChevronDown
-                  className={`hidden h-4 w-4 text-muted-foreground transition-transform ${profileOpen ? "rotate-180" : ""}`}
-                />
-              </Button>
-            }
+        {pathname === "/" && inspector.available && (
+          <button
+            type="button"
+            aria-label={uiText("Show or hide details")}
+            title={uiText("Show or hide details")}
+            aria-controls="model-drawer"
+            aria-pressed={inspector.open}
+            onClick={() => window.dispatchEvent(new Event("printstash:toggle-library-inspector"))}
+            className={`hidden h-8 w-8 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:inline-flex ${inspector.open ? "bg-muted text-foreground" : ""}`}
           >
-            <WorkspaceMenu
-              pathname={pathname}
-              username={user?.username ?? "…"}
-              printersInQuickAccess={desktop && pathname === "/"}
-              isAdmin={!!user?.is_superuser}
-              onNavigate={() => setProfileOpen(false)}
-              onLogout={handleLogout}
-            />
-          </DropdownMenu>
+            <PanelRight className="h-4 w-4" aria-hidden />
+          </button>
         )}
       </div>
     </header>

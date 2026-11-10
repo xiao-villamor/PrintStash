@@ -18,6 +18,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { usePathname, useSearchParams } from "@/lib/navigation";
 import {
@@ -49,6 +50,7 @@ function renderNav(options: RenderAppOptions & { pending?: unknown[] } = {}) {
   return renderApp(
     <>
       <SidebarNav />
+      <KeyboardShortcuts />
       <CurrentLocation />
     </>,
     {
@@ -77,7 +79,7 @@ describe("SidebarNav", () => {
     it("links to the vault", () => {
       renderNav();
 
-      expect(screen.getByRole("link", { name: /Vault/i })).toHaveAttribute("href", "/");
+      expect(screen.getByRole("link", { name: "Collections" })).toHaveAttribute("href", "/");
     });
 
     it("opens Favorites using the existing library filter", () => {
@@ -146,7 +148,7 @@ describe("SidebarNav", () => {
       renderNav();
       await user.click(screen.getByRole("button", { name: "My workspace" }));
 
-      expect(screen.getByRole("menuitem", { name: "Wiki" })).toHaveAttribute(
+      expect(screen.getByRole("menuitem", { name: /Docs/ })).toHaveAttribute(
         "href",
         "https://www.printstash.org/docs/",
       );
@@ -177,19 +179,19 @@ describe("SidebarNav", () => {
         "aria-current",
         "page",
       );
-      expect(screen.getByRole("link", { name: "Vault" })).not.toHaveAttribute("aria-current");
+      expect(screen.getByRole("link", { name: "Collections" })).not.toHaveAttribute("aria-current");
     });
 
-    it("marks a nested inbox route in the rail", () => {
+    it("keeps Pending reachable from a nested inbox route", () => {
       renderNav({ at: "/inbox/41" });
 
-      expect(screen.getByRole("link", { name: "Pending" })).toHaveAttribute("aria-current", "page");
+      expect(screen.getByRole("link", { name: "Pending" })).toHaveAttribute("href", "/inbox");
     });
 
     it("does not mark the vault on a different route", () => {
       renderNav({ at: "/inbox" });
 
-      expect(screen.getByRole("link", { name: "Vault" })).not.toHaveAttribute("aria-current");
+      expect(screen.getByRole("link", { name: "Collections" })).not.toHaveAttribute("aria-current");
     });
 
     it("returns the brand link to the remembered collection", () => {
@@ -223,7 +225,7 @@ describe("SidebarNav", () => {
       await user.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
 
       expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveTextContent(
-        "Focus library search",
+        "Search panel",
       );
     });
   });

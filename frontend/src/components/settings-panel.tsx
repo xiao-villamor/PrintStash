@@ -7,11 +7,13 @@ import type { EditingBase } from "@/types/editing";
 import type { PreferenceIntent } from "@/lib/queries/settings-preferences";
 
 import { GettingStartedReminder } from "@/components/getting-started-reminder";
+import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 
 import { knownUiText } from "@/lib/locale";
 import { formatNumber } from "@/lib/format";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
+import { setThemeMode, useThemeMode } from "@/lib/theme";
 import { copyText } from "@/lib/clipboard";
 import { parseApiError } from "@/lib/errors";
 import { useUiLocale } from "@/lib/i18n";
@@ -53,6 +55,7 @@ import {
   type TrashReceipt,
 } from "@/lib/queries/settings-trash";
 import { useBackupPolicyDraft } from "@/lib/queries/settings-backup-policy";
+import { auditHistoryOptions } from "@/lib/queries/settings-maintenance";
 import { getSessionVersion } from "@/lib/session-transport";
 import {
   collectionAccessOptions,
@@ -68,6 +71,7 @@ import { BackupRunHistory } from "@/components/backup-run-history";
 import { CollectionPicker } from "@/components/collection-picker";
 import {
   Bell,
+  ArrowRightLeft,
   Boxes,
   Check,
   CircleArrowUp,
@@ -100,12 +104,14 @@ import {
   Trash2,
   Search,
   Server,
+  Sun,
   Tag,
   UserPlus,
   Users,
   Upload,
 } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -166,7 +172,8 @@ import {
   writeCardMetrics,
 } from "@/lib/card-metrics";
 import { toast } from "@/lib/toast";
-import { useI18n, type MessageKey } from "@/lib/i18n";
+import { localeDefinitions, SUPPORTED_LOCALES, useI18n, type MessageKey } from "@/lib/i18n";
+import "./settings-panel.css";
 import { storageOperationMessage } from "@/lib/storage-operations";
 import {
   usePrinterCardImagePreference,
@@ -254,6 +261,27 @@ const SETTINGS_GROUPS: { labelKey: MessageKey; ids: SettingsSection[] }[] = [
   { labelKey: "System", ids: ["maintenance", "work", "design", "previews", "gpu", "about"] },
 ];
 
+const SETTINGS_SUBTITLES = {
+  overview: "settings.subtitle.overview",
+  access: "settings.subtitle.access",
+  storage: "settings.subtitle.storage",
+  backup: "settings.subtitle.backup",
+  "remote-storage": "settings.subtitle.remoteStorage",
+  imports: "settings.subtitle.imports",
+  "ai-search": "settings.subtitle.aiSearch",
+  maintenance: "settings.subtitle.maintenance",
+  work: "settings.subtitle.work",
+  libraries: "settings.subtitle.libraries",
+  notifications: "settings.subtitle.notifications",
+  sso: "settings.subtitle.sso",
+  spoolman: "settings.subtitle.spoolman",
+  design: "settings.subtitle.design",
+  previews: "settings.subtitle.previews",
+  gpu: "settings.subtitle.gpu",
+  trash: "settings.subtitle.trash",
+  about: "settings.subtitle.about",
+} satisfies Record<SettingsSection, MessageKey>;
+
 /** True when the `?section=` value names one of the sections we ship. */
 function isSettingsSection(value: string | null): value is SettingsSection {
   return SETTINGS_SECTIONS.some((section) => section.id === value);
@@ -312,11 +340,8 @@ function isModelPurge(operation: TrashOperation | null): operation is TrashRowKe
 }
 
 // Shared button styles — keep settings actions visually uniform and theme-aware.
-const BTN_PRIMARY = cn(buttonVariants({ size: "xs" }), "uppercase tracking-wider");
-const BTN_SECONDARY = cn(
-  buttonVariants({ variant: "outline", size: "xs" }),
-  "uppercase tracking-wider text-muted-foreground",
-);
+const BTN_PRIMARY = buttonVariants({ size: "xs" });
+const BTN_SECONDARY = buttonVariants({ variant: "outline", size: "xs" });
 const BTN_ICON = buttonVariants({ variant: "outline", size: "icon-sm" });
 const INPUT = cn(inputClasses, "h-auto py-2 rounded");
 
@@ -443,17 +468,21 @@ function SettingsCard({
   title,
   description,
   action,
+  footer,
   children,
   className,
   stackActionOnMobile = false,
+  hideHeader = false,
 }: {
   icon?: typeof Server;
   title: string;
   description?: string;
   action?: React.ReactNode;
+  footer?: React.ReactNode;
   children?: React.ReactNode;
   className?: string;
   stackActionOnMobile?: boolean;
+  hideHeader?: boolean;
 }) {
   useUiLocale();
   return (
@@ -461,34 +490,37 @@ function SettingsCard({
       role="group"
       aria-label={title}
       className={cn(
-        "overflow-hidden rounded-lg border border-border bg-card text-card-foreground",
+        "settings-card overflow-hidden rounded-lg border border-border bg-card text-card-foreground",
         className,
       )}
     >
-      <div
-        className={cn(
-          "flex items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5",
-          stackActionOnMobile && "flex-col sm:flex-row",
-        )}
-      >
-        <div className="flex items-start gap-3 min-w-0">
-          {Icon && (
-            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-              <Icon className="h-4 w-4" />
+      {!hideHeader && (
+        <div
+          className={cn(
+            "settings-card-head flex items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5",
+            stackActionOnMobile && "flex-col sm:flex-row",
+          )}
+        >
+          <div className="flex items-start gap-3 min-w-0">
+            {Icon && (
+              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                <Icon className="h-4 w-4" />
+              </div>
+            )}
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+              {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
+            </div>
+          </div>
+          {action && (
+            <div className={cn("flex-shrink-0", stackActionOnMobile && "w-full sm:w-auto")}>
+              {action}
             </div>
           )}
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-            {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
-          </div>
         </div>
-        {action && (
-          <div className={cn("flex-shrink-0", stackActionOnMobile && "w-full sm:w-auto")}>
-            {action}
-          </div>
-        )}
-      </div>
+      )}
       {children}
+      {footer && <div className="settings-card-foot">{footer}</div>}
     </div>
   );
 }
@@ -496,7 +528,11 @@ function SettingsCard({
 export function SettingsPanel() {
   useUiLocale();
   const { user } = useAuth();
-  const { locale, t } = useI18n();
+  const { locale, setLocale, t } = useI18n();
+  const themeMode = useThemeMode();
+  const [storageTab, setStorageTab] = useState<"location" | "usage" | "cache">("location");
+  const [migrationOpen, setMigrationOpen] = useState(false);
+  const [spoolmanActionHost, setSpoolmanActionHost] = useState<HTMLDivElement | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const latestRelease = CHANGELOG[0];
@@ -504,6 +540,8 @@ export function SettingsPanel() {
   // during render; mirroring it into state needed an effect to re-sync on every
   // deep link, back button, and replace.
   const activeSection = settingsSection(searchParams.get("section"));
+  const settingsTrash = activeSection === "trash" && searchParams.get("view") === "settings";
+  const trashPage = activeSection === "trash" && !settingsTrash;
   const mobileTabsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -556,6 +594,8 @@ export function SettingsPanel() {
       : userCommand.variables.id
     : null;
   const [createUserDraft, setCreateUserDraft] = useState({ username: "", email: "", password: "" });
+  const [createUserOpen, setCreateUserOpen] = useState(false);
+  const [passwordTarget, setPasswordTarget] = useState<number | null>(null);
   const { username: newUsername, email: newUserEmail, password: newUserPassword } = createUserDraft;
   const [passwordDrafts, setPasswordDrafts] = useState<Record<number, string>>({});
   const [accessCollection, setAccessCollection] = useState<CollectionNodeRead | null>(null);
@@ -670,7 +710,8 @@ export function SettingsPanel() {
   const [trashRetentionDraft, setTrashRetentionDraft] = useState<RetentionDraft | null>(null);
   const remoteConfig = useVaultConfig({
     enabled:
-      !!user?.is_superuser && ["design", "previews", "backup", "trash"].includes(activeSection),
+      !!user?.is_superuser &&
+      ["overview", "design", "previews", "backup", "trash"].includes(activeSection),
     retry: false,
   });
   const configDenied =
@@ -712,7 +753,12 @@ export function SettingsPanel() {
   const backupConnectionCommand = useStorageConnectionCommand();
   const [backingUp, setBackingUp] = useState(false);
   const backupEnabled = !!user?.is_superuser && activeSection === "backup";
-  const ownedBackupRead = useQuery({ ...backupSourcesOptions(), enabled: backupEnabled });
+  const overviewSafetyEnabled = !!user?.is_superuser && activeSection === "overview";
+  const ownedBackupRead = useQuery({
+    ...backupSourcesOptions(),
+    enabled: backupEnabled || overviewSafetyEnabled,
+  });
+  const overviewAuditRead = useQuery({ ...auditHistoryOptions(), enabled: overviewSafetyEnabled });
   const localBackupRead = useQuery({ ...unownedLocalBackupsOptions(), enabled: backupEnabled });
   const s3BackupRead = useQuery({ ...unownedS3BackupsOptions(), enabled: backupEnabled });
   const remoteBackupRead = useQuery({ ...unownedRemoteBackupsOptions(), enabled: backupEnabled });
@@ -721,6 +767,11 @@ export function SettingsPanel() {
     ownedBackupRead.isError &&
     [401, 403, 404].includes(parseApiError(ownedBackupRead.error).status);
   const backups = user?.is_superuser && !backupsDenied ? (ownedBackupRead.data ?? []) : [];
+  const latestBackup = backups.reduce<BackupMeta | null>(
+    (latest, backup) => (!latest || backup.created_at > latest.created_at ? backup : latest),
+    null,
+  );
+  const latestAudit = overviewAuditRead.data?.[0];
   const unownedBackups =
     user?.is_superuser && !localBackupRead.isError ? (localBackupRead.data ?? []) : [];
   const unownedS3Backups =
@@ -786,6 +837,12 @@ export function SettingsPanel() {
   useEffect(() => {
     accountLive.current = true;
     const release = onAuthChange(() => {
+      setCreateUserDraft({ username: "", email: "", password: "" });
+      setCreateUserOpen(false);
+      setPasswordDrafts({});
+      setPasswordTarget(null);
+      setStorageTab("location");
+      setMigrationOpen(false);
       setOwnedReceipt(null);
       setAccessCollection(null);
       setAccessPickerOpen(false);
@@ -823,6 +880,8 @@ export function SettingsPanel() {
     const params = new URLSearchParams(searchParams.toString());
     if (section === "overview") params.delete("section");
     else params.set("section", section);
+    if (section === "trash") params.set("view", "settings");
+    else params.delete("view");
     const query = params.toString();
     router.replace(query ? `/settings?${query}` : "/settings");
   }
@@ -1501,6 +1560,7 @@ export function SettingsPanel() {
       setCreateUserDraft((current) =>
         current === captured ? { username: "", email: "", password: "" } : current,
       );
+      setCreateUserOpen(false);
       toast.success(uiText("User created."));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
@@ -1530,6 +1590,7 @@ export function SettingsPanel() {
       setPasswordDrafts((current) =>
         current[id] === captured ? { ...current, [id]: "" } : current,
       );
+      setPasswordTarget(null);
       toast.success(uiText("Password reset."));
     } catch (error) {
       if (accountCurrent(session)) toast.error(error);
@@ -1954,10 +2015,369 @@ export function SettingsPanel() {
     ? users.find((row) => row.id === Number(printerAccessUserId))
     : null;
 
+  const reviewExpiredButton = (
+    <button
+      type="button"
+      onClick={() => setPurgeExpiredOpen(true)}
+      disabled={
+        !user?.is_superuser ||
+        trashBusy === "gc" ||
+        parsedTrashRetentionDays === null ||
+        trashRetentionDays < 0 ||
+        gcRead.isError ||
+        gcRead.isPending ||
+        (gcPlan !== null && ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
+      }
+      className={BTN_SECONDARY}
+    >
+      {trashBusy === "gc" ? uiText("Preparing") : uiText("Review expired")}
+    </button>
+  );
+
+  const trashRetentionCard =
+    activeSection === "trash" ? (
+      <SettingsCard
+        className="border-0"
+        icon={Trash2}
+        title={uiText("Trash retention")}
+        description={uiText(
+          "Soft-deleted models stay restorable until the retention window expires.",
+        )}
+        action={settingsTrash ? reviewExpiredButton : undefined}
+        footer={
+          <button
+            type="button"
+            onClick={saveTrashRetention}
+            disabled={
+              !user?.is_superuser ||
+              !remoteConfigData ||
+              remoteConfig.isError ||
+              preferenceCommand.blocked ||
+              backupPolicy.isPending ||
+              parsedTrashRetentionDays === null
+            }
+            className={BTN_PRIMARY}
+          >
+            {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
+          </button>
+        }
+      >
+        <div className="settings-preference-fields px-4 sm:px-5">
+          <label className="settings-preference-row">
+            <span>{uiText("Days")}</span>
+            <input
+              type="number"
+              min={-1}
+              value={trashRetentionText}
+              onChange={(event) => {
+                const text = event.target.value;
+                if (remoteConfigData)
+                  setTrashRetentionDraft((previous) => ({
+                    text,
+                    base: previous?.base ?? captureEditingBase(remoteConfigData),
+                  }));
+              }}
+              disabled={
+                !user?.is_superuser ||
+                !remoteConfigData ||
+                remoteConfig.isError ||
+                trashRetentionBusy
+              }
+              className={INPUT}
+            />
+          </label>
+        </div>
+        {trashPurgeResult && (
+          <div
+            role="status"
+            aria-live="polite"
+            className={cn(
+              "border-t px-4 py-3 text-xs sm:px-5",
+              (trashPurgeResult.storage_cleanup_status ?? "completed") === "completed"
+                ? "border-success/30 bg-success/10 text-success"
+                : "border-warning/30 bg-warning/10 text-warning",
+            )}
+          >
+            {cleanupStatusMessage(t, trashPurgeResult)}
+          </div>
+        )}
+        {gcPlan && (
+          <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-foreground">
+                  {uiText("GC plan #{value1} · {value2}", {
+                    value1: String(gcPlan.id ?? ""),
+                    value2: String(gcPlan.state ?? ""),
+                  })}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {uiText(
+                    "{value1} of {value2} expired resources · {value3} storage keys · {value4}",
+                    {
+                      value1: String(gcPlan.resource_count ?? ""),
+                      value2: String(gcPlan.candidate_pool_count ?? ""),
+                      value3: String(gcPlan.key_count ?? ""),
+                      value4: String(formatBytes(gcPlan.size_bytes) ?? ""),
+                    },
+                  )}
+                </p>
+              </div>
+              <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                {gcPlan.backup_id ? uiText("backup verified") : uiText("no backup bound")}
+              </span>
+            </div>
+            <p className="mt-3 text-2xs text-muted-foreground">{uiText("Exact plan digest")}</p>
+            <code className="mt-1 block break-all rounded border border-border bg-background px-2 py-2 text-3xs text-foreground">
+              {gcPlan.digest}
+            </code>
+            {gcPlan.state === "preview" && (
+              <div className="mt-3 space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  {uiText(
+                    "Approval is fail-closed: paste the exact digest below. The server will also require verified storage and a recent backup on an independent S3 provider before starting the quarantine.",
+                  )}
+                </p>
+                <input
+                  className={INPUT}
+                  aria-label={uiText("Confirm GC plan digest")}
+                  placeholder={uiText("Paste the 64-character digest")}
+                  value={gcDigestConfirmation}
+                  disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
+                  onChange={(event) => setGcDigestConfirmation(event.target.value.trim())}
+                />
+              </div>
+            )}
+            {gcPlan.state === "quarantined" && gcPlan.quarantine_until && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                {uiText(
+                  "Recovery quarantine ends {value1}. The plan and backup are reverified before final deletion.",
+                  { value1: String(formatDateTime(gcPlan.quarantine_until) ?? "") },
+                )}
+              </p>
+            )}
+            {gcPlan.last_error && (
+              <p className="mt-3 text-xs text-destructive">{gcPlan.last_error}</p>
+            )}
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              {gcPlan.state === "preview" && (
+                <button
+                  type="button"
+                  className={BTN_PRIMARY}
+                  disabled={
+                    gcRead.isError ||
+                    gcRead.isPending ||
+                    trashBusy === "gc" ||
+                    gcDigestConfirmation !== gcPlan.digest
+                  }
+                  onClick={approveExpiredGcPlan}
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  {uiText("Verify backup and quarantine")}
+                </button>
+              )}
+              {gcPlan.state === "quarantined" && (
+                <button
+                  type="button"
+                  className={BTN_PRIMARY}
+                  disabled={
+                    gcRead.isError ||
+                    gcRead.isPending ||
+                    trashBusy === "gc" ||
+                    !gcPlan.quarantine_until ||
+                    !gcQuarantineReady
+                  }
+                  onClick={finalizeExpiredGcPlan}
+                >
+                  <Eraser className="h-3.5 w-3.5" />
+                  {uiText("Reverify and finalize")}
+                </button>
+              )}
+              {["preview", "quarantined"].includes(gcPlan.state) && (
+                <button
+                  type="button"
+                  className={BTN_SECONDARY}
+                  disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
+                  onClick={abortExpiredGcPlan}
+                >
+                  {uiText("Abort plan")}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </SettingsCard>
+    ) : null;
+
+  const trashItemsCard =
+    activeSection === "trash" ? (
+      <SettingsCard
+        hideHeader={trashPage}
+        className="border-0"
+        icon={Boxes}
+        title={uiText("trash.itemsTitle")}
+        description={uiText("multipart.trashHelp")}
+      >
+        {trashItems.length > 0 && (
+          <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 text-xs text-muted-foreground sm:px-5">
+            <span className="flex items-center gap-3">
+              <Checkbox
+                checked={selectedTrash.length === trashItems.length}
+                onChange={toggleAllTrash}
+                disabled={trashBusy !== null}
+                ariaLabel={uiText("trash.selectAll")}
+              />
+              {uiText("trash.selectAll")}
+            </span>
+            <span>
+              {selectedTrash.length > 0
+                ? uiText("trash.selectedCount", {
+                    value1: String(selectedTrash.length),
+                    count: selectedTrash.length,
+                  })
+                : uiText("trash.itemsCount", {
+                    value1: String(trashItems.length),
+                    count: Number(trashItems.length),
+                  })}
+            </span>
+            {selectedTrash.length > 0 && (
+              <span className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={restoreSelectedTrash}
+                  disabled={trashBusy !== null}
+                  className={BTN_SECONDARY}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {uiText("Restore selected")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPurgeSelectionOpen(true)}
+                  disabled={trashBusy !== null}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium disabled:opacity-50 disabled:cursor-disabled"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {uiText("Delete selected")}
+                </button>
+              </span>
+            )}
+            {trashItems.some((item) => item.kind === "model") && (
+              <span className="font-mono tabular-nums">
+                {t("Known model storage: {size}", {
+                  size: formatBytes(
+                    trashItems.reduce(
+                      (total, item) => total + (item.kind === "model" ? item.size_bytes : 0),
+                      0,
+                    ),
+                  ),
+                })}
+              </span>
+            )}
+          </div>
+        )}
+        <div className="divide-y divide-border">
+          {!user ? (
+            <p className="p-4 sm:p-5 text-sm text-muted-foreground">
+              {uiText("Sign in to manage the trash.")}
+            </p>
+          ) : trashLoading ? (
+            <p className="p-4 sm:p-5 text-sm text-muted-foreground">{uiText("Loading...")}</p>
+          ) : trashRead.isError ? (
+            <p role="alert" className="p-4 text-sm">
+              {uiText("settings.trashLoadFailed")}
+            </p>
+          ) : trashItems.length === 0 ? (
+            <p className="p-4 sm:p-5 text-sm text-muted-foreground">{uiText("Trash is empty.")}</p>
+          ) : (
+            trashItems.map((item) => (
+              <div
+                key={trashRowKey(item)}
+                className={cn(
+                  "grid gap-3 p-4 sm:p-5 lg:items-center",
+                  trashPage
+                    ? "grid-cols-[auto_auto_minmax(0,1fr)] lg:grid-cols-[auto_auto_minmax(0,1fr)_auto]"
+                    : "grid-cols-[auto_minmax(0,1fr)] lg:grid-cols-[auto_minmax(0,1fr)_auto]",
+                )}
+              >
+                <Checkbox
+                  checked={trashSelection.has(trashRowKey(item))}
+                  onChange={() => toggleTrashItem(trashRowKey(item))}
+                  disabled={trashBusy !== null}
+                  ariaLabel={uiText(
+                    item.kind === "multipart"
+                      ? "multipart.selectTrashed"
+                      : "Select deleted model {value1}",
+                    {
+                      value1: String(item.name),
+                    },
+                  )}
+                />
+                {trashPage && (
+                  <ProtectedThumbnail
+                    path={item.kind === "model" ? item.thumbnail_url : null}
+                    alt=""
+                    className="flex h-12 w-14 items-center justify-center border border-border bg-muted text-muted-foreground"
+                    imageClassName="h-full w-full object-cover"
+                    placeholder={<Boxes className="h-5 w-5" aria-hidden />}
+                  />
+                )}
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="break-words text-sm font-medium text-foreground">{item.name}</p>
+                    <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                      {item.kind === "multipart"
+                        ? uiText("multipart.trashLabel")
+                        : uiText("{value1} files", { value1: String(item.file_count) })}
+                    </span>
+                    <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                      {item.kind === "multipart"
+                        ? uiText("multipart.partsCount", { count: item.part_count })
+                        : formatBytes(item.size_bytes)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {uiText("Deleted {value1} · Expires {value2}", {
+                      value1: String(formatDate(item.deleted_at) ?? ""),
+                      value2: String(formatDate(item.expires_at) ?? ""),
+                    })}
+                  </p>
+                </div>
+                <div
+                  className={cn(
+                    "flex flex-wrap gap-2 lg:col-start-auto lg:justify-end",
+                    trashPage ? "col-start-3" : "col-start-2",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => restoreTrashItem(trashRowKey(item))}
+                    disabled={trashBusy !== null}
+                    className={BTN_SECONDARY}
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    {uiText("Restore")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => purgeTrashItem(trashRowKey(item))}
+                    disabled={trashBusy !== null}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium disabled:opacity-50 disabled:cursor-disabled"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    {uiText("Delete")}
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </SettingsCard>
+    ) : null;
+
   return (
     <Localized>
       <div className="w-full space-y-6">
-        {activeSection !== "trash" && <GettingStartedReminder />}
         <ConfirmModal
           open={restartConfirmOpen}
           onClose={() => {
@@ -2135,20 +2555,43 @@ export function SettingsPanel() {
         />
 
         <PageHeader
-          title={activeSection === "trash" ? t("settings.trash") : t("settings.title")}
+          title={trashPage ? t("settings.trash") : t("settings.title")}
           description={
-            activeSection === "trash" ? uiText("multipart.trashHelp") : t("settings.description")
+            trashPage ? (
+              uiText("Review trashed items by name before restoring or permanently removing them.")
+            ) : (
+              <>
+                {t(
+                  SETTINGS_SECTIONS.find((section) => section.id === activeSection)?.labelKey ??
+                    "settings.overview",
+                )}
+                {" · "}
+                {t(SETTINGS_SUBTITLES[activeSection])}
+              </>
+            )
           }
           actions={
-            activeSection === "trash" ? (
-              <Button variant="outline" onClick={() => changeSection("overview")}>
-                {t("settings.title")}
+            trashPage ? (
+              <>
+                <Button variant="outline" onClick={loadTrash} disabled={trashLoading}>
+                  {t("Refresh")}
+                </Button>
+                {reviewExpiredButton}
+                <Button variant="outline" onClick={() => changeSection("overview")}>
+                  {t("settings.title")}
+                </Button>
+              </>
+            ) : settingsTrash ? (
+              <Button variant="outline" onClick={() => router.push("/settings?section=trash")}>
+                {t("Open Trash")}
               </Button>
+            ) : activeSection === "spoolman" ? (
+              <div ref={setSpoolmanActionHost} className="flex flex-wrap items-center gap-2" />
             ) : undefined
           }
         />
 
-        {activeSection !== "trash" && (
+        {!trashPage && (
           <div ref={mobileTabsRef} className="border-b border-border pb-3 lg:hidden">
             <TabBar
               tabs={visibleSettingsSections.map((section) => {
@@ -2175,15 +2618,15 @@ export function SettingsPanel() {
 
         <div
           className={
-            activeSection === "trash"
+            trashPage
               ? ""
-              : "lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-6"
+              : "lg:grid lg:grid-cols-[14.375rem_minmax(0,1fr)] lg:items-start lg:gap-5"
           }
         >
-          {activeSection !== "trash" && (
+          {!trashPage && (
             <nav
               aria-label={uiText("Settings sections")}
-              className="sticky top-0 hidden rounded-lg border border-border bg-card p-2 lg:block"
+              className="sticky top-0 hidden border border-border bg-card p-3.5 lg:block"
             >
               {SETTINGS_GROUPS.map((group) => {
                 const sections = group.ids.flatMap((id) => {
@@ -2196,7 +2639,13 @@ export function SettingsPanel() {
                     key={group.labelKey}
                     className="border-b border-border px-1 py-2 last:border-b-0"
                   >
-                    <p className="px-2 pb-1 text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    <p
+                      className={cn(
+                        "px-2 pb-1 font-mono text-3xs font-medium uppercase tracking-wider text-muted-foreground",
+                        group.labelKey === "Global settings" &&
+                          "pb-3 font-sans text-[13px] font-semibold normal-case tracking-normal text-foreground",
+                      )}
+                    >
                       {uiText(group.labelKey)}
                     </p>
                     {sections.map((section) => {
@@ -2209,13 +2658,13 @@ export function SettingsPanel() {
                           aria-current={isActive ? "page" : undefined}
                           onClick={() => changeSection(section.id)}
                           className={cn(
-                            "flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                            "flex w-full items-center gap-2.5 px-2.5 py-[7px] text-left text-[13px] font-normal transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
                             isActive
                               ? "bg-accent text-accent-foreground"
                               : "text-muted-foreground hover:bg-popover-hover hover:text-foreground",
                           )}
                         >
-                          <Icon className="h-4 w-4 shrink-0" />
+                          <Icon className="h-3.5 w-3.5 shrink-0" />
                           <span>{t(section.labelKey)}</span>
                         </button>
                       );
@@ -2300,7 +2749,7 @@ export function SettingsPanel() {
                 </Button>
               </div>
             )}
-            {activeSection !== "trash" &&
+            {activeSection === "overview" &&
               releaseStatus?.update_available &&
               releaseStatus.latest_version && (
                 <div
@@ -2373,7 +2822,78 @@ export function SettingsPanel() {
                     ))}
                   </div>
 
-                  <div className="divide-y divide-border">
+                  <div className="settings-inline-groups divide-y divide-border">
+                    {user?.is_superuser && (
+                      <SettingsCard
+                        icon={ShieldCheck}
+                        title={t("Data safety")}
+                        description={t("Review backups and file checks for this Vault.")}
+                        action={
+                          <div className="flex flex-wrap gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => changeSection("backup")}
+                            >
+                              {t("settings.backup")}
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => changeSection("maintenance")}
+                            >
+                              {t("settings.maintenance")}
+                            </Button>
+                          </div>
+                        }
+                      >
+                        <dl className="settings-safety-rows">
+                          <div>
+                            <dt>{t("Last backup")}</dt>
+                            <dd>
+                              {ownedBackupRead.isPending
+                                ? t("Loading…")
+                                : ownedBackupRead.isError
+                                  ? t("Unavailable")
+                                  : latestBackup
+                                    ? formatDateTime(latestBackup.created_at)
+                                    : t("Never")}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{t("Next automatic backup")}</dt>
+                            <dd>
+                              {remoteConfig.isPending
+                                ? t("Loading…")
+                                : !remoteConfigData || remoteConfig.isError
+                                  ? t("Unavailable")
+                                  : remoteConfigData.automatic_backups_enabled &&
+                                      remoteConfigData.automatic_backup_time_utc
+                                    ? uiText("{value1} UTC", {
+                                        value1: remoteConfigData.automatic_backup_time_utc,
+                                      })
+                                    : remoteConfigData.automatic_backups_enabled
+                                      ? t("Unavailable")
+                                      : t("Disabled")}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{t("Last Vault audit")}</dt>
+                            <dd>
+                              {overviewAuditRead.isPending
+                                ? t("Loading…")
+                                : overviewAuditRead.isError
+                                  ? t("Unavailable")
+                                  : latestAudit
+                                    ? formatDateTime(
+                                        latestAudit.finished_at ?? latestAudit.created_at,
+                                      )
+                                    : t("Never")}
+                            </dd>
+                          </div>
+                        </dl>
+                      </SettingsCard>
+                    )}
                     {/* System information */}
                     <SettingsCard
                       icon={Server}
@@ -2399,12 +2919,9 @@ export function SettingsPanel() {
                             key={item.label}
                             className="flex items-center gap-4 py-3 border-b border-border last:border-b-0"
                           >
-                            <div className="w-9 h-9 rounded bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
-                              <item.icon className="h-4 w-4" />
-                            </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-foreground">{item.label}</p>
-                              <p className="text-xs text-muted-foreground truncate">{item.desc}</p>
+                              <p className="text-xs text-muted-foreground">{item.desc}</p>
                             </div>
                             <span className="font-mono text-xs sm:text-sm text-foreground text-right flex-shrink-0">
                               {item.value}
@@ -2504,7 +3021,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "access" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="settings-grouped animate-panel-in">
                 {user?.is_superuser && (
                   <SettingsCard
                     icon={Users}
@@ -2512,86 +3029,108 @@ export function SettingsPanel() {
                     description={uiText(
                       "Create users, assign vault admins, disable accounts, and reset passwords.",
                     )}
+                    action={
+                      <Button onClick={() => setCreateUserOpen(true)} disabled={usersQuery.isError}>
+                        {t("Create user")}
+                      </Button>
+                    }
                   >
                     <div className="p-4 sm:p-5 space-y-4">
-                      <div className="grid gap-2 lg:grid-cols-[1fr_1fr_1fr_auto]">
-                        <label className="block space-y-1">
-                          <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                            {uiText("Username")}
-                          </span>
-                          <input
-                            id="new-user-username"
-                            value={newUsername}
-                            onChange={(event) =>
-                              setCreateUserDraft((current) => ({
-                                ...current,
-                                username: event.target.value,
-                              }))
+                      <Modal
+                        open={createUserOpen}
+                        onClose={() => {
+                          if (usersBusy !== "create") setCreateUserOpen(false);
+                        }}
+                        title={t("Create user")}
+                      >
+                        <div className="grid gap-4">
+                          <label className="block space-y-1">
+                            <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                              {uiText("Username")}
+                            </span>
+                            <input
+                              id="new-user-username"
+                              value={newUsername}
+                              onChange={(event) =>
+                                setCreateUserDraft((current) => ({
+                                  ...current,
+                                  username: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                              maxLength={128}
+                              autoComplete="username"
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                              {uiText("Email")}
+                            </span>
+                            <input
+                              id="new-user-email"
+                              value={newUserEmail}
+                              onChange={(event) =>
+                                setCreateUserDraft((current) => ({
+                                  ...current,
+                                  email: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                              type="email"
+                              maxLength={255}
+                              autoComplete="email"
+                            />
+                          </label>
+                          <label className="block space-y-1">
+                            <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                              {uiText("Initial password")}
+                            </span>
+                            <input
+                              id="new-user-password"
+                              value={newUserPassword}
+                              onChange={(event) =>
+                                setCreateUserDraft((current) => ({
+                                  ...current,
+                                  password: event.target.value,
+                                }))
+                              }
+                              className={INPUT}
+                              type="password"
+                              minLength={8}
+                              maxLength={256}
+                              autoComplete="new-password"
+                              aria-describedby="new-user-password-help"
+                            />
+                          </label>
+                        </div>
+                        <p id="new-user-password-help" className="text-xs text-muted-foreground">
+                          {uiText("Initial password: at least 8 characters.")}
+                        </p>
+                        <div className="mt-5 flex justify-end gap-2">
+                          <Button
+                            variant="outline"
+                            onClick={() => setCreateUserOpen(false)}
+                            disabled={usersBusy === "create"}
+                          >
+                            {t("Cancel")}
+                          </Button>
+                          <button
+                            type="button"
+                            onClick={createUser}
+                            disabled={
+                              usersBusy !== null ||
+                              usersQuery.isError ||
+                              usersQuery.isPending ||
+                              !newUsername.trim() ||
+                              newUserPassword.trim().length < 8
                             }
-                            className={INPUT}
-                            maxLength={128}
-                            autoComplete="username"
-                          />
-                        </label>
-                        <label className="block space-y-1">
-                          <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                            {uiText("Email")}
-                          </span>
-                          <input
-                            id="new-user-email"
-                            value={newUserEmail}
-                            onChange={(event) =>
-                              setCreateUserDraft((current) => ({
-                                ...current,
-                                email: event.target.value,
-                              }))
-                            }
-                            className={INPUT}
-                            type="email"
-                            maxLength={255}
-                            autoComplete="email"
-                          />
-                        </label>
-                        <label className="block space-y-1">
-                          <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                            {uiText("Initial password")}
-                          </span>
-                          <input
-                            id="new-user-password"
-                            value={newUserPassword}
-                            onChange={(event) =>
-                              setCreateUserDraft((current) => ({
-                                ...current,
-                                password: event.target.value,
-                              }))
-                            }
-                            className={INPUT}
-                            type="password"
-                            minLength={8}
-                            maxLength={256}
-                            autoComplete="new-password"
-                            aria-describedby="new-user-password-help"
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          onClick={createUser}
-                          disabled={
-                            usersBusy !== null ||
-                            usersQuery.isError ||
-                            usersQuery.isPending ||
-                            !newUsername.trim() ||
-                            newUserPassword.trim().length < 8
-                          }
-                          className={`${BTN_PRIMARY} self-end`}
-                        >
-                          <UserPlus className="h-3.5 w-3.5" />
-                          {uiText("Create")}
-                        </button>
-                      </div>
-                      <p id="new-user-password-help" className="text-xs text-muted-foreground">
-                        {uiText("Initial password: at least 8 characters.")}
-                      </p>
+                            className={BTN_PRIMARY}
+                          >
+                            <UserPlus className="h-3.5 w-3.5" />
+                            {uiText("Create")}
+                          </button>
+                        </div>
+                      </Modal>
 
                       <div className="space-y-2">
                         {usersQuery.isError && (
@@ -2616,7 +3155,7 @@ export function SettingsPanel() {
                               key={row.id}
                               role="group"
                               aria-label={`${uiText("User")}: ${row.username}`}
-                              className="rounded border border-border p-3 space-y-3"
+                              className="border-b border-border py-3 last:border-b-0"
                             >
                               <div className="flex flex-col gap-3 md:flex-row md:items-center">
                                 <div className="min-w-0 flex-1">
@@ -2643,6 +3182,18 @@ export function SettingsPanel() {
                                   </p>
                                 </div>
                                 <div className="flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={
+                                      usersBusy !== null ||
+                                      usersQuery.isError ||
+                                      usersQuery.isPending
+                                    }
+                                    onClick={() => setPasswordTarget(row.id)}
+                                    className={BTN_SECONDARY}
+                                  >
+                                    {uiText("Reset password")}
+                                  </button>
                                   <button
                                     type="button"
                                     disabled={
@@ -2677,33 +3228,42 @@ export function SettingsPanel() {
                                   </button>
                                 </div>
                               </div>
-                              <div className="grid gap-2 md:grid-cols-[1fr_auto]">
-                                <input
-                                  value={passwordDrafts[row.id] ?? ""}
-                                  onChange={(event) =>
-                                    setPasswordDrafts((current) => ({
-                                      ...current,
-                                      [row.id]: event.target.value,
-                                    }))
-                                  }
-                                  className={INPUT}
-                                  type="password"
-                                  placeholder={uiText("New password")}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => resetUserPassword(row.id)}
-                                  disabled={
-                                    usersBusy !== null ||
-                                    usersQuery.isError ||
-                                    usersQuery.isPending ||
-                                    (passwordDrafts[row.id]?.trim().length ?? 0) < 8
-                                  }
-                                  className={BTN_SECONDARY}
-                                >
-                                  {uiText("Reset password")}
-                                </button>
-                              </div>
+                              <Modal
+                                open={passwordTarget === row.id}
+                                onClose={() => {
+                                  if (usersBusy !== row.id) setPasswordTarget(null);
+                                }}
+                                title={uiText("Reset password")}
+                              >
+                                <div className="grid gap-3">
+                                  <input
+                                    value={passwordDrafts[row.id] ?? ""}
+                                    onChange={(event) =>
+                                      setPasswordDrafts((current) => ({
+                                        ...current,
+                                        [row.id]: event.target.value,
+                                      }))
+                                    }
+                                    className={INPUT}
+                                    type="password"
+                                    placeholder={uiText("New password")}
+                                    aria-label={uiText("New password")}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => resetUserPassword(row.id)}
+                                    disabled={
+                                      usersBusy !== null ||
+                                      usersQuery.isError ||
+                                      usersQuery.isPending ||
+                                      (passwordDrafts[row.id]?.trim().length ?? 0) < 8
+                                    }
+                                    className={BTN_SECONDARY}
+                                  >
+                                    {uiText("Reset password")}
+                                  </button>
+                                </div>
+                              </Modal>
                             </div>
                           ))
                         )}
@@ -2734,9 +3294,9 @@ export function SettingsPanel() {
                     }
                   >
                     <div className="p-4 sm:p-5 space-y-4">
-                      <div className="grid gap-2 lg:grid-cols-[1fr_1.4fr_auto_auto]">
-                        <label className="block space-y-1">
-                          <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                      <div className="settings-access-fields">
+                        <label className="settings-preference-row">
+                          <span className="text-[13px] font-medium text-foreground">
                             {uiText("User")}
                           </span>
                           <select
@@ -2755,8 +3315,8 @@ export function SettingsPanel() {
                             ))}
                           </select>
                         </label>
-                        <div className="block space-y-1">
-                          <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                        <div className="settings-preference-row">
+                          <span className="text-[13px] font-medium text-foreground">
                             {uiText("Collection")}
                           </span>
                           <DropdownMenu
@@ -2791,8 +3351,8 @@ export function SettingsPanel() {
                             />
                           </DropdownMenu>
                         </div>
-                        <label className="block space-y-1">
-                          <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                        <label className="settings-preference-row">
+                          <span className="text-[13px] font-medium text-foreground">
                             {uiText("Role")}
                           </span>
                           <select
@@ -2825,7 +3385,7 @@ export function SettingsPanel() {
                             collectionPermissionsQuery.isPending ||
                             collectionPermissionsQuery.isError
                           }
-                          className={`${BTN_PRIMARY} self-end`}
+                          className={`${BTN_PRIMARY} settings-access-submit`}
                         >
                           {accessBusy === "save" ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -2948,9 +3508,9 @@ export function SettingsPanel() {
                     }
                   >
                     <div className="space-y-4 p-4 sm:p-5">
-                      <div className="grid gap-2 lg:grid-cols-[1fr_1.4fr_auto_auto]">
-                        <label className="block space-y-1">
-                          <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                      <div className="settings-access-fields">
+                        <label className="settings-preference-row">
+                          <span className="text-[13px] font-medium text-foreground">
                             {uiText("User")}
                           </span>
                           <select
@@ -2972,8 +3532,8 @@ export function SettingsPanel() {
                             ))}
                           </select>
                         </label>
-                        <label className="block space-y-1">
-                          <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                        <label className="settings-preference-row">
+                          <span className="text-[13px] font-medium text-foreground">
                             {uiText("Printer")}
                           </span>
                           <select
@@ -3007,8 +3567,8 @@ export function SettingsPanel() {
                             ))}
                           </select>
                         </label>
-                        <label className="block space-y-1">
-                          <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                        <label className="settings-preference-row">
+                          <span className="text-[13px] font-medium text-foreground">
                             {uiText("Role")}
                           </span>
                           <select
@@ -3049,7 +3609,7 @@ export function SettingsPanel() {
                             !selectedPrinterRead?.isSuccess ||
                             selectedPrinterRead.isError
                           }
-                          className={`${BTN_PRIMARY} self-end`}
+                          className={`${BTN_PRIMARY} settings-access-submit`}
                         >
                           {printerAccessBusy === "save" ? (
                             <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -3367,16 +3927,60 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "storage" && (
-              <div className="space-y-6 animate-panel-in">
-                <StorageConfigCard storageHealth={storageHealth} migrationManaged />
-                {user?.is_superuser && <StorageInventoryPanel />}
-                {user?.is_superuser && <VaultMigrationPanel />}
-                {user?.is_superuser && <ArtifactCacheCard />}
+              <div className="settings-storage border border-border bg-card animate-panel-in">
+                <TabBar
+                  tabs={[
+                    { key: "location", label: t("Location") },
+                    ...(user?.is_superuser
+                      ? [
+                          { key: "usage" as const, label: t("Usage") },
+                          { key: "cache" as const, label: t("Remote cache") },
+                        ]
+                      : []),
+                  ]}
+                  active={storageTab}
+                  onChange={setStorageTab}
+                  className="flex-wrap gap-1 px-5 pt-4"
+                  tabClassName="px-2.5 py-1 text-sm text-muted-foreground hover:bg-muted"
+                  activeTabClassName="bg-accent text-accent-foreground"
+                  showIndicator={false}
+                />
+                <div className="settings-storage-pane" hidden={storageTab !== "location"}>
+                  <StorageConfigCard storageHealth={storageHealth} migrationManaged />
+                  {user?.is_superuser && (
+                    <SettingsCard
+                      className="settings-storage-migration"
+                      icon={ArrowRightLeft}
+                      title={t("migration.title")}
+                      description={t("migration.description")}
+                      action={
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          aria-expanded={migrationOpen}
+                          onClick={() => setMigrationOpen((open) => !open)}
+                        >
+                          {t("Plan migration")}
+                        </Button>
+                      }
+                    >
+                      <div hidden={!migrationOpen}>
+                        <VaultMigrationPanel />
+                      </div>
+                    </SettingsCard>
+                  )}
+                </div>
+                <div className="settings-storage-pane" hidden={storageTab !== "usage"}>
+                  {user?.is_superuser && <StorageInventoryPanel />}
+                </div>
+                <div className="settings-storage-pane" hidden={storageTab !== "cache"}>
+                  {user?.is_superuser && <ArtifactCacheCard />}
+                </div>
               </div>
             )}
 
             {activeSection === "backup" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="settings-grouped animate-panel-in">
                 {!user?.is_superuser && (
                   <p className="text-sm text-muted-foreground">
                     {t("settings.backupAdministratorRequired")}
@@ -3503,79 +4107,11 @@ export function SettingsPanel() {
                   </p>
                 )}
                 <SettingsCard
-                  icon={RefreshCw}
-                  title={t("settings.backupRetentionTitle")}
-                  description={t("settings.backupRetentionDescription")}
-                  stackActionOnMobile
-                  action={
-                    <button
-                      type="button"
-                      onClick={saveBackupRetention}
-                      disabled={
-                        !user?.is_superuser ||
-                        backupRetentionBusy ||
-                        backupConfigUnavailable ||
-                        parsedBackupRetentionDays === null ||
-                        preferenceCommand.blocked ||
-                        backupPolicy.isPending
-                      }
-                      className={cn(
-                        BTN_PRIMARY,
-                        "h-auto min-h-8 w-full whitespace-normal py-2 sm:w-auto",
-                      )}
-                    >
-                      {backupRetentionBusy ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Check className="h-3.5 w-3.5" />
-                      )}
-                      {t("settings.backupRetentionSave")}
-                    </button>
-                  }
-                >
-                  <div className="p-4 sm:p-5">
-                    <label className="block max-w-xs text-xs text-muted-foreground">
-                      {t("settings.backupRetentionLabel")}
-                      <input
-                        type="number"
-                        min={0}
-                        max={365}
-                        value={backupRetentionDays}
-                        disabled={
-                          !user?.is_superuser || backupRetentionBusy || backupConfigUnavailable
-                        }
-                        onChange={(event) => {
-                          const text = event.target.value;
-                          if (remoteConfigData)
-                            setBackupRetentionDays((previous) => ({
-                              text,
-                              base: previous?.base ?? captureEditingBase(remoteConfigData),
-                            }));
-                        }}
-                        aria-invalid={parsedBackupRetentionDays === null}
-                        aria-describedby={
-                          parsedBackupRetentionDays === null ? "backup-retention-error" : undefined
-                        }
-                        className={cn(inputClasses, "mt-1.5 w-32 font-mono")}
-                      />
-                    </label>
-                    {parsedBackupRetentionDays === null && (
-                      <p
-                        id="backup-retention-error"
-                        role="alert"
-                        className="mt-2 text-xs text-destructive"
-                      >
-                        {t("settings.backupRetentionError")}
-                      </p>
-                    )}
-                  </div>
-                </SettingsCard>
-                <SettingsCard
                   icon={Clock}
                   title={t("settings.backupPolicyTitle")}
                   description={t("settings.backupPolicyDescription")}
                   stackActionOnMobile
-                  action={
+                  footer={
                     <button
                       type="button"
                       onClick={() => void saveBackupPolicy()}
@@ -3604,8 +4140,8 @@ export function SettingsPanel() {
                   }
                 >
                   <div className="space-y-5 p-4 sm:p-5">
-                    <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_12rem] sm:items-end">
-                      <label className="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/40 p-3">
+                    <div>
+                      <label className="settings-preference-row">
                         <span>
                           <span className="block text-sm font-medium text-foreground">
                             {t("settings.backupAutomaticEnable")}
@@ -3631,8 +4167,8 @@ export function SettingsPanel() {
                           }
                         />
                       </label>
-                      <label className="text-xs text-muted-foreground">
-                        {t("settings.backupAutomaticTime")}
+                      <label className="settings-preference-row">
+                        <span>{t("settings.backupAutomaticTime")}</span>
                         <input
                           type="time"
                           value={automaticBackupTimeUtc}
@@ -3647,19 +4183,19 @@ export function SettingsPanel() {
                             backupConfigUnavailable ||
                             backupsLoading
                           }
-                          className={cn(inputClasses, "mt-1.5 w-full font-mono")}
+                          className={cn(inputClasses, "w-full font-mono")}
                         />
                       </label>
                     </div>
 
-                    <div className="overflow-hidden rounded-md border border-border">
-                      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] gap-2 border-b bg-muted/30 px-3 py-2 text-2xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    <div className="overflow-hidden">
+                      <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] gap-2 border-b py-2 text-xs text-muted-foreground">
                         <span>{t("settings.backupDestination")}</span>
                         <span className="text-center">{t("settings.backupManualColumn")}</span>
                         <span className="text-center">{t("settings.backupAutomaticColumn")}</span>
                       </div>
                       <div className="divide-y divide-border">
-                        <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-center gap-2 px-3 py-3">
+                        <div className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-center gap-2 py-3">
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-foreground">
                               {t("settings.backupLocalDestination")}
@@ -3708,7 +4244,7 @@ export function SettingsPanel() {
                         {backupConnections.map((connection) => (
                           <div
                             key={connection.id}
-                            className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-center gap-2 px-3 py-3"
+                            className="grid grid-cols-[minmax(0,1fr)_5.5rem_5.5rem] items-center gap-2 py-3"
                           >
                             <div className="min-w-0">
                               <p className="truncate text-sm font-medium text-foreground">
@@ -3778,6 +4314,74 @@ export function SettingsPanel() {
                         ) : null}
                       </div>
                     </div>
+                  </div>
+                </SettingsCard>
+                <SettingsCard
+                  icon={RefreshCw}
+                  title={t("settings.backupRetentionTitle")}
+                  description={t("settings.backupRetentionDescription")}
+                  stackActionOnMobile
+                  footer={
+                    <button
+                      type="button"
+                      onClick={saveBackupRetention}
+                      disabled={
+                        !user?.is_superuser ||
+                        backupRetentionBusy ||
+                        backupConfigUnavailable ||
+                        parsedBackupRetentionDays === null ||
+                        preferenceCommand.blocked ||
+                        backupPolicy.isPending
+                      }
+                      className={cn(
+                        BTN_PRIMARY,
+                        "h-auto min-h-8 w-full whitespace-normal py-2 sm:w-auto",
+                      )}
+                    >
+                      {backupRetentionBusy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      {t("settings.backupRetentionSave")}
+                    </button>
+                  }
+                >
+                  <div className="p-4 sm:p-5">
+                    <label className="settings-preference-row">
+                      <span>{t("settings.backupRetentionLabel")}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={365}
+                        value={backupRetentionDays}
+                        disabled={
+                          !user?.is_superuser || backupRetentionBusy || backupConfigUnavailable
+                        }
+                        onChange={(event) => {
+                          const text = event.target.value;
+                          if (remoteConfigData)
+                            setBackupRetentionDays((previous) => ({
+                              text,
+                              base: previous?.base ?? captureEditingBase(remoteConfigData),
+                            }));
+                        }}
+                        aria-invalid={parsedBackupRetentionDays === null}
+                        aria-describedby={
+                          parsedBackupRetentionDays === null ? "backup-retention-error" : undefined
+                        }
+                        className={cn(inputClasses, "w-full font-mono")}
+                      />
+                    </label>
+                    {parsedBackupRetentionDays === null && (
+                      <p
+                        id="backup-retention-error"
+                        role="alert"
+                        className="mt-2 text-xs text-destructive"
+                      >
+                        {t("settings.backupRetentionError")}
+                      </p>
+                    )}
                   </div>
                 </SettingsCard>
                 <SettingsCard
@@ -4240,7 +4844,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "imports" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="settings-imports animate-panel-in">
                 <MakerWorldConnectCard />
                 <ProviderConnectionsPanel />
               </div>
@@ -4268,12 +4872,15 @@ export function SettingsPanel() {
 
             {activeSection === "spoolman" && (
               <div className="space-y-6 animate-panel-in">
-                <SpoolmanConnectCard canEdit={!!user?.is_superuser} />
+                <SpoolmanConnectCard
+                  canEdit={!!user?.is_superuser}
+                  actionHost={spoolmanActionHost}
+                />
               </div>
             )}
 
             {activeSection === "design" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="settings-grouped animate-panel-in">
                 {user?.is_superuser && remoteConfig.isError && (
                   <div role="alert" className="flex items-center gap-2 text-sm">
                     <p>{t("settings.configLoadFailed")}</p>
@@ -4287,49 +4894,93 @@ export function SettingsPanel() {
                 )}
 
                 <SettingsCard
+                  icon={Sun}
+                  title={t("Theme and language")}
+                  description={t("Theme and language apply to this browser.")}
+                >
+                  <div className="settings-preference-fields">
+                    <label className="settings-preference-row">
+                      <span>{t("Theme")}</span>
+                      <select
+                        value={themeMode}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (value === "light" || value === "dark" || value === "system")
+                            setThemeMode(value);
+                        }}
+                        className={inputClasses}
+                      >
+                        <option value="light">{t("Light")}</option>
+                        <option value="dark">{t("Dark")}</option>
+                        <option value="system">{t("System")}</option>
+                      </select>
+                    </label>
+                    <label className="settings-preference-row">
+                      <span>{t("locale.label")}</span>
+                      <select
+                        value={locale}
+                        onChange={(event) => {
+                          const selected = SUPPORTED_LOCALES.find(
+                            (item) => item === event.target.value,
+                          );
+                          if (selected) setLocale(selected);
+                        }}
+                        className={inputClasses}
+                      >
+                        {SUPPORTED_LOCALES.map((option) => (
+                          <option key={option} value={option}>
+                            {localeDefinitions[option].name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </SettingsCard>
+
+                <SettingsCard
                   icon={Printer}
                   title={uiText("Printer cards")}
                   description={uiText(
                     "Choose whether printer cards include a visual. Plain cards remain more compact and information-dense.",
                   )}
                 >
-                  <div className="flex items-center justify-between gap-4 p-4 sm:p-5">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-md bg-muted sm:flex">
-                        <img
-                          src="/images/printers/generic-fdm.png"
-                          alt=""
-                          className="h-12 w-12 object-contain"
-                        />
-                      </div>
+                  <div className="settings-preference-fields">
+                    <div className="settings-preference-row">
                       <div>
                         <p className="text-[13px] font-medium text-foreground">
-                          {uiText("Show printer image")}
+                          {uiText("Show printer image on printer cards")}
                         </p>
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {uiText("Adds a brand-neutral printer visual above each card.")}
                         </p>
                       </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-label={uiText("Show printer image on printer cards")}
+                          aria-checked={showPrinterCardImage}
+                          onClick={() => {
+                            if (showPrinterCardImage) updatePrinterCardImagePreference(false);
+                            else setPrinterImageWarningOpen(true);
+                          }}
+                          className={`relative inline-flex h-5 w-9 shrink-0 items-center border transition-colors ${
+                            showPrinterCardImage
+                              ? "border-primary bg-primary"
+                              : "border-input bg-muted"
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 bg-primary-foreground transition-transform ${
+                              showPrinterCardImage ? "translate-x-4" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                        <span className="text-xs text-foreground">
+                          {showPrinterCardImage ? uiText("On") : uiText("Off")}
+                        </span>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-label={uiText("Show printer image on printer cards")}
-                      aria-checked={showPrinterCardImage}
-                      onClick={() => {
-                        if (showPrinterCardImage) updatePrinterCardImagePreference(false);
-                        else setPrinterImageWarningOpen(true);
-                      }}
-                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
-                        showPrinterCardImage ? "bg-primary" : "bg-outline-variant"
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform ${
-                          showPrinterCardImage ? "translate-x-6" : "translate-x-1"
-                        }`}
-                      />
-                    </button>
                   </div>
                 </SettingsCard>
 
@@ -4341,33 +4992,42 @@ export function SettingsPanel() {
                     "Automatically promote a revision to known-good after its first successful print. A manual failed/archived verdict is never overridden.",
                   )}
                 >
-                  <div className="p-4 sm:p-5 flex items-center justify-between gap-4">
-                    <span className="text-[13px] text-foreground">
-                      {uiText("Auto-mark known good on successful print")}
-                    </span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-label={uiText("Auto-mark known good on successful print")}
-                      aria-checked={autoMarkKnownGood}
-                      disabled={
-                        !user?.is_superuser ||
-                        !remoteConfigData ||
-                        remoteConfig.isError ||
-                        preferenceCommand.blocked ||
-                        backupPolicy.isPending
-                      }
-                      onClick={() => saveAutoMarkKnownGood(!autoMarkKnownGood)}
-                      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-                        autoMarkKnownGood ? "bg-primary" : "bg-outline-variant"
-                      }`}
-                    >
-                      <span
-                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                          autoMarkKnownGood ? "translate-x-6" : "translate-x-1"
-                        }`}
-                      />
-                    </button>
+                  <div className="settings-preference-fields">
+                    <div className="settings-preference-row">
+                      <span className="text-[13px] text-foreground">
+                        {uiText("Auto-mark known good on successful print")}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-label={uiText("Auto-mark known good on successful print")}
+                          aria-checked={autoMarkKnownGood}
+                          disabled={
+                            !user?.is_superuser ||
+                            !remoteConfigData ||
+                            remoteConfig.isError ||
+                            preferenceCommand.blocked ||
+                            backupPolicy.isPending
+                          }
+                          onClick={() => saveAutoMarkKnownGood(!autoMarkKnownGood)}
+                          className={`relative inline-flex h-5 w-9 shrink-0 items-center border transition-colors disabled:opacity-50 ${
+                            autoMarkKnownGood
+                              ? "border-primary bg-primary"
+                              : "border-input bg-muted"
+                          }`}
+                        >
+                          <span
+                            className={`inline-block h-4 w-4 transform bg-white transition-transform ${
+                              autoMarkKnownGood ? "translate-x-4" : "translate-x-0"
+                            }`}
+                          />
+                        </button>
+                        <span className="text-xs text-foreground">
+                          {autoMarkKnownGood ? uiText("On") : uiText("Off")}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </SettingsCard>
 
@@ -4379,29 +5039,31 @@ export function SettingsPanel() {
                     "Currency used to display cost figures in statistics and filament pricing.",
                   )}
                 >
-                  <div className="p-4 sm:p-5 flex items-center justify-between gap-4">
-                    <label htmlFor="display-currency" className="text-[13px] text-foreground">
-                      {uiText("Display currency")}
-                    </label>
-                    <select
-                      id="display-currency"
-                      value={currency}
-                      onChange={(event) => saveCurrency(event.target.value)}
-                      disabled={
-                        !user?.is_superuser ||
-                        !remoteConfigData ||
-                        remoteConfig.isError ||
-                        preferenceCommand.blocked ||
-                        backupPolicy.isPending
-                      }
-                      className={`${INPUT} max-w-xs`}
-                    >
-                      {CURRENCY_OPTIONS.map((opt) => (
-                        <option key={opt.code} value={opt.code}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="settings-preference-fields">
+                    <div className="settings-preference-row">
+                      <label htmlFor="display-currency" className="text-[13px] text-foreground">
+                        {uiText("Display currency")}
+                      </label>
+                      <select
+                        id="display-currency"
+                        value={currency}
+                        onChange={(event) => saveCurrency(event.target.value)}
+                        disabled={
+                          !user?.is_superuser ||
+                          !remoteConfigData ||
+                          remoteConfig.isError ||
+                          preferenceCommand.blocked ||
+                          backupPolicy.isPending
+                        }
+                        className={INPUT}
+                      >
+                        {CURRENCY_OPTIONS.map((opt) => (
+                          <option key={opt.code} value={opt.code}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </SettingsCard>
 
@@ -4557,7 +5219,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "gpu" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="settings-grouped animate-panel-in">
                 {user?.is_superuser && (
                   <SettingsCard
                     icon={Gpu}
@@ -4613,7 +5275,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "previews" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="settings-grouped animate-panel-in">
                 {user?.is_superuser && remoteConfig.isError && (
                   <div role="alert" className="flex items-center gap-2 text-sm">
                     <p>{t("settings.configLoadFailed")}</p>
@@ -4633,9 +5295,9 @@ export function SettingsPanel() {
                     "Balance sharpness against GPU use in the 3D Model and G-code viewers. This preference is saved in this browser.",
                   )}
                 >
-                  <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
-                    <label className="block space-y-1">
-                      <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                  <div className="settings-preference-fields">
+                    <label className="settings-preference-row">
+                      <span className="text-[13px] font-medium text-foreground">
                         {uiText("Preview quality")}
                       </span>
                       <select
@@ -4654,8 +5316,8 @@ export function SettingsPanel() {
                       </select>
                     </label>
 
-                    <label className="block space-y-1">
-                      <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                    <label className="settings-preference-row">
+                      <span className="text-[13px] font-medium text-foreground">
                         {uiText("Screenshot resolution")}
                       </span>
                       <select
@@ -4765,361 +5427,21 @@ export function SettingsPanel() {
                     </Button>
                   </div>
                 )}
-                <div className="divide-y divide-border overflow-hidden border border-border bg-card">
-                  <SettingsCard
-                    className="border-0"
-                    icon={Trash2}
-                    title={uiText("Trash retention")}
-                    description={uiText(
-                      "Soft-deleted models stay restorable until the retention window expires.",
-                    )}
-                    action={
-                      <button
-                        type="button"
-                        onClick={loadTrash}
-                        disabled={trashLoading}
-                        className={BTN_ICON}
-                        title={uiText("Refresh trash")}
-                      >
-                        <RefreshCw className={`h-4 w-4 ${trashLoading ? "animate-spin" : ""}`} />
-                      </button>
-                    }
-                  >
-                    <div className="p-4 sm:p-5 grid gap-3 sm:grid-cols-[160px_auto_auto] sm:items-end">
-                      <label className="block">
-                        <span className="block text-2xs text-muted-foreground mb-1">
-                          {uiText("Days")}
-                        </span>
-                        <input
-                          type="number"
-                          min={-1}
-                          value={trashRetentionText}
-                          onChange={(event) => {
-                            const text = event.target.value;
-                            if (remoteConfigData)
-                              setTrashRetentionDraft((previous) => ({
-                                text,
-                                base: previous?.base ?? captureEditingBase(remoteConfigData),
-                              }));
-                          }}
-                          disabled={
-                            !user?.is_superuser ||
-                            !remoteConfigData ||
-                            remoteConfig.isError ||
-                            trashRetentionBusy
-                          }
-                          className={INPUT}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={saveTrashRetention}
-                        disabled={
-                          !user?.is_superuser ||
-                          !remoteConfigData ||
-                          remoteConfig.isError ||
-                          preferenceCommand.blocked ||
-                          backupPolicy.isPending ||
-                          parsedTrashRetentionDays === null
-                        }
-                        className={BTN_PRIMARY}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setPurgeExpiredOpen(true)}
-                        disabled={
-                          !user?.is_superuser ||
-                          trashBusy === "gc" ||
-                          parsedTrashRetentionDays === null ||
-                          trashRetentionDays < 0 ||
-                          gcRead.isError ||
-                          gcRead.isPending ||
-                          (gcPlan !== null &&
-                            ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
-                        }
-                        className={BTN_SECONDARY}
-                      >
-                        <Eraser className="h-3.5 w-3.5" />
-                        {trashBusy === "gc" ? uiText("Preparing") : uiText("Review expired")}
-                      </button>
+                {trashPage ? (
+                  <>
+                    <div className="overflow-hidden border border-border bg-card">
+                      {trashItemsCard}
                     </div>
-                    {trashPurgeResult && (
-                      <div
-                        role="status"
-                        aria-live="polite"
-                        className={cn(
-                          "border-t px-4 py-3 text-xs sm:px-5",
-                          (trashPurgeResult.storage_cleanup_status ?? "completed") === "completed"
-                            ? "border-success/30 bg-success/10 text-success"
-                            : "border-warning/30 bg-warning/10 text-warning",
-                        )}
-                      >
-                        {cleanupStatusMessage(t, trashPurgeResult)}
-                      </div>
-                    )}
-                    {gcPlan && (
-                      <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="text-xs font-semibold text-foreground">
-                              {uiText("GC plan #{value1} · {value2}", {
-                                value1: String(gcPlan.id ?? ""),
-                                value2: String(gcPlan.state ?? ""),
-                              })}
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {uiText(
-                                "{value1} of {value2} expired resources · {value3} storage keys · {value4}",
-                                {
-                                  value1: String(gcPlan.resource_count ?? ""),
-                                  value2: String(gcPlan.candidate_pool_count ?? ""),
-                                  value3: String(gcPlan.key_count ?? ""),
-                                  value4: String(formatBytes(gcPlan.size_bytes) ?? ""),
-                                },
-                              )}
-                            </p>
-                          </div>
-                          <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                            {gcPlan.backup_id
-                              ? uiText("backup verified")
-                              : uiText("no backup bound")}
-                          </span>
-                        </div>
-                        <p className="mt-3 text-2xs text-muted-foreground">
-                          {uiText("Exact plan digest")}
-                        </p>
-                        <code className="mt-1 block break-all rounded border border-border bg-background px-2 py-2 text-3xs text-foreground">
-                          {gcPlan.digest}
-                        </code>
-                        {gcPlan.state === "preview" && (
-                          <div className="mt-3 space-y-3">
-                            <p className="text-xs text-muted-foreground">
-                              {uiText(
-                                "Approval is fail-closed: paste the exact digest below. The server will also require verified storage and a recent backup on an independent S3 provider before starting the quarantine.",
-                              )}
-                            </p>
-                            <input
-                              className={INPUT}
-                              aria-label={uiText("Confirm GC plan digest")}
-                              placeholder={uiText("Paste the 64-character digest")}
-                              value={gcDigestConfirmation}
-                              disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
-                              onChange={(event) =>
-                                setGcDigestConfirmation(event.target.value.trim())
-                              }
-                            />
-                          </div>
-                        )}
-                        {gcPlan.state === "quarantined" && gcPlan.quarantine_until && (
-                          <p className="mt-3 text-xs text-muted-foreground">
-                            {uiText(
-                              "Recovery quarantine ends {value1}. The plan and backup are reverified before final deletion.",
-                              { value1: String(formatDateTime(gcPlan.quarantine_until) ?? "") },
-                            )}
-                          </p>
-                        )}
-                        {gcPlan.last_error && (
-                          <p className="mt-3 text-xs text-destructive">{gcPlan.last_error}</p>
-                        )}
-                        <div className="mt-3 flex flex-wrap justify-end gap-2">
-                          {gcPlan.state === "preview" && (
-                            <button
-                              type="button"
-                              className={BTN_PRIMARY}
-                              disabled={
-                                gcRead.isError ||
-                                gcRead.isPending ||
-                                trashBusy === "gc" ||
-                                gcDigestConfirmation !== gcPlan.digest
-                              }
-                              onClick={approveExpiredGcPlan}
-                            >
-                              <ShieldCheck className="h-3.5 w-3.5" />
-                              {uiText("Verify backup and quarantine")}
-                            </button>
-                          )}
-                          {gcPlan.state === "quarantined" && (
-                            <button
-                              type="button"
-                              className={BTN_PRIMARY}
-                              disabled={
-                                gcRead.isError ||
-                                gcRead.isPending ||
-                                trashBusy === "gc" ||
-                                !gcPlan.quarantine_until ||
-                                !gcQuarantineReady
-                              }
-                              onClick={finalizeExpiredGcPlan}
-                            >
-                              <Eraser className="h-3.5 w-3.5" />
-                              {uiText("Reverify and finalize")}
-                            </button>
-                          )}
-                          {["preview", "quarantined"].includes(gcPlan.state) && (
-                            <button
-                              type="button"
-                              className={BTN_SECONDARY}
-                              disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
-                              onClick={abortExpiredGcPlan}
-                            >
-                              {uiText("Abort plan")}
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </SettingsCard>
-
-                  <SettingsCard
-                    className="border-0"
-                    icon={Boxes}
-                    title={uiText("trash.itemsTitle")}
-                    description={uiText("multipart.trashHelp")}
-                  >
-                    {trashItems.length > 0 && (
-                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-                        <span className="flex items-center gap-3">
-                          <Checkbox
-                            checked={selectedTrash.length === trashItems.length}
-                            onChange={toggleAllTrash}
-                            disabled={trashBusy !== null}
-                            ariaLabel={uiText("trash.selectAll")}
-                          />
-                          {selectedTrash.length > 0
-                            ? uiText("trash.selectedCount", {
-                                value1: String(selectedTrash.length),
-                                count: selectedTrash.length,
-                              })
-                            : uiText("trash.itemsCount", {
-                                value1: String(trashItems.length),
-                                count: Number(trashItems.length),
-                              })}
-                        </span>
-                        {selectedTrash.length > 0 && (
-                          <span className="flex flex-wrap gap-2">
-                            <button
-                              type="button"
-                              onClick={restoreSelectedTrash}
-                              disabled={trashBusy !== null}
-                              className={BTN_SECONDARY}
-                            >
-                              <RotateCcw className="h-3.5 w-3.5" />
-                              {uiText("Restore selected")}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setPurgeSelectionOpen(true)}
-                              disabled={trashBusy !== null}
-                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-disabled"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              {uiText("Delete selected")}
-                            </button>
-                          </span>
-                        )}
-                        <span className="font-mono tabular-nums" aria-label={uiText("Trash size")}>
-                          {uiText("{value1} reclaimable", {
-                            value1: String(
-                              formatBytes(
-                                trashItems.reduce(
-                                  (total, item) =>
-                                    total + (item.kind === "model" ? item.size_bytes : 0),
-                                  0,
-                                ),
-                              ) ?? "",
-                            ),
-                          })}
-                        </span>
-                      </div>
-                    )}
-                    <div className="divide-y divide-border">
-                      {!user ? (
-                        <p className="p-4 sm:p-5 text-sm text-muted-foreground">
-                          {uiText("Sign in to manage the trash.")}
-                        </p>
-                      ) : trashLoading ? (
-                        <p className="p-4 sm:p-5 text-sm text-muted-foreground">
-                          {uiText("Loading...")}
-                        </p>
-                      ) : trashRead.isError ? (
-                        <p role="alert" className="p-4 text-sm">
-                          {uiText("settings.trashLoadFailed")}
-                        </p>
-                      ) : trashItems.length === 0 ? (
-                        <p className="p-4 sm:p-5 text-sm text-muted-foreground">
-                          {uiText("Trash is empty.")}
-                        </p>
-                      ) : (
-                        trashItems.map((item) => (
-                          <div
-                            key={trashRowKey(item)}
-                            className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 p-4 sm:p-5 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center"
-                          >
-                            <Checkbox
-                              checked={trashSelection.has(trashRowKey(item))}
-                              onChange={() => toggleTrashItem(trashRowKey(item))}
-                              disabled={trashBusy !== null}
-                              ariaLabel={uiText(
-                                item.kind === "multipart"
-                                  ? "multipart.selectTrashed"
-                                  : "Select deleted model {value1}",
-                                {
-                                  value1: String(item.name),
-                                },
-                              )}
-                            />
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="break-words text-sm font-medium text-foreground">
-                                  {item.name}
-                                </p>
-                                <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
-                                  {item.kind === "multipart"
-                                    ? uiText("multipart.trashLabel")
-                                    : uiText("{value1} files", { value1: String(item.file_count) })}
-                                </span>
-                                <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
-                                  {item.kind === "multipart"
-                                    ? uiText("multipart.partsCount", { count: item.part_count })
-                                    : formatBytes(item.size_bytes)}
-                                </span>
-                              </div>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                {uiText("Deleted {value1} · Expires {value2}", {
-                                  value1: String(formatDate(item.deleted_at) ?? ""),
-                                  value2: String(formatDate(item.expires_at) ?? ""),
-                                })}
-                              </p>
-                            </div>
-                            <div className="col-start-2 flex flex-wrap gap-2 lg:col-start-auto lg:justify-end">
-                              <button
-                                type="button"
-                                onClick={() => restoreTrashItem(trashRowKey(item))}
-                                disabled={trashBusy !== null}
-                                className={BTN_SECONDARY}
-                              >
-                                <RotateCcw className="h-3.5 w-3.5" />
-                                {uiText("Restore")}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => purgeTrashItem(trashRowKey(item))}
-                                disabled={trashBusy !== null}
-                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-disabled"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                                {uiText("Delete")}
-                              </button>
-                            </div>
-                          </div>
-                        ))
-                      )}
+                    <div className="overflow-hidden border border-border bg-card">
+                      {trashRetentionCard}
                     </div>
-                  </SettingsCard>
-                </div>
+                  </>
+                ) : (
+                  <div className="settings-inline-groups divide-y divide-border overflow-hidden border border-border bg-card">
+                    {trashRetentionCard}
+                    {trashItemsCard}
+                  </div>
+                )}
               </div>
             )}
 
@@ -5223,6 +5545,11 @@ export function SettingsPanel() {
                     )}
                   </div>
                 </SettingsCard>
+              </div>
+            )}
+            {activeSection === "overview" && (
+              <div className="mt-6">
+                <GettingStartedReminder />
               </div>
             )}
           </main>

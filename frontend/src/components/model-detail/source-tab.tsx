@@ -4,9 +4,9 @@ import { useRef, useState, type ReactNode } from "react";
 import { ExternalLink, Image } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   sourceApi,
@@ -58,6 +58,7 @@ function provenanceOriginLabel(
 }
 
 function SourceField({
+  modelName,
   source,
   field,
   canEdit,
@@ -66,6 +67,7 @@ function SourceField({
   submit,
   last = false,
 }: {
+  modelName?: string;
   source: ProvenanceSourceRead;
   field: ProvenanceFieldRead;
   canEdit: boolean;
@@ -134,89 +136,52 @@ function SourceField({
           {provenanceOriginLabel(field.effective_origin, i18n)}
         </span>
       </div>
-      {editing ? (
-        <div className="space-y-2">
-          <Input
-            disabled={blocked || !canEdit}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            aria-label={t("source.override", { label })}
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button size="xs" disabled={blocked || !canEdit} onClick={save}>
-              {t("source.save")}
-            </Button>
-            <Button
-              size="xs"
-              variant="outline"
-              disabled={blocked}
-              onClick={() => {
-                setValue(field.effective_value);
-                setEditing(false);
-              }}
+      <div className="flex min-w-0 flex-col items-start gap-2">
+        <div className="w-full min-w-0 break-words whitespace-pre-wrap text-sm text-muted-foreground">
+          {safeLink ? (
+            <a
+              href={safeLink}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex max-w-full items-start gap-1 text-primary hover:underline"
             >
-              {t("source.cancel")}
-            </Button>
-            {field.user_override_set && (
-              <Button
-                size="xs"
-                variant="ghost"
-                disabled={blocked || !canEdit}
-                onClick={() => setRestoreOpen(true)}
-              >
-                {t("source.restore")}
-              </Button>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="flex min-w-0 flex-col items-start gap-2">
-          <div className="w-full min-w-0 break-words whitespace-pre-wrap text-sm text-muted-foreground">
-            {safeLink ? (
-              <a
-                href={safeLink}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex max-w-full items-start gap-1 text-primary hover:underline"
-              >
-                <span className="min-w-0 [overflow-wrap:anywhere]">{safeLink}</span>
-                <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              </a>
-            ) : (
-              field.effective_value ||
-              (field.field_name.startsWith("license")
-                ? t("source.notSupplied")
-                : t("source.notSuppliedGeneric"))
-            )}
-          </div>
-          {canEdit && (
-            <div className="flex shrink-0 flex-wrap gap-1">
-              {(field.field_name === "title" || field.field_name === "description") && (
-                <Button size="xs" variant="outline" onClick={applyToModel}>
-                  {field.field_name === "title"
-                    ? (i18n?.t("source.useTitle") ?? uiText("Use source title"))
-                    : (i18n?.t("source.useDescription") ?? uiText("Use source description"))}
-                </Button>
-              )}
-              {/* Every field renders one of these, so the visible word alone leaves a
-                  screen-reader user hearing "Edit" five times with no way to tell them
-                  apart — and it is what let a Playwright test drive the wrong one. */}
-              <Button
-                size="xs"
-                variant="ghost"
-                aria-label={t("source.editField", { field: label })}
-                onClick={() => {
-                  setValue(field.effective_value);
-                  setBase(snapshot);
-                  setEditing(true);
-                }}
-              >
-                {t("source.edit")}
-              </Button>
-            </div>
+              <span className="min-w-0 [overflow-wrap:anywhere]">{safeLink}</span>
+              <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            </a>
+          ) : (
+            field.effective_value ||
+            (field.field_name.startsWith("license")
+              ? t("source.notSupplied")
+              : t("source.notSuppliedGeneric"))
           )}
         </div>
-      )}
+        {canEdit && (
+          <div className="flex shrink-0 flex-wrap gap-1">
+            {(field.field_name === "title" || field.field_name === "description") && (
+              <Button size="xs" variant="outline" onClick={applyToModel}>
+                {field.field_name === "title"
+                  ? (i18n?.t("source.useTitle") ?? uiText("Use source title"))
+                  : (i18n?.t("source.useDescription") ?? uiText("Use source description"))}
+              </Button>
+            )}
+            {/* Every field renders one of these, so the visible word alone leaves a
+                  screen-reader user hearing "Edit" five times with no way to tell them
+                  apart — and it is what let a Playwright test drive the wrong one. */}
+            <Button
+              size="xs"
+              variant="ghost"
+              aria-label={t("source.editField", { field: label })}
+              onClick={() => {
+                setValue(field.effective_value);
+                setBase(snapshot);
+                setEditing(true);
+              }}
+            >
+              {t("source.edit")}
+            </Button>
+          </div>
+        )}
+      </div>
       {field.field_name === "license_text" && (
         <p className="col-span-full mt-1 text-xs text-muted-foreground @xl/source:col-start-2">
           {i18n?.t("source.licenseDisclaimer") ??
@@ -225,6 +190,74 @@ function SourceField({
             )}
         </p>
       )}
+      <Modal
+        open={editing && !restoreOpen}
+        onClose={() => {
+          setValue(field.effective_value);
+          setEditing(false);
+        }}
+        title={t("source.editField", { field: label })}
+        description={uiText("Save your override while retaining the captured source value.")}
+        footer={
+          <>
+            {field.user_override_set && (
+              <Button
+                variant="ghost"
+                className="mr-auto"
+                disabled={blocked || !canEdit}
+                onClick={() => setRestoreOpen(true)}
+              >
+                {t("source.restore")}
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              onClick={() => {
+                setValue(field.effective_value);
+                setEditing(false);
+              }}
+            >
+              {t("source.cancel")}
+            </Button>
+            <Button disabled={blocked || !canEdit} onClick={save}>
+              {uiText("Save override")}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-5">
+          <dl className="grid grid-cols-[1fr_2fr] gap-x-4 gap-y-2 bg-plate p-4 text-[13px]">
+            {modelName && (
+              <>
+                <dt className="text-muted-foreground">{uiText("Model")}</dt>
+                <dd>{modelName}</dd>
+              </>
+            )}
+            <dt className="text-muted-foreground">{uiText("Captured source")}</dt>
+            <dd>
+              {source.provider} · {source.source_item_id ?? "—"}
+            </dd>
+          </dl>
+          <h3 className="text-sm font-semibold">{uiText("Your override")}</h3>
+          <label className="block space-y-2 text-[13px]">
+            {uiText("Your value")}
+            <textarea
+              disabled={blocked || !canEdit}
+              value={value}
+              onChange={(event) => setValue(event.target.value)}
+              aria-label={t("source.override", { label })}
+              rows={3}
+              className="w-full border border-input bg-card p-3 text-sm"
+            />
+          </label>
+          <div className="border-t border-border pt-4">
+            <h3 className="text-[13px] font-medium">{uiText("Captured value")}</h3>
+            <p className="mt-2 whitespace-pre-wrap break-words text-[13px] text-muted-foreground">
+              {field.captured_value || t("source.notSuppliedGeneric")}
+            </p>
+          </div>
+        </div>
+      </Modal>
       <ConfirmModal
         open={restoreOpen}
         onClose={() => setRestoreOpen(false)}
@@ -446,16 +479,23 @@ function SourceIdentityRow({
   );
 }
 
-export function SourceTab(props: { modelId: number; canEdit: boolean; api?: SourceApi }) {
+export function SourceTab(props: {
+  modelId: number;
+  modelName?: string;
+  canEdit: boolean;
+  api?: SourceApi;
+}) {
   return <SourceTabContent key={props.modelId} {...props} />;
 }
 
 function SourceTabContent({
   modelId,
+  modelName,
   canEdit,
   api = sourceApi,
 }: {
   modelId: number;
+  modelName?: string;
   canEdit: boolean;
   api?: SourceApi;
 }) {
@@ -618,6 +658,7 @@ function SourceTabContent({
                 <div>
                   {source.fields.map((field, index) => (
                     <SourceField
+                      modelName={modelName}
                       key={field.field_name}
                       source={source}
                       field={field}

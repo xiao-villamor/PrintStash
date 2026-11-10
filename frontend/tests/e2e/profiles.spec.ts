@@ -19,17 +19,22 @@ test.describe("profiles route", () => {
     await page.goto("/profiles");
 
     await expect(page.getByRole("heading", { name: "Profiles" })).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Filament presets" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /Filaments/ })).toBeVisible();
     await expect(page.getByLabel("Filament preset name 1")).toHaveCount(0);
-    await page.getByRole("button", { name: "View details for Generic PLA" }).click();
+    await expect(page.getByRole("button", { name: /Generic PLA/ }).first()).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     await expect(page.getByRole("region", { name: "Settings for Generic PLA" })).toBeVisible();
     await page.getByRole("button", { name: "Edit profile Generic PLA" }).click();
     await expect(page.getByLabel("Filament preset name 1")).toHaveValue("Generic PLA");
     await expect(page.getByLabel("Filament brand 1")).toHaveValue("Generic");
+    await page.getByRole("dialog").getByRole("button", { name: "Close" }).click();
     await page.getByRole("tab", { name: /Printers/ }).click();
-    await expect(page.getByRole("heading", { name: "Printer presets" })).toBeVisible();
     await expect(page.getByLabel("Printer preset name 1")).toHaveCount(0);
-    await page.getByRole("button", { name: "View details for Creality Ender-3 V3 SE" }).click();
+    await expect(
+      page.getByRole("button", { name: /Creality Ender-3 V3 SE/ }).first(),
+    ).toHaveAttribute("aria-pressed", "true");
     await expect(
       page.getByRole("region", { name: "Settings for Creality Ender-3 V3 SE" }),
     ).toBeVisible();

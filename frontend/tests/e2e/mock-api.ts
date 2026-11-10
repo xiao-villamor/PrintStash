@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { aVaultConfig, aPrinter, aRevision } from "../../src/test-support/factories";
 import type { VaultConfigUpdate, PrinterUpdate } from "../../src/types";
 import { aCaption } from "../../src/test-support/captions";
@@ -8,7 +9,7 @@ import type { Duplex } from "node:stream";
 import type { SubjectCaption } from "../../src/types/captions";
 import type { SearchStatus } from "../../src/types/search";
 import type { ModelProvenanceRead, ModelSourceCoverRead } from "../../src/types/provenance";
-import type { MetadataRead } from "../../src/types/models";
+import type { ManualPrintJobCreate, MetadataRead, ModelPrintJobRead } from "../../src/types/models";
 
 const now = "2026-06-04T00:24:22.000000";
 
@@ -256,7 +257,13 @@ const modelList = [
     printer_presence: [{ printer_id: printer.id, printer_name: printer.name, file_count: 1 }],
     updated_at: model.updated_at,
     mesh_file_id: 1,
-    print_summary: null,
+    print_summary: {
+      layer_height_mm: metadata.layer_height_mm,
+      estimated_time_s: metadata.estimated_time_s,
+      filament_weight_g: metadata.filament_weight_g,
+      material_type: metadata.material_type,
+      slicer_name: metadata.slicer_name,
+    },
     recommended_revision_status: "known_good",
     recommended_revision_label: null,
   },
@@ -265,6 +272,8 @@ const modelList = [
 // Mutable server state a test can flip before navigating (workers: 1, serial).
 let inboxCollectionId: number | null = null;
 let fleetJobState: "paused" | "failed" = "paused";
+let manualPrintRecords: ModelPrintJobRead[] = [];
+let nextManualPrintId = 4;
 const state = {
   externalLibrariesEnabled: false,
   ingestJobQueued: false,
@@ -478,6 +487,8 @@ export function resetMockApiState(): void {
   state.s3LegacyCandidate = true;
   state.s3LegacyAdopted = false;
   fleetJobState = "paused";
+  manualPrintRecords = [];
+  nextManualPrintId = 4;
   state.gcPlanState = null;
 }
 
@@ -1463,7 +1474,123 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
     return;
   }
   if (url.pathname === "/api/v1/models/1/print-jobs") {
+    if (req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        let payload: ManualPrintJobCreate;
+        try {
+          payload = JSON.parse(body);
+        } catch {
+          sendJson(res, { detail: "invalid_json" }, 422);
+          return;
+        }
+        const file = model.files.find((item) => item.id === payload.file_id);
+        if (!file) {
+          sendJson(res, { detail: { code: "file_not_found" } }, 404);
+          return;
+        }
+        if (payload.printer_id != null && payload.printer_id !== printer.id) {
+          sendJson(res, { detail: { code: "printer_not_found" } }, 404);
+          return;
+        }
+        const printerName =
+          payload.printer_id != null ? printer.name : payload.printer_name?.trim();
+        if (!printerName) {
+          sendJson(res, { detail: { code: "printer_required" } }, 422);
+          return;
+        }
+        const jobState = payload.state ?? "completed";
+        if (
+          ![
+            "queued",
+            "uploading",
+            "started",
+            "printing",
+            "paused",
+            "completed",
+            "cancelled",
+            "failed",
+          ].includes(jobState)
+        ) {
+          sendJson(res, { detail: "invalid_print_state" }, 422);
+          return;
+        }
+        const createdAt = new Date().toISOString();
+        const identity = {
+          display_name: null,
+          task_id: null,
+          subtask_id: null,
+          project_id: null,
+          profile_id: null,
+          gcode_file: null,
+          plate_index: null,
+        };
+        const reported = { current_layer: null, total_layers: null, nozzle_diameter: null };
+        const downloadUrl = `/api/v1/files/${file.id}/download`;
+        const record: ModelPrintJobRead = {
+          id: nextManualPrintId++,
+          printer_id: payload.printer_id ?? null,
+          printer_name: printerName,
+          file_id: file.id,
+          remote_filename: file.original_filename,
+          source: "manual",
+          external_display_name: null,
+          artifact_evidence: "vault",
+          reproducibility_level: "exact",
+          identity,
+          metadata: reported,
+          reproducibility: {
+            level: "exact",
+            identity,
+            metadata: reported,
+            error: null,
+            download_url: downloadUrl,
+          },
+          download_url: downloadUrl,
+          toolpath_preview_url: null,
+          gcode_revision_number: file.gcode_revision_number ?? null,
+          revision_label: file.revision_label ?? null,
+          state:
+            jobState === "queued"
+              ? "queued"
+              : jobState === "uploading"
+                ? "uploading"
+                : jobState === "started"
+                  ? "started"
+                  : jobState === "printing"
+                    ? "printing"
+                    : jobState === "paused"
+                      ? "paused"
+                      : jobState === "failed"
+                        ? "failed"
+                        : jobState === "cancelled"
+                          ? "cancelled"
+                          : "completed",
+          material_type: null,
+          error: payload.error ?? null,
+          filament_used_g: null,
+          actual_duration_s: null,
+          filament_cost: null,
+          spool_id: payload.spool_id ?? null,
+          spool_name: payload.spool_name ?? null,
+          started_at: payload.started_at ?? null,
+          finished_at: payload.finished_at ?? null,
+          created_at: createdAt,
+        };
+        manualPrintRecords.unshift(record);
+        sendJson(res, record);
+      });
+      return;
+    }
+    if (req.method !== "GET") {
+      sendJson(res, { detail: "method_not_allowed" }, 405);
+      return;
+    }
     sendJson(res, [
+      ...manualPrintRecords,
       {
         id: 1,
         printer_id: printer.id,
@@ -1861,6 +1988,15 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
   if (url.pathname.startsWith("/api/v1/files/") && url.pathname.endsWith("/toolpath-preview")) {
     res.writeHead(200, { "Content-Type": "text/plain" });
     res.end("G90\nM82\nG1 Z0.2\nG1 X10 Y0 E0.1\nG1 X20 Y0 E0.2\n");
+    return;
+  }
+  if (url.pathname === "/api/v1/files/2/toolpath") {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end(
+      readFileSync(
+        new URL("../../../backend/tests/fixtures/real_orca_ender3_benchy.gcode", import.meta.url),
+      ),
+    );
     return;
   }
   if (url.pathname.startsWith("/api/v1/files/") && url.pathname.endsWith("/download")) {

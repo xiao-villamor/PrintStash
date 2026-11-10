@@ -171,24 +171,24 @@ export function MaintenancePanel() {
 
   if (commands.retired) return null;
   return (
-    <div className="space-y-5 animate-panel-in">
+    <div className="settings-maintenance animate-panel-in">
       <Card role="region" aria-labelledby="maintenance-heading" className="overflow-hidden">
-        <div className="border-b border-border px-4 py-4 sm:px-5">
-          <h2 id="maintenance-heading" className="text-sm font-semibold">
-            {t("maintenance.title")}
-          </h2>
-          <p className="text-xs text-muted-foreground">{t("maintenance.subtitle")}</p>
-        </div>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+        <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-muted-foreground">
             <ShieldCheck className="h-4 w-4" aria-hidden />
-            {t("maintenance.checkNow")}
-          </CardTitle>
-          <CardDescription>{t("maintenance.checkNowDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="divide-y divide-border rounded-md border border-border">
-            <div className="flex flex-col items-stretch gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+          </span>
+          <div>
+            <h2 id="maintenance-heading" className="text-sm font-semibold">
+              {t("maintenance.checkNow")}
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t("maintenance.checkNowDescription")}
+            </p>
+          </div>
+        </div>
+        <CardContent className="space-y-4 px-4 pb-4 pt-0 sm:pl-16 sm:pr-5">
+          <div className="divide-y divide-border">
+            <div className="flex flex-col items-stretch gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold">{t("auditSchedule.quick")}</h3>
                 <p className="mt-1 text-sm text-muted-foreground">
@@ -204,7 +204,7 @@ export function MaintenancePanel() {
                 {t("maintenance.runQuick")}
               </Button>
             </div>
-            <div className="flex flex-col items-stretch gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col items-stretch gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
                 <h3 className="text-sm font-semibold">{t("auditSchedule.full")}</h3>
                 <p className="mt-1 text-sm text-muted-foreground">

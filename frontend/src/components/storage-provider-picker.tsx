@@ -49,6 +49,41 @@ const CATEGORIES: Array<{
   },
 ];
 
+const ONBOARDING_CATEGORIES = {
+  this_machine: {
+    get title() {
+      return uiText("Local folder");
+    },
+    get description() {
+      return uiText("On this server");
+    },
+  },
+  s3_compatible: {
+    get title() {
+      return uiText("S3-compatible");
+    },
+    get description() {
+      return uiText("Bucket on MinIO, Garage, R2 or AWS");
+    },
+  },
+  nextcloud_webdav: {
+    get title() {
+      return uiText("WebDAV / Nextcloud");
+    },
+    get description() {
+      return uiText("A folder on your Nextcloud");
+    },
+  },
+  nas_sftp: {
+    get title() {
+      return uiText("SFTP");
+    },
+    get description() {
+      return uiText("A folder on your NAS over SSH");
+    },
+  },
+} as const;
+
 export type ProviderValues = StorageProviderConfigValues;
 
 export function defaultProviderValues(provider: StorageProvider): ProviderValues {
@@ -186,24 +221,23 @@ export function StorageProviderPicker(props: {
         >
           {props.onboarding ? uiText("setup.storageChoice") : uiText("Storage category")}
         </legend>
-        <div className={props.onboarding ? "grid grid-cols-3 gap-2" : "grid gap-2 sm:grid-cols-2"}>
+        <div className={props.onboarding ? "grid grid-cols-2 gap-2" : "grid gap-2 sm:grid-cols-2"}>
           {CATEGORIES.map((category) => {
             const Icon = category.icon;
             const hasProviders = props.providers.some(
-              (provider) => provider.category === category.id,
+              (provider) =>
+                provider.category === category.id && (!props.onboarding || provider.selectable),
             );
             const active = selectedCategory === category.id;
             return (
               <Button
                 key={category.id}
                 type="button"
-                variant={props.onboarding && category.id !== "this_machine" ? "ghost" : "outline"}
+                variant="outline"
                 disabled={props.disabled || !hasProviders}
                 aria-pressed={active}
                 aria-label={
-                  props.onboarding && category.id === "this_machine"
-                    ? uiText("setup.serverStorage")
-                    : category.label
+                  props.onboarding ? ONBOARDING_CATEGORIES[category.id].title : category.label
                 }
                 onClick={() => {
                   const choices = props.providers.filter(
@@ -217,22 +251,48 @@ export function StorageProviderPicker(props: {
                 }}
                 className={cn(
                   "h-auto justify-start gap-2 whitespace-normal px-3 py-3 text-left",
-                  props.onboarding &&
-                    (category.id === "this_machine"
-                      ? "col-span-3 min-h-12"
-                      : "min-h-11 flex-col justify-center px-1 py-2 text-center text-xs sm:flex-row"),
-                  active && "border-transparent bg-accent text-accent-foreground hover:bg-accent",
+                  props.onboarding && "min-h-16 items-start",
+                  active &&
+                    (props.onboarding
+                      ? "border-primary bg-accent text-accent-foreground hover:bg-accent"
+                      : "border-transparent bg-accent text-accent-foreground hover:bg-accent"),
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                {props.onboarding ? uiText(`setup.category.${category.id}`) : category.label}
-                {props.onboarding && category.id === "this_machine" && (
-                  <span className="ml-auto text-xs font-normal">{uiText("setup.recommended")}</span>
+                {props.onboarding ? (
+                  <span className="min-w-0">
+                    <span className="block text-xs font-medium">
+                      {ONBOARDING_CATEGORIES[category.id].title}
+                    </span>
+                    <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                      {category.id === "this_machine" && props.values.data_dir
+                        ? `${String(props.values.data_dir)} · `
+                        : ""}
+                      {ONBOARDING_CATEGORIES[category.id].description}
+                    </span>
+                  </span>
+                ) : (
+                  category.label
                 )}
               </Button>
             );
           })}
         </div>
+        {props.onboarding &&
+          props.providers
+            .filter(
+              (provider) =>
+                !provider.selectable && (provider.uses?.vault?.reason ?? provider.disabled_reason),
+            )
+            .map((provider) => (
+              <p key={provider.id} className="text-xs text-muted-foreground">
+                {knownUiText(provider.label)}:{" "}
+                {storageOperationMessage(
+                  provider.uses?.vault?.reason ?? provider.disabled_reason ?? "",
+                  i18n?.t,
+                )}
+              </p>
+            ))}
       </fieldset>
 
       {!(

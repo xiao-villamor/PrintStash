@@ -1,0 +1,32 @@
+.printer-settings-fields > .contents > .printer-settings-field {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 6px 24px;
+  align-items: start;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.printer-settings-fields .printer-settings-field > span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  font-size: 13px;
+  gap: 6px;
+  padding-top: 6px;
+}
+.printer-settings-fields .printer-settings-field > :not(span) {
+  grid-column: 2;
+  margin-top: 0;
+}
+.printer-settings-fields .printer-settings-field input {
+  background: var(--card);
+}
+@media (max-width: 767px) {
+  .printer-settings-fields > .contents > .printer-settings-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .printer-settings-fields .printer-settings-field > :not(span) {
+    grid-column: 1;
+  }
+}

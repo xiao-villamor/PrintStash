@@ -6,7 +6,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
-import { Check, Loader2, Plus, Star, Wifi } from "lucide-react";
+import { Star, Wifi } from "lucide-react";
 
 import {
   batchSetRevisionLabels,
@@ -28,6 +28,8 @@ import {
 } from "@/types";
 
 import { PRINT_JOB_PRESENTATION, revisionStatusLabel } from "./presentation";
+import { ChoiceField } from "./choice-field";
+import { Modal } from "@/components/ui/modal";
 import { RevisionCompare, type ComparisonMode } from "./revision-compare";
 import { HashValue } from "./file-hashes";
 import { Localized } from "@/components/ui/localized";
@@ -38,18 +40,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { EntityTagsDialog } from "@/components/entity-tags-dialog";
+import { isTypingTarget, keyboardOverlayOpen } from "@/lib/keyboard-commands";
 
 const NO_OUTCOMES: ArtifactOutcomeRead[] = [];
 
 /** The revision statuses the edit form offers, in menu order; `""` is unmarked. */
 const REVISION_STATUS_CHOICES = ["", "known_good", "needs_test", "failed", "archived"] as const;
-
-type RevisionStatusChoice = (typeof REVISION_STATUS_CHOICES)[number];
-
-/** Read the status `<select>`'s value back as one of the offered choices. */
-function parseRevisionStatusChoice(value: string): RevisionStatusChoice {
-  return REVISION_STATUS_CHOICES.find((choice) => choice === value) ?? "";
-}
 
 function RevisionResults({ fileId, jobs }: { fileId: number; jobs: ModelPrintJobRead[] | null }) {
   if (jobs === null) return <span className="text-muted-foreground">{uiText("Not recorded")}</span>;
@@ -94,6 +90,7 @@ export function RevisionsTab({
   comparisonMode = "gcode",
   onSend,
   onSettings,
+  onLogPrint,
   jobs = null,
 }: {
   modelId: number;
@@ -109,6 +106,7 @@ export function RevisionsTab({
   comparisonMode?: ComparisonMode;
   onSend?: (mode: "send" | "queue") => void;
   onSettings?: () => void;
+  onLogPrint?: (fileId: number, state: "completed" | "failed") => void;
   jobs?: ModelPrintJobRead[] | null;
 }) {
   useUiLocale();
@@ -284,10 +282,56 @@ export function RevisionsTab({
               : uiText("This revision will be moved to trash.")
           }
         />
-        <section hidden={comparing}>
+        <section
+          hidden={comparing}
+          onKeyDown={(event) => {
+            if (
+              event.defaultPrevented ||
+              event.nativeEvent.isComposing ||
+              (event.repeat && event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
+              event.ctrlKey ||
+              event.metaKey ||
+              event.altKey ||
+              (event.shiftKey && event.key !== "1" && event.key !== "2") ||
+              isTypingTarget(event.target) ||
+              keyboardOverlayOpen()
+            )
+              return;
+            const focused =
+              event.target instanceof HTMLElement
+                ? event.target.closest<HTMLElement>("[data-revision-id]")
+                : null;
+            if (!focused) return;
+            const index = gcodeFiles.findIndex(
+              (file) => file.id === Number(focused.dataset.revisionId),
+            );
+            if (index < 0) return;
+            if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+              event.preventDefault();
+              const next =
+                gcodeFiles[
+                  Math.max(
+                    0,
+                    Math.min(gcodeFiles.length - 1, index + (event.key === "ArrowDown" ? 1 : -1)),
+                  )
+                ];
+              inspect(next.id);
+              event.currentTarget
+                .querySelector<HTMLButtonElement>(`button[data-revision-id="${next.id}"]`)
+                ?.focus();
+            } else if ((event.key === "1" || event.key === "2") && onLogPrint) {
+              event.preventDefault();
+              inspect(gcodeFiles[index].id);
+              onLogPrint(gcodeFiles[index].id, event.key === "1" ? "completed" : "failed");
+            }
+          }}
+        >
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-on-surface">
-              {uiText("G-code Revisions")}
+              {uiText("G-code revisions")}{" "}
+              <span className="ml-1 text-xs font-normal text-muted-foreground">
+                {gcodeFiles.length}
+              </span>
             </h2>
             <div className="flex items-center gap-2">
               {allFiles.length >= 2 && (
@@ -317,8 +361,7 @@ export function RevisionsTab({
                 disabled={!auth.isAuthenticated || !canEdit}
                 title={auth.blockReason ?? uiText("Add G-code revision")}
               >
-                <Plus className="h-3.5 w-3.5" />
-                {uiText(" Add")}
+                {uiText("Add revision")}
               </Button>
             </div>
           </div>
@@ -353,7 +396,7 @@ export function RevisionsTab({
                     <th>{uiText("Revision")}</th>
                     <th>{uiText("Printer results")}</th>
                     <th>{uiText("Material")}</th>
-                    <th>{uiText("Layer height")}</th>
+                    <th>{uiText("Layer")}</th>
                     <th>{uiText("Time")}</th>
                     <th>{uiText("Filament")}</th>
                   </tr>
@@ -384,6 +427,7 @@ export function RevisionsTab({
                           )}
                           <button
                             type="button"
+                            data-revision-id={file.id}
                             className="text-left"
                             aria-pressed={file.id === selectedId}
                             onClick={() => inspect(file.id)}
@@ -394,7 +438,7 @@ export function RevisionsTab({
                               })}
                             </strong>
                             {file.revision_label && (
-                              <span className="ml-2 font-normal">{file.revision_label}</span>
+                              <span className="ml-2 font-normal">{` ${file.revision_label}`}</span>
                             )}
                           </button>
                           {file.is_recommended && (
@@ -510,6 +554,7 @@ export function RevisionsTab({
                               : f.file_type
                           }
                           size="sm"
+                          showLabel
                         />
                         {onSettings && (
                           <Button variant="ghost" onClick={onSettings}>
@@ -571,67 +616,84 @@ export function RevisionsTab({
                       </div>
 
                       {isEditingRevision && (
-                        <div className="space-y-2 border-t border-outline-variant pt-3">
-                          <input
-                            value={revisionLabel}
-                            onChange={(e) => setRevisionLabel(e.target.value)}
-                            maxLength={128}
-                            placeholder={uiText("Revision label")}
-                            className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
-                          />
-                          <select
-                            value={revisionStatus}
-                            onChange={(e) =>
-                              setRevisionStatus(parseRevisionStatusChoice(e.target.value))
-                            }
-                            className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
-                          >
-                            {REVISION_STATUS_CHOICES.map((choice) => (
-                              <option key={choice || "unmarked"} value={choice}>
-                                {revisionStatusLabel(choice || null)}
-                              </option>
-                            ))}
-                          </select>
-                          <textarea
-                            value={revisionNotes}
-                            onChange={(e) => setRevisionNotes(e.target.value)}
-                            rows={2}
-                            placeholder={uiText(
-                              "Notes about print outcome, fit, filament, or what to try next",
-                            )}
-                            className="w-full bg-surface-container-lowest border border-outline-variant rounded px-3 py-2 font-mono text-xs text-on-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
-                          />
-                          <label className="flex items-center gap-2 text-xs font-mono text-on-surface-variant">
-                            <input
-                              type="checkbox"
-                              checked={revisionRecommended}
-                              onChange={(e) => setRevisionRecommended(e.target.checked)}
-                              className="rounded"
+                        <Modal
+                          open
+                          onClose={() => {
+                            if (saving !== f.id) setEditingRevisionId(null);
+                          }}
+                          title={uiText("Edit revision")}
+                          className="max-w-[640px]"
+                          description={uiText(
+                            "Set a manual status for this Revision. It does not change the recommended Revision or its measured history.",
+                          )}
+                          footer={
+                            <>
+                              <Button
+                                variant="outline"
+                                onClick={() => setEditingRevisionId(null)}
+                                disabled={saving === f.id}
+                              >
+                                {uiText("Cancel")}
+                              </Button>
+                              <Button onClick={() => saveRevision(f)} loading={saving === f.id}>
+                                {uiText("Save Revision")}
+                              </Button>
+                            </>
+                          }
+                        >
+                          <div className="space-y-5">
+                            <label className="grid gap-2 text-sm">
+                              {uiText("Revision label")}
+                              <input
+                                value={revisionLabel}
+                                onChange={(e) => setRevisionLabel(e.target.value)}
+                                maxLength={128}
+                                placeholder={uiText("Revision label")}
+                                className="w-full bg-card border border-input rounded px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                              />
+                            </label>
+                            <ChoiceField<FileRevisionStatus | "">
+                              label={uiText("Manual label")}
+                              value={revisionStatus}
+                              options={REVISION_STATUS_CHOICES.map((value) => ({
+                                value,
+                                label: revisionStatusLabel(value || null),
+                              }))}
+                              onChange={setRevisionStatus}
+                              inline
                             />
-                            {uiText("Mark as recommended G-code for this model")}
-                          </label>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => setEditingRevisionId(null)}
-                              disabled={saving === f.id}
-                              className="flex-1 py-2 rounded border border-outline-variant text-on-surface-variant font-mono text-xs uppercase tracking-wider hover:bg-surface-container-low transition-colors disabled:opacity-50"
-                            >
-                              {uiText("Cancel")}
-                            </button>
-                            <button
-                              onClick={() => saveRevision(f)}
-                              disabled={saving === f.id}
-                              className="flex-1 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-1.5"
-                            >
-                              {saving === f.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Check className="h-4 w-4" />
+                            <label className="grid gap-2 text-sm">
+                              {uiText("Notes")}
+                              <textarea
+                                value={revisionNotes}
+                                onChange={(e) => setRevisionNotes(e.target.value)}
+                                rows={2}
+                                placeholder={uiText(
+                                  "Notes about print outcome, fit, filament, or what to try next",
+                                )}
+                                className="w-full bg-card border border-input rounded px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                              />
+                            </label>
+                            <ChoiceField
+                              label={uiText("Recommended Revision")}
+                              value={revisionRecommended ? "recommend" : "keep"}
+                              options={[
+                                { value: "keep", label: uiText("Keep current recommendation") },
+                                {
+                                  value: "recommend",
+                                  label: uiText("Make this Revision recommended"),
+                                },
+                              ]}
+                              onChange={(value) => setRevisionRecommended(value === "recommend")}
+                              inline
+                            />
+                            <p className="border-t border-border pt-4 text-xs text-muted-foreground">
+                              {uiText(
+                                "Saving Failed or Archived never removes the recommended marker.",
                               )}
-                              {saving === f.id ? uiText("Saving...") : uiText("Save")}
-                            </button>
+                            </p>
                           </div>
-                        </div>
+                        </Modal>
                       )}
                     </div>
                   );

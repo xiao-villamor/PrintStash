@@ -340,7 +340,7 @@ export function RevisionCompare({
           </div>
           {onClose && (
             <Button size="xs" variant="ghost" onClick={onClose}>
-              {uiText("Back")}
+              {uiText("Back to revisions")}
             </Button>
           )}
         </div>

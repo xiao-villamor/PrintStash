@@ -278,7 +278,9 @@ export function SettingsTab({
             {meta?.slicer_name ? (
               <strong className="font-medium text-foreground">
                 {meta.slicer_name}
-                {meta.slicer_version ? ` ${meta.slicer_version}` : ""}
+                {meta.slicer_version
+                  ? ` ${meta.slicer_version.toLowerCase().startsWith(meta.slicer_name.toLowerCase()) ? meta.slicer_version.slice(meta.slicer_name.length).trim() : meta.slicer_version}`
+                  : ""}
               </strong>
             ) : (
               uiText("Not recorded")

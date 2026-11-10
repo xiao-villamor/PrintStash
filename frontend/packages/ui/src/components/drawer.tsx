@@ -49,13 +49,14 @@ export function Drawer({
         data-state={state}
         onClick={onClose}
         aria-hidden
-        className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity duration-fast ease-out data-[state=closed]:opacity-0"
+        className="absolute inset-0 bg-overlay-scrim transition-opacity duration-fast ease-out data-[state=closed]:opacity-0"
       />
       <div
         ref={panelRef}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
+        data-overlay-open={open}
         aria-label={ariaLabel}
         data-state={state}
         className={cn(SIDE_CLASSES[side], className)}

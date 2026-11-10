@@ -137,21 +137,31 @@ export function SearchIndexHealth({ generation }: { generation: SearchGeneration
     },
   ];
   return (
-    <section aria-label={t("aiSearch.health.title")} className="space-y-2">
-      <h4 className="text-sm font-semibold">{t("aiSearch.health.title")}</h4>
-      <dl className="grid max-w-prose grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+    <section aria-label={t("aiSearch.health.title")} className="border-t border-border">
+      <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
+        <Check className="h-8 w-8 shrink-0 bg-muted p-2 text-muted-foreground" aria-hidden />
+        <div>
+          <h4 className="text-sm font-semibold">{t("aiSearch.health.title")}</h4>
+          <p className="mt-0.5 max-w-prose text-xs text-muted-foreground">
+            {t("aiSearch.health.help")}
+          </p>
+        </div>
+      </div>
+      <dl className="px-4 pb-2 text-sm sm:pl-16 sm:pr-5">
         {rows.map((row) => (
-          <div key={row.label} className="contents">
-            <dt className="text-muted-foreground">{row.label}</dt>
+          <div
+            key={row.label}
+            className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-border py-3 last:border-0"
+          >
+            <dt>{row.label}</dt>
             <dd
-              className={`min-w-0 break-words tabular-nums ${row.tone === "warning" ? "text-warning" : ""}`}
+              className={`min-w-0 break-words text-right font-mono tabular-nums ${row.tone === "warning" ? "text-warning" : ""}`}
             >
               {row.value}
             </dd>
           </div>
         ))}
       </dl>
-      <p className="max-w-prose text-xs text-muted-foreground">{t("aiSearch.health.help")}</p>
     </section>
   );
 }

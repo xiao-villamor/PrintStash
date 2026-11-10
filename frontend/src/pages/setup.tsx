@@ -33,6 +33,7 @@ import { SetupUnavailable } from "@/components/setup-unavailable";
 import { setupErrorMessage, setupStorageBody } from "@/lib/setup-storage";
 import { providerFormError } from "@/lib/storage-provider-form";
 import { formatBytes } from "@/lib/format";
+import { knownUiText } from "@/lib/locale";
 import type { SetupStorageCheck } from "@/types";
 
 export interface SetupPageDeps extends SetupEntryApi {
@@ -66,7 +67,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
   const status = bootstrap.data?.status ?? null;
   const existing = bootstrap.data?.kind === "configured";
   const providers = bootstrap.data?.kind === "ready" ? bootstrap.data.providers : [];
-  const [step, setStep] = useState<1 | 2>(1);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [account, setAccount] = useState({ username: "", password: "", confirm: "", email: "" });
   const [visiblePasswords, setVisiblePasswords] = useState({ password: false, confirm: false });
   const initialStorage = useMemo(() => {
@@ -256,15 +257,22 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
           onSubmit={(event) => {
             event.preventDefault();
             if (step === 1) next();
-            else void submit();
+            else if (step === 2 && currentCheck?.ready) setStep(3);
+            else if (step === 3) void submit();
           }}
         >
           <div>
             <h2 ref={heading} tabIndex={-1} className="text-base font-semibold tracking-tight">
-              {t(step === 1 ? "setup.account" : "setup.files")}
+              {t(
+                step === 1 ? "setup.accountHeading" : step === 2 ? "setup.files" : "setup.summary",
+              )}
             </h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              {t(step === 1 ? "setup.accountHelp" : "setup.defaultHelp")}
+            <p className={step === 1 ? "sr-only" : "mt-2 text-sm text-muted-foreground"}>
+              {step === 1
+                ? t("setup.accountHelp")
+                : step === 2
+                  ? `${t("setup.defaultHelp")} ${t("setup.existingHelp")}`
+                  : null}
             </p>
           </div>
           {step === 1 ? (
@@ -300,8 +308,8 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                       aria-describedby={`setup-${field}-help`}
                       className={
                         field === "password" || field === "confirm"
-                          ? "h-11 bg-surface-container-lowest pr-12"
-                          : "h-11 bg-surface-container-lowest"
+                          ? "h-9 bg-surface-container-lowest pr-10"
+                          : "h-9 bg-surface-container-lowest"
                       }
                       onChange={(event) => {
                         setAccount((current) => ({ ...current, [field]: event.target.value }));
@@ -313,7 +321,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="absolute inset-y-0 right-0 h-full w-11 text-muted-foreground"
+                        className="absolute inset-y-0 right-0 h-full w-10 text-muted-foreground"
                         aria-label={t(
                           visiblePasswords[field] ? "setup.hideField" : "setup.showField",
                           { field: t(`setup.${field}`) },
@@ -355,7 +363,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                 </div>
               ))}
             </div>
-          ) : (
+          ) : step === 2 ? (
             <>
               <div className="space-y-4">
                 <StorageProviderPicker
@@ -384,23 +392,21 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                     setError("");
                   }}
                 />
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  {t("setup.existingHelp")}
-                </p>
               </div>
               {error && (
                 <p role="alert" className="text-sm text-destructive">
                   {error}
                 </p>
               )}
-              <div className="space-y-3 border-t border-border pt-4">
+              <div className="space-y-3 border border-border bg-muted/30 p-3.5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
-                  <p className="text-xs leading-relaxed text-muted-foreground">
-                    {t("setup.checkFirst")}
-                  </p>
+                  <div>
+                    <p className="text-sm font-medium leading-relaxed">{t("setup.checkFirst")}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{t("setup.checkHelp")}</p>
+                  </div>
                   <Button
                     type="button"
-                    variant={currentCheck?.ready ? "outline" : "default"}
+                    variant="outline"
                     loading={operation === "check"}
                     disabled={operation === "create"}
                     className="shrink-0"
@@ -427,14 +433,17 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                     </>
                   ) : null}
                 </div>
-                <p className="text-xs text-muted-foreground">{t("setup.checkHelp")}</p>
               </div>
-              <section aria-label={t("setup.summary")}>
-                <p className="flex items-center justify-between gap-3 text-sm">
-                  <span className="min-w-0 break-all">
-                    <span className="text-muted-foreground">{t("setup.username")}: </span>
-                    {account.username.trim()}{" "}
-                  </span>
+            </>
+          ) : (
+            <dl
+              aria-label={t("setup.summary")}
+              className="divide-y divide-border border-y border-border text-sm"
+            >
+              <div className="grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-3 py-3">
+                <dt className="text-muted-foreground">{t("setup.username")}</dt>
+                <dd className="min-w-0 break-all">{account.username.trim()}</dd>
+                <dd>
                   <Button
                     type="button"
                     variant="ghost"
@@ -444,34 +453,74 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                   >
                     {t("setup.edit")}
                   </Button>
-                </p>
-              </section>
-            </>
+                </dd>
+              </div>
+              <div className="grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-3 py-3">
+                <dt className="text-muted-foreground">{t("setup.email")}</dt>
+                <dd className="min-w-0 break-all">{account.email.trim() || "—"}</dd>
+                <dd>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => setStep(1)}
+                  >
+                    {t("setup.edit")}
+                  </Button>
+                </dd>
+              </div>
+              <div className="grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-3 py-3">
+                <dt className="text-muted-foreground">{t("setup.files")}</dt>
+                <dd className="min-w-0 break-words">
+                  {knownUiText(
+                    providers.find((provider) => provider.id === providerId)?.label ?? providerId,
+                  )}
+                  {values.data_dir ? ` · ${String(values.data_dir)}` : ""}
+                </dd>
+                <dd>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => setStep(2)}
+                  >
+                    {t("setup.edit")}
+                  </Button>
+                </dd>
+              </div>
+            </dl>
           )}
-          {error && step === 1 && (
+          {error && step !== 2 && (
             <p role="alert" className="text-sm text-destructive">
               {error}
             </p>
           )}
-          <div className="flex gap-3 border-t border-border pt-5">
-            {step === 2 ? (
+          {step === 3 && busy && (
+            <p role="status" aria-live="polite">
+              {t("setup.creating")}
+            </p>
+          )}
+          <div className="flex justify-between gap-3 border-t border-border pt-5">
+            {step !== 1 ? (
               <Button
                 type="button"
                 variant="outline"
                 className="h-11"
                 disabled={busy}
-                onClick={() => setStep(1)}
+                onClick={() => setStep(step === 3 ? 2 : 1)}
               >
                 {t("setup.back")}
               </Button>
             ) : null}
             <Button
               type="submit"
-              className="h-auto min-h-11 flex-1 whitespace-normal py-2.5"
+              className="ml-auto h-auto min-h-9 whitespace-normal py-2"
               loading={busy}
               disabled={step === 2 && !currentCheck?.ready}
             >
-              {t(step === 1 ? "setup.next" : "setup.create")}
+              {t(step === 3 ? "setup.create" : "setup.next")}
             </Button>
           </div>
         </form>

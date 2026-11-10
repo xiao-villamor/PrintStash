@@ -7,6 +7,11 @@ export interface CollectionsPaneState {
   attachBreadcrumbs: (node: HTMLDivElement | null) => void;
   open: boolean;
   toggle: () => void;
+  mode: "collections" | "search" | "favorites" | "pending" | "views";
+  showCollections: () => void;
+  showSearch: () => void;
+  showPending: () => void;
+  showSavedViews: () => void;
 }
 
 export const CollectionsPaneContext = createContext<CollectionsPaneState | null>(null);

@@ -26,6 +26,7 @@ import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
+import { inputClasses } from "@/components/ui/input";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { usePrintStatistics, useVaultConfig } from "@/lib/queries";
 import type { StatsPeriod } from "@/lib/api";
@@ -114,7 +115,7 @@ type ChartType = (typeof CHART_TYPES)[number]["id"];
 
 const ACCENT = "var(--chart-1)";
 const CHROME = "var(--chart-grid)";
-const AXIS_TICK = { fill: CHROME } as const;
+const AXIS_TICK = { fill: "var(--muted-foreground)" } as const;
 const CURSOR_FILL = { fill: CHROME, fillOpacity: 0.18 } as const;
 const CURSOR_LINE = { stroke: ACCENT, strokeOpacity: 0.4 } as const;
 
@@ -199,6 +200,35 @@ function MetricCard({ label, value }: { label: string; value: string }) {
         {value}
       </div>
     </div>
+  );
+}
+
+function PeriodSelector({
+  period,
+  onChange,
+}: {
+  period: StatsPeriod;
+  onChange: (period: StatsPeriod) => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <label className="inline-flex items-center gap-2 text-xs text-foreground">
+      {t("Period")}
+      <select
+        value={period}
+        onChange={(event) => {
+          const selected = PERIODS.find((option) => option.value === event.target.value);
+          if (selected) onChange(selected.value);
+        }}
+        className={`${inputClasses} h-9 w-auto`}
+      >
+        {PERIODS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
   );
 }
 
@@ -326,14 +356,18 @@ function RankingCard({
 function TimeSeriesCard({
   stats,
   currency,
+  period,
+  onPeriodChange,
 }: {
   stats: PrintStatisticsRead;
   currency: string | null;
+  period: StatsPeriod;
+  onPeriodChange: (period: StatsPeriod) => void;
 }) {
   useUiLocale();
   const { locale, t } = useI18n();
-  const [metric, setMetric] = useState<Metric>("cost");
-  const [chartType, setChartType] = useState<ChartType>("area");
+  const [metric, setMetric] = useState<Metric>("prints");
+  const [chartType, setChartType] = useState<ChartType>("bar");
 
   const data = stats.cost_over_time.map((b) => ({
     bucket: b.bucket,
@@ -356,9 +390,7 @@ function TimeSeriesCard({
         ? formatFilament(v)
         : String(Math.round(v));
 
-  const grid = (
-    <CartesianGrid vertical={false} strokeDasharray="3 5" stroke={CHROME} strokeOpacity={0.32} />
-  );
+  const grid = <CartesianGrid vertical={false} stroke={CHROME} strokeOpacity={0.65} />;
   const xAxis = (
     <XAxis
       dataKey="bucket"
@@ -381,6 +413,7 @@ function TimeSeriesCard({
       axisLine={false}
       tickMargin={8}
       width={56}
+      allowDecimals={metric !== "prints"}
       tick={AXIS_TICK}
       tickFormatter={(v) => formatValue(Number(v))}
     />
@@ -393,77 +426,93 @@ function TimeSeriesCard({
   );
 
   return (
-    <Card className="overflow-hidden">
-      <CardHeader className="flex flex-col gap-3 border-b border-border/70 p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+    <>
+      <div className="flex flex-wrap items-center gap-3">
+        <PeriodSelector period={period} onChange={onPeriodChange} />
+        <label className="inline-flex items-center gap-2 text-xs text-foreground">
+          {t("Metric")}
+          <select
+            value={metric}
+            onChange={(event) => {
+              const selected = METRICS.find((option) => option.id === event.target.value);
+              if (selected) setMetric(selected.id);
+            }}
+            className={`${inputClasses} h-9 w-auto`}
+          >
+            {METRICS.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Segmented options={CHART_TYPES} value={chartType} onChange={setChartType} />
+      </div>
+      <Card className="overflow-hidden">
+        <CardHeader className="p-5">
           <CardTitle className="text-sm font-semibold">
-            {uiText("{metric} over time", { metric: localizedMetricLabel })}
+            {metric === "prints"
+              ? t("Completed jobs in selected period")
+              : uiText("{metric} over time", { metric: localizedMetricLabel })}
           </CardTitle>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {translateUiText(locale, "Completed jobs in selected period")}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Segmented options={METRICS} value={metric} onChange={setMetric} />
-          <Segmented options={CHART_TYPES} value={chartType} onChange={setChartType} />
-        </div>
-      </CardHeader>
-      <CardContent className="px-5 pb-5">
-        {metric === "cost" && currency === null ? (
-          <p role="status" className="py-12 text-center text-sm text-muted-foreground">
-            {t("stats.costUnavailable")}
-          </p>
-        ) : (
-          <ResponsiveContainer width="100%" height={260}>
-            {chartType === "area" ? (
-              <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="metricFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={ACCENT} stopOpacity={0.3} />
-                    <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                {grid}
-                {xAxis}
-                {yAxis}
-                {tooltip(CURSOR_LINE)}
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke={ACCENT}
-                  strokeWidth={2}
-                  fill="url(#metricFill)"
-                  activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
-                />
-              </AreaChart>
-            ) : chartType === "line" ? (
-              <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                {grid}
-                {xAxis}
-                {yAxis}
-                {tooltip(CURSOR_LINE)}
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  stroke={ACCENT}
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
-                />
-              </LineChart>
-            ) : (
-              <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                {grid}
-                {xAxis}
-                {yAxis}
-                {tooltip(CURSOR_FILL)}
-                <Bar dataKey="value" fill={ACCENT} radius={[4, 4, 0, 0]} />
-              </BarChart>
-            )}
-          </ResponsiveContainer>
-        )}
-      </CardContent>
-    </Card>
+        </CardHeader>
+        <CardContent className="px-5 pb-5">
+          {metric === "cost" && currency === null ? (
+            <p role="status" className="py-12 text-center text-sm text-muted-foreground">
+              {t("stats.costUnavailable")}
+            </p>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              {chartType === "area" ? (
+                <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="metricFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor={ACCENT} stopOpacity={0.3} />
+                      <stop offset="100%" stopColor={ACCENT} stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  {grid}
+                  {xAxis}
+                  {yAxis}
+                  {tooltip(CURSOR_LINE)}
+                  <Area
+                    type="monotone"
+                    dataKey="value"
+                    stroke={ACCENT}
+                    strokeWidth={2}
+                    fill="url(#metricFill)"
+                    activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
+                  />
+                </AreaChart>
+              ) : chartType === "line" ? (
+                <LineChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  {grid}
+                  {xAxis}
+                  {yAxis}
+                  {tooltip(CURSOR_LINE)}
+                  <Line
+                    type="monotone"
+                    dataKey="value"
+                    stroke={ACCENT}
+                    strokeWidth={2}
+                    dot={false}
+                    activeDot={{ r: 4, fill: "var(--card)", stroke: ACCENT, strokeWidth: 2 }}
+                  />
+                </LineChart>
+              ) : (
+                <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                  {grid}
+                  {xAxis}
+                  {yAxis}
+                  {tooltip(CURSOR_FILL)}
+                  <Bar dataKey="value" fill="var(--secondary)" maxBarSize={28} />
+                </BarChart>
+              )}
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+    </>
   );
 }
 
@@ -472,11 +521,15 @@ function StatsContent({
   currency,
   visibleWidgets,
   section,
+  period,
+  onPeriodChange,
 }: {
   stats: PrintStatisticsRead;
   currency: string | null;
   visibleWidgets: Set<WidgetId>;
   section: "overview" | "rankings";
+  period: StatsPeriod;
+  onPeriodChange: (period: StatsPeriod) => void;
 }) {
   useUiLocale();
   const { locale, t } = useI18n();
@@ -567,7 +620,12 @@ function StatsContent({
           </div>
         </div>
 
-        <TimeSeriesCard stats={stats} currency={currency} />
+        <TimeSeriesCard
+          stats={stats}
+          currency={currency}
+          period={period}
+          onPeriodChange={onPeriodChange}
+        />
 
         <p className="-mt-3 text-xs text-muted-foreground">
           {translateUiText(locale, "7-day forecast uses selected period’s daily filament average.")}
@@ -647,11 +705,6 @@ export default function StatisticsPage() {
         )}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Segmented
-              options={PERIODS.map((p) => ({ id: p.value, label: p.label }))}
-              value={period}
-              onChange={setPeriod}
-            />
             <DropdownMenu
               portal
               open={customizeOpen}
@@ -701,11 +754,14 @@ export default function StatisticsPage() {
         ]}
         active={section}
         onChange={setSection}
-        showIndicator={false}
-        className="gap-1 border-b border-border pb-3"
-        tabClassName="px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        activeTabClassName="bg-accent text-accent-foreground"
+        className="gap-6 border-b border-border"
+        tabClassName="px-0 py-3 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        activeTabClassName="font-semibold text-foreground"
       />
+
+      {(!data || data.total_prints === 0 || section === "rankings") && (
+        <PeriodSelector period={period} onChange={setPeriod} />
+      )}
 
       {user?.is_superuser && config.isError && (
         <div role="alert" className="flex items-center gap-2 text-sm">
@@ -736,6 +792,8 @@ export default function StatisticsPage() {
           currency={currency}
           visibleWidgets={visibleWidgets}
           section={section}
+          period={period}
+          onPeriodChange={setPeriod}
         />
       )}
     </PageContainer>

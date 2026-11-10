@@ -23,6 +23,9 @@ import { subscribeImportJobCompletions } from "@/lib/task-center";
 import { toast } from "@/lib/toast";
 import { uiText } from "@/lib/locale";
 import { refreshVaultAfterIngest } from "@/lib/query-client";
+import { useSystemTheme } from "@/lib/theme";
+import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
+import "./app-shell.css";
 
 const ArchiveReviewDialog = lazyImport(() =>
   import("@/components/archive-review").then((module) => ({ default: module.ArchiveReviewDialog })),
@@ -31,6 +34,7 @@ const ArchiveReviewDialog = lazyImport(() =>
 const CHROMELESS_PREFIXES = ["/setup", "/login"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  useSystemTheme();
   const pathname = usePathname();
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -137,13 +141,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <CollectionsPaneProvider>
               <NavigationShellProvider>
                 <MobileFilterProvider>
+                  <KeyboardShortcuts />
                   <div className="flex h-dvh overflow-hidden">
                     <SidebarNav />
                     <CollectionsPaneHost />
                     <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
                       <TopBar />
                       <PreviewActivityTracker enabled={!!user?.is_superuser} />
-                      <div className="flex min-h-0 flex-1 overflow-hidden">
+                      <div className="shell-route-viewport flex min-h-0 flex-1 overflow-hidden">
                         {isVault ? (
                           children
                         ) : (

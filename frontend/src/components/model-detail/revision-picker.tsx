@@ -1,4 +1,3 @@
-import { Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText } from "@/lib/locale";
@@ -19,13 +18,12 @@ export function RevisionPicker({
   return (
     <section className="detail-revision-picker" aria-label={uiText("Inspect revision")}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-muted-foreground">{uiText("Inspect revision")}</span>
         <div className="flex min-w-0 flex-wrap gap-1" role="group" aria-label={uiText("Revisions")}>
           {files.map((file) => (
             <Button
               key={file.id}
               size="sm"
-              variant="ghost"
+              variant="outline"
               aria-pressed={selected.id === file.id}
               className={selected.id === file.id ? "bg-accent text-accent-foreground" : ""}
               onClick={() => onSelect(file.id)}
@@ -34,9 +32,7 @@ export function RevisionPicker({
               {uiText("Rev {value1}", {
                 value1: String(file.gcode_revision_number ?? file.version),
               })}
-              {file.is_recommended && (
-                <Star className="ml-1 h-3 w-3" aria-label={uiText("Recommended")} />
-              )}
+              {file.is_recommended && <> · {uiText("Recommended")}</>}
             </Button>
           ))}
         </div>

@@ -31,6 +31,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { Modal } from "@/components/ui/modal";
 import { Input, inputClasses } from "@/components/ui/input";
 import { Localized } from "@/components/ui/localized";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -157,6 +158,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     addressing_style: "auto",
   });
   const [editing, setEditing] = useState<StorageConnection | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<StorageConnection | null>(null);
   const [probeFailures, setProbeFailures] = useState<
     Record<number, { base: EditingBase; error: ApiError }>
@@ -169,6 +171,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
       setValues({});
       setName("");
       setEditing(null);
+      setFormOpen(false);
       setRemoveTarget(null);
       setProbeFailures({});
       setPurpose("library");
@@ -227,6 +230,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
   function edit(connection: StorageConnection) {
     generation.current += 1;
     setEditing(connection);
+    setFormOpen(true);
     setName(connection.name);
     setPurpose(connection.purpose);
     const nextProviderId = String(connection.configuration.provider ?? connection.kind);
@@ -242,6 +246,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
     generation.current += 1;
     command.discardReview();
     setEditing(null);
+    setFormOpen(false);
     setName("");
     setPurpose("library");
     setValues(selected ? providerDefaults(selected, "library") : {});
@@ -405,6 +410,44 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
       if (current(session)) toast.error(error);
     }
   }
+  const connectionReview = (
+    <>
+      {!connectionsDenied && user?.is_superuser && (
+        <StorageConnectionReview
+          review={command.review}
+          busy={command.isPending}
+          onReview={() => {
+            const session = getSessionVersion();
+            void command.reviewLatest().catch((error) => {
+              if (current(session)) toast.error(error);
+            });
+          }}
+          onAdopt={() => {
+            const session = getSessionVersion();
+            void command
+              .adopt()
+              .then((row) => {
+                if (current(session) && editing) edit(row);
+              })
+              .catch((error) => {
+                if (current(session)) toast.error(error);
+              });
+          }}
+          onSave={() => {
+            if (editing && command.review.phase === "ready" && command.review.id === editing.id)
+              void addConnection(true);
+            else {
+              const session = getSessionVersion();
+              void command.saveRevised().catch((error) => {
+                if (current(session)) toast.error(error);
+              });
+            }
+          }}
+        />
+      )}
+    </>
+  );
+
   if (retired) return null;
 
   return (
@@ -414,53 +457,31 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
         aria-label={uiText("Remote storage")}
         className="overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm"
       >
-        <header className="flex items-start gap-3 border-b border-border px-4 py-4 sm:px-5">
+        <header className="flex flex-wrap items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
             <Cloud className="h-4 w-4" aria-hidden />
           </div>
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-foreground">{uiText("Remote storage")}</h2>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold text-foreground">{uiText("Connections")}</h2>
             <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-muted-foreground">
               {uiText(
-                "Connect a remote location once, then use it for off-site backup replicas, read-only Library sources, or both. Credentials remain encrypted on this server.",
+                "Pausing a connection stops new backup copies and library scans without forgetting its credentials.",
               )}
             </p>
           </div>
+          <Button
+            size="sm"
+            disabled={unavailable || busy !== null}
+            onClick={() => {
+              resetForm();
+              setFormOpen(true);
+            }}
+          >
+            {uiText("Add remote connection")}
+          </Button>
         </header>
 
-        {!connectionsDenied && user?.is_superuser && (
-          <StorageConnectionReview
-            review={command.review}
-            busy={command.isPending}
-            onReview={() => {
-              const session = getSessionVersion();
-              void command.reviewLatest().catch((error) => {
-                if (current(session)) toast.error(error);
-              });
-            }}
-            onAdopt={() => {
-              const session = getSessionVersion();
-              void command
-                .adopt()
-                .then((row) => {
-                  if (current(session) && editing) edit(row);
-                })
-                .catch((error) => {
-                  if (current(session)) toast.error(error);
-                });
-            }}
-            onSave={() => {
-              if (editing && command.review.phase === "ready" && command.review.id === editing.id)
-                void addConnection(true);
-              else {
-                const session = getSessionVersion();
-                void command.saveRevised().catch((error) => {
-                  if (current(session)) toast.error(error);
-                });
-              }
-            }}
-          />
-        )}
+        {!formOpen && connectionReview}
         {connectionsFailed && connections.length > 0 && (
           <div role="alert" className="flex items-center gap-2 px-4 py-3 text-sm sm:px-5">
             <p>{i18n.t("storage.connectionsLoadFailed")}</p>
@@ -488,16 +509,6 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
           </p>
         )}
         <div className="border-b border-border">
-          <div className="px-4 py-3 sm:px-5">
-            <h3 className="text-sm font-semibold text-foreground">{uiText("Connections")}</h3>
-            {connections.length > 0 && (
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {uiText(
-                  "Pausing a connection stops new backup copies and library scans without forgetting its credentials.",
-                )}
-              </p>
-            )}
-          </div>
           {!user?.is_superuser ? (
             <p className="px-4 pb-4 text-sm text-muted-foreground sm:px-5">
               {i18n.t("storage.connectionsAdministratorRequired")}
@@ -683,208 +694,215 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
             <span className="sr-only">{uiText("Loading connections…")}</span>
           </div>
         ) : connectionsDenied || !user?.is_superuser ? null : (
-          <div className="space-y-5 px-4 py-4 sm:px-5 sm:py-5">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">
-                {editing
-                  ? uiText("Edit {value1}", { value1: String(editing.name) })
-                  : uiText("Add remote connection")}
-              </h3>
-            </div>
-            <fieldset className="space-y-2">
-              <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
-                {uiText("Storage category")}
-              </legend>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {REMOTE_CATEGORIES.map((choice) => {
-                  const Icon = choice.icon;
-                  return (
-                    <Button
-                      key={choice.id}
-                      type="button"
-                      variant="outline"
-                      aria-pressed={category === choice.id}
-                      disabled={
-                        unavailable ||
-                        editUnavailable ||
-                        editing !== null ||
-                        !remoteProviders.some((provider) => provider.category === choice.id)
-                      }
-                      onClick={() => chooseCategory(choice.id)}
-                      className={cn(
-                        "h-auto min-h-11 justify-start gap-2 whitespace-normal px-3 py-3 text-left",
-                        category === choice.id &&
-                          "border-transparent bg-accent text-accent-foreground hover:bg-accent",
-                      )}
-                    >
-                      <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                      {choice.label}
-                    </Button>
-                  );
-                })}
-              </div>
-            </fieldset>
-            <fieldset className="space-y-2">
-              <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
-                {uiText("Provider")}
-              </legend>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {categoryProviders.map((provider) => {
-                  const providerAvailability = availability(provider.id);
-                  const providerUnavailable = providerAvailability?.available === false;
-                  const reason = providerUnavailable ? providerAvailability.reason : undefined;
-                  return (
-                    <Button
-                      key={provider.id}
-                      type="button"
-                      variant="outline"
-                      aria-label={knownUiText(provider.label)}
-                      aria-pressed={provider.id === providerId}
-                      disabled={
-                        unavailable || editUnavailable || editing !== null || providerUnavailable
-                      }
-                      onClick={() => chooseProvider(provider)}
-                      className={cn(
-                        "h-auto min-h-12 justify-start whitespace-normal px-3 py-3 text-left",
-                        provider.id === providerId &&
-                          "border-transparent bg-accent text-accent-foreground hover:bg-accent",
-                      )}
-                    >
-                      <span>
-                        <span className="block text-sm font-medium">
-                          {knownUiText(provider.label)}
-                        </span>
-                        {reason && (
-                          <span className="block text-xs font-normal opacity-70">
-                            {storageOperationMessage(reason, i18n?.t)}
-                          </span>
-                        )}
-                      </span>
-                    </Button>
-                  );
-                })}
-              </div>
-            </fieldset>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className={FIELD_LABEL}>
-                {uiText("Connection name")}
-                <Input
-                  value={name}
-                  maxLength={128}
-                  disabled={unavailable || editUnavailable}
-                  placeholder={uiText("Workshop storage")}
-                  onChange={(event) => {
-                    generation.current += 1;
-                    setName(event.target.value);
-                  }}
-                />
-              </label>
-              <fieldset className="space-y-1.5">
-                <legend className="text-xs font-medium text-on-surface-variant">
-                  {uiText("Use for")}
+          <Modal
+            open={formOpen}
+            onClose={() => {
+              if (busy === null) setFormOpen(false);
+            }}
+            title={
+              editing
+                ? uiText("Edit {value1}", { value1: String(editing.name) })
+                : uiText("Add remote connection")
+            }
+            className="max-w-3xl"
+          >
+            {connectionReview}
+            <div className="space-y-5">
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
+                  {uiText("Storage category")}
                 </legend>
-                <div className="grid grid-cols-3 gap-1">
-                  {PURPOSES.map((value) => (
-                    <Button
-                      key={value}
-                      type="button"
-                      variant="outline"
-                      aria-pressed={purpose === value}
-                      disabled={unavailable || editUnavailable}
-                      onClick={() => {
-                        generation.current += 1;
-                        setPurpose(value);
-                      }}
-                      className={cn(
-                        "h-auto min-h-10 whitespace-normal px-2 py-2 text-xs",
-                        purpose === value &&
-                          "border-transparent bg-accent text-accent-foreground hover:bg-accent",
-                      )}
-                    >
-                      {purposeLabel(value)}
-                    </Button>
-                  ))}
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {REMOTE_CATEGORIES.map((choice) => {
+                    const Icon = choice.icon;
+                    return (
+                      <Button
+                        key={choice.id}
+                        type="button"
+                        variant="outline"
+                        aria-pressed={category === choice.id}
+                        disabled={
+                          unavailable ||
+                          editUnavailable ||
+                          editing !== null ||
+                          !remoteProviders.some((provider) => provider.category === choice.id)
+                        }
+                        onClick={() => chooseCategory(choice.id)}
+                        className={cn(
+                          "h-auto min-h-11 justify-start gap-2 whitespace-normal px-3 py-3 text-left",
+                          category === choice.id &&
+                            "border-transparent bg-accent text-accent-foreground hover:bg-accent",
+                        )}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                        {choice.label}
+                      </Button>
+                    );
+                  })}
                 </div>
               </fieldset>
-            </div>
-            {selected && (
-              <div className="space-y-4 rounded-lg border border-outline-variant bg-surface-container-low p-4">
-                <StorageProviderFields
-                  provider={selected}
-                  values={values}
-                  onChange={changeValue}
-                  use={use}
-                  disabled={unavailable || editUnavailable || busy !== null}
-                  storedSecrets={storedSecrets}
-                  editing={editing !== null}
-                  onClear={(field) => {
-                    generation.current += 1;
-                    setValues((current) => ({ ...current, [field]: "" }));
-                  }}
-                />
-                {selected.consequences.length > 0 && (
-                  <ul className="space-y-1 text-xs text-muted-foreground">
-                    {selected.consequences.map((text) => (
-                      <li key={text}>{knownUiText(text)}</li>
+              <fieldset className="space-y-2">
+                <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
+                  {uiText("Provider")}
+                </legend>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {categoryProviders.map((provider) => {
+                    const providerAvailability = availability(provider.id);
+                    const providerUnavailable = providerAvailability?.available === false;
+                    const reason = providerUnavailable ? providerAvailability.reason : undefined;
+                    return (
+                      <Button
+                        key={provider.id}
+                        type="button"
+                        variant="outline"
+                        aria-label={knownUiText(provider.label)}
+                        aria-pressed={provider.id === providerId}
+                        disabled={
+                          unavailable || editUnavailable || editing !== null || providerUnavailable
+                        }
+                        onClick={() => chooseProvider(provider)}
+                        className={cn(
+                          "h-auto min-h-12 justify-start whitespace-normal px-3 py-3 text-left",
+                          provider.id === providerId &&
+                            "border-transparent bg-accent text-accent-foreground hover:bg-accent",
+                        )}
+                      >
+                        <span>
+                          <span className="block text-sm font-medium">
+                            {knownUiText(provider.label)}
+                          </span>
+                          {reason && (
+                            <span className="block text-xs font-normal opacity-70">
+                              {storageOperationMessage(reason, i18n?.t)}
+                            </span>
+                          )}
+                        </span>
+                      </Button>
+                    );
+                  })}
+                </div>
+              </fieldset>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className={FIELD_LABEL}>
+                  {uiText("Connection name")}
+                  <Input
+                    value={name}
+                    maxLength={128}
+                    disabled={unavailable || editUnavailable}
+                    placeholder={uiText("Workshop storage")}
+                    onChange={(event) => {
+                      generation.current += 1;
+                      setName(event.target.value);
+                    }}
+                  />
+                </label>
+                <fieldset className="space-y-1.5">
+                  <legend className="text-xs font-medium text-on-surface-variant">
+                    {uiText("Use for")}
+                  </legend>
+                  <div className="grid grid-cols-3 gap-1">
+                    {PURPOSES.map((value) => (
+                      <Button
+                        key={value}
+                        type="button"
+                        variant="outline"
+                        aria-pressed={purpose === value}
+                        disabled={unavailable || editUnavailable}
+                        onClick={() => {
+                          generation.current += 1;
+                          setPurpose(value);
+                        }}
+                        className={cn(
+                          "h-auto min-h-10 whitespace-normal px-2 py-2 text-xs",
+                          purpose === value &&
+                            "border-transparent bg-accent text-accent-foreground hover:bg-accent",
+                        )}
+                      >
+                        {purposeLabel(value)}
+                      </Button>
                     ))}
-                  </ul>
-                )}
+                  </div>
+                </fieldset>
               </div>
-            )}
-            {editing && (
-              <p className="text-xs text-muted-foreground">
-                {uiText(
-                  "Leave stored credentials blank to keep them. Target changes are blocked while Library sources or backups depend on this connection.",
-                )}
-              </p>
-            )}
-            {purpose === "both" && (
-              <p className="rounded-md bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
-                {uiText(
-                  "Shared connections keep one base folder. Library source paths must stay separate from the reserved printstash-backups folder.",
-                )}
-              </p>
-            )}
-            <div className="flex justify-end gap-2">
-              {editing && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={busy !== null}
-                  onClick={resetForm}
-                >
-                  {uiText("Cancel editing")}
-                </Button>
+              {selected && (
+                <div className="space-y-4 rounded-lg border border-outline-variant bg-surface-container-low p-4">
+                  <StorageProviderFields
+                    provider={selected}
+                    values={values}
+                    onChange={changeValue}
+                    use={use}
+                    disabled={unavailable || editUnavailable || busy !== null}
+                    storedSecrets={storedSecrets}
+                    editing={editing !== null}
+                    onClear={(field) => {
+                      generation.current += 1;
+                      setValues((current) => ({ ...current, [field]: "" }));
+                    }}
+                  />
+                  {selected.consequences.length > 0 && (
+                    <ul className="space-y-1 text-xs text-muted-foreground">
+                      {selected.consequences.map((text) => (
+                        <li key={text}>{knownUiText(text)}</li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               )}
-              {catalogueFailed && (
-                <p className="mr-auto text-xs text-muted-foreground">
-                  {i18n?.t("storage.operationUnavailable") ??
-                    uiText("Storage information is unavailable. Reload to try again.")}
+              {editing && (
+                <p className="text-xs text-muted-foreground">
+                  {uiText(
+                    "Leave stored credentials blank to keep them. Target changes are blocked while Library sources or backups depend on this connection.",
+                  )}
                 </p>
               )}
-              <Button
-                type="button"
-                disabled={
-                  unavailable ||
-                  editUnavailable ||
-                  command.blocked ||
-                  loading ||
-                  catalogueFailed ||
-                  busy !== null ||
-                  selectedAvailability?.available === false ||
-                  !canCreateConnection()
-                }
-                onClick={() => void addConnection()}
-              >
-                {busy === "create" ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                ) : (
-                  <Plus className="h-4 w-4" aria-hidden />
+              {purpose === "both" && (
+                <p className="rounded-md bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
+                  {uiText(
+                    "Shared connections keep one base folder. Library source paths must stay separate from the reserved printstash-backups folder.",
+                  )}
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                {editing && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busy !== null}
+                    onClick={resetForm}
+                  >
+                    {uiText("Cancel editing")}
+                  </Button>
                 )}
-                {editing ? uiText("Save changes") : uiText("Save connection")}
-              </Button>
+                {catalogueFailed && (
+                  <p className="mr-auto text-xs text-muted-foreground">
+                    {i18n?.t("storage.operationUnavailable") ??
+                      uiText("Storage information is unavailable. Reload to try again.")}
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  disabled={
+                    unavailable ||
+                    editUnavailable ||
+                    command.blocked ||
+                    loading ||
+                    catalogueFailed ||
+                    busy !== null ||
+                    selectedAvailability?.available === false ||
+                    !canCreateConnection()
+                  }
+                  onClick={() => void addConnection()}
+                >
+                  {busy === "create" ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                  ) : (
+                    <Plus className="h-4 w-4" aria-hidden />
+                  )}
+                  {editing ? uiText("Save changes") : uiText("Save connection")}
+                </Button>
+              </div>
             </div>
-          </div>
+          </Modal>
         )}
 
         {!connectionsDenied && user?.is_superuser && (

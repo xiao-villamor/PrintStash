@@ -1,5 +1,6 @@
 import { useViewportAssetUrl } from "@/lib/use-viewport-admission";
 import { Box, Boxes, FileText, Folder } from "lucide-react";
+import "./library-items.css";
 import { cn } from "@/lib/utils";
 import type { SearchSubjectType } from "@/types/search";
 
@@ -13,7 +14,7 @@ export function SearchSubjectPreview({
   large?: boolean;
 }) {
   const { url: source, ref } = useViewportAssetUrl(path);
-  const frame = large ? "aspect-[4/3] w-full" : "h-16 w-16 shrink-0";
+  const frame = large ? "h-36 w-full shrink-0" : "h-16 w-16 shrink-0";
   const Icon =
     subjectType === "collection"
       ? Folder
@@ -28,14 +29,14 @@ export function SearchSubjectPreview({
       src={source}
       alt=""
       loading="lazy"
-      className={cn(frame, "rounded-md bg-muted/30 object-contain")}
+      className={cn(frame, "library-preview object-contain")}
     />
   ) : (
     <div
       ref={ref}
       className={cn(
         frame,
-        "flex items-center justify-center rounded-md bg-muted/30 text-muted-foreground",
+        "flex items-center justify-center library-preview text-muted-foreground",
       )}
       aria-hidden
     >

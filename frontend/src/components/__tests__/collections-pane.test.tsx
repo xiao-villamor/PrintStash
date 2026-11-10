@@ -1,6 +1,6 @@
 /** Shell geometry preserves the Library tree owner and uses real outliner data on other routes. */
 import { useState } from "react";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLocation } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
@@ -130,15 +130,48 @@ describe("LibraryBreadcrumbs", () => {
 });
 
 describe("CollectionsPaneHost", () => {
+  it("remembers a submitted search in its actual panel", async () => {
+    renderPane({ at: "/search?q=bracket" });
+    expect(screen.getByRole("searchbox", { name: "Search library" })).toHaveValue("bracket");
+    expect(await screen.findByRole("button", { name: "bracket" })).toBeVisible();
+    expect(JSON.parse(localStorage.getItem("printstash.recent-searches.1") ?? "[]")).toEqual([
+      "bracket",
+    ]);
+  });
+  it("bounds recent searches to eight distinct queries", () => {
+    localStorage.setItem(
+      "printstash.recent-searches.1",
+      JSON.stringify(Array.from({ length: 8 }, (_, i) => `query${i}`)),
+    );
+    renderPane({ at: "/search?q=newest" });
+    const panel = screen.getByRole("complementary", { name: "Search panel" });
+    expect(within(panel).getAllByRole("button")).toHaveLength(8);
+    expect(within(panel).queryByRole("button", { name: "query7" })).not.toBeInTheDocument();
+  });
+  it("keeps another account's recent queries private", () => {
+    localStorage.setItem("printstash.recent-searches.1", JSON.stringify(["private query"]));
+    renderPane({ at: "/search", auth: memberSession() });
+    expect(screen.queryByRole("button", { name: "private query" })).not.toBeInTheDocument();
+  });
+  it("rejects malformed persisted recent queries", () => {
+    localStorage.setItem(
+      "printstash.recent-searches.1",
+      JSON.stringify([42, null, { query: "wrong" }, "valid"]),
+    );
+    renderPane({ at: "/search" });
+    const panel = screen.getByRole("complementary", { name: "Search panel" });
+    expect(within(panel).getAllByRole("button")).toHaveLength(1);
+    expect(within(panel).getByRole("button", { name: "valid" })).toBeVisible();
+  });
   it("navigates from a secondary screen using the production outliner", async () => {
     const user = userEvent.setup();
     const collection = aCollection({ id: 5, name: "Hardware", path: "hardware" });
     const app = renderPane({
-      at: "/search",
+      at: "/inbox",
       routes: { ...collectionTreeRoutes([collection]), ...outlinerRoutes([collection]) },
     });
 
-    await user.click(await screen.findByRole("button", { name: "Hardware" }));
+    await user.click(await screen.findByRole("treeitem", { name: "Hardware" }));
 
     await waitFor(() =>
       expect(
@@ -155,7 +188,7 @@ describe("CollectionsPaneHost", () => {
 
   it("routes collection creation back to the existing Library command owner", async () => {
     const user = userEvent.setup();
-    renderPane({ at: "/search" });
+    renderPane({ at: "/inbox" });
 
     await user.click(screen.getByRole("button", { name: "New collection" }));
 

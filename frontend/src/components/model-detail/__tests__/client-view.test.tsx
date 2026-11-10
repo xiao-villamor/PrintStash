@@ -53,6 +53,14 @@ function renderView(options: RenderAppOptions & { initialModel?: ModelRead | nul
 }
 
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   window.localStorage.clear();
 });
 

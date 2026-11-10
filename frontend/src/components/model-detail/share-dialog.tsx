@@ -5,12 +5,14 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, Copy, Link2, Loader2, X } from "lucide-react";
+import { Check, Copy, Loader2 } from "lucide-react";
 
 import { createModelShare, listModelShares, revokeShare } from "@/lib/api/share";
 import { toast } from "@/lib/toast";
 import { FileRead, ShareLinkRead } from "@/types";
-import { ModalShell } from "@/components/ui/modal";
+import { Modal } from "@/components/ui/modal";
+import { Button } from "@/components/ui/button";
+import { ChoiceField } from "./choice-field";
 import { Localized } from "@/components/ui/localized";
 
 function shareUrl(path: string): string {
@@ -21,11 +23,13 @@ function shareUrl(path: string): string {
 
 export function ShareDialog({
   modelId,
+  modelName,
   files,
   open,
   onClose,
 }: {
   modelId: number;
+  modelName?: string;
   files: FileRead[];
   open: boolean;
   onClose: () => void;
@@ -36,11 +40,16 @@ export function ShareDialog({
   const [creating, setCreating] = useState(false);
   const [expiresInDays, setExpiresInDays] = useState(7);
   const [allowDownload, setAllowDownload] = useState(false);
-  const [revisionScope, setRevisionScope] = useState<"all" | "selected">("all");
-  const [selectedRevisionIds, setSelectedRevisionIds] = useState<number[]>([]);
+  const gcodeFiles = useMemo(() => files.filter((f) => f.file_type === "gcode"), [files]);
+  const initialRevision = gcodeFiles.find((file) => file.is_recommended) ?? gcodeFiles.at(-1);
+  const [revisionScope, setRevisionScope] = useState<"all" | "selected">(
+    initialRevision ? "selected" : "all",
+  );
+  const [selectedRevisionIds, setSelectedRevisionIds] = useState<number[]>(
+    initialRevision ? [initialRevision.id] : [],
+  );
   const [lastToken, setLastToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const gcodeFiles = useMemo(() => files.filter((f) => f.file_type === "gcode"), [files]);
 
   // Each open starts from a clean form. Adjusting state during the render that
   // flips `open` (React's documented alternative to a reset effect) keeps the
@@ -51,7 +60,7 @@ export function ShareDialog({
     if (open) {
       const recommended =
         gcodeFiles.find((f) => f.is_recommended) ?? gcodeFiles[gcodeFiles.length - 1];
-      setRevisionScope("all");
+      setRevisionScope(recommended ? "selected" : "all");
       setSelectedRevisionIds(recommended ? [recommended.id] : []);
       setLoading(true);
     }
@@ -112,38 +121,41 @@ export function ShareDialog({
 
   return (
     <Localized>
-      <ModalShell
+      <Modal
         open={open}
         onClose={onClose}
-        className="bg-surface-container-lowest border border-outline-variant rounded-md w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl"
+        title={modelName ? uiText("Share {value1}", { value1: modelName }) : uiText("Share model")}
+        description={uiText(
+          "Choose which Revisions the link exposes, whether files can be downloaded, and when access expires.",
+        )}
+        className="max-w-160"
+        footer={
+          <>
+            <Button variant="outline" onClick={onClose}>
+              {uiText("Close")}
+            </Button>
+            <Button type="button" onClick={doCreate} disabled={createDisabled} loading={creating}>
+              {uiText("Create link")}
+            </Button>
+          </>
+        }
       >
-        <div className="flex items-start justify-between gap-4 px-6 py-4 border-b border-outline-variant">
-          <div>
-            <h3 className="text-sm font-semibold text-on-surface flex items-center gap-2">
-              <Link2 className="h-4 w-4" />
-              {uiText(" Share model")}
-            </h3>
-            <p className="text-xs text-on-surface-variant mt-0.5">
-              {uiText(
-                "Public, expiring, read-only links. Anyone with the link can view this model only.",
-              )}
-            </p>
+        {modelName && (
+          <div className="mb-5 grid grid-cols-[1fr_2fr] gap-4 bg-plate p-4 text-[13px]">
+            <span className="text-muted-foreground">{uiText("Model")}</span>
+            <span className="break-words">{modelName}</span>
           </div>
-          <button
-            onClick={onClose}
-            aria-label={uiText("Close")}
-            className="h-7 w-7 -mt-1 rounded hover:bg-surface-container flex items-center justify-center text-on-surface-variant"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="p-6 space-y-5">
+        )}
+        <p className="mb-4 text-[13px] text-muted-foreground">
+          {uiText("Copy the new link after creating it. You can revoke access at any time.")}
+        </p>
+        <div className="space-y-5">
           {/* Create */}
-          <div className="space-y-3">
-            <div className="flex items-end gap-3">
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold">{uiText("Link access")}</h3>
+            <div className="space-y-4">
               <label className="block">
-                <span className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                <span className="mb-2 block text-sm text-foreground">
                   {uiText("Expires (days)")}
                 </span>
                 <input
@@ -152,69 +164,69 @@ export function ShareDialog({
                   max={365}
                   value={expiresInDays}
                   onChange={(e) => setExpiresInDays(Number(e.target.value))}
-                  className="w-28 h-9 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3"
+                  className="w-40 h-9 bg-surface-container-lowest text-on-surface font-mono text-sm border border-outline-variant rounded px-3"
                 />
               </label>
-              <label className="flex items-center gap-2 h-9">
-                <input
-                  type="checkbox"
-                  checked={allowDownload}
-                  onChange={(e) => setAllowDownload(e.target.checked)}
-                  className="accent-primary"
-                />
-                <span className="text-xs text-on-surface">{uiText("Allow file download")}</span>
-              </label>
+              <ChoiceField<"off" | "on">
+                label={uiText("Allow file download")}
+                value={allowDownload ? "on" : "off"}
+                onChange={(value) => setAllowDownload(value === "on")}
+                inline
+                options={[
+                  { value: "off", label: uiText("Off") },
+                  { value: "on", label: uiText("On") },
+                ]}
+              />
             </div>
             {gcodeFiles.length > 0 && (
-              <div className="space-y-2">
-                <p className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant">
-                  {uiText("Revisions")}
-                </p>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRevisionScope("all")}
-                    className={`rounded border px-3 py-2 text-left font-mono text-2xs ${
-                      revisionScope === "all"
-                        ? "border-primary bg-secondary-container text-on-secondary-container"
-                        : "border-outline-variant text-on-surface-variant hover:bg-surface-container-low"
-                    }`}
-                  >
-                    {uiText("Every revision")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRevisionScope("selected")}
-                    className={`rounded border px-3 py-2 text-left font-mono text-2xs ${
-                      revisionScope === "selected"
-                        ? "border-primary bg-secondary-container text-on-secondary-container"
-                        : "border-outline-variant text-on-surface-variant hover:bg-surface-container-low"
-                    }`}
-                  >
-                    {uiText("Selected revisions")}
-                  </button>
-                </div>
+              <div className="space-y-4 border-t border-border pt-5">
+                <h3 className="text-sm font-semibold">{uiText("Included Revisions")}</h3>
+                <ChoiceField<"all" | "selected" | number>
+                  label={uiText("Revisions")}
+                  value={
+                    revisionScope === "selected" && selectedRevisionIds.length === 1
+                      ? selectedRevisionIds[0]
+                      : revisionScope
+                  }
+                  onChange={(value) => {
+                    if (value === "all" || value === "selected") {
+                      setRevisionScope(value);
+                    } else {
+                      setRevisionScope("selected");
+                      setSelectedRevisionIds([value]);
+                    }
+                  }}
+                  options={[
+                    { value: "all", label: uiText("Every revision") },
+                    { value: "selected", label: uiText("Selected revisions") },
+                    ...gcodeFiles.map((file) => ({
+                      value: file.id,
+                      label: `${uiText("Rev ")}${file.gcode_revision_number ?? file.version}`,
+                    })),
+                  ]}
+                  inline
+                />
                 {revisionScope === "selected" && (
-                  <div className="max-h-44 overflow-y-auto rounded border border-outline-variant divide-y divide-outline-variant">
+                  <div className="max-h-72 overflow-y-auto divide-y divide-border">
                     {gcodeFiles.map((f) => (
                       <label
                         key={f.id}
-                        className="flex items-start gap-2 px-3 py-2 hover:bg-surface-container-low"
+                        className="flex items-start gap-3 py-4 hover:bg-surface-container-low"
                       >
                         <input
                           type="checkbox"
                           checked={selectedRevisionIds.includes(f.id)}
                           onChange={() => toggleRevision(f.id)}
-                          className="mt-0.5 accent-primary"
+                          className="mt-0.5 h-5 w-5 shrink-0 accent-primary"
                         />
                         <span className="min-w-0">
-                          <span className="block text-xs text-on-surface truncate">
+                          <span className="block text-sm font-semibold text-on-surface">
                             {uiText("Rev ")}
                             {f.gcode_revision_number ?? f.version}
                             {f.revision_label ? ` · ${f.revision_label}` : ""}
                             {f.is_recommended ? uiText(" · Recommended") : ""}
                           </span>
-                          <span className="block font-mono text-3xs text-on-surface-variant truncate">
+                          <span className="mt-1 block break-all text-[13px] text-on-surface-variant">
                             {f.original_filename}
                           </span>
                         </span>
@@ -224,19 +236,6 @@ export function ShareDialog({
                 )}
               </div>
             )}
-            <button
-              type="button"
-              onClick={doCreate}
-              disabled={createDisabled}
-              className="px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
-            >
-              {creating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Link2 className="h-4 w-4" />
-              )}
-              {uiText("Create link")}
-            </button>
           </div>
 
           {lastToken && (
@@ -251,6 +250,7 @@ export function ShareDialog({
                   className="flex-1 h-8 bg-surface-container-lowest text-on-surface font-mono text-2xs border border-outline-variant rounded px-2"
                 />
                 <button
+                  aria-label={uiText("Copy link")}
                   onClick={copyLast}
                   className="h-8 w-8 rounded border border-outline-variant flex items-center justify-center hover:bg-surface-container-low"
                 >
@@ -266,24 +266,17 @@ export function ShareDialog({
 
           {/* Existing */}
           <div>
-            <h4 className="font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-2">
-              {uiText("Active links")}
-            </h4>
+            <h4 className="mb-2 text-sm font-semibold text-foreground">{uiText("Active links")}</h4>
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin text-on-surface-variant" />
             ) : links.length === 0 ? (
-              <p className="font-mono text-2xs text-on-surface-variant/70">
-                {uiText("No share links yet.")}
-              </p>
+              <p className="text-[13px] text-muted-foreground">{uiText("No share links yet.")}</p>
             ) : (
-              <div className="space-y-2">
+              <div className="divide-y divide-border border-y border-border">
                 {links.map((l) => (
-                  <div
-                    key={l.id}
-                    className="flex items-center justify-between gap-2 rounded border border-outline-variant px-3 py-2"
-                  >
+                  <div key={l.id} className="flex items-center justify-between gap-4 py-4">
                     <div className="min-w-0">
-                      <p className="font-mono text-2xs text-on-surface">
+                      <p className="text-sm font-medium text-on-surface">
                         {l.is_active
                           ? uiText("Active")
                           : l.revoked_at
@@ -296,7 +289,7 @@ export function ShareDialog({
                             })
                           : uiText(" · all revs")}
                       </p>
-                      <p className="font-mono text-3xs text-on-surface-variant">
+                      <p className="mt-1 text-xs text-on-surface-variant">
                         {uiText("expires {value1} · {value2} views", {
                           value1: String(
                             new Date(l.expires_at).toLocaleDateString(currentLocale()) ?? "",
@@ -308,7 +301,7 @@ export function ShareDialog({
                     {l.is_active && (
                       <button
                         onClick={() => doRevoke(l.id)}
-                        className="font-mono text-3xs uppercase tracking-wider text-error hover:underline shrink-0"
+                        className="shrink-0 border border-border px-3 py-2 text-[13px] text-foreground hover:bg-accent"
                       >
                         {uiText("Revoke")}
                       </button>
@@ -319,7 +312,7 @@ export function ShareDialog({
             )}
           </div>
         </div>
-      </ModalShell>
+      </Modal>
     </Localized>
   );
 }

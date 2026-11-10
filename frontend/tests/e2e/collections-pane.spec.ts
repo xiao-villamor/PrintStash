@@ -33,14 +33,16 @@ test.describe("Global collection pane", () => {
   test("preserves an explicit collapsed preference after reload", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/search");
-    const toggle = page.locator("header").getByRole("button", { name: "Collections", exact: true });
+    const toggle = page
+      .locator("header")
+      .getByRole("button", { name: "Toggle sidebar", exact: true });
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
 
     await toggle.click();
     await page.reload();
 
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
-    await expect(page.getByRole("complementary", { name: "Collections" })).toBeHidden();
+    await expect(page.getByRole("complementary", { name: "Search panel" })).toBeHidden();
   });
 
   test("keeps Library content usable when the desktop pane is absent on phones", async ({
@@ -53,5 +55,12 @@ test.describe("Global collection pane", () => {
     await expect(page.getByRole("heading", { name: "All Models", exact: true })).toBeVisible();
     await expect(page.getByRole("complementary", { name: "Collections" })).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+    const main = await page.getByRole("main").boundingBox();
+    const navigation = await page
+      .getByRole("navigation", { name: "Navigation", exact: true })
+      .boundingBox();
+    expect(main).not.toBeNull();
+    expect(navigation).not.toBeNull();
+    expect(main!.y + main!.height).toBeLessThanOrEqual(navigation!.y);
   });
 });

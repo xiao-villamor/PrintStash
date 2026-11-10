@@ -5,6 +5,9 @@ module.exports = {
     extend: {
       colors: {
         border: "var(--border)",
+        "border-strong": "var(--border-strong)",
+        "overlay-scrim": "var(--overlay-scrim)",
+        plate: "var(--plate)",
         input: "var(--input)",
         ring: "var(--ring)",
         background: "var(--background)",
@@ -52,6 +55,9 @@ module.exports = {
       fontFamily: {
         sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "ui-monospace", "monospace"],
+      },
+      boxShadow: {
+        dialog: "0 20px 60px var(--dialog-shadow)",
       },
       borderRadius: {
         DEFAULT: "var(--radius)",

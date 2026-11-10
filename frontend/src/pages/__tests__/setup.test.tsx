@@ -247,7 +247,7 @@ describe("SetupPage", () => {
     expect(screen.getByRole("heading", { name: "Welcome to PrintStash" })).toBeVisible();
     expect(
       screen.getByRole("list", { name: "Setup progress" }).querySelector('[aria-current="step"]'),
-    ).toHaveTextContent("Your account");
+    ).toHaveTextContent("Account");
     const fields = screen.getAllByRole("textbox").map((field) => field.getAttribute("id"));
     expect(fields.indexOf("setup-username")).toBeLessThan(fields.indexOf("setup-email"));
   });
@@ -295,16 +295,35 @@ describe("SetupPage", () => {
     const user = await reachStorage();
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(screen.getByLabelText("Password")).toHaveValue("Password123");
-    expect(screen.getByRole("heading", { name: "Your account" })).toHaveFocus();
+    expect(
+      screen.getByRole("heading", { name: "Create your administrator account" }),
+    ).toHaveFocus();
   });
   it("requires a successful check before creating an account", async () => {
     await reachStorage();
-    expect(screen.getByRole("button", { name: "Create my account and continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  });
+  it("reviews the checked choices before creating an account", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(
+      screen.getByRole("heading", { name: "Review before creating your account" }),
+    ).toBeVisible();
+    expect(screen.getByText("admin")).toBeVisible();
+    expect(screen.getByText(/\/data\/files/)).toBeVisible();
+    expect(screen.queryByDisplayValue("Password123")).not.toBeInTheDocument();
+    expect(deps.completeSetup).not.toHaveBeenCalled();
+    await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    expect(screen.getByLabelText("Username")).toHaveValue("admin");
+    expect(screen.getByLabelText("Password")).toHaveValue("Password123");
   });
   it("continues the guide with the authenticated administrator", async () => {
     const user = await reachStorage();
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
     await waitFor(() => expect(currentPath()).toBe("/getting-started"));
     expect(deps.storeLogin).toHaveBeenCalledWith(
@@ -318,6 +337,7 @@ describe("SetupPage", () => {
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
 
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
 
     await waitFor(() => expect(currentPath()).toBe("/getting-started"));
@@ -330,6 +350,7 @@ describe("SetupPage", () => {
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
 
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
 
     await screen.findByRole("alert");
@@ -340,8 +361,10 @@ describe("SetupPage", () => {
     const user = await reachStorage();
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
     await screen.findByRole("alert");
+    await user.click(screen.getByRole("button", { name: "Back" }));
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(screen.getByLabelText("Password")).toHaveValue("Password123");
   });
@@ -351,6 +374,7 @@ describe("SetupPage", () => {
     vi.mocked(deps.getSetupStatus).mockResolvedValue({ configured: true, user_count: 0 });
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeVisible();
     expect(deps.completeSetup).toHaveBeenCalledTimes(1);
@@ -363,6 +387,7 @@ describe("SetupPage", () => {
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
 
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
 
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeVisible();
@@ -383,7 +408,7 @@ describe("SetupPage", () => {
     const user = await reachStorage();
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     expect(await screen.findByText("Needs attention")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Create my account and continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
   });
   it("shows disabled registration without account inputs", async () => {
     vi.mocked(deps.getSetupStatus).mockResolvedValue({
@@ -460,7 +485,7 @@ describe("Storage form recovery", () => {
 
   it("selects a single-provider category directly", async () => {
     const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "S3-compatible object storage" }));
+    await user.click(screen.getByRole("button", { name: "S3-compatible" }));
     expect(screen.getByLabelText("Bucket")).toBeVisible();
     expect(screen.queryByLabelText("Data directory")).not.toBeInTheDocument();
     expect(screen.getByText("Guarded storage consequences")).toBeVisible();
@@ -477,8 +502,8 @@ describe("Storage form recovery", () => {
 
   it("restores server defaults when returning from a remote provider", async () => {
     const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "S3-compatible object storage" }));
-    await user.click(screen.getByRole("button", { name: "On this server (recommended)" }));
+    await user.click(screen.getByRole("button", { name: "S3-compatible" }));
+    await user.click(screen.getByRole("button", { name: "Local folder" }));
     expect(screen.getByLabelText("Data directory")).toHaveValue("/data/files");
     expect(screen.getByLabelText("Thumbnail directory")).toHaveValue("/data/thumbs");
   });
@@ -487,7 +512,7 @@ describe("Storage form recovery", () => {
     const user = await reachStorage();
     await user.clear(screen.getByLabelText("Data directory"));
     await user.type(screen.getByLabelText("Data directory"), "/custom/files");
-    await user.click(screen.getByRole("button", { name: "On this server (recommended)" }));
+    await user.click(screen.getByRole("button", { name: "Local folder" }));
     expect(screen.getByLabelText("Data directory")).toHaveValue("/custom/files");
   });
 
@@ -500,7 +525,7 @@ describe("Storage form recovery", () => {
       { ...s3, id: "cloudflare_r2", label: "Cloudflare R2" },
     ]);
     const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "S3-compatible object storage" }));
+    await user.click(screen.getByRole("button", { name: "S3-compatible" }));
     expect(screen.getByLabelText("Provider")).toHaveValue("cloudflare_r2");
     expect(screen.getByRole("option", { name: "Amazon S3" })).toBeDisabled();
     expect(screen.getByLabelText("Bucket")).toBeVisible();
@@ -518,8 +543,8 @@ describe("Storage form recovery", () => {
           : provider,
       ),
     );
-    const user = await reachStorage();
-    await user.click(screen.getByRole("button", { name: "S3-compatible object storage" }));
+    await reachStorage();
+    expect(screen.getByRole("button", { name: "S3-compatible" })).toBeDisabled();
     expect(
       screen.getByText(/Amazon S3.*This connection requires the full API image/),
     ).toBeVisible();
@@ -535,7 +560,7 @@ describe("Storage form recovery", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     expect(await screen.findByText("Storage ready")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Create my account and continue" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
   });
   it("preserves storage locations when the language changes", async () => {
     const user = await reachStorage();
@@ -561,7 +586,7 @@ describe("Storage form recovery", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Check storage" })).toBeEnabled(),
     );
-    expect(screen.getByRole("button", { name: "Create my account and continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
   });
 
   it("identifies measured capacity as available space", async () => {
@@ -580,11 +605,12 @@ describe("Storage form recovery", () => {
     const user = await reachStorage();
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
     expect(await screen.findByText("Creating your account…")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled();
-    expect(screen.getByLabelText("Data directory")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "S3-compatible object storage" })).toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(3);
+    for (const edit of screen.getAllByRole("button", { name: "Edit" })) expect(edit).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
   });
 });
 
@@ -619,6 +645,7 @@ describe("setup entry lifetime", () => {
     await screen.findByText("Storage ready");
     const session = Promise.withResolvers<Awaited<ReturnType<SetupPageDeps["beginSetup"]>>>();
     vi.mocked(deps.beginSetup).mockReturnValueOnce(session.promise);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
 
     cleanup();
@@ -634,6 +661,7 @@ describe("setup entry lifetime", () => {
     const completed = Promise.withResolvers<SetupResponse>();
     vi.mocked(deps.completeSetup).mockReturnValueOnce(completed.promise);
     const task = createTask({ title: "Earlier upload", jobId: "old-install-job" });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
 
     cleanup();
@@ -649,6 +677,7 @@ describe("setup entry lifetime", () => {
     await screen.findByText("Storage ready");
     const completed = Promise.withResolvers<SetupResponse>();
     vi.mocked(deps.completeSetup).mockReturnValueOnce(completed.promise);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
 
     cleanup();
@@ -665,6 +694,7 @@ describe("setup entry lifetime", () => {
     vi.mocked(deps.getSetupStatus).mockReturnValueOnce(recovered.promise);
     vi.mocked(deps.completeSetup).mockRejectedValueOnce(new Error("lost response"));
     const task = createTask({ title: "Earlier upload", jobId: "old-install-job" });
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
     await waitFor(() => expect(deps.getSetupStatus).toHaveBeenCalledTimes(2));
 
@@ -731,6 +761,7 @@ describe("setup source ownership", () => {
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
 
+    await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
     await waitFor(() => expect(currentPath()).toBe("/getting-started"));
 

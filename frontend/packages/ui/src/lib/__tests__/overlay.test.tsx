@@ -16,8 +16,8 @@
  * the kind of regression that ships unnoticed.
  */
 
-import { act, render, screen } from "@testing-library/react";
-import { useRef } from "react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useMountTransition, useOverlayBehavior } from "../overlay";
@@ -155,6 +155,91 @@ describe("useMountTransition", () => {
 });
 
 describe("useOverlayBehavior", () => {
+  it("closes only the foremost overlay", () => {
+    const parentClose = vi.fn<() => void>();
+    const childClose = vi.fn<() => void>();
+    const view = render(
+      <Overlay open onClose={parentClose}>
+        <button type="button">Parent</button>
+      </Overlay>,
+    );
+    view.rerender(
+      <Overlay open onClose={parentClose}>
+        <button type="button">Parent</button>
+        <Overlay open onClose={childClose}>
+          <button type="button">Child</button>
+        </Overlay>
+      </Overlay>,
+    );
+    press("Escape");
+    expect(childClose).toHaveBeenCalledOnce();
+    expect(parentClose).not.toHaveBeenCalled();
+  });
+  it("retains parent scroll ownership after a child closes", () => {
+    function Nested() {
+      const [child, setChild] = useState(false);
+      return (
+        <Overlay open onClose={() => {}}>
+          <button type="button" onClick={() => setChild(true)}>
+            Open evidence
+          </button>
+          <Overlay open={child} onClose={() => setChild(false)}>
+            <button type="button">Preview</button>
+          </Overlay>
+        </Overlay>
+      );
+    }
+    render(<Nested />);
+    screen.getByRole("button", { name: "Open evidence" }).focus();
+    fireEvent.click(screen.getByRole("button", { name: "Open evidence" }));
+    press("Escape");
+    expect(document.body.style.overflow).toBe("hidden");
+    expect(screen.getByRole("button", { name: "Open evidence" })).toHaveFocus();
+  });
+  it("restores the preexisting body scroll style", () => {
+    document.body.style.overflow = "clip";
+    const view = render(<Overlay open onClose={() => {}} />);
+    view.unmount();
+    expect(document.body.style.overflow).toBe("clip");
+    document.body.style.overflow = "";
+  });
+  it("does not move focus when a lower overlay closes", () => {
+    const parent = render(
+      <Overlay open onClose={() => {}}>
+        <button type="button">Parent</button>
+      </Overlay>,
+    );
+    render(
+      <Overlay open onClose={() => {}}>
+        <button type="button">Child</button>
+      </Overlay>,
+    );
+    screen.getByRole("button", { name: "Child" }).focus();
+    parent.unmount();
+    expect(screen.getByRole("button", { name: "Child" })).toHaveFocus();
+    expect(document.body.style.overflow).toBe("hidden");
+  });
+  it("leaves an Escape consumed by a focused menu to that menu", () => {
+    const close = vi.fn<() => void>();
+    render(
+      <Overlay open onClose={close}>
+        <button
+          type="button"
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              event.stopPropagation();
+            }
+          }}
+        >
+          Menu
+        </button>
+      </Overlay>,
+    );
+    fireEvent.keyDown(screen.getByRole("button", { name: "Menu" }), { key: "Escape" });
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it("moves focus into the panel when it opens", () => {
     render(<Overlay open={true} onClose={vi.fn<() => void>()} />);
 

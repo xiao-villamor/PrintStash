@@ -98,9 +98,9 @@ of taste.
   Profiles, Settings, printer detail. These compose
   `PageContainer` (`components/ui/page-container.tsx`), which owns the scroll
   container, the padding, the mobile bottom-nav clearance, and **one** content
-  width: `max-w-screen-2xl`, centered. There is no second width to choose from, and no
-  page may hand-roll its own scroll container — that is exactly how Printers
-  ended up spanning a 2560px monitor while Statistics sat in a 1024px column.
+  width: the full available work area, with 24px desktop padding. There is no second width to choose from, and no
+  page may hand-roll its own scroll container. The approved workbench keeps
+  document pages aligned to the same full-width frame on large monitors.
 - **Surfaces** — the vault grid, model detail's split pane, the public share
   page. These own the whole viewport and do not use `PageContainer`. A grid of
   print models *should* use every pixel of a farm monitor.

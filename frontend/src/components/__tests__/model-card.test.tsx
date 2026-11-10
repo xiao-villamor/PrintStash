@@ -163,30 +163,19 @@ describe("ModelCard", () => {
     });
   });
 
-  describe("collection badge", () => {
-    it("shows the exact folder name instead of its slug", () => {
-      renderApp(
-        <ModelCard
-          model={{ ...model, collection: "testing/my-parts" }}
-          collectionLabel="Testing/My Parts"
-        />,
-      );
-
-      expect(screen.getByText("My Parts")).toBeVisible();
-      expect(screen.queryByText("my-parts")).toBeNull();
-    });
-
-    it("shows only the collection name from a hierarchy path", () => {
-      renderApp(
-        <ModelCard
-          model={{ ...model, collection: "printstash-data/workstation/drawer-organizer" }}
-          collectionLabel="PrintStash Data/Workstation/Drawer Organizer"
-        />,
-      );
-
-      expect(screen.getByText("Drawer Organizer")).toBeVisible();
-      expect(screen.queryByText("PrintStash Data/Workstation/Drawer Organizer")).toBeNull();
-    });
+  it("opens inline inspection while retaining its native full-page fallback", async () => {
+    const onInspect = vi.fn<(id: number, opener: HTMLElement) => void>();
+    renderApp(
+      <>
+        <ModelCard model={model} onInspect={onInspect} />
+        <CardLocation />
+      </>,
+    );
+    const link = screen.getByRole("link", { name: model.name });
+    await userEvent.click(link);
+    expect(onInspect).toHaveBeenCalledWith(model.id, link);
+    expect(screen.getByLabelText("Current card location")).toHaveTextContent(/^\/$/);
+    expect(link).toHaveAttribute("href", "/models/1");
   });
 
   describe("quick tag access", () => {
@@ -225,8 +214,9 @@ describe("ModelCard", () => {
     renderApp(<ModelCard model={model} />);
 
     expect(screen.getByLabelText("Revision status: Needs Test; label: a")).toHaveTextContent(
-      "Needs Test·a",
+      "Needs Test",
     );
+    expect(screen.getByText("a")).toBeVisible();
   });
   describe("the metrics on the face of the card", () => {
     it("shows the layer height the slicer recorded", () => {
@@ -247,21 +237,20 @@ describe("ModelCard", () => {
     it("drops the hours from a print under an hour", () => {
       renderCard({ print_summary: printSummary({ estimated_time_s: 900 }) });
 
-      expect(screen.getByText("15m")).toBeInTheDocument();
+      expect(screen.getByText("15m 0s")).toBeInTheDocument();
     });
 
     it("shows the filament weight", () => {
       renderCard({ print_summary: printSummary({ filament_weight_g: 42.4 }) });
 
-      expect(screen.getByText("42 g")).toBeInTheDocument();
+      expect(screen.getByText("42.4 g")).toBeInTheDocument();
     });
 
-    it("shows a dash for a figure the slicer never recorded", () => {
-      // A blank cell reads as a rendering bug; a dash reads as "unknown", which
-      // is what it is.
+    it("labels figures the slicer never recorded", () => {
+      // No figure should imply a measured zero or a fabricated estimate.
       renderCard({ print_summary: null });
 
-      expect(screen.getAllByText("—")).not.toHaveLength(0);
+      expect(screen.getByText("Not recorded")).toBeVisible();
     });
 
     it("shows the metrics the user chose instead of the defaults", () => {
@@ -274,7 +263,7 @@ describe("ModelCard", () => {
 
       renderCard({ print_summary: printSummary({ material_type: "PETG" }) });
 
-      expect(screen.getByText("SLR")).toBeInTheDocument();
+      expect(screen.getByLabelText("SLR: PrusaSlicer")).toBeVisible();
     });
   });
 
@@ -342,10 +331,10 @@ describe("localized model card", () => {
       locale: "es",
     });
     expect(screen.getByText("Files", { exact: true })).toBeVisible();
-    expect(screen.getByText("CAPA", { exact: true })).toBeVisible();
-    expect(screen.getByText("ARCH", { exact: true })).toBeVisible();
+    expect(screen.getByLabelText("CAPA: 0,20 mm")).toBeVisible();
+    expect(screen.getByLabelText("ARCH: 2")).toBeVisible();
     expect(screen.getByText("0,20 mm", { exact: true })).toBeVisible();
-    expect(screen.getByText("2 archivos", { exact: true })).toBeVisible();
+    expect(screen.getByText("PLA", { exact: true })).toBeVisible();
   });
   it("localizes card actions while preserving the model name", () => {
     localStorage.setItem("printstash.locale", "es");
@@ -377,9 +366,11 @@ describe("OpenDesign Model card facts", () => {
     renderCard({ recommended_revision_status: null, recommended_revision_label: null });
     expect(screen.getByText("No revision status")).toBeVisible();
   });
-  it("keeps a long tag accessible on its card", () => {
+  it("keeps the full tag set in the card's edit action", async () => {
     const tag = "An intentionally long library tag that exceeds a narrow card";
-    renderCard({ tags: [tag] });
-    expect(screen.getByText(tag)).toBeInTheDocument();
+    const onEditTags = vi.fn<(item: ModelListItem) => void>();
+    renderApp(<ModelCard model={{ ...model, tags: [tag] }} onEditTags={onEditTags} />);
+    await userEvent.click(screen.getByRole("button", { name: "Edit tags for Cam Holder v4" }));
+    expect(onEditTags).toHaveBeenCalledWith(expect.objectContaining({ tags: [tag] }));
   });
 });

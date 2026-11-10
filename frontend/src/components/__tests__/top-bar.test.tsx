@@ -15,7 +15,7 @@
  * on.
  */
 
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -74,10 +74,6 @@ function renderTopBar({
   );
 }
 
-function openProfileMenu(user: ReturnType<typeof userEvent.setup>) {
-  return user.click(screen.getByRole("button", { name: "My workspace" }));
-}
-
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("printstash.locale", "en");
@@ -93,15 +89,36 @@ afterEach(() => {
 });
 
 describe("TopBar", () => {
-  it("links Wiki to the documentation site", () => {
+  it("reflects the Library inspector owner state", async () => {
     renderTopBar();
-
-    expect(screen.getByRole("link", { name: "Wiki" })).toHaveAttribute(
-      "href",
-      "https://www.printstash.org/docs/",
+    fireEvent(
+      window,
+      new CustomEvent("printstash:library-inspector-state", {
+        detail: { available: true, open: true },
+      }),
     );
+    expect(screen.getByRole("button", { name: "Show or hide details" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    fireEvent(
+      window,
+      new CustomEvent("printstash:library-inspector-state", {
+        detail: { available: false, open: false },
+      }),
+    );
+    expect(screen.queryByRole("button", { name: "Show or hide details" })).not.toBeInTheDocument();
   });
-
+  it("ignores malformed inspector events", () => {
+    renderTopBar();
+    fireEvent(
+      window,
+      new CustomEvent("printstash:library-inspector-state", {
+        detail: { available: "yes", open: true },
+      }),
+    );
+    expect(screen.queryByRole("button", { name: "Show or hide details" })).not.toBeInTheDocument();
+  });
   it("labels an unknown page in the breadcrumb", () => {
     renderTopBar({ at: "/page-that-does-not-exist" });
 
@@ -120,7 +137,9 @@ describe("TopBar", () => {
         seed: [[queryKeys.model(1), aModel({ name: "Garden bracket", collection })]],
       });
 
-      expect(screen.getByText("Garden bracket")).toBeVisible();
+      expect(
+        within(screen.getByRole("navigation", { name: "Breadcrumbs" })).getByText("Garden bracket"),
+      ).toBeVisible();
       const link = screen.getByRole("link", { name: "Back" });
       const target = new URL(link.getAttribute("href") ?? "", "http://test");
       expect(target.pathname).toBe("/");
@@ -304,190 +323,6 @@ describe("TopBar", () => {
       await user.keyboard("a/b");
 
       expect(box).toHaveValue("a/b");
-    });
-  });
-
-  describe("account menu", () => {
-    it.each([true, false])(
-      "keeps Builds out of the workspace menu for either role (%s)",
-      async (isAdmin) => {
-        const user = userEvent.setup();
-        renderTopBar({
-          at: "/builds/1",
-          auth: session({ user: { id: 1, username: "admin", email: null, is_superuser: isAdmin } }),
-        });
-        await openProfileMenu(user);
-        expect(screen.queryByRole("menuitem", { name: "Builds" })).not.toBeInTheDocument();
-        expect(screen.getByRole("menuitem", { name: "Profiles" })).toHaveAttribute(
-          "href",
-          "/profiles",
-        );
-      },
-    );
-
-    it("offers a log-in link to a signed-out visitor", () => {
-      renderTopBar({ auth: session({ user: null }) });
-
-      expect(screen.getByRole("link", { name: "Log in" })).toHaveAttribute("href", "/login");
-    });
-
-    it("names the signed-in user inside My workspace", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-      expect(screen.getByRole("menu")).toHaveTextContent("admin");
-    });
-
-    it("does not duplicate the Library printer quick access", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-      expect(screen.queryByRole("menuitem", { name: "Printers" })).not.toBeInTheDocument();
-    });
-
-    it.each(["/settings", "/models/1", "/library/similar"])(
-      "keeps Printers reachable away from the sidebar at %s",
-      async (at) => {
-        const user = userEvent.setup();
-        renderTopBar({ at });
-        await openProfileMenu(user);
-        expect(screen.getByRole("menuitem", { name: "Printers" })).toHaveAttribute(
-          "href",
-          "/printers",
-        );
-      },
-    );
-
-    it("keeps Printers reachable when the desktop sidebar is hidden", async () => {
-      const user = userEvent.setup();
-      renderTopBar({ matchesMedia: () => false });
-      await openProfileMenu(user);
-      expect(screen.getByRole("menuitem", { name: "Printers" })).toHaveAttribute(
-        "href",
-        "/printers",
-      );
-    });
-
-    it("retains the existing workspace destination names", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-      expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-        "Vault",
-        "Pending",
-        "Similar models",
-        "Statistics",
-        "Profiles",
-        "Settings",
-        "Toggle theme",
-        "Language: English",
-        "Wiki",
-        "Log out",
-      ]);
-    });
-
-    it("returns focus to My workspace after Escape", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-      await user.keyboard("{Escape}");
-      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
-      expect(screen.getByRole("button", { name: "My workspace" })).toHaveFocus();
-    });
-
-    it.each([
-      { label: "administrator", isAdmin: true },
-      { label: "regular user", isAdmin: false },
-    ])("offers Wiki in the profile dropdown for a $label", async ({ isAdmin }) => {
-      const user = userEvent.setup();
-      renderTopBar({
-        auth: session({ user: { id: 1, username: "admin", email: null, is_superuser: isAdmin } }),
-      });
-
-      await openProfileMenu(user);
-
-      expect(screen.getByRole("menu")).toBeInTheDocument();
-      expect(screen.getByRole("menuitem", { name: "Wiki" })).toHaveAttribute(
-        "href",
-        "https://www.printstash.org/docs/",
-      );
-    });
-
-    it("links Pending at the inbox route", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-
-      await openProfileMenu(user);
-
-      expect(screen.getByRole("menuitem", { name: "Pending" })).toHaveAttribute("href", "/inbox");
-    });
-
-    it("navigates when a destination is chosen", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-
-      await user.click(screen.getByRole("menuitem", { name: "Pending" }));
-
-      expect(screen.getByTestId("location")).toHaveTextContent("/inbox");
-    });
-
-    it("marks the destination for the current route", async () => {
-      const user = userEvent.setup();
-      renderTopBar({ at: "/inbox" });
-
-      await openProfileMenu(user);
-
-      expect(screen.getByRole("menuitem", { name: "Pending" })).toHaveAttribute(
-        "aria-current",
-        "page",
-      );
-    });
-
-    it("marks Pending for a nested inbox route", async () => {
-      const user = userEvent.setup();
-      renderTopBar({ at: "/inbox/41" });
-
-      await openProfileMenu(user);
-
-      expect(screen.getByRole("menuitem", { name: "Pending" })).toHaveAttribute(
-        "aria-current",
-        "page",
-      );
-    });
-
-    it("drops the admin-only destinations for an ordinary user", async () => {
-      const user = userEvent.setup();
-      renderTopBar({
-        at: "/settings",
-        auth: session({ user: { id: 2, username: "maker", email: null, is_superuser: false } }),
-      });
-
-      await user.click(screen.getByRole("button", { name: "My workspace" }));
-
-      expect(screen.queryByRole("menuitem", { name: "Printers" })).toBeNull();
-      expect(screen.queryByRole("menuitem", { name: "Statistics" })).toBeNull();
-    });
-
-    it("signs the user out", async () => {
-      const logout = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
-      const user = userEvent.setup();
-      renderTopBar({ auth: session({ logout }) });
-      await openProfileMenu(user);
-
-      await user.click(screen.getByRole("menuitem", { name: "Log out" }));
-
-      expect(logout).toHaveBeenCalledTimes(1);
-    });
-
-    it("sends the signed-out user to the login page", async () => {
-      const user = userEvent.setup();
-      renderTopBar();
-      await openProfileMenu(user);
-
-      await user.click(screen.getByRole("menuitem", { name: "Log out" }));
-
-      await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/login"));
     });
   });
 

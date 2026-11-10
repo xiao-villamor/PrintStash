@@ -3,7 +3,7 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -21,25 +21,17 @@ import {
   PrinterProfileUpdate,
 } from "@/types";
 
-import { useSpoolmanStatus } from "@/lib/queries";
+import { useSpoolmanStatus, useVaultConfig } from "@/lib/queries";
+import { useAuth } from "@/lib/auth-context";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
-import {
-  Check,
-  Layers,
-  Loader2,
-  Plus,
-  Printer,
-  RefreshCw,
-  Trash2,
-  X,
-  ChevronDown,
-  Pencil,
-} from "lucide-react";
+import { Check, Layers, Loader2, Plus, Printer, RefreshCw, Trash2, X, Pencil } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
+import { Modal } from "@/components/ui/modal";
+import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -86,7 +78,7 @@ type DeletePresetTarget = {
   name: string;
 };
 
-const compactInputClass = "h-9 text-sm";
+const compactInputClass = "h-10 text-sm";
 
 function parseOptionalNumber(value: string): number | null {
   if (!value.trim()) return null;
@@ -144,20 +136,12 @@ function printerDirty(profile: PrinterProfileRead, edit: PrinterEdit): boolean {
 
 function FieldLabel({ children }: { children: React.ReactNode }) {
   useUiLocale();
-  return (
-    <span className="mb-1.5 block text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
-      {children}
-    </span>
-  );
+  return <span className="mb-1.5 block text-sm font-medium text-foreground">{children}</span>;
 }
 
 function RowLabel({ children }: { children: React.ReactNode }) {
   useUiLocale();
-  return (
-    <span className="mb-1.5 block text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
-      {children}
-    </span>
-  );
+  return <span className="mb-1.5 block text-sm font-medium text-foreground">{children}</span>;
 }
 
 function RowStatus({ state }: { state?: "saving" | "saved" }) {
@@ -260,39 +244,38 @@ function PresetReviewPanel({
 function ProfileRow({
   name,
   summary,
-  notes,
-  icon,
   editor,
   onBlur,
   onClose,
   onSelect,
+  onDelete,
+  deleteLabel,
+  editTitle,
   selected,
   detailsHost,
   children,
 }: {
   name: string;
   summary: string;
-  notes: string | null;
-  icon: React.ReactNode;
   editor: React.ReactNode;
   onBlur: React.FocusEventHandler<HTMLDivElement>;
   onClose: () => void;
   onSelect: () => void;
+  onDelete?: () => void;
+  deleteLabel?: string;
+  editTitle: string;
   selected: boolean;
   detailsHost: HTMLDivElement | null;
   children: React.ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(selected);
   const [editing, setEditing] = useState(false);
   const detailsRef = useRef<HTMLDivElement>(null);
   function toggleDetails() {
-    if (expanded) onClose();
-    else onSelect();
-    setExpanded(!expanded);
+    if (!selected) onSelect();
   }
-  const details = expanded ? (
-    <div ref={detailsRef} className="min-w-0 space-y-4 border-t border-border px-4 py-4 sm:px-5">
-      <div className="flex justify-end">
+  const details = selected ? (
+    <div ref={detailsRef} className="min-w-0 space-y-4 px-4 pb-4 sm:px-5">
+      <div className="absolute right-5 top-4 flex items-center gap-2">
         <Button
           variant="ghost"
           size="xs"
@@ -310,22 +293,27 @@ function ProfileRow({
           )}
           {uiText(editing ? "profiles.closeEditorLabel" : "Edit")}
         </Button>
+        {onDelete && (
+          <Button variant="ghost" size="xs" onClick={onDelete} aria-label={deleteLabel}>
+            {uiText("Delete")}
+          </Button>
+        )}
       </div>
-      {editing ? (
+      <Modal
+        open={editing}
+        onClose={() => {
+          onClose();
+          setEditing(false);
+        }}
+        title={editTitle}
+      >
         <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <p className="col-span-full text-xs text-muted-foreground">
             {uiText("Changes save automatically when leaving a row.")}
           </p>
           {editor}
         </div>
-      ) : notes && !selected ? (
-        <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-baseline sm:gap-3">
-          <span className="shrink-0 text-xs font-medium text-muted-foreground">
-            {uiText("Notes")}
-          </span>
-          <p className="min-w-0 whitespace-pre-wrap break-words text-sm">{notes}</p>
-        </div>
-      ) : null}
+      </Modal>
       {children}
     </div>
   ) : null;
@@ -343,41 +331,16 @@ function ProfileRow({
       role="region"
       aria-label={uiText("profiles.profileRow", { name })}
     >
-      <div
-        className={`flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5 ${selected ? "bg-muted" : ""}`}
-      >
-        <span
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-          aria-hidden
-        >
-          {icon}
-        </span>
+      <div className={`m-3 ${selected ? "bg-muted" : ""}`}>
         <button
           type="button"
           onClick={toggleDetails}
-          aria-expanded={expanded}
-          className="min-w-0 flex-1 text-left"
+          aria-pressed={selected}
+          className="w-full min-w-0 px-3 py-3 text-left"
         >
           <h3 className="break-words text-sm font-semibold">{name}</h3>
           {summary && <p className="mt-1 break-words text-xs text-muted-foreground">{summary}</p>}
         </button>
-        <div className="flex shrink-0 items-center gap-2 max-sm:w-full max-sm:justify-end">
-          <Button
-            variant="outline"
-            size="xs"
-            aria-label={uiText(expanded ? "profiles.closeDetails" : "profiles.openDetails", {
-              name,
-            })}
-            aria-expanded={expanded}
-            onClick={toggleDetails}
-          >
-            {uiText("profiles.details")}
-            <ChevronDown
-              aria-hidden
-              className={`h-3.5 w-3.5 transition-transform duration-press ${expanded ? "rotate-180" : ""}`}
-            />
-          </Button>
-        </div>
       </div>
       {details && detailsHost && createPortal(details, detailsHost)}
     </div>
@@ -387,13 +350,11 @@ function ProfileRow({
 function ProfileSummary({ name, facts }: { name: string; facts: [string, string | null][] }) {
   return (
     <div className="space-y-4 p-4 sm:p-5">
-      <strong className="block break-words text-base">{name}</strong>
+      <strong className="block break-words pr-36 text-base">{name}</strong>
       <dl className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2 xl:grid-cols-4">
         {facts.map(([label, value]) => (
           <div key={label} className="min-w-0">
-            <dt className="text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
-              {label}
-            </dt>
+            <dt className="text-xs text-muted-foreground">{label}</dt>
             <dd className="mt-1 whitespace-pre-wrap break-words text-sm">{value || "—"}</dd>
           </div>
         ))}
@@ -404,8 +365,10 @@ function ProfileSummary({ name, facts }: { name: string; facts: [string, string 
 
 export function FilamentProfilesCard() {
   useUiLocale();
+  const helpId = useId();
   const auth = useRequireAuth();
-  const { locale } = useI18n();
+  const { locale, t } = useI18n();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<"filaments" | "printers">("filaments");
   const filamentQuery = useQuery({ ...filamentProfilesOptions(), enabled: auth.isAuthenticated });
   const printerQuery = useQuery({ ...printerProfilesOptions(), enabled: auth.isAuthenticated });
@@ -477,6 +440,16 @@ export function FilamentProfilesCard() {
   const [newPrinterModel, setNewPrinterModel] = useState("");
   const [newPrinterNozzle, setNewPrinterNozzle] = useState("");
   const [newPrinterNotes, setNewPrinterNotes] = useState("");
+  const config = useVaultConfig({ enabled: !!user?.is_superuser && showAddFilament, retry: false });
+  const currency = user?.is_superuser && !config.isError ? (config.data?.currency ?? null) : null;
+  let currencyName = currency;
+  if (currency) {
+    try {
+      currencyName = new Intl.DisplayNames(locale, { type: "currency" }).of(currency) ?? currency;
+    } catch {
+      currencyName = currency;
+    }
+  }
 
   function resetNewFilament() {
     setNewName("");
@@ -887,11 +860,57 @@ export function FilamentProfilesCard() {
   }
 
   const tabClass =
-    "flex min-w-32 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium text-muted-foreground transition-[background-color,color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+    "flex items-center gap-1 px-0 py-3 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+
+  const profileActions = (
+    <div className="flex items-center justify-end gap-2">
+      {activeTab === "filaments" && (
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          onClick={handleSyncSpoolman}
+          loading={syncing}
+          disabled={!auth.isAuthenticated || activeDenied || !spoolmanEnabled}
+        >
+          {!syncing && <RefreshCw className="h-3.5 w-3.5" />}
+          {translateUiText(locale, "Sync Spoolman")}
+        </Button>
+      )}
+      <Button
+        ref={newPresetButton}
+        type="button"
+        size="xs"
+        disabled={!auth.isAuthenticated || activeDenied}
+        aria-expanded={activeTab === "filaments" ? showAddFilament : showAddPrinter}
+        onClick={() => {
+          if (!auth.isAuthenticated) {
+            auth.showAuthRequiredToast();
+            return;
+          }
+          if (activeTab === "filaments") setShowAddFilament((value) => !value);
+          else setShowAddPrinter((value) => !value);
+        }}
+      >
+        <Plus className="h-3.5 w-3.5" />
+        {translateUiText(
+          locale,
+          activeTab === "filaments"
+            ? uiText("New filament profile")
+            : uiText("New printer profile"),
+        )}
+      </Button>
+    </div>
+  );
 
   return (
     <Localized>
       <div className="animate-panel-in space-y-4">
+        <PageHeader
+          title={translateUiText(locale, "Profiles")}
+          description={translateUiText(locale, "profiles.description")}
+          actions={profileActions}
+        />
         <ConfirmModal
           open={
             deleteTarget !== null &&
@@ -930,121 +949,96 @@ export function FilamentProfilesCard() {
           </div>
         )}
 
-        <div className="flex flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
-          <TabBar
-            tabs={[
-              {
-                key: "filaments",
-                label: (
-                  <>
-                    <Layers className="h-4 w-4" aria-hidden />
-                    {translateUiText(locale, "Filaments")}{" "}
-                    <Badge
-                      variant="secondary"
-                      className="border-0 bg-transparent px-0 text-muted-foreground"
-                    >
-                      {filaments.length}
-                    </Badge>
-                  </>
-                ),
-              },
-              {
-                key: "printers",
-                label: (
-                  <>
-                    <Printer className="h-4 w-4" aria-hidden />
-                    {translateUiText(locale, "Printers")}{" "}
-                    <Badge
-                      variant="secondary"
-                      className="border-0 bg-transparent px-0 text-muted-foreground"
-                    >
-                      {printers.length}
-                    </Badge>
-                  </>
-                ),
-              },
-            ]}
-            active={activeTab}
-            onChange={setActiveTab}
-            showIndicator={false}
-            className="max-w-full flex-wrap gap-1"
-            tabClassName={tabClass}
-            activeTabClassName="bg-accent text-accent-foreground"
-          />
-
-          <div className="flex items-center justify-end gap-2">
-            {activeTab === "filaments" && spoolmanEnabled && (
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                onClick={handleSyncSpoolman}
-                loading={syncing}
-                disabled={!auth.isAuthenticated || activeDenied}
-              >
-                {!syncing && <RefreshCw className="h-3.5 w-3.5" />}
-                {translateUiText(locale, "Sync Spoolman")}
-              </Button>
-            )}
-            <Button
-              ref={newPresetButton}
-              type="button"
-              size="xs"
-              disabled={!auth.isAuthenticated || activeDenied}
-              aria-expanded={activeTab === "filaments" ? showAddFilament : showAddPrinter}
-              onClick={() => {
-                if (!auth.isAuthenticated) {
-                  auth.showAuthRequiredToast();
-                  return;
-                }
-                if (activeTab === "filaments") setShowAddFilament((value) => !value);
-                else setShowAddPrinter((value) => !value);
-              }}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {translateUiText(
-                locale,
-                activeTab === "filaments" ? uiText("New filament") : uiText("New printer"),
-              )}
-              <ChevronDown
-                className={`h-3.5 w-3.5 transition-transform duration-press ${(activeTab === "filaments" ? showAddFilament : showAddPrinter) ? "rotate-180" : ""}`}
-              />
-            </Button>
-          </div>
-        </div>
         <Card className="overflow-hidden">
+          <div className="border-b border-border px-5">
+            <TabBar
+              tabs={[
+                {
+                  key: "filaments",
+                  label: (
+                    <>
+                      {translateUiText(locale, "Filaments")}{" "}
+                      <Badge
+                        variant="secondary"
+                        className="border-0 bg-transparent px-0 text-muted-foreground"
+                      >
+                        {filaments.length}
+                      </Badge>
+                    </>
+                  ),
+                },
+                {
+                  key: "printers",
+                  label: (
+                    <>
+                      {translateUiText(locale, "Printers")}{" "}
+                      <Badge
+                        variant="secondary"
+                        className="border-0 bg-transparent px-0 text-muted-foreground"
+                      >
+                        {printers.length}
+                      </Badge>
+                    </>
+                  ),
+                },
+              ]}
+              active={activeTab}
+              onChange={setActiveTab}
+              className="max-w-full flex-wrap gap-6"
+              tabClassName={tabClass}
+              activeTabClassName="font-semibold text-foreground"
+            />
+          </div>
           {activeDenied ? null : activeTab === "filaments" ? (
             <section aria-labelledby="filament-presets-heading">
-              <div className="flex items-center justify-between border-b px-5 py-3">
-                <div>
-                  <h2 id="filament-presets-heading" className="text-sm font-semibold">
-                    {uiText("Filament presets")}
-                  </h2>
-                  <p className="text-xs text-muted-foreground">{uiText("profiles.browseHelp")}</p>
-                </div>
-              </div>
+              <h2 id="filament-presets-heading" className="sr-only">
+                {uiText("Filament presets")}
+              </h2>
 
-              {showAddFilament && (
+              <Modal
+                open={showAddFilament}
+                onClose={() => {
+                  if (!commands.createFilament.isPending) setShowAddFilament(false);
+                }}
+                title={uiText("New filament preset")}
+                description={uiText("Material information used by your saved Revisions.")}
+              >
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
                     handleCreateFilament();
                   }}
                   aria-label={uiText("Create filament preset")}
-                  className="border-b bg-accent/30 p-5"
+                  className="space-y-4"
                 >
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-                    <label>
-                      <FieldLabel>{uiText("Name")}</FieldLabel>
-                      <Input
-                        value={newName}
-                        onChange={(e) => setNewName(e.target.value)}
-                        placeholder={uiText("Everyday PLA")}
-                        className={compactInputClass}
-                        autoFocus
-                        required
-                      />
-                    </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <h3 className="col-span-full text-sm font-semibold">
+                      {uiText("Profile name")}
+                    </h3>
+                    <div className="col-span-full">
+                      <label>
+                        <FieldLabel>{uiText("Name")}</FieldLabel>
+                        <Input
+                          value={newName}
+                          onChange={(e) => setNewName(e.target.value)}
+                          placeholder={uiText("Everyday PLA")}
+                          className={compactInputClass}
+                          autoFocus
+                          required
+                          maxLength={128}
+                          aria-describedby={`${helpId}-filament-name`}
+                        />
+                      </label>
+                      <span
+                        id={`${helpId}-filament-name`}
+                        className="mt-1 block text-xs text-muted-foreground"
+                      >
+                        {uiText("Required · up to 128 characters.")}
+                      </span>
+                    </div>
+                    <h3 className="col-span-full border-t border-border pt-4 text-sm font-semibold">
+                      {uiText("Material & cost")}
+                    </h3>
                     <label>
                       <FieldLabel>{uiText("Material")}</FieldLabel>
                       <Input
@@ -1063,51 +1057,76 @@ export function FilamentProfilesCard() {
                         className={compactInputClass}
                       />
                     </label>
-                    <label>
-                      <FieldLabel>{uiText("Cost per kg")}</FieldLabel>
-                      <Input
-                        value={newCost}
-                        onChange={(e) => setNewCost(e.target.value)}
-                        inputMode="decimal"
-                        placeholder="0.00"
-                        className={compactInputClass}
-                      />
-                    </label>
-                    <label>
-                      <FieldLabel>{uiText("Notes")}</FieldLabel>
-                      <Input
-                        value={newNotes}
-                        onChange={(e) => setNewNotes(e.target.value)}
-                        placeholder={uiText("Optional")}
-                        className={compactInputClass}
-                      />
-                    </label>
+                    <div className="col-span-full">
+                      <label>
+                        <FieldLabel>
+                          {currency
+                            ? t("Cost per kg ({currency})", { currency })
+                            : uiText("Cost per kg")}
+                        </FieldLabel>
+                        <Input
+                          value={newCost}
+                          onChange={(e) => setNewCost(e.target.value)}
+                          inputMode="decimal"
+                          placeholder="0.00"
+                          className={`${compactInputClass} max-w-40`}
+                          aria-describedby={`${helpId}-filament-cost`}
+                        />
+                      </label>
+                      <p
+                        id={`${helpId}-filament-cost`}
+                        className="mt-1 text-xs text-muted-foreground"
+                      >
+                        {currencyName
+                          ? t("{currency} per kilogram. Enter zero or a positive amount.", {
+                              currency: currencyName,
+                            })
+                          : t("Enter zero or a positive amount.")}
+                      </p>
+                    </div>
+                    <h3 className="col-span-full border-t border-border pt-4 text-sm font-semibold">
+                      {uiText("Notes")}
+                    </h3>
+                    <div className="col-span-full">
+                      <label>
+                        <FieldLabel>{uiText("Notes")}</FieldLabel>
+                        <textarea
+                          value={newNotes}
+                          onChange={(e) => setNewNotes(e.target.value)}
+                          placeholder={uiText("Optional")}
+                          className="min-h-20 w-full resize-y border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-describedby={`${helpId}-filament-notes`}
+                        />
+                      </label>
+                      <span
+                        id={`${helpId}-filament-notes`}
+                        className="mt-1 block text-xs text-muted-foreground"
+                      >
+                        {uiText("Optional details to keep with this preset.")}
+                      </span>
+                    </div>
                   </div>
-                  <div className="mt-4 flex justify-end gap-2">
+                  <div className="-mx-6 -mb-6 mt-6 flex justify-end gap-2 border-t border-border bg-plate px-6 py-4">
                     <Button
                       type="button"
-                      variant="ghost"
-                      size="xs"
+                      variant="outline"
                       onClick={() => {
                         resetNewFilament();
                         newPresetButton.current?.focus();
                       }}
                     >
-                      <X className="h-3.5 w-3.5" />
                       {uiText("Cancel")}
                     </Button>
                     <Button
                       type="submit"
-                      size="xs"
                       loading={commands.createFilament.isPending}
                       disabled={!newName.trim()}
                     >
-                      <Plus className="h-3.5 w-3.5" />
-                      {uiText("Add preset")}
+                      {uiText("Add profile")}
                     </Button>
                   </div>
                 </form>
-              )}
+              </Modal>
 
               {loading ? (
                 <div className="space-y-2 p-5">
@@ -1124,7 +1143,7 @@ export function FilamentProfilesCard() {
                 />
               ) : (
                 <div className="grid min-w-0 md:grid-cols-[minmax(220px,27%)_minmax(0,1fr)]">
-                  <div className="divide-y divide-border border-b border-border md:border-b-0 md:border-r">
+                  <div className="border-b border-border md:border-b-0 md:border-r">
                     {filaments.map((profile) => {
                       const review = filamentReviews[profile.id];
                       const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
@@ -1152,10 +1171,24 @@ export function FilamentProfilesCard() {
                           onBlur={(e) => handleRowBlur(e, () => autoSaveFilament(profile))}
                           onClose={() => void autoSaveFilament(profile)}
                           onSelect={() => setSelectedFilamentId(profile.id)}
+                          onDelete={
+                            !linked &&
+                            auth.isAuthenticated &&
+                            rowStatus[`f${profile.id}`] !== "saving"
+                              ? () =>
+                                  setDeleteTarget({
+                                    kind: "filament",
+                                    id: profile.id,
+                                    name: edit.name,
+                                  })
+                              : undefined
+                          }
+                          deleteLabel={uiText("Delete filament preset {value1}", {
+                            value1: edit.name,
+                          })}
+                          editTitle={uiText("Edit filament preset")}
                           selected={profile.id === selectedFilament?.id}
                           detailsHost={detailsHost}
-                          notes={profile.notes}
-                          icon={<Layers className="h-4 w-4" />}
                           editor={
                             <>
                               <label className="min-w-0 sm:col-span-2">
@@ -1316,7 +1349,7 @@ export function FilamentProfilesCard() {
                       );
                     })}
                   </div>
-                  <aside className="min-w-0">
+                  <aside className="relative min-w-0">
                     {selectedFilament && (
                       <ProfileSummary
                         name={selectedFilament.name}
@@ -1340,34 +1373,56 @@ export function FilamentProfilesCard() {
             </section>
           ) : (
             <section aria-labelledby="printer-presets-heading">
-              <div className="border-b px-5 py-3">
-                <h2 id="printer-presets-heading" className="text-sm font-semibold">
-                  {uiText("Printer presets")}
-                </h2>
-                <p className="text-xs text-muted-foreground">{uiText("profiles.browseHelp")}</p>
-              </div>
+              <h2 id="printer-presets-heading" className="sr-only">
+                {uiText("Printer presets")}
+              </h2>
 
-              {showAddPrinter && (
+              <Modal
+                open={showAddPrinter}
+                onClose={() => {
+                  if (!commands.createPrinter.isPending) setShowAddPrinter(false);
+                }}
+                title={uiText("New printer preset")}
+                description={uiText(
+                  "Describe the settings captured with a Revision; this does not change a connected printer.",
+                )}
+              >
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
                     handleCreatePrinter();
                   }}
                   aria-label={uiText("Create printer preset")}
-                  className="border-b bg-accent/30 p-5"
+                  className="space-y-4"
                 >
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    <label>
-                      <FieldLabel>{uiText("Name")}</FieldLabel>
-                      <Input
-                        value={newPrinterName}
-                        onChange={(e) => setNewPrinterName(e.target.value)}
-                        placeholder={uiText("Voron 2.4 — 0.4 mm")}
-                        className={compactInputClass}
-                        autoFocus
-                        required
-                      />
-                    </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <h3 className="col-span-full text-sm font-semibold">
+                      {uiText("Profile name")}
+                    </h3>
+                    <div className="col-span-full">
+                      <label>
+                        <FieldLabel>{uiText("Name")}</FieldLabel>
+                        <Input
+                          value={newPrinterName}
+                          onChange={(e) => setNewPrinterName(e.target.value)}
+                          placeholder={uiText("Voron 2.4 — 0.4 mm")}
+                          className={compactInputClass}
+                          autoFocus
+                          required
+                          maxLength={128}
+                          aria-describedby={`${helpId}-printer-name`}
+                        />
+                      </label>
+                      <span
+                        id={`${helpId}-printer-name`}
+                        className="mt-1 block text-xs text-muted-foreground"
+                      >
+                        {uiText("Required · up to 128 characters.")}
+                      </span>
+                    </div>
+                    <h3 className="col-span-full border-t border-border pt-4 text-sm font-semibold">
+                      {uiText("Printer & nozzle")}
+                    </h3>
                     <label>
                       <FieldLabel>{uiText("Printer model")}</FieldLabel>
                       <Input
@@ -1387,41 +1442,49 @@ export function FilamentProfilesCard() {
                         className={compactInputClass}
                       />
                     </label>
-                    <label>
-                      <FieldLabel>{uiText("Notes")}</FieldLabel>
-                      <Input
-                        value={newPrinterNotes}
-                        onChange={(e) => setNewPrinterNotes(e.target.value)}
-                        placeholder={uiText("Optional")}
-                        className={compactInputClass}
-                      />
-                    </label>
+                    <h3 className="col-span-full border-t border-border pt-4 text-sm font-semibold">
+                      {uiText("Notes")}
+                    </h3>
+                    <div className="col-span-full">
+                      <label>
+                        <FieldLabel>{uiText("Notes")}</FieldLabel>
+                        <textarea
+                          value={newPrinterNotes}
+                          onChange={(e) => setNewPrinterNotes(e.target.value)}
+                          placeholder={uiText("Optional")}
+                          className="min-h-20 w-full resize-y border border-input bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          aria-describedby={`${helpId}-printer-notes`}
+                        />
+                      </label>
+                      <span
+                        id={`${helpId}-printer-notes`}
+                        className="mt-1 block text-xs text-muted-foreground"
+                      >
+                        {uiText("Optional details to keep with this preset.")}
+                      </span>
+                    </div>
                   </div>
-                  <div className="mt-4 flex justify-end gap-2">
+                  <div className="-mx-6 -mb-6 mt-6 flex justify-end gap-2 border-t border-border bg-plate px-6 py-4">
                     <Button
                       type="button"
-                      variant="ghost"
-                      size="xs"
+                      variant="outline"
                       onClick={() => {
                         resetNewPrinter();
                         newPresetButton.current?.focus();
                       }}
                     >
-                      <X className="h-3.5 w-3.5" />
                       {uiText("Cancel")}
                     </Button>
                     <Button
                       type="submit"
-                      size="xs"
                       loading={commands.createPrinter.isPending}
                       disabled={!newPrinterName.trim()}
                     >
-                      <Plus className="h-3.5 w-3.5" />
-                      {uiText("Add preset")}
+                      {uiText("Add profile")}
                     </Button>
                   </div>
                 </form>
-              )}
+              </Modal>
 
               {loading ? (
                 <div className="space-y-2 p-5">
@@ -1438,7 +1501,7 @@ export function FilamentProfilesCard() {
                 />
               ) : (
                 <div className="grid min-w-0 md:grid-cols-[minmax(220px,27%)_minmax(0,1fr)]">
-                  <div className="divide-y divide-border border-b border-border md:border-b-0 md:border-r">
+                  <div className="border-b border-border md:border-b-0 md:border-r">
                     {printers.map((profile) => {
                       const review = printerReviews[profile.id];
                       const edit = printerEdits[profile.id] ?? printerEdit(profile);
@@ -1462,10 +1525,22 @@ export function FilamentProfilesCard() {
                           onBlur={(e) => handleRowBlur(e, () => autoSavePrinter(profile))}
                           onClose={() => void autoSavePrinter(profile)}
                           onSelect={() => setSelectedPrinterId(profile.id)}
+                          onDelete={
+                            auth.isAuthenticated && rowStatus[`p${profile.id}`] !== "saving"
+                              ? () =>
+                                  setDeleteTarget({
+                                    kind: "printer",
+                                    id: profile.id,
+                                    name: edit.name,
+                                  })
+                              : undefined
+                          }
+                          deleteLabel={uiText("Delete printer preset {value1}", {
+                            value1: edit.name,
+                          })}
+                          editTitle={uiText("Edit printer preset")}
                           selected={profile.id === selectedPrinter?.id}
                           detailsHost={detailsHost}
-                          notes={profile.notes}
-                          icon={<Printer className="h-4 w-4" />}
                           editor={
                             <>
                               <label className="min-w-0 sm:col-span-2">
@@ -1599,7 +1674,7 @@ export function FilamentProfilesCard() {
                       );
                     })}
                   </div>
-                  <aside className="min-w-0">
+                  <aside className="relative min-w-0">
                     {selectedPrinter && (
                       <ProfileSummary
                         name={selectedPrinter.name}

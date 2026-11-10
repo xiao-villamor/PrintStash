@@ -32,6 +32,10 @@
     --destructive: #b42318;
     --destructive-foreground: #ffffff;
     --border: #e4e7ec;
+    --border-strong: #cdd3db;
+    --overlay-scrim: rgb(16 24 40 / 0.28);
+    --plate: #f8fafc;
+    --dialog-shadow: rgb(16 24 40 / 0.12);
     --input: #8190a3;
     --ring: #4d6f9b;
     --radius: 0px;
@@ -130,6 +134,10 @@
 
     /* Borders & inputs */
     --border: #232a35;
+    --border-strong: #36404e;
+    --overlay-scrim: rgb(0 0 0 / 0.45);
+    --plate: #10151c;
+    --dialog-shadow: rgb(0 0 0 / 0.5);
     --input: #697b92;
     --ring: #7896bc;
 

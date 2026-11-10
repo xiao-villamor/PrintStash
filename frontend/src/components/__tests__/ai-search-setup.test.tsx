@@ -597,9 +597,11 @@ describe("AiSearchSetup", () => {
   });
   it("keeps guided setup available while visiting technical settings", async () => {
     setup();
-    await userEvent.click(await screen.findByRole("tab", { name: "Technical" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Technical settings" }));
     expect(await screen.findByRole("checkbox", { name: "Enable AI Search" })).toBeVisible();
-    await userEvent.click(screen.getByRole("tab", { name: "Guided setup" }));
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }),
+    );
     expect(
       await screen.findByRole("heading", { name: "Where should AI Search run?" }),
     ).toBeVisible();
@@ -664,16 +666,34 @@ describe("AiSearchSetup", () => {
     expect(app.requestsWithMethod("POST")[0].url).toContain("/downloads/download-1/cancel");
   });
   it("lets an existing user change setup", async () => {
-    setup({
+    const app = setup({
       routes: {
         "GET /api/v1/config/ai-search": json(searchConfiguration({ settings: enabled })),
         "GET /api/v1/config/ai-search/generations": json([aSearchGeneration({ state: "active" })]),
       },
     });
-    await userEvent.click(await screen.findByRole("button", { name: "Change setup" }));
+    await screen.findByRole("heading", { name: "AI Search is ready" });
+    const readsBefore = app
+      .requestsWithMethod("GET")
+      .filter((request) =>
+        /\/(inference\/models|config\/ai-search\/generations|search\/status)(\?|$)/.test(
+          request.url,
+        ),
+      ).length;
+    await userEvent.click((await screen.findAllByRole("button", { name: "Change setup" }))[0]);
+    expect(await screen.findByRole("dialog", { name: "AI Search setup" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Prepare my library" })).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Change location" }));
-    expect(screen.getByRole("button", { name: "Connect another server" })).toBeVisible();
+    expect(
+      app
+        .requestsWithMethod("GET")
+        .filter((request) =>
+          /\/(inference\/models|config\/ai-search\/generations|search\/status)(\?|$)/.test(
+            request.url,
+          ),
+        ),
+    ).toHaveLength(readsBefore);
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: /Location/ }), "server");
+    expect(screen.getByRole("form", { name: "Inference server" })).toBeVisible();
   });
   it("explains a failed background preparation", async () => {
     setup({

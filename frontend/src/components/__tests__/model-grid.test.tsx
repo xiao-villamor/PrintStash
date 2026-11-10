@@ -272,8 +272,13 @@ function lastMultipartQuery(requests: () => { method: string; url: string }[]): 
 }
 
 async function openFilters() {
-  const trigger = screen.getAllByRole("button", { name: "Filters" }).at(-1)!;
-  if (trigger.getAttribute("aria-expanded") === "false") await userEvent.setup().click(trigger);
+  if (!screen.queryByRole("dialog", { name: "Filter Models" })) {
+    await userEvent.click(screen.getAllByRole("button", { name: /^Filters(?: \d+)?$/ }).at(-1)!);
+  }
+  const more = await within(screen.getByRole("dialog", { name: "Filter Models" })).findByText(
+    "More filters",
+  );
+  if (!more.closest("details")?.open) await userEvent.click(more);
 }
 
 async function waitForLibraryActions() {
@@ -292,7 +297,7 @@ describe("ModelBrowser", () => {
   describe("library actions", () => {
     it("keeps library commands beside Filters", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       const main = screen.getByRole("main");
       const actions = within(main).getByRole("group", { name: "Library tools" });
       expect(within(main).getAllByRole("button", { name: "Filters" })).not.toHaveLength(0);
@@ -304,14 +309,14 @@ describe("ModelBrowser", () => {
 
       expect(within(actions).getByRole("link", { name: "Similar models" })).toBeVisible();
       expect(within(actions).getByRole("button", { name: "New collection" })).toBeVisible();
-      expect(within(actions).queryByRole("button", { name: "Select" })).not.toBeInTheDocument();
+      expect(within(actions).getByRole("button", { name: "Select" })).toBeVisible();
       expect(screen.getByRole("checkbox", { name: "Select Benchy" })).toBeVisible();
       expect(screen.queryByRole("button", { name: "Library tools" })).not.toBeInTheDocument();
       expect(screen.queryByRole("menu")).not.toBeInTheDocument();
     });
     it("links to library-wide similar models", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       const actions = screen.getByRole("group", { name: "Library tools" });
 
       expect(within(actions).getByRole("link", { name: "Similar models" })).toHaveAttribute(
@@ -330,7 +335,7 @@ describe("ModelBrowser", () => {
     it("supports the keyboard selection lifecycle", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.keyboard("s");
       expect(screen.getByRole("button", { name: "Done" })).toBeVisible();
@@ -340,7 +345,7 @@ describe("ModelBrowser", () => {
     });
     it("hides selection for signed-out readers", async () => {
       renderVault({ auth: signedOutSession(), models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       const actions = screen.getByRole("group", { name: "Library tools" });
 
       expect(within(actions).queryByRole("button", { name: "Select" })).not.toBeInTheDocument();
@@ -350,7 +355,9 @@ describe("ModelBrowser", () => {
     it("names the favorites view when the filter is active", async () => {
       renderVault({ at: "/?favorites=true" });
 
-      expect(await screen.findByRole("heading", { name: "Favorites", level: 1 })).toBeVisible();
+      expect(
+        await screen.findByRole("heading", { name: "Favorites & saved views", level: 1 }),
+      ).toBeVisible();
     });
     it("offers a way back from an empty favorites view", async () => {
       const user = userEvent.setup();
@@ -378,7 +385,7 @@ describe("ModelBrowser", () => {
         ],
       });
 
-      expect(await screen.findByText("Benchy")).toBeInTheDocument();
+      expect(await within(screen.getByRole("main")).findByText("Benchy")).toBeInTheDocument();
       expect(screen.getByText("Cube")).toBeInTheDocument();
     });
 
@@ -705,7 +712,7 @@ describe("ModelBrowser", () => {
         at: "/?printed=invalid&has_similar_candidates=false",
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(lastModelsQuery(requests).has("printed")).toBe(false);
       expect(lastModelsQuery(requests).has("has_similar_candidates")).toBe(false);
     });
@@ -718,7 +725,7 @@ describe("ModelBrowser", () => {
         historyProbe: true,
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(lastModelsQuery(requests).has("printer_id")).toBe(false);
       await waitFor(() =>
         expect(screen.getByTestId("vault-location")).not.toHaveTextContent("printer_id"),
@@ -738,7 +745,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "GET /api/v1/saved-views": json([saved]) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: saved.name }));
@@ -756,7 +763,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "POST /api/v1/saved-views": json(aSavedView()) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: /Save current view/ }));
@@ -784,7 +791,7 @@ describe("ModelBrowser", () => {
           "POST /api/v1/saved-views": json(aSavedView({ id: 2 })),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: `Duplicate ${saved.name}` }));
@@ -804,7 +811,7 @@ describe("ModelBrowser", () => {
         at: "/?file_type=stl&file_type=bad&printed=no&tag=functional",
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await openFilters();
       await waitFor(() =>
         expect(requests().some((call) => call.url.includes("/models/facets"))).toBe(true),
@@ -830,7 +837,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         collections: [aCollection()],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       expect(screen.getAllByText("1 selected").length).toBeGreaterThan(0);
@@ -964,7 +971,7 @@ describe("ModelBrowser", () => {
         ],
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       const whole = requests().filter(
         (call) => new URL(call.url, "http://test").pathname === "/api/v1/collections",
@@ -1360,7 +1367,7 @@ describe("ModelBrowser", () => {
     it("starts in the everything library view when no preference exists", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(screen.getAllByRole("button", { name: "Everything" })[0]).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -1370,7 +1377,7 @@ describe("ModelBrowser", () => {
     it("remembers a library view choice", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(screen.getAllByRole("button", { name: "Multipart sets only" })[0]);
 
@@ -1391,7 +1398,7 @@ describe("ModelBrowser", () => {
 
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(screen.getAllByRole("button", { name: "Everything" })[0]).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -1403,7 +1410,7 @@ describe("ModelBrowser", () => {
 
       renderVault({ at: "/?type=all", models: [aModelListItem({ name: "Benchy" })] });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(screen.getAllByRole("button", { name: "Everything" })[0]).toHaveAttribute(
         "aria-pressed",
         "true",
@@ -1421,10 +1428,9 @@ describe("ModelBrowser", () => {
     it("remembers a switch to the list view", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
-      await user.click(screen.getByRole("button", { name: /Display/ }));
-      await user.click(screen.getByRole("menuitem", { name: "List View" }));
+      await user.click(screen.getByRole("button", { name: "List View" }));
 
       expect(window.localStorage.getItem("ps-vault-view")).toBe("list");
     });
@@ -1432,7 +1438,7 @@ describe("ModelBrowser", () => {
     it("writes a sort choice into the URL", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })], historyProbe: true });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(sortButton());
       await user.click(screen.getAllByRole("menuitem", { name: "Name A–Z" }).at(-1)!);
@@ -1443,7 +1449,7 @@ describe("ModelBrowser", () => {
     it("restores URL-owned mode on history navigation", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })], historyProbe: true });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(screen.getByRole("button", { name: "Open multipart location" }));
       expect(screen.getAllByRole("button", { name: "Multipart sets only" })[0]).toHaveAttribute(
@@ -1462,7 +1468,7 @@ describe("ModelBrowser", () => {
     it("remembers a sort choice", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       const sort = sortButton();
       await user.click(sort);
@@ -1475,7 +1481,7 @@ describe("ModelBrowser", () => {
     it("restores the selected relevance ordering for Model browse", async () => {
       const user = userEvent.setup();
       const app = renderVault({ at: "/?q=benchy", models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await user.click(sortButton());
       await user.click(screen.getAllByRole("menuitem", { name: "Relevance" }).at(-1)!);
       expect(window.localStorage.getItem("ps-vault-sort")).toBe("relevance");
@@ -1496,7 +1502,7 @@ describe("ModelBrowser", () => {
 
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       expect(sortButton()).toHaveTextContent("Newest");
     });
   });
@@ -1505,30 +1511,22 @@ describe("ModelBrowser", () => {
     it("follows the document tab through browser history", async () => {
       const user = userEvent.setup();
       renderVault({ historyProbe: true });
-      await screen.findByRole("tab", { name: "Models" });
+      await screen.findByRole("heading", { name: "All Models" });
 
       await user.click(screen.getByRole("button", { name: "Open documents location" }));
-      expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(await screen.findByRole("heading", { name: "Documents" })).toBeVisible();
       await user.click(screen.getByRole("button", { name: "History back" }));
-      expect(screen.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
+      expect(await screen.findByRole("heading", { name: "All Models" })).toBeVisible();
+      expect(screen.queryByRole("heading", { name: "Documents" })).not.toBeInTheDocument();
       await user.click(screen.getByRole("button", { name: "History forward" }));
 
-      expect(screen.getByRole("tab", { name: "Documents" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(await screen.findByRole("heading", { name: "Documents" })).toBeVisible();
     });
 
     it("opens on the documents tab when the URL asks for it", async () => {
       renderVault({ at: "/?v=docs" });
 
-      expect(await screen.findByRole("tab", { name: "Documents" })).toHaveAttribute(
-        "aria-selected",
-        "true",
-      );
+      expect(await screen.findByRole("heading", { name: "Documents" })).toBeVisible();
     });
   });
 
@@ -1865,7 +1863,7 @@ describe("ModelBrowser", () => {
           aModelListItem({ id: 2, name: "Cube" }),
         ],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
 
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
@@ -1897,7 +1895,7 @@ describe("ModelBrowser", () => {
       const user = userEvent.setup();
       window.localStorage.setItem("ps-recent-folders", JSON.stringify(["parts"]));
       renderVault({ models: [aModelListItem({ name: "Benchy" })], collections: [aCollection()] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(screen.getAllByRole("button", { name: /Recent/ }).at(-1)!);
 
@@ -1911,7 +1909,7 @@ describe("ModelBrowser", () => {
 
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      expect(await screen.findByText("Benchy")).toBeInTheDocument();
+      expect(await within(screen.getByRole("main")).findByText("Benchy")).toBeInTheDocument();
     });
 
     it("ignores a stored list that is not JSON", async () => {
@@ -1919,7 +1917,7 @@ describe("ModelBrowser", () => {
 
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
 
-      expect(await screen.findByText("Benchy")).toBeInTheDocument();
+      expect(await within(screen.getByRole("main")).findByText("Benchy")).toBeInTheDocument();
     });
   });
 
@@ -1971,7 +1969,7 @@ describe("ModelBrowser", () => {
         tags: [aTag({ name: "functional", slug: "functional" })],
       });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       // The chip is the only way back out of a tag that arrived in the URL, so
       // losing it strands the user in a filtered view they cannot widen.
       expect(screen.getByRole("button", { name: /Clear all/ })).toBeInTheDocument();
@@ -2022,12 +2020,17 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "POST /api/v1/collections": json(aCollection({ id: 9, name: "Bolts" })) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: "New collection" }));
-      await user.type(screen.getByPlaceholderText(/New subcollection/), "Bolts");
-      await user.click(screen.getByRole("button", { name: "Create" }));
+      await user.type(
+        within(screen.getByRole("dialog", { name: "New collection" })).getByRole("textbox", {
+          name: "Name",
+        }),
+        "Bolts",
+      );
+      await user.click(screen.getByRole("button", { name: "Create collection" }));
 
       await waitFor(() =>
         expect(
@@ -2053,12 +2056,17 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "POST /api/v1/collections": json(aCollection({ id: 9, name: "Bolts" })) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: "New collection" }));
-      await user.type(screen.getByPlaceholderText("Collection name..."), "Bolts");
-      await user.click(screen.getByRole("button", { name: "Create" }));
+      await user.type(
+        within(screen.getByRole("dialog", { name: "New collection" })).getByRole("textbox", {
+          name: "Name",
+        }),
+        "Bolts",
+      );
+      await user.click(screen.getByRole("button", { name: "Create collection" }));
 
       await waitFor(() =>
         expect(
@@ -2076,18 +2084,18 @@ describe("ModelBrowser", () => {
     it("refuses to create a folder with no name", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: "New collection" }));
 
-      expect(screen.getByRole("button", { name: "Create" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Create collection" })).toBeDisabled();
     });
 
     it("abandons the form on cancel", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: "New collection" }));
 
@@ -2099,7 +2107,7 @@ describe("ModelBrowser", () => {
 
   describe("acting on several models at once", () => {
     async function selectBoth(user: ReturnType<typeof userEvent.setup>) {
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.keyboard("s");
       await user.click(screen.getByRole("button", { name: /Select all on screen/ }));
@@ -2172,7 +2180,7 @@ describe("ModelBrowser", () => {
           aModelListItem({ id: 2, name: "Cube" }),
         ],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
 
@@ -2219,7 +2227,7 @@ describe("ModelBrowser", () => {
           },
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.keyboard("s");
       selecting = true;
@@ -2773,7 +2781,7 @@ describe("ModelBrowser", () => {
 
   describe("batch outcomes", () => {
     async function selectOneModel(user: ReturnType<typeof userEvent.setup>) {
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
     }
@@ -2866,7 +2874,7 @@ describe("ModelBrowser", () => {
 
     it("opens the upload dialog for a dropped mesh", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["x"], "cube.stl")]) });
 
@@ -2875,7 +2883,7 @@ describe("ModelBrowser", () => {
 
     it("ignores a drop that carries nothing importable", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["x"], "notes.txt")]) });
 
@@ -2884,7 +2892,7 @@ describe("ModelBrowser", () => {
 
     it("opens the upload dialog for a dropped archive", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["x"], "pack.zip")]) });
 
@@ -2893,7 +2901,7 @@ describe("ModelBrowser", () => {
 
     it("opens the upload dialog for several dropped meshes", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, {
         dataTransfer: dataTransfer([new File(["a"], "a.stl"), new File(["b"], "b.stl")]),
@@ -2904,7 +2912,7 @@ describe("ModelBrowser", () => {
 
     it("opens the upload dialog for a dropped G-code file", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["x"], "part.gcode")]) });
 
@@ -2913,7 +2921,7 @@ describe("ModelBrowser", () => {
 
     it("opens the upload dialog for a dropped BGCODE file", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.drop(main, { dataTransfer: dataTransfer([new File(["GCDE"], "part.bgcode")]) });
 
@@ -2925,7 +2933,7 @@ describe("ModelBrowser", () => {
       // folder drop targets; treating it as a file upload would open the dialog
       // on top of the move the user is doing.
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       const modelDrag: DroppedPayload = {
         types: ["application/x-printstash-model"],
@@ -2947,7 +2955,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "GET /api/v1/saved-views": json([aSavedView()]) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: "Rename PETG only" }));
@@ -2968,7 +2976,7 @@ describe("ModelBrowser", () => {
     it("focuses the saved-view name when creating a view", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: /Save current view/ }));
@@ -2985,7 +2993,7 @@ describe("ModelBrowser", () => {
     it("immediately retires the private create draft with its session", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: /Save current view/ }));
@@ -3003,7 +3011,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "GET /api/v1/saved-views": json({ detail: "temporary_failure" }, 503) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await screen.findByText("Could not load saved views");
@@ -3022,7 +3030,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "POST /api/v1/saved-views": () => pending.promise },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: /Save current view/ }));
@@ -3078,7 +3086,7 @@ describe("ModelBrowser", () => {
           ]),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
 
@@ -3097,7 +3105,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "POST /api/v1/saved-views": json(aSavedView({ name: "PETG" })) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
@@ -3123,9 +3131,8 @@ describe("ModelBrowser", () => {
         tags: [aTag()],
         routes: { "POST /api/v1/saved-views": json(aSavedView()) },
       });
-      await screen.findByText("Benchy");
-      await waitForLibraryActions();
-      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await within(screen.getByRole("main")).findByText("Benchy");
+      await user.click(screen.getByRole("tab", { name: "Saved views" }));
       await user.click(await screen.findByRole("button", { name: /Save current view/ }));
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getByRole("textbox"), "PETG");
@@ -3143,7 +3150,7 @@ describe("ModelBrowser", () => {
     it("will not save a view with no name", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
@@ -3160,7 +3167,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "GET /api/v1/saved-views": json([aSavedView({ name: "Ready to print" })]) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
@@ -3171,7 +3178,7 @@ describe("ModelBrowser", () => {
     it("says so when no view has been saved", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
@@ -3192,7 +3199,7 @@ describe("ModelBrowser", () => {
           ]),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
 
@@ -3211,11 +3218,12 @@ describe("ModelBrowser", () => {
           "PATCH /api/v1/saved-views/1": json(aSavedView()),
         },
       });
-      await screen.findByText("Benchy");
-      await waitForLibraryActions();
-      await user.click(screen.getByRole("button", { name: /Saved views/ }));
+      await within(screen.getByRole("main")).findByText("Benchy");
+      await user.click(screen.getByRole("tab", { name: "Saved views" }));
 
-      await user.click(await screen.findByRole("button", { name: "Update PETG only" }));
+      await screen.findByRole("heading", { name: "PETG only" });
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getByRole("menuitem", { name: "Update with current filters" }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -3233,7 +3241,7 @@ describe("ModelBrowser", () => {
           "PATCH /api/v1/saved-views/1": json(aSavedView({ name: "PLA only" })),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: "Rename PETG only" }));
@@ -3265,7 +3273,7 @@ describe("ModelBrowser", () => {
           "POST /api/v1/saved-views": json(aSavedView({ id: 3 })),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
 
@@ -3284,7 +3292,7 @@ describe("ModelBrowser", () => {
         models: [aModelListItem({ name: "Benchy" })],
         routes: { "GET /api/v1/saved-views": json([aSavedView()]) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
 
@@ -3304,7 +3312,7 @@ describe("ModelBrowser", () => {
           "DELETE /api/v1/saved-views/1": json(null, 204),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("button", { name: /Saved views/ }));
       await user.click(await screen.findByRole("button", { name: "Delete PETG only" }));
@@ -3327,7 +3335,7 @@ describe("ModelBrowser", () => {
         routes: { "GET /api/v1/saved-views": json([aSavedView()]) },
       });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       expect(screen.queryByRole("button", { name: /Saved views/ })).toBeNull();
     });
@@ -3340,7 +3348,7 @@ describe("ModelBrowser", () => {
         at: "/?file_type=stl&tag=functional&favorites=true&sort=name-asc",
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await userEvent.setup().click(screen.getAllByRole("button", { name: /Clear all/ })[0]);
       await waitFor(() => {
         const query = lastModelsQuery(requests);
@@ -3365,7 +3373,7 @@ describe("ModelBrowser", () => {
         at: "/?tag=functional&favorites=true&q=bracket",
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await user.click(await screen.findByRole("button", { name: /Clear all/ }));
 
@@ -3393,9 +3401,10 @@ describe("ModelBrowser", () => {
     it("remembers the tab for the next visit", async () => {
       const user = userEvent.setup();
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
-      await user.click(screen.getByRole("tab", { name: "Documents" }));
+      await user.click(screen.getByRole("button", { name: "More" }));
+      await user.click(screen.getByRole("menuitem", { name: "Documents" }));
 
       expect(window.localStorage.getItem("printstash.last.view")).toBe("docs");
     });
@@ -3526,7 +3535,7 @@ describe("ModelBrowser", () => {
           "DELETE /api/v1/models/1/star": () => pending.promise,
         },
       });
-      await screen.findByText("Favorite bracket");
+      await within(screen.getByRole("main")).findByText("Favorite bracket");
 
       await user.click(
         screen.getByRole("button", { name: "Remove Favorite bracket from favorites" }),
@@ -3551,7 +3560,7 @@ describe("ModelBrowser", () => {
         },
       });
 
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitFor(() =>
         expect(screen.queryByRole("button", { name: /Load more/ })).toBeInTheDocument(),
       );
@@ -4236,7 +4245,7 @@ describe("ModelBrowser", () => {
         collections: [aCollection({ effective_role: "view" })],
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       expect(screen.getByRole("button", { name: "New collection" })).toBeDisabled();
@@ -4249,7 +4258,7 @@ describe("ModelBrowser", () => {
         collections: [aCollection({ effective_role: "view" })],
         models: [aModelListItem({ name: "Benchy" })],
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
 
       await waitForLibraryActions();
       expect(screen.getByRole("button", { name: "New collection" })).toHaveAttribute(
@@ -4267,7 +4276,7 @@ describe("ModelBrowser", () => {
         tags: [aTag()],
         routes: { "POST /api/v1/models/batch/tags": json({ detail: "unavailable" }, 503) },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       await user.click(screen.getByRole("button", { name: "Tag" }));
@@ -4307,7 +4316,7 @@ describe("ModelBrowser", () => {
           }),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       await user.click(screen.getByRole("button", { name: "Tag" }));
@@ -4335,7 +4344,7 @@ describe("ModelBrowser", () => {
           "PATCH /api/v1/models/1": json({ id: 1, tags: ["draft"], edit_version: 12 }),
         },
       });
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByRole("checkbox", { name: "Select Benchy" }));
       await user.click(screen.getByRole("button", { name: "Tag" }));
@@ -4391,13 +4400,17 @@ describe("ModelBrowser", () => {
       // "printer_presence=none" means nothing to the person reading the chip.
       renderVault({ at: "/?printer_presence=none" });
 
-      expect(await within(screen.getByRole("main")).findByText("Vault only")).toBeInTheDocument();
+      expect(
+        await within(screen.getByRole("main")).findByRole("button", { name: "Vault only" }),
+      ).toBeInTheDocument();
     });
 
     it("names an on-a-printer filter in words", async () => {
       renderVault({ at: "/?printer_presence=any" });
 
-      expect(await within(screen.getByRole("main")).findByText("On a printer")).toBeInTheDocument();
+      expect(
+        await within(screen.getByRole("main")).findByRole("button", { name: "On a printer" }),
+      ).toBeInTheDocument();
     });
 
     it("names a structured filter readably", async () => {
@@ -4465,7 +4478,7 @@ describe("ModelBrowser", () => {
           },
         });
         const folder = await folderCard();
-        await screen.findByText("Benchy");
+        await within(screen.getByRole("main")).findByText("Benchy");
         const values = new Map<string, string>();
         const dataTransfer = {
           types: [MODEL_DND_MIME],
@@ -4541,7 +4554,7 @@ describe("ModelBrowser", () => {
       // Without the overlay a user dragging a file over the page has no way to
       // know the page will take it, and drops it on the desktop instead.
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.dragEnter(main, { dataTransfer: fileDrag() });
 
@@ -4552,7 +4565,7 @@ describe("ModelBrowser", () => {
       // The folder cards are the drop targets for a model; lighting the whole
       // vault up would suggest dropping anywhere works.
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
 
       fireEvent.dragEnter(main, { dataTransfer: { types: [MODEL_DND_MIME] } });
 
@@ -4563,7 +4576,7 @@ describe("ModelBrowser", () => {
       // A drag over a grid fires leave/enter pairs constantly as it passes
       // between cards; a naive handler flickers the overlay on every one.
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
       fireEvent.dragEnter(main, { dataTransfer: fileDrag() });
       fireEvent.dragEnter(main, { dataTransfer: fileDrag() });
 
@@ -4574,7 +4587,7 @@ describe("ModelBrowser", () => {
 
     it("takes the invitation down when the drag really leaves", async () => {
       renderVault({ models: [aModelListItem({ name: "Benchy" })] });
-      const main = await screen.findByText("Benchy");
+      const main = await within(screen.getByRole("main")).findByText("Benchy");
       fireEvent.dragEnter(main, { dataTransfer: fileDrag() });
 
       fireEvent.dragLeave(main, { dataTransfer: fileDrag() });
@@ -4606,7 +4619,7 @@ describe("ModelBrowser", () => {
     });
 
     async function selectAndMove(user: ReturnType<typeof userEvent.setup>) {
-      await screen.findByText("Benchy");
+      await within(screen.getByRole("main")).findByText("Benchy");
       await waitForLibraryActions();
       await user.click(screen.getByLabelText("Select Benchy"));
       await user.click(await screen.findByRole("button", { name: /Move/ }));
@@ -4815,7 +4828,7 @@ describe("OpenDesign Library strip", () => {
         }),
       },
     });
-    await user.click(await screen.findByRole("button", { name: /^Known Good/ }));
+    await user.click(await screen.findByRole("button", { name: /^Ready/ }));
     await waitFor(() =>
       expect(lastModelsQuery(app.requests).getAll("revision_status")).toEqual(["known_good"]),
     );
@@ -4827,7 +4840,7 @@ describe("OpenDesign Library strip", () => {
       models: [aModelListItem({ name: "Retained tag Model" })],
     });
     await screen.findByText("Retained tag Model");
-    await user.click(screen.getByRole("button", { name: /^All$/ }));
+    await user.click(screen.getByRole("button", { name: /^All(?: \d+)?$/ }));
     await waitFor(() =>
       expect(lastModelsQuery(app.requests).getAll("revision_status")).toEqual([]),
     );

@@ -11,7 +11,6 @@ import {
   Activity,
   AlertTriangle,
   Bell,
-  CheckCircle2,
   ChevronDown,
   Cpu,
   Images,
@@ -22,7 +21,6 @@ import {
 } from "lucide-react";
 import { Link } from "@/lib/link";
 
-import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -112,8 +110,8 @@ function SectionHeader({
   description: string;
 }) {
   return (
-    <div className="flex items-start gap-3 border-b px-4 py-4 sm:px-5">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+    <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted">
         <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />
       </div>
       <div className="min-w-0">
@@ -318,20 +316,15 @@ function BackgroundWorkView({
 
   return (
     <Card className="overflow-hidden animate-panel-in">
-      <div className="flex items-center justify-between gap-3 border-b bg-muted/30 p-3">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold">{uiText("Background work")}</h2>
-          <p className="text-xs text-muted-foreground">
-            {uiText("See work that continues while you use PrintStash.")}
-          </p>
-        </div>
+      <div className="flex justify-end px-4 pt-4 sm:px-5">
         <Button
           size="sm"
           variant="outline"
           onClick={() => void refresh()}
           aria-label={uiText("Refresh")}
         >
-          <RefreshCw className="h-4 w-4" aria-hidden />
+          <RefreshCw className="mr-2 h-4 w-4" aria-hidden />
+          {uiText("Refresh")}
         </Button>
       </div>
 
@@ -356,87 +349,77 @@ function BackgroundWorkView({
         </div>
       ) : overview ? (
         <>
+          <div className="grid grid-cols-1 gap-3 border-b border-border px-4 pb-5 pt-3 sm:grid-cols-3 sm:px-5">
+            {[
+              { label: uiText("Running now"), value: running, icon: Activity },
+              { label: uiText("Waiting to start"), value: waiting, icon: Layers },
+              {
+                label: uiText("Recent failures"),
+                value: overview.failed_jobs.length,
+                icon: AlertTriangle,
+              },
+            ].map(({ label, value, icon: Icon }) => (
+              <div key={label} className="px-4 py-2 sm:border-l sm:border-border sm:first:border-0">
+                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>{label}</span>
+                  <Icon className="h-4 w-4" aria-hidden />
+                </div>
+                <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
+              </div>
+            ))}
+          </div>
           <SectionHeader
             icon={Images}
-            title={uiText("Derivative processing")}
+            title={uiText("Preview and metadata processing")}
             description={uiText(
               "Disabling keeps existing previews and lets current processing finish. Re-enabling may start a backfill.",
             )}
           />
-          <ul className="divide-y divide-border border-b">
+          <ul className="divide-y divide-border border-b px-4 pb-2 sm:pl-16 sm:pr-5">
             {overview.definitions
               .filter((definition) => definition.name in POLICY_SETTINGS)
               .map((definition) => (
                 <li
                   key={definition.name}
-                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5"
+                  className="flex flex-wrap items-center justify-between gap-3 py-3"
                 >
-                  <label className="flex items-start gap-3 text-sm">
-                    <Checkbox
-                      checked={definition.enabled}
-                      disabled={busy.has(`policy:${definition.name}`)}
-                      ariaLabel={policyPurpose(definition.name)}
-                      onChange={(checked) => savePolicy(definition, checked)}
-                    />
-                    <span>
-                      <span className="font-medium">{policyPurpose(definition.name)}</span>
-                      <span className="block text-xs text-muted-foreground">
-                        {definition.enabled ? uiText("Enabled") : uiText("Processing disabled")}
-                        {" · "}
-                        {uiText("Deployment default: {value}", {
-                          value: definition.default_enabled
-                            ? uiText("Enabled")
-                            : uiText("Disabled"),
-                        })}
-                      </span>
+                  <div className="min-w-0 text-sm">
+                    <span className="font-medium">{policyPurpose(definition.name)}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {definition.enabled ? uiText("Enabled") : uiText("Processing disabled")}
+                      {" · "}
+                      {uiText("Deployment default: {value}", {
+                        value: definition.default_enabled ? uiText("Enabled") : uiText("Disabled"),
+                      })}
                     </span>
-                  </label>
-                  {definition.overridden && (
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {uiText(definition.enabled ? "On" : "Off")}
+                    </span>
                     <Button
                       size="sm"
-                      variant="ghost"
+                      variant="outline"
                       disabled={busy.has(`policy:${definition.name}`)}
-                      onClick={() => savePolicy(definition, null)}
+                      onClick={() => savePolicy(definition, !definition.enabled)}
+                      aria-label={`${uiText(definition.enabled ? "Turn off" : "Turn on")} ${policyPurpose(definition.name)}`}
                     >
-                      {uiText("Use deployment default")}
+                      {uiText(definition.enabled ? "Turn off" : "Turn on")}
                     </Button>
-                  )}
+                    {definition.overridden && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={busy.has(`policy:${definition.name}`)}
+                        onClick={() => savePolicy(definition, null)}
+                      >
+                        {uiText("Use deployment default")}
+                      </Button>
+                    )}
+                  </div>
                 </li>
               ))}
           </ul>
-          <SectionHeader
-            icon={Activity}
-            title={uiText("What's happening now")}
-            description={uiText("A quick view of work across your vault.")}
-          />
-          <div className="grid grid-cols-3 gap-2 border-b px-4 py-4 sm:gap-3 sm:px-5">
-            <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-3">
-              <Activity className="h-4 w-4 shrink-0 text-primary" aria-hidden />
-              <div>
-                <p className="text-lg font-semibold leading-tight">{running}</p>
-                <p className="text-xs text-muted-foreground">{uiText("Running now")}</p>
-              </div>
-            </div>
-            <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-3">
-              <Layers className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-              <div>
-                <p className="text-lg font-semibold leading-tight">{waiting}</p>
-                <p className="text-xs text-muted-foreground">{uiText("Waiting to start")}</p>
-              </div>
-            </div>
-            <div className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-3">
-              {overview.failed_jobs.length > 0 ? (
-                <AlertTriangle className="h-4 w-4 shrink-0 text-warning" aria-hidden />
-              ) : (
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-success" aria-hidden />
-              )}
-              <div>
-                <p className="text-lg font-semibold leading-tight">{overview.failed_jobs.length}</p>
-                <p className="text-xs text-muted-foreground">{uiText("Recent failures")}</p>
-              </div>
-            </div>
-          </div>
-
           <SectionHeader
             icon={Images}
             title={uiText("Checking a model's preview?")}

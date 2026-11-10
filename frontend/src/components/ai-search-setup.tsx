@@ -4,7 +4,7 @@ import { captureEditingBase } from "@/lib/api/editing";
 import type { EditingBase } from "@/types/editing";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Check, HardDrive, Server, ArrowRight } from "lucide-react";
+import { Check, HardDrive, Search, Server, ArrowRight } from "lucide-react";
 import { Link } from "@/lib/link";
 import { Button } from "@/components/ui/button";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
@@ -25,9 +25,13 @@ import type { GenerationProposal, SearchGeneration, SearchSettingsRead } from "@
 export function AiSearchSetup({
   settings: currentSettings,
   catalog,
+  changing: controlledChanging,
+  onChangingChange,
 }: {
   settings: SearchSettingsRead;
   catalog: AiSearchCatalog;
+  changing?: boolean;
+  onChangingChange?: (changing: boolean) => void;
 }) {
   const { t } = useI18n();
   const { user } = useAuth();
@@ -64,7 +68,9 @@ export function AiSearchSetup({
   );
   const [selected, setSelected] = useState<string | null>(null);
   const [endpointId, setEndpointId] = useState<number | null>(null);
-  const [changing, setChanging] = useState(false);
+  const [localChanging, setLocalChanging] = useState(false);
+  const changing = controlledChanging ?? localChanging;
+  const setChanging = onChangingChange ?? setLocalChanging;
   const [connecting, setConnecting] = useState(false);
   const [settingsReview, setSettingsReview] = useState<
     null | { phase: "required" | "loading" } | { phase: "ready"; snapshot: SearchSettingsRead }
@@ -91,7 +97,7 @@ export function AiSearchSetup({
   const active = generations.data?.find(
     (g) => g.profile === "semantic_text" && g.state === "active",
   );
-  const requiresAvailability = settings.settings.enabled && !!active;
+  const requiresAvailability = settings.settings.enabled && !!active && !changing;
   const availability = useQuery(searchStatusOptions(user?.id, requiresAvailability));
   const failedPreparation = generations.data?.find(
     (generation) => generation.profile === "semantic_text" && generation.state === "failed",
@@ -274,6 +280,248 @@ export function AiSearchSetup({
     if (!isMessageKey(key)) throw new Error("search_generation_phase_invalid");
     return t(key);
   })();
+  if (changing && !settingsReview) {
+    return (
+      <fieldset disabled={busy} aria-busy={busy} className="min-w-0">
+        <div className="space-y-4 p-6">
+          {message && (
+            <p role="alert" className="text-sm text-destructive">
+              {message}
+            </p>
+          )}
+          {!building && failedPreparation && (
+            <p role="status" className="text-sm text-warning">
+              {t(
+                "Preparation stopped before search was ready. Try again, or open Advanced AI controls for details.",
+              )}
+            </p>
+          )}
+          <label className="block space-y-1.5 text-sm">
+            <span className="font-medium">{t("Location")}</span>
+            <select
+              className="block h-10 w-full border border-input bg-card px-3"
+              value={path ?? ""}
+              disabled={!!building || !!downloading}
+              onChange={(event) => {
+                const value = event.target.value;
+                setPath(value === "local" || value === "server" ? value : null);
+                setConnecting(false);
+                setMessage(null);
+              }}
+            >
+              {!path && <option value="">{t("aiSearch.chooseModel")}</option>}
+              <option value="local">{t("On this machine")}</option>
+              <option value="server">{t("Another server")}</option>
+            </select>
+            {path && (
+              <span className="block text-xs text-muted-foreground">
+                {t(
+                  path === "local"
+                    ? "Your library text stays here. Local AI uses this machine’s CPU, memory and storage; GPU acceleration is not available."
+                    : "Connect an AI service. Library text will be sent to that server.",
+                )}
+              </span>
+            )}
+          </label>
+          {path && (
+            <label className="block space-y-1.5 text-sm">
+              <span className="font-medium">{t("aiSearch.modelOrServer")}</span>
+              <select
+                className="block h-10 w-full border border-input bg-card px-3"
+                value={path === "local" ? (local?.id ?? "") : String(remote?.id ?? "")}
+                disabled={!!building || !!downloading}
+                onChange={(event) => {
+                  if (path === "local") setSelected(event.target.value || null);
+                  else setEndpointId(event.target.value ? Number(event.target.value) : null);
+                  setConnecting(false);
+                  setMessage(null);
+                }}
+              >
+                {(path === "local" ? choices.length === 0 : servers.length === 0) && (
+                  <option value="">{t("aiSearch.chooseModel")}</option>
+                )}
+                {path === "local"
+                  ? choices.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.key}
+                      </option>
+                    ))
+                  : servers.map((server) => (
+                      <option key={server.id} value={server.id}>
+                        {server.model} · {server.host}
+                      </option>
+                    ))}
+              </select>
+            </label>
+          )}
+          {!building && !downloading && path === "local" && !local && (
+            <p className="text-sm text-muted-foreground">
+              {t(
+                "This installation needs a compatible local AI runtime and model. You can connect another server instead, or ask your administrator to install local AI support.",
+              )}
+            </p>
+          )}
+          {!building && !downloading && path === "server" && (!remote || connecting) ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                {t(
+                  "Enter the connection details supplied by your AI server. It must support text embeddings; a chat-only service cannot prepare search.",
+                )}
+              </p>
+              <InferenceEndpointForm compact onSaved={() => setConnecting(false)} />
+            </>
+          ) : !building && !downloading && path === "server" && remote ? (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                {t("Library text and search queries will be sent to {host}.", {
+                  host: remote.host,
+                })}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => setConnecting(true)}>
+                {t("Connect a new server")}
+              </Button>
+            </div>
+          ) : !building && !downloading && path === "local" && local ? (
+            <p className="text-xs text-muted-foreground">
+              {local.installed
+                ? t("Already downloaded. No download needed.")
+                : t("Download size: {size}", { size: formatBytes(local.size_bytes) })}
+            </p>
+          ) : null}
+          {!building &&
+            !downloading &&
+            path &&
+            (path === "local" ? local : remote) &&
+            !connecting && (
+              <p className="text-sm text-muted-foreground">
+                {t(
+                  !enabled
+                    ? path === "local"
+                      ? "Continuing enables AI Search and local processing. Nothing is downloaded yet."
+                      : "Continuing enables AI Search. Local processing and downloads keep their current settings."
+                    : path === "local" && !local?.installed
+                      ? "This allows administrator-requested model downloads and downloads this model from its provider. Your library files are not uploaded."
+                      : "We’ll check the space needed, then prepare your library. Search switches on automatically when it is ready.",
+                )}
+              </p>
+            )}
+          {!downloading && failedDownload && (
+            <p role="alert" className="text-sm text-warning">
+              {t("A model download failed. You can retry the download below.")}
+            </p>
+          )}
+          {downloading && (
+            <section className="space-y-3 border-t border-border pt-4">
+              <h3 className="text-sm font-semibold">{t("Downloading an AI model")}</h3>
+              <progress
+                className="h-2 w-full accent-primary"
+                aria-label={t("AI model download progress")}
+                max={100}
+                value={downloading.progress ?? 0}
+              />
+              <p role="status" className="text-sm">
+                {formatBytes(downloading.processed)} / {formatBytes(downloading.total)}
+              </p>
+              <Button type="button" variant="outline" onClick={() => dispatch("cancel")}>
+                {t("Cancel download")}
+              </Button>
+            </section>
+          )}
+          {building && (
+            <section className="space-y-3 border-t border-border pt-4">
+              <h3 className="text-sm font-semibold">
+                {t(
+                  building.phase === "ready"
+                    ? "Your search is prepared"
+                    : building.phase === "verify_failed"
+                      ? "Preparation needs attention"
+                      : "Preparing your library",
+                )}
+              </h3>
+              <p role="status" className="text-sm font-medium">
+                {phaseLabel}
+              </p>
+              <SearchPreparationStages generation={building} />
+              {building.phase === "backfill" && (
+                <>
+                  <progress
+                    className="h-2 w-full accent-primary"
+                    aria-label={t("Library preparation progress")}
+                    max={Math.max(1, building.eligible)}
+                    value={building.indexed}
+                  />
+                  <p className="text-sm tabular-nums">
+                    {t("{done} of {total} searchable entries prepared", {
+                      done: building.indexed,
+                      total: building.eligible,
+                    })}
+                  </p>
+                  {building.eta_seconds !== null && (
+                    <p className="text-sm text-muted-foreground">
+                      {t("aiSearch.eta", { time: formatDuration(building.eta_seconds) })}
+                    </p>
+                  )}
+                  {building.quarantined > 0 && (
+                    <p className="text-sm text-warning">
+                      {t("aiSearch.quarantined", { count: building.quarantined })}
+                    </p>
+                  )}
+                </>
+              )}
+              {building.phase === "ready" && <SearchIndexHealth generation={building} />}
+              {building.error_code && (
+                <p role="alert" className="text-sm text-warning">
+                  {building.phase === "verify_failed"
+                    ? `${t("aiSearch.generationError")} ${building.error_code}`
+                    : t("An embedding request failed. PrintStash will retry it automatically.")}
+                </p>
+              )}
+              {building.version_token && (
+                <div className="flex flex-wrap gap-2">
+                  {building.phase === "verify_failed" && (
+                    <Button type="button" onClick={() => dispatch("retry")}>
+                      {t("Retry preparation")}
+                    </Button>
+                  )}
+                  {building.phase === "ready" && (
+                    <Button type="button" onClick={() => dispatch("activate")}>
+                      {t("Use prepared search")}
+                    </Button>
+                  )}
+                  <Button type="button" variant="outline" onClick={() => dispatch("cancel")}>
+                    {t("Cancel preparation")}
+                  </Button>
+                </div>
+              )}
+            </section>
+          )}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-border bg-plate px-6 py-4">
+          <Button type="button" variant="outline" onClick={() => setChanging(false)}>
+            {t("Cancel")}
+          </Button>
+          {!building &&
+            !downloading &&
+            path &&
+            (path === "local" ? local : remote) &&
+            !connecting &&
+            (!enabled ? (
+              <Button type="button" onClick={() => dispatch("enable")}>
+                {t(path === "local" ? "Enable local AI Search" : "Enable server AI Search")}
+              </Button>
+            ) : path === "local" && !local?.installed ? (
+              <Button type="button" onClick={() => dispatch("download")}>
+                {t("Allow download and continue")}
+              </Button>
+            ) : (
+              <Button type="button" onClick={() => dispatch("prepare")}>
+                {t("Prepare my library")}
+              </Button>
+            ))}
+        </div>
+      </fieldset>
+    );
+  }
   return (
     <div>
       {settingsReview && (
@@ -320,24 +568,28 @@ export function AiSearchSetup({
         </section>
       )}
       <fieldset disabled={settingsReview !== null} className="min-w-0">
-        <ol
-          aria-label={t("AI setup progress")}
-          className="grid grid-cols-3 gap-2 border-b bg-muted/30 px-4 py-4 text-xs sm:px-5"
-        >
-          {[t("Choose location"), t("Prepare search"), t("Start searching")].map((label, index) => (
-            <li
-              key={label}
-              aria-current={step === index + 1 ? "step" : undefined}
-              className={`flex items-center gap-2 ${step === index + 1 ? "font-semibold text-foreground" : "text-muted-foreground"}`}
-            >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border">
-                {step > index + 1 ? <Check className="h-3 w-3" aria-hidden /> : index + 1}
-              </span>
-              {label}
-            </li>
-          ))}
-        </ol>
-        <div className="space-y-5 p-4 sm:p-6">
+        {!ready && (
+          <ol
+            aria-label={t("AI setup progress")}
+            className="grid grid-cols-3 gap-2 border-b bg-muted/30 px-4 py-4 text-xs sm:px-5"
+          >
+            {[t("Choose location"), t("Prepare search"), t("Start searching")].map(
+              (label, index) => (
+                <li
+                  key={label}
+                  aria-current={step === index + 1 ? "step" : undefined}
+                  className={`flex items-center gap-2 ${step === index + 1 ? "font-semibold text-foreground" : "text-muted-foreground"}`}
+                >
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border">
+                    {step > index + 1 ? <Check className="h-3 w-3" aria-hidden /> : index + 1}
+                  </span>
+                  {label}
+                </li>
+              ),
+            )}
+          </ol>
+        )}
+        <div className={ready ? "" : "space-y-5 p-4 sm:p-6"}>
           {message && (
             <p role="alert" className="text-sm text-destructive">
               {message}
@@ -369,24 +621,33 @@ export function AiSearchSetup({
           )}
           {ready ? (
             <>
-              <div>
-                <h3 className="text-xl font-semibold">{t("AI Search is ready")}</h3>
-                <p className="mt-2 max-w-prose text-sm text-muted-foreground">
-                  {t("Describe what you want to print. Try “a holder for my tools”.")}
-                </p>
+              <div className="flex flex-wrap items-start gap-3 px-4 py-4 sm:px-5">
+                <Search
+                  className="h-8 w-8 shrink-0 bg-muted p-2 text-muted-foreground"
+                  aria-hidden
+                />
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm font-semibold">{t("AI Search is ready")}</h3>
+                  <p className="mt-0.5 max-w-prose text-xs text-muted-foreground">
+                    {t("Describe what you want to print. Try “a holder for my tools”.")}
+                  </p>
+                </div>
+                <span className="bg-muted px-2 py-1 text-xs text-muted-foreground">
+                  {t("Ready")}
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setChanging(true)}>
+                    {t("Change setup")}
+                  </Button>
+                  <Button size="sm" asChild>
+                    <Link href="/search?q=a%20holder%20for%20my%20tools">
+                      {t("Try AI Search")}
+                      <ArrowRight className="ml-2 h-4 w-4" aria-hidden />
+                    </Link>
+                  </Button>
+                </div>
               </div>
               <SearchIndexHealth generation={active} />
-              <div className="flex flex-wrap gap-3">
-                <Button asChild>
-                  <Link href="/search?q=a%20holder%20for%20my%20tools">
-                    {t("Try AI Search")}
-                    <ArrowRight className="ml-2 h-4 w-4" aria-hidden />
-                  </Link>
-                </Button>
-                <Button variant="ghost" onClick={() => setChanging(true)}>
-                  {t("Change setup")}
-                </Button>
-              </div>
             </>
           ) : building ? (
             <>

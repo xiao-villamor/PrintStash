@@ -16,6 +16,13 @@ import { storageProviderCatalogue } from "@/test-support/storage-provider-catalo
 import { aStorageConnection } from "@/test-support/factories";
 import { adminSession, memberSession, json, renderApp } from "@/test-support/render";
 
+async function openNewConnection() {
+  const button = await screen.findByRole("button", { name: "Add remote connection" });
+  await waitFor(() => expect(button).toBeEnabled());
+  await userEvent.click(button);
+  return screen.findByRole("dialog", { name: "Add remote connection" });
+}
+
 describe("RemoteStorageConnections", () => {
   it("explains disabled transport selection", async () => {
     const view = renderApp(<RemoteStorageConnections />, {
@@ -33,6 +40,7 @@ describe("RemoteStorageConnections", () => {
         ]),
       },
     });
+    await openNewConnection();
     expect(
       await screen.findByText("This API image does not include the required storage service."),
     ).toBeVisible();
@@ -49,7 +57,7 @@ describe("RemoteStorageConnections", () => {
       },
     });
     expect(await screen.findByText("Workshop storage")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Save connection" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Add remote connection" })).toBeDisabled();
   });
 
   it("lists each remote profile with its current uses", async () => {
@@ -83,6 +91,7 @@ describe("RemoteStorageConnections", () => {
     expect(screen.getByRole("status", { name: "Add remote connection" })).toBeVisible();
     expect(screen.queryByLabelText("Connection name")).toBeNull();
     finish(json(storageProviderCatalogue));
+    await openNewConnection();
     expect(await screen.findByLabelText("Connection name")).toBeVisible();
     expect(screen.queryByRole("status", { name: "Add remote connection" })).toBeNull();
   });
@@ -95,6 +104,7 @@ describe("RemoteStorageConnections", () => {
         "GET /api/v1/storage-connections": json([]),
       },
     });
+    await openNewConnection();
     const categories = await screen.findByRole("group", { name: "Storage category" });
 
     await user.click(within(categories).getByRole("button", { name: "Nextcloud and WebDAV" }));
@@ -128,6 +138,7 @@ describe("RemoteStorageConnections", () => {
     });
     await screen.findByText(/No remote storage connected yet/);
 
+    await openNewConnection();
     await user.click(screen.getByLabelText("Connection name"));
     await user.paste("Shared Drive");
     await user.click(
@@ -302,6 +313,7 @@ describe("RemoteStorageConnections", () => {
       },
     });
 
+    await openNewConnection();
     expect(await screen.findByRole("button", { name: "Save connection" })).toBeDisabled();
   });
 
@@ -313,6 +325,7 @@ describe("RemoteStorageConnections", () => {
         "GET /api/v1/storage-connections": json([]),
       },
     });
+    await openNewConnection();
     const save = await screen.findByRole("button", { name: "Save connection" });
 
     await user.type(screen.getByLabelText("Connection name"), "Incomplete S3");
@@ -357,7 +370,7 @@ describe("RemoteStorageConnections", () => {
     expect(JSON.parse(view.requestsWithMethod("PATCH")[0].body).secrets).toEqual({
       secret_key: "replacement",
     });
-    expect(screen.queryByDisplayValue("replacement")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByDisplayValue("replacement")).not.toBeInTheDocument());
   });
 
   it("keeps edits visible when a dependent target change is refused", async () => {
@@ -379,9 +392,11 @@ describe("RemoteStorageConnections", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled());
     expect(screen.getByLabelText("Bucket")).toHaveValue("different-bucket");
     await user.click(screen.getByRole("button", { name: "Cancel editing" }));
-    expect(
-      screen.queryByRole("heading", { name: "Edit Workshop storage" }),
-    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("heading", { name: "Edit Workshop storage" }),
+      ).not.toBeInTheDocument(),
+    );
   });
 });
 
@@ -393,6 +408,7 @@ describe("RemoteStorageConnections preset selection", () => {
         "GET /api/v1/storage/providers": json(storageProviderCatalogue),
       },
     });
+    await openNewConnection();
     const categories = await screen.findByRole("group", { name: "Storage category" });
     await userEvent
       .setup()
@@ -413,6 +429,7 @@ describe("RemoteStorageConnections preset selection", () => {
         ),
       },
     });
+    await openNewConnection();
     const categories = await screen.findByRole("group", { name: "Storage category" });
     await user.click(within(categories).getByRole("button", { name: "NAS over SFTP" }));
     await user.click(screen.getByRole("button", { name: "Hetzner Storage Box — SFTP" }));
@@ -445,7 +462,7 @@ describe("RemoteStorageConnections ownership recovery", () => {
       "Connections could not be loaded.",
     );
     expect(within(region).queryByText("No remote storage connected yet.")).not.toBeInTheDocument();
-    expect(within(region).getByRole("button", { name: "Save connection" })).toBeDisabled();
+    expect(within(region).getByRole("button", { name: "Add remote connection" })).toBeDisabled();
     app.route({ "GET /api/v1/storage-connections": json([aStorageConnection()]) });
     await userEvent.click(within(region).getByRole("button", { name: "Retry" }));
     expect(await within(region).findByText("Workshop storage")).toBeVisible();
@@ -573,6 +590,10 @@ describe("RemoteStorageConnections authoritative lifetimes", () => {
     );
     await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
     await userEvent.type(screen.getByLabelText("Secret key"), "FakeRoleLostStorageSecret");
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await userEvent.click(screen.getByRole("button", { name: "Remove" }));
     await screen.findByRole("dialog");
     app.rerender(
@@ -647,6 +668,10 @@ describe("RemoteStorageConnections authoritative lifetimes", () => {
     });
     await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
     await userEvent.type(screen.getByLabelText("Secret key"), "FakeDeniedStorageSecret");
+    await userEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Close" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     await userEvent.click(screen.getByRole("button", { name: "Remove" }));
     await screen.findByRole("dialog");
     app.route({ "GET /api/v1/storage-connections": json({ detail: "forbidden" }, 403) });
@@ -746,7 +771,7 @@ describe("Remote connection conditional editing", () => {
       expect(within(preview).getByText("Other administrator")).toBeVisible();
       await userEvent.click(screen.getByRole("button", { name: "Save revised changes" }));
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Save connection" })).toBeVisible(),
+        expect(screen.getByRole("button", { name: "Add remote connection" })).toBeVisible(),
       );
       expect(writes.map((headers) => headers.get("If-Match"))).toEqual([
         `"storage-connection-1-e${original.edit_epoch}-v1"`,

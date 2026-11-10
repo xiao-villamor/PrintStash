@@ -294,7 +294,7 @@ test.describe("Loaded Library surfaces", () => {
       }),
     );
     await page.goto("/?type=all");
-    await expect(page.getByRole("button", { name: /^Known Good/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Ready/ })).toBeVisible();
     expect(
       await page.getByRole("main").evaluate((main) => main.scrollWidth <= main.clientWidth),
     ).toBe(true);
@@ -363,8 +363,15 @@ test.describe("Loaded Library surfaces", () => {
         .toBe(true);
       await anchor.evaluate((node) => node.scrollIntoView({ block: "center" }));
       await page.clock.runFor(50);
-      const before = await anchor.evaluate((node) => node.getBoundingClientRect().top);
       await anchor.click();
+      const openPage = page
+        .locator("#model-drawer")
+        .getByRole("link", { name: "Open page", exact: true });
+      await expect(openPage).toBeVisible();
+      await page.clock.runFor(100);
+      // Match the departure layout after the real inspector changes the columns.
+      const before = await anchor.evaluate((node) => node.getBoundingClientRect().top);
+      await openPage.click();
       await expect(
         page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
       ).toBeVisible();

@@ -5,7 +5,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Bell, Loader2, Plus, Send, Trash2, Pencil } from "lucide-react";
+import { Bell, Loader2, Send, Trash2, Pencil } from "lucide-react";
 import {
   createNotificationChannel,
   deleteNotificationChannel,
@@ -24,6 +24,7 @@ import type {
 } from "@/types";
 import { toast } from "@/lib/toast";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { inputClasses } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Localized } from "@/components/ui/localized";
@@ -44,12 +45,9 @@ import type { NotificationsSettings, NotificationChannelUpdate } from "@/types";
 
 const CARD = "overflow-hidden rounded-lg border border-border bg-card shadow-sm";
 const INPUT = cn(inputClasses, "h-auto px-2.5 py-1.5 rounded placeholder:text-muted-foreground/40");
-const BTN_PRIMARY = cn(buttonVariants({ size: "xs" }), "font-mono uppercase tracking-wider");
-const BTN_SECONDARY = cn(
-  buttonVariants({ variant: "outline", size: "xs" }),
-  "font-mono uppercase tracking-wider text-muted-foreground",
-);
-const LABEL = "block text-2xs text-muted-foreground mb-1";
+const BTN_PRIMARY = buttonVariants({ size: "xs" });
+const BTN_SECONDARY = buttonVariants({ variant: "outline", size: "xs" });
+const LABEL = "mb-1 block text-sm font-medium";
 
 const TARGETS: { value: NotificationTarget; label: string }[] = [
   {
@@ -615,23 +613,22 @@ export function NotificationsPanel({
 
   return (
     <Localized>
-      <div className="space-y-4">
+      <div className="settings-notifications">
         {settingsFailure}
         {error && (
           <p role="alert" className="text-sm text-destructive">
             {error}
           </p>
         )}
-        <fieldset
-          className="min-w-0 space-y-4"
-          disabled={busy !== null || Boolean(settingsQuery.error)}
-        >
+        <fieldset className="min-w-0" disabled={busy !== null || Boolean(settingsQuery.error)}>
           {/* Master switch */}
-          <div className={`${CARD} px-4 sm:px-6 py-4 flex items-center justify-between gap-3`}>
-            <div className="min-w-0 flex items-start gap-2">
-              <Bell className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
+          <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-5">
+            <div className="min-w-0 flex items-start gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-muted-foreground">
+                <Bell className="h-4 w-4" aria-hidden />
+              </span>
               <div>
-                <h3 className="text-sm font-semibold text-foreground">{uiText("Notifications")}</h3>
+                <h3 className="text-sm font-semibold text-foreground">{uiText("Channels")}</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {uiText(
                     "Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.",
@@ -639,16 +636,44 @@ export function NotificationsPanel({
                 </p>
               </div>
             </div>
-            <label className="inline-flex items-center gap-2 flex-shrink-0">
-              <input
-                type="checkbox"
-                checked={enabled}
-                disabled={!canEdit || busy === "switch" || switchReview !== null}
-                onChange={(e) => toggleEnabled(e.target.checked)}
-                className="h-4 w-4 accent-primary"
-              />
-              <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                {enabled ? uiText("On") : uiText("Off")}
+            {canEdit && (
+              <Button size="sm" disabled={draft !== null} onClick={() => setDraft(emptyDraft())}>
+                {uiText("Add channel")}
+              </Button>
+            )}
+          </div>
+          <div className="px-4 sm:pl-16 sm:pr-5">
+            <label className="settings-preference-row">
+              <span>
+                <span className="block">{uiText("Notifications")}</span>
+                <span className="mt-1 block text-xs font-normal text-muted-foreground">
+                  {uiText("Turn every channel on or off at once. Channels keep their settings.")}
+                </span>
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span className="relative inline-flex h-5 w-9 shrink-0 items-center">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    disabled={!canEdit || busy === "switch" || switchReview !== null}
+                    onChange={(e) => toggleEnabled(e.target.checked)}
+                    className="peer sr-only"
+                  />
+                  <span
+                    aria-hidden
+                    className="absolute inset-0 border border-input bg-muted peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-ring peer-disabled:opacity-50"
+                  >
+                    <span
+                      className={cn(
+                        "absolute left-0 top-0 h-4 w-4 bg-primary-foreground transition-transform",
+                        enabled && "translate-x-4",
+                      )}
+                    />
+                  </span>
+                </span>
+                <span className="text-xs text-foreground">
+                  {enabled ? uiText("On") : uiText("Off")}
+                </span>
               </span>
             </label>
           </div>
@@ -700,7 +725,7 @@ export function NotificationsPanel({
 
           {/* Channel list */}
           {canEdit && (
-            <div className="space-y-2">
+            <div className="px-4 sm:pl-16 sm:pr-5">
               {channels.length === 0 && !draft && (
                 <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-border bg-muted/20 px-6 py-8 text-center">
                   <Bell className="h-7 w-7 text-muted-foreground/50" />
@@ -715,7 +740,7 @@ export function NotificationsPanel({
               {channels.map((ch) => {
                 const badge = statusBadge(ch.last_status);
                 return (
-                  <div key={ch.id} className={`${CARD} px-4 py-3`}>
+                  <div key={ch.id} className="border-b border-border py-4 last:border-b-0">
                     <div className="flex items-center justify-between gap-3 flex-wrap">
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
@@ -769,6 +794,7 @@ export function NotificationsPanel({
                           ) : (
                             <Send className="h-3.5 w-3.5" />
                           )}
+                          {uiText("Send a test notification")}
                         </button>
                         <button
                           type="button"
@@ -777,6 +803,7 @@ export function NotificationsPanel({
                           title={uiText("Edit channel")}
                         >
                           <Pencil className="h-3.5 w-3.5" />
+                          {uiText("Edit channel")}
                         </button>
                         <button
                           type="button"
@@ -786,6 +813,7 @@ export function NotificationsPanel({
                           title={uiText("Delete channel")}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
+                          {uiText("Delete channel")}
                         </button>
                       </div>
                     </div>
@@ -795,72 +823,84 @@ export function NotificationsPanel({
 
               {/* Draft form */}
               {draft ? (
-                <>
-                  <ChannelForm
-                    draft={draft}
-                    setDraft={setDraft}
-                    printers={printersQuery.data}
-                    printersError={printersQuery.error}
-                    retryPrinters={() => void printersQuery.refetch()}
-                    onSave={() => void saveDraft()}
-                    onCancel={() => {
+                <Modal
+                  open
+                  title={uiText(draft.id ? "Edit channel" : "Add channel")}
+                  onClose={() => {
+                    if (busy !== "save") {
                       setDraft(null);
                       setChannelReview({ phase: "idle" });
                       setError(null);
-                    }}
-                    reviewRequired={channelReview.phase !== "idle"}
-                    saving={busy === "save"}
-                  />
-                  {channelReview.phase !== "idle" && (
-                    <div role="status" className="space-y-2 text-sm">
-                      <p>{uiText("Review the current channel before saving again.")}</p>
-                      {reviewedChannel && <ChannelSnapshot channel={reviewedChannel} />}
-                      {channelReplaced && (
-                        <p>
-                          {uiText(
-                            "The channel was replaced. Use current values before editing it.",
-                          )}
-                        </p>
-                      )}
-                      <div className="flex flex-wrap gap-2">
-                        <Button variant="outline" size="sm" onClick={() => void reviewChannel()}>
-                          {uiText("Review current values")}
-                        </Button>
-                        {reviewedChannel && channelReview.phase === "ready" && (
-                          <>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => void adoptCurrent(reviewedChannel.id)}
-                            >
-                              {uiText("Use current values")}
-                            </Button>
-                            <Button
-                              size="sm"
-                              disabled={
-                                channelReplaced ||
-                                (draft.printerIds !== null && draft.printerIds.length === 0)
-                              }
-                              onClick={() => void saveDraft(true)}
-                            >
-                              {uiText("Save revised changes")}
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setDraft(emptyDraft())}
-                  className={BTN_PRIMARY}
+                    }
+                  }}
+                  className="max-w-3xl"
                 >
-                  <Plus className="h-3.5 w-3.5" />
-                  {uiText("Add channel")}
-                </button>
-              )}
+                  <fieldset
+                    disabled={busy !== null || Boolean(settingsQuery.error)}
+                    className="space-y-4"
+                  >
+                    {error && (
+                      <p role="alert" className="text-sm text-destructive">
+                        {error}
+                      </p>
+                    )}
+                    <ChannelForm
+                      draft={draft}
+                      setDraft={setDraft}
+                      printers={printersQuery.data}
+                      printersError={printersQuery.error}
+                      retryPrinters={() => void printersQuery.refetch()}
+                      onSave={() => void saveDraft()}
+                      onCancel={() => {
+                        setDraft(null);
+                        setChannelReview({ phase: "idle" });
+                        setError(null);
+                      }}
+                      reviewRequired={channelReview.phase !== "idle"}
+                      saving={busy === "save"}
+                    />
+                    {channelReview.phase !== "idle" && (
+                      <div role="status" className="space-y-2 text-sm">
+                        <p>{uiText("Review the current channel before saving again.")}</p>
+                        {reviewedChannel && <ChannelSnapshot channel={reviewedChannel} />}
+                        {channelReplaced && (
+                          <p>
+                            {uiText(
+                              "The channel was replaced. Use current values before editing it.",
+                            )}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          <Button variant="outline" size="sm" onClick={() => void reviewChannel()}>
+                            {uiText("Review current values")}
+                          </Button>
+                          {reviewedChannel && channelReview.phase === "ready" && (
+                            <>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void adoptCurrent(reviewedChannel.id)}
+                              >
+                                {uiText("Use current values")}
+                              </Button>
+                              <Button
+                                size="sm"
+                                disabled={
+                                  channelReplaced ||
+                                  (draft.printerIds !== null && draft.printerIds.length === 0)
+                                }
+                                onClick={() => void saveDraft(true)}
+                              >
+                                {uiText("Save revised changes")}
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </fieldset>
+                </Modal>
+              ) : null}
             </div>
           )}
 
@@ -875,13 +915,18 @@ export function NotificationsPanel({
           </div>
         )}
         {deliveriesQuery.isPending && <p role="status">{uiText("Loading delivery history…")}</p>}
-        {canEdit && !deliveriesQuery.error && deliveries && deliveries.length > 0 && (
-          <div className={CARD}>
-            <div className="px-4 py-3 border-b border-border">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        {canEdit && !deliveriesQuery.error && deliveries && (
+          <div className="border-t border-border">
+            <div className="px-4 py-4 sm:px-5">
+              <h4 className="text-sm font-semibold text-foreground">
                 {uiText("Recent deliveries")}
               </h4>
             </div>
+            {deliveries.length === 0 && (
+              <p className="px-4 pb-4 text-sm text-muted-foreground sm:pl-16">
+                {uiText("No notification deliveries yet.")}
+              </p>
+            )}
             <div className="divide-y divide-border">
               {deliveries.map((d) => {
                 const badge = statusBadge(d.status);

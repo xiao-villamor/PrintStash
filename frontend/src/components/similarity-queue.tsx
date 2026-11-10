@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { TabBar } from "@/components/ui/tabs";
 import { useSearchParams } from "@/lib/navigation";
 import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -72,11 +73,39 @@ function ModelLabel({ model }: { model: SimilarityModel }) {
 export function SimilarityRow({
   candidate,
   returnTo,
+  compact = false,
 }: {
   candidate: SimilarityCandidate;
   returnTo?: string;
+  compact?: boolean;
 }) {
   const { t } = useI18n();
+  if (compact)
+    return (
+      <li className="flex items-center justify-between gap-4 py-4">
+        <div className="min-w-0">
+          <p className="break-words text-sm font-semibold">
+            {candidate.model_a.name} ↔ {candidate.model_b.name}
+          </p>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            {evidenceLabel(candidate.evidence_class)} · {Math.round(candidate.confidence * 100)}% ·{" "}
+            {evidenceDescription(candidate)}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {candidate.freshness === "stale" && (
+            <span className="text-xs text-warning">{t("similarity.stale")}</span>
+          )}
+          <Button asChild variant="outline" size="sm">
+            <Link
+              href={`/library/similar/${candidate.id}${returnTo ? `?returnTo=${encodeURIComponent(returnTo)}` : ""}`}
+            >
+              {t("similarity.compare")}
+            </Link>
+          </Button>
+        </div>
+      </li>
+    );
   return (
     <li className="grid gap-4 px-4 py-4 sm:px-5 @3xl/similarity:grid-cols-[minmax(0,1fr)_auto] @3xl/similarity:items-center">
       <div className="min-w-0 space-y-3">
@@ -263,10 +292,216 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
   modelReturnParams.set("tab", "similar");
   const returnTo = modelId === undefined ? filterUrl : `/models/${modelId}?${modelReturnParams}`;
   const QueueFrame = modelDetail ? "div" : Card;
+  const filterControls = (
+    <div
+      id={filtersId}
+      hidden={!filtersOpen}
+      className={modelDetail ? "min-w-0" : "min-w-0 basis-full border-t border-border pt-3"}
+    >
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
+          {t("similarity.allClasses")}
+          <select
+            className="block w-full rounded-md border border-input bg-background p-2 text-sm"
+            value={filters.evidence_class ?? ""}
+            onChange={(event) =>
+              setFilters({
+                evidence_class: EVIDENCE_CLASSES.find((value) => value === event.target.value),
+              })
+            }
+          >
+            <option value="">{t("similarity.allClasses")}</option>
+            {EVIDENCE_CLASSES.map((value) => (
+              <option key={value} value={value}>
+                {evidenceLabel(value)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
+          {t("similarity.current")}
+          <select
+            className="block w-full rounded-md border border-input bg-background p-2 text-sm"
+            value={filters.freshness ?? ""}
+            onChange={(event) =>
+              setFilters({
+                freshness:
+                  event.target.value === "current"
+                    ? "current"
+                    : event.target.value === "stale"
+                      ? "stale"
+                      : undefined,
+              })
+            }
+          >
+            <option value="">{t("similarity.allFreshness")}</option>
+            <option value="current">{t("similarity.current")}</option>
+            <option value="stale">{t("similarity.stale")}</option>
+          </select>
+        </label>
+        <label className="min-w-48 flex-1 space-y-1 text-xs">
+          {t("similarity.threshold")}{" "}
+          <output>
+            {threshold ?? Math.round((status.data?.selection?.minimum_confidence ?? 0.9) * 100)}%
+          </output>
+          <input
+            type="range"
+            min={50}
+            max={100}
+            value={
+              threshold ?? Math.round((status.data?.selection?.minimum_confidence ?? 0.9) * 100)
+            }
+            aria-label={t("similarity.threshold")}
+            className="block w-full accent-primary"
+            onChange={(event) =>
+              setFilters({ minimum_confidence: Number(event.target.value) / 100 })
+            }
+          />
+        </label>
+        {!modelId && (
+          <div className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
+            {t("similarity.collection")}
+            <select
+              className="block rounded-md border border-input bg-background p-2 text-sm"
+              aria-label={t("similarity.collection")}
+              value={choosingCollection ? "pick" : (filters.collection_id ?? "")}
+              onChange={(event) => {
+                if (event.target.value === "pick") setChoosingCollection(true);
+                else {
+                  setChoosingCollection(false);
+                  setCollectionChoice(null);
+                  setFilters({ collection_id: undefined });
+                }
+              }}
+            >
+              <option value="">{t("similarity.library")}</option>
+              <option value="pick">{uiText("Choose existing collection")}</option>
+              {matchingCollection && (
+                <option value={matchingCollection.id}>{matchingCollection.display_path}</option>
+              )}
+              {filters.collection_id !== undefined && !matchingCollection && (
+                <option value={filters.collection_id}>
+                  {t("similarity.collectionNumber", { id: filters.collection_id })}
+                </option>
+              )}
+            </select>
+            {choosingCollection && (
+              <CollectionPicker
+                minRole="view"
+                selectedPath={null}
+                emptyLabel={uiText("No collections found.")}
+                onSelect={(collection) => {
+                  if (collection === null) throw new Error("A collection is required");
+                  setCollectionChoice(collection);
+                  setFilters({ collection_id: collection.id });
+                  setChoosingCollection(false);
+                }}
+              />
+            )}
+          </div>
+        )}
+        <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
+          {t("similarity.allFormats")}
+          <select
+            className="block rounded-md border border-input bg-background p-2 text-sm"
+            value={filters.file_type ?? ""}
+            onChange={(event) => setFilters({ file_type: event.target.value || undefined })}
+          >
+            <option value="">{t("similarity.allFormats")}</option>
+            {["stl", "obj", "glb", "gltf", "ply", "3dm", "fbx", "3mf", "step"].map((value) => (
+              <option key={value} value={value}>
+                {value.toUpperCase()}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
+          {t("similarity.allSources")}
+          <select
+            className="block rounded-md border border-input bg-background p-2 text-sm"
+            value={filters.source ?? ""}
+            onChange={(event) =>
+              setFilters({
+                source:
+                  event.target.value === "vault"
+                    ? "vault"
+                    : event.target.value === "external"
+                      ? "external"
+                      : undefined,
+              })
+            }
+          >
+            <option value="">{t("similarity.allSources")}</option>
+            <option value="vault">{t("similarity.vault")}</option>
+            <option value="external">{t("similarity.external")}</option>
+          </select>
+        </label>
+        <label className="flex items-center gap-2 py-2 text-xs">
+          <Checkbox
+            ariaLabel={t("similarity.knownGood")}
+            checked={filters.known_good ?? false}
+            onChange={(checked) => setFilters({ known_good: checked || undefined })}
+          />
+          {t("similarity.knownGood")}
+        </label>
+      </div>
+    </div>
+  );
+  const queueActions = (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <Button
+        variant="outline"
+        size="sm"
+        className={modelDetail ? "order-2" : undefined}
+        aria-expanded={filtersOpen}
+        aria-controls={filtersId}
+        onClick={() => setFiltersOpen(!filtersOpen)}
+      >
+        {!modelDetail && <SlidersHorizontal className="h-4 w-4" aria-hidden />}
+        {uiText("Filters")}
+        {activeFilters.length > 0 && (
+          <span className="font-mono text-xs">{activeFilters.length}</span>
+        )}
+      </Button>
+      {modelId !== undefined && (
+        <Button
+          size="sm"
+          onClick={() => {
+            if (modelId === undefined) throw new Error("A Model is required");
+            const session = getSessionVersion();
+            find.mutate(
+              { id: modelId, session },
+              {
+                onSuccess: (result) => {
+                  if (session === getSessionVersion())
+                    setStartedRun({ modelId, id: result.run.id });
+                },
+                onError: (error) => {
+                  if (session === getSessionVersion()) toast.error(error);
+                },
+              },
+            );
+          }}
+          loading={find.isPending && find.variables?.id === modelId}
+          disabled={status.isError || !status.data?.enabled}
+        >
+          {t("similarity.find")}
+        </Button>
+      )}
+    </div>
+  );
   return (
     <>
       {modelDetail && (
-        <h2 className="mb-4 text-base font-semibold text-on-surface">{t("similarity.review")}</h2>
+        <div className="mb-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-base font-semibold text-foreground">{t("similarity.title")}</h2>
+            {queueActions}
+          </div>
+          <p className="mt-3 text-[13px] text-muted-foreground">
+            {uiText("Review measured geometry before linking models.")}
+          </p>
+        </div>
       )}
       <SimilaritySearch modelId={modelId} />
       <QueueFrame
@@ -280,222 +515,59 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
         <div
           className={cn(
             "flex flex-wrap items-center gap-3 border-b bg-muted/30 p-3",
-            modelDetail && "border-outline-variant bg-surface",
+            modelDetail && "border-0 bg-transparent p-0",
           )}
         >
           <div className="min-w-0 basis-full @3xl/similarity:flex-1 @3xl/similarity:basis-auto">
+            {modelDetail && (
+              <p className="mb-2 text-[13px] text-muted-foreground">{uiText("Review state")}</p>
+            )}
             <TabBar
-              tabs={REVIEW_STATES.map((state) => ({ key: state, label: t(`similarity.${state}`) }))}
-              active={filters.review_state ?? "open"}
-              onChange={(review_state) => setFilters({ review_state })}
-              className="grid w-full grid-cols-2 gap-1 @sm/similarity:grid-cols-4 @3xl/similarity:flex"
-              tabClassName="h-9 min-w-0 whitespace-nowrap rounded-md px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring @sm/similarity:px-0 @3xl/similarity:px-3"
+              tabs={[
+                ...REVIEW_STATES.map((state) => ({
+                  key: state,
+                  label:
+                    modelDetail && state === "open" ? uiText("Open") : t(`similarity.${state}`),
+                })),
+                ...(modelDetail ? [{ key: "all" as const, label: uiText("All") }] : []),
+              ]}
+              active={filters.review_state ?? "all"}
+              onChange={(review_state) =>
+                setFilters({ review_state: review_state === "all" ? undefined : review_state })
+              }
+              className={
+                modelDetail
+                  ? "flex flex-wrap gap-1.5"
+                  : "grid w-full grid-cols-2 gap-1 @sm/similarity:grid-cols-4 @3xl/similarity:flex"
+              }
+              tabClassName={cn(
+                "h-9 min-w-0 whitespace-nowrap px-3 text-[13px] text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                modelDetail && "border border-border",
+              )}
               activeTabClassName="bg-accent text-accent-foreground"
               showIndicator={false}
             />
           </div>
-          <div className="flex w-full flex-wrap items-center justify-end gap-2 @3xl/similarity:w-auto">
-            <Button
-              variant="outline"
-              size="sm"
-              aria-expanded={filtersOpen}
-              aria-controls={filtersId}
-              onClick={() => setFiltersOpen(!filtersOpen)}
+          {!modelDetail && queueActions}
+          {modelDetail ? (
+            <Modal
+              open={filtersOpen}
+              onClose={() => setFiltersOpen(false)}
+              title={uiText("Similarity filters")}
+              footer={
+                <>
+                  <Button variant="outline" onClick={clearFilters}>
+                    {uiText("Clear filters")}
+                  </Button>
+                  <Button onClick={() => setFiltersOpen(false)}>{uiText("Apply filters")}</Button>
+                </>
+              }
             >
-              <SlidersHorizontal className="h-4 w-4" aria-hidden />
-              {uiText("Filters")}
-              {activeFilters.length > 0 && (
-                <span className="font-mono text-xs">{activeFilters.length}</span>
-              )}
-            </Button>
-            {modelId !== undefined && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  if (modelId === undefined) throw new Error("A Model is required");
-                  const session = getSessionVersion();
-                  find.mutate(
-                    { id: modelId, session },
-                    {
-                      onSuccess: (result) => {
-                        if (session === getSessionVersion())
-                          setStartedRun({ modelId, id: result.run.id });
-                      },
-                      onError: (error) => {
-                        if (session === getSessionVersion()) toast.error(error);
-                      },
-                    },
-                  );
-                }}
-                loading={find.isPending && find.variables?.id === modelId}
-                disabled={status.isError || !status.data?.enabled}
-              >
-                {t("similarity.find")}
-              </Button>
-            )}
-          </div>
-          <div
-            id={filtersId}
-            hidden={!filtersOpen}
-            className="min-w-0 basis-full border-t border-border pt-3"
-          >
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
-                {t("similarity.allClasses")}
-                <select
-                  className="block w-full rounded-md border border-input bg-background p-2 text-sm"
-                  value={filters.evidence_class ?? ""}
-                  onChange={(event) =>
-                    setFilters({
-                      evidence_class: EVIDENCE_CLASSES.find(
-                        (value) => value === event.target.value,
-                      ),
-                    })
-                  }
-                >
-                  <option value="">{t("similarity.allClasses")}</option>
-                  {EVIDENCE_CLASSES.map((value) => (
-                    <option key={value} value={value}>
-                      {evidenceLabel(value)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
-                {t("similarity.current")}
-                <select
-                  className="block w-full rounded-md border border-input bg-background p-2 text-sm"
-                  value={filters.freshness ?? ""}
-                  onChange={(event) =>
-                    setFilters({
-                      freshness:
-                        event.target.value === "current"
-                          ? "current"
-                          : event.target.value === "stale"
-                            ? "stale"
-                            : undefined,
-                    })
-                  }
-                >
-                  <option value="">{t("similarity.allFreshness")}</option>
-                  <option value="current">{t("similarity.current")}</option>
-                  <option value="stale">{t("similarity.stale")}</option>
-                </select>
-              </label>
-              <label className="min-w-48 flex-1 space-y-1 text-xs">
-                {t("similarity.threshold")}{" "}
-                <output>
-                  {threshold ??
-                    Math.round((status.data?.selection?.minimum_confidence ?? 0.9) * 100)}
-                  %
-                </output>
-                <input
-                  type="range"
-                  min={50}
-                  max={100}
-                  value={
-                    threshold ??
-                    Math.round((status.data?.selection?.minimum_confidence ?? 0.9) * 100)
-                  }
-                  aria-label={t("similarity.threshold")}
-                  className="block w-full accent-primary"
-                  onChange={(event) =>
-                    setFilters({ minimum_confidence: Number(event.target.value) / 100 })
-                  }
-                />
-              </label>
-              {!modelId && (
-                <div className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
-                  {t("similarity.collection")}
-                  <select
-                    className="block rounded-md border border-input bg-background p-2 text-sm"
-                    aria-label={t("similarity.collection")}
-                    value={choosingCollection ? "pick" : (filters.collection_id ?? "")}
-                    onChange={(event) => {
-                      if (event.target.value === "pick") setChoosingCollection(true);
-                      else {
-                        setChoosingCollection(false);
-                        setCollectionChoice(null);
-                        setFilters({ collection_id: undefined });
-                      }
-                    }}
-                  >
-                    <option value="">{t("similarity.library")}</option>
-                    <option value="pick">{uiText("Choose existing collection")}</option>
-                    {matchingCollection && (
-                      <option value={matchingCollection.id}>
-                        {matchingCollection.display_path}
-                      </option>
-                    )}
-                    {filters.collection_id !== undefined && !matchingCollection && (
-                      <option value={filters.collection_id}>
-                        {t("similarity.collectionNumber", { id: filters.collection_id })}
-                      </option>
-                    )}
-                  </select>
-                  {choosingCollection && (
-                    <CollectionPicker
-                      minRole="view"
-                      selectedPath={null}
-                      emptyLabel={uiText("No collections found.")}
-                      onSelect={(collection) => {
-                        if (collection === null) throw new Error("A collection is required");
-                        setCollectionChoice(collection);
-                        setFilters({ collection_id: collection.id });
-                        setChoosingCollection(false);
-                      }}
-                    />
-                  )}
-                </div>
-              )}
-              <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
-                {t("similarity.allFormats")}
-                <select
-                  className="block rounded-md border border-input bg-background p-2 text-sm"
-                  value={filters.file_type ?? ""}
-                  onChange={(event) => setFilters({ file_type: event.target.value || undefined })}
-                >
-                  <option value="">{t("similarity.allFormats")}</option>
-                  {["stl", "obj", "glb", "gltf", "ply", "3dm", "fbx", "3mf", "step"].map(
-                    (value) => (
-                      <option key={value} value={value}>
-                        {value.toUpperCase()}
-                      </option>
-                    ),
-                  )}
-                </select>
-              </label>
-              <label className="min-w-0 flex-1 basis-32 space-y-1 text-xs">
-                {t("similarity.allSources")}
-                <select
-                  className="block rounded-md border border-input bg-background p-2 text-sm"
-                  value={filters.source ?? ""}
-                  onChange={(event) =>
-                    setFilters({
-                      source:
-                        event.target.value === "vault"
-                          ? "vault"
-                          : event.target.value === "external"
-                            ? "external"
-                            : undefined,
-                    })
-                  }
-                >
-                  <option value="">{t("similarity.allSources")}</option>
-                  <option value="vault">{t("similarity.vault")}</option>
-                  <option value="external">{t("similarity.external")}</option>
-                </select>
-              </label>
-              <label className="flex items-center gap-2 py-2 text-xs">
-                <Checkbox
-                  ariaLabel={t("similarity.knownGood")}
-                  checked={filters.known_good ?? false}
-                  onChange={(checked) => setFilters({ known_good: checked || undefined })}
-                />
-                {t("similarity.knownGood")}
-              </label>
-            </div>
-          </div>
+              {filterControls}
+            </Modal>
+          ) : (
+            filterControls
+          )}
         </div>
         {activeFilters.length > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2 text-xs text-muted-foreground">
@@ -505,17 +577,19 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
             </Button>
           </div>
         )}
-        <div className={cn("border-b px-4 py-3 sm:px-5", modelDetail && "border-outline-variant")}>
-          {!modelDetail && <h2 className="text-sm font-semibold">{t("similarity.review")}</h2>}
-          <p
-            className={cn(
-              "text-xs text-muted-foreground",
-              modelDetail ? "font-mono leading-relaxed text-on-surface-variant" : "mt-1",
-            )}
-          >
-            {t("similarity.reviewHelp")}
-          </p>
-        </div>
+        {!modelDetail && (
+          <div className="border-b px-4 py-3 sm:px-5">
+            {!modelDetail && <h2 className="text-sm font-semibold">{t("similarity.review")}</h2>}
+            <p
+              className={cn(
+                "text-xs text-muted-foreground",
+                modelDetail ? "font-mono leading-relaxed text-on-surface-variant" : "mt-1",
+              )}
+            >
+              {t("similarity.reviewHelp")}
+            </p>
+          </div>
+        )}
         {status.isError && (
           <div role="alert" className="border-b p-3 text-sm text-destructive">
             {t("similarity.loadError")}{" "}
@@ -572,7 +646,12 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
         ) : rows.length ? (
           <ul className="divide-y divide-border">
             {rows.map((candidate) => (
-              <SimilarityRow key={candidate.id} candidate={candidate} returnTo={returnTo} />
+              <SimilarityRow
+                key={candidate.id}
+                candidate={candidate}
+                returnTo={returnTo}
+                compact={modelDetail}
+              />
             ))}
           </ul>
         ) : (
@@ -631,6 +710,11 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
               {t("similarity.more")}
             </Button>
           </div>
+        )}
+        {modelDetail && (
+          <p className="mt-5 text-[13px] text-muted-foreground">
+            {uiText("A match does not merge models or delete files.")}
+          </p>
         )}
       </QueueFrame>
     </>

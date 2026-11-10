@@ -30,7 +30,7 @@ describe("EntityTagsDialog", () => {
     await userEvent.click(screen.getByRole("button", { name: "Edit tags" }));
     expect(await screen.findByText("Inherited by descendants.")).toBeVisible();
     await userEvent.click(screen.getByRole("button", { name: "Workshop" }));
-    await userEvent.type(screen.getByLabelText("Tags to add"), "Painted{Enter}");
+    await userEvent.type(screen.getByPlaceholderText("Search or create a tag"), "Painted{Enter}");
     await userEvent.click(screen.getByRole("button", { name: "Save tags" }));
 
     expect(onSave).toHaveBeenCalledWith(
@@ -55,7 +55,7 @@ describe("EntityTagsDialog", () => {
     await screen.findByRole("button", { name: "Save tags" });
 
     view.rerender(<EntityTagsDialog {...props} tags={["Refreshed"]} onSave={refreshed} />);
-    await userEvent.type(screen.getByLabelText("Tags to add"), "My tag{Enter}");
+    await userEvent.type(screen.getByPlaceholderText("Search or create a tag"), "My tag{Enter}");
     await userEvent.click(screen.getByRole("button", { name: "Save tags" }));
 
     expect(original).toHaveBeenCalledWith(["Original", "My tag"], expect.any(AbortSignal));
@@ -107,7 +107,7 @@ describe("EntityTagsDialog", () => {
         triggerMode="none"
       />,
     );
-    await userEvent.type(screen.getByLabelText("Tags to add"), "My draft{Enter}");
+    await userEvent.type(screen.getByPlaceholderText("Search or create a tag"), "My draft{Enter}");
     await userEvent.click(screen.getByRole("button", { name: "Save tags" }));
     expect(original).toHaveBeenCalledWith(["Original", "My draft"], expect.any(AbortSignal));
     expect(refreshed).not.toHaveBeenCalled();

@@ -16,7 +16,6 @@ import {
 import { useId, useState, useSyncExternalStore } from "react";
 
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
-import { Modal } from "@/components/ui/modal";
 import { WorkspaceMenu } from "@/components/workspace-menu";
 import { useAuth } from "@/lib/auth-context";
 import { useI18n, useUiLocale, type MessageKey } from "@/lib/i18n";
@@ -27,6 +26,8 @@ import { uiText } from "@/lib/locale";
 import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
 import { useNavigationShell } from "@/lib/navigation-shell";
 import { useInboxCount } from "@/lib/queries/inbox";
+import { openKeyboardShortcuts } from "@/lib/keyboard-commands";
+import { useCollectionsPane } from "@/lib/collections-pane-context";
 
 type RailDestination =
   | "library"
@@ -45,7 +46,7 @@ type NavItem = {
 };
 
 const mainItems: NavItem[] = [
-  { id: "library", href: "/", labelKey: "nav.vault", icon: FolderClosed },
+  { id: "library", href: "/", labelKey: "Collections", icon: FolderClosed },
   { id: "search", href: "/search", labelKey: "Search", icon: Search },
   { id: "inbox", href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
   { id: "favorites", href: "/?favorites=true", labelKey: "Favorites", icon: Star },
@@ -99,13 +100,13 @@ export function SidebarNav() {
   const { user, logout } = useAuth();
   const { t } = useI18n();
   const startup = useLibraryStartup();
+  const pane = useCollectionsPane();
   const { requestSavedViews, savedViewsOpen, savedViewsAvailable, attachSavedViews } =
     useNavigationShell();
   const inbox = useInboxCount(user !== null && startup.canLoad("inbox"));
   const pendingCount = user ? (inbox.data ?? 0) : 0;
   const homeHref = useSyncExternalStore(subscribeLastVaultHref, lastVaultHref);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
   const favorites = pathname === "/" && params.get("favorites") === "true";
 
   async function handleLogout() {
@@ -117,30 +118,38 @@ export function SidebarNav() {
   function isActive(id: RailDestination) {
     switch (id) {
       case "library":
+        if (pane?.open) return pane.mode === "collections" && !savedViewsOpen;
         return (
           !savedViewsOpen &&
           !favorites &&
           (pathname === "/" || /^\/(models|multipart-models|documents)\//.test(pathname))
         );
       case "search":
+        if (pane?.open) return pane.mode === "search";
         return pathname.startsWith("/search");
       case "inbox":
+        if (pane?.open && pane.mode === "pending") return true;
         return pathname.startsWith("/inbox");
       case "favorites":
+        if (pane?.open && pane.mode !== "favorites") return false;
         return favorites && !savedViewsOpen;
       case "printers":
         return pathname.startsWith("/printers");
       case "profiles":
         return pathname.startsWith("/profiles");
       case "trash":
-        return pathname === "/settings" && params.get("section") === "trash";
+        return (
+          pathname === "/settings" &&
+          params.get("section") === "trash" &&
+          params.get("view") !== "settings"
+        );
     }
   }
 
   const railClass = (active: boolean) =>
     `relative flex h-10 w-10 shrink-0 items-center justify-center transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
       active
-        ? "bg-accent text-accent-foreground before:absolute before:-left-1.5 before:bottom-2.5 before:top-2.5 before:w-0.5 before:bg-primary"
+        ? "bg-accent text-accent-foreground before:absolute before:-left-1.5 before:bottom-[9px] before:top-[9px] before:w-[3px] before:bg-primary"
         : "text-muted-foreground hover:bg-muted hover:text-foreground"
     }`;
 
@@ -153,7 +162,21 @@ export function SidebarNav() {
         key={item.id}
         href={item.href}
         title={label}
-        aria-current={active ? "page" : undefined}
+        aria-current={
+          active && item.id !== "library" && item.id !== "search" && item.id !== "inbox"
+            ? "page"
+            : undefined
+        }
+        aria-expanded={
+          item.id === "library" || item.id === "search" || item.id === "inbox"
+            ? active && pane?.open
+            : undefined
+        }
+        aria-controls={
+          item.id === "library" || item.id === "search" || item.id === "inbox"
+            ? "collections-pane"
+            : undefined
+        }
         className={railClass(active)}
         onClick={(event) => {
           const target = event.currentTarget.getAttribute("target");
@@ -169,13 +192,22 @@ export function SidebarNav() {
           )
             return;
           event.preventDefault();
+          if (pane && (item.id === "library" || item.id === "search" || item.id === "inbox")) {
+            const mode =
+              item.id === "library" ? "collections" : item.id === "search" ? "search" : "pending";
+            if (pane.open && pane.mode === mode) pane.toggle();
+            else if (mode === "collections") pane.showCollections();
+            else if (mode === "search") pane.showSearch();
+            else pane.showPending();
+            return;
+          }
           router.push(item.href);
         }}
       >
         <item.icon className="h-5 w-5" strokeWidth={1.6} aria-hidden />
         <span className="sr-only">{label}</span>
         {item.id === "inbox" && pendingCount > 0 && (
-          <span className="absolute right-0 top-0 min-w-4 rounded-full bg-secondary px-1 text-center font-mono text-3xs font-semibold leading-4 text-secondary-foreground">
+          <span className="absolute right-[3px] top-[3px] min-w-[18px] rounded-full bg-secondary px-1 text-center font-mono text-2xs font-semibold leading-[18px] text-secondary-foreground">
             {pendingCount}
           </span>
         )}
@@ -187,7 +219,7 @@ export function SidebarNav() {
     <>
       <nav
         aria-label={uiText("Navigation")}
-        className="hidden h-full w-rail shrink-0 flex-col items-center border-r border-border bg-rail py-2.5 md:flex"
+        className="hidden h-full w-rail shrink-0 flex-col items-center gap-1 border-r border-border bg-rail py-2.5 md:flex"
       >
         <Link
           href={homeHref}
@@ -207,8 +239,13 @@ export function SidebarNav() {
                 aria-pressed={savedViewsOpen}
                 className={railClass(savedViewsOpen)}
                 onClick={() => {
-                  requestSavedViews();
-                  if (pathname !== "/") router.push("/");
+                  if (pane) {
+                    if (pane.open && pane.mode === "views") pane.toggle();
+                    else pane.showSavedViews();
+                  } else {
+                    requestSavedViews();
+                    if (pathname !== "/") router.push("/");
+                  }
                 }}
               >
                 <Bookmark className="h-5 w-5" strokeWidth={1.6} aria-hidden />
@@ -223,7 +260,7 @@ export function SidebarNav() {
             title={uiText("Keyboard shortcuts")}
             aria-label={uiText("Keyboard shortcuts")}
             className={railClass(false)}
-            onClick={() => setHelpOpen(true)}
+            onClick={openKeyboardShortcuts}
           >
             <Keyboard className="h-5 w-5" strokeWidth={1.6} aria-hidden />
           </button>
@@ -233,6 +270,8 @@ export function SidebarNav() {
               onOpenChange={setAccountOpen}
               align="start"
               role="menu"
+              portal
+              contentClassName="desktop-workspace-popover"
               trigger={
                 <button
                   type="button"
@@ -271,28 +310,6 @@ export function SidebarNav() {
           )}
         </div>
       </nav>
-      <Modal
-        open={helpOpen}
-        onClose={() => setHelpOpen(false)}
-        title={uiText("Keyboard shortcuts")}
-      >
-        <dl className="divide-y divide-border text-sm">
-          <div className="flex items-center justify-between gap-4 py-3">
-            <dt>{uiText("Focus library search")}</dt>
-            <dd>
-              <kbd className="border border-border bg-muted px-2 py-1 font-mono">/</kbd>
-            </dd>
-          </div>
-          <div className="flex items-center justify-between gap-4 py-3">
-            <dt>{uiText("Clear selection")}</dt>
-            <dd>
-              <kbd className="border border-border bg-muted px-2 py-1 font-mono">
-                {t("keyboard.escape")}
-              </kbd>
-            </dd>
-          </div>
-        </dl>
-      </Modal>
     </>
   );
 }

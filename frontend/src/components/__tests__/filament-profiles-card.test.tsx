@@ -24,10 +24,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilamentProfilesCard } from "@/components/filament-profiles-card";
-import { anEditingBase } from "@/test-support/factories";
+import { anEditingBase, aVaultConfig } from "@/test-support/factories";
 import { clearLogin } from "@/lib/auth-store";
 import { queryClient, queryKeys } from "@/lib/query-client";
-import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
+import { json, memberSession, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { FilamentProfileRead, PrinterProfileRead } from "@/types";
 
 const FROZEN_NOW = "2026-01-01T00:00:00Z";
@@ -189,7 +189,7 @@ describe("FilamentProfilesCard", () => {
       fireEvent.change(await screen.findByRole("textbox", { name: "Filament preset name 1" }), {
         target: { value: "Local draft" },
       });
-      await user.click(screen.getByRole("button", { name: "New filament" }));
+      await user.click(screen.getByRole("button", { name: "New filament profile" }));
       await user.type(
         within(screen.getByRole("form", { name: "Create filament preset" })).getByRole("textbox", {
           name: "Name",
@@ -197,7 +197,7 @@ describe("FilamentProfilesCard", () => {
         "Second preset",
       );
 
-      await user.click(screen.getByRole("button", { name: "Add preset" }));
+      await user.click(screen.getByRole("button", { name: "Add profile" }));
 
       await waitFor(() =>
         expect(
@@ -287,7 +287,7 @@ describe("FilamentProfilesCard", () => {
       });
       fireEvent.change(existingName, { target: { value: "Unsaved existing row" } });
       const opener = screen.getByRole("button", {
-        name: kind === "filament" ? "New filament" : "New printer",
+        name: kind === "filament" ? "New filament profile" : "New printer profile",
       });
       await user.click(opener);
       const formName = kind === "filament" ? "Create filament preset" : "Create printer preset";
@@ -296,7 +296,9 @@ describe("FilamentProfilesCard", () => {
 
       await user.click(within(form).getByRole("button", { name: "Cancel" }));
 
-      expect(screen.queryByRole("form", { name: formName })).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.queryByRole("form", { name: formName })).not.toBeInTheDocument(),
+      );
       expect(opener).toHaveFocus();
       await user.click(opener);
       for (const field of within(screen.getByRole("form", { name: formName })).getAllByRole(
@@ -317,7 +319,7 @@ describe("FilamentProfilesCard", () => {
         if (kind === "printer") await user.click(screen.getByRole("tab", { name: /Printers/ }));
         await openProfileRows();
         const opener = screen.getByRole("button", {
-          name: kind === "filament" ? "New filament" : "New printer",
+          name: kind === "filament" ? "New filament profile" : "New printer profile",
         });
         await user.click(opener);
         const formName = kind === "filament" ? "Create filament preset" : "Create printer preset";
@@ -328,7 +330,15 @@ describe("FilamentProfilesCard", () => {
           "Draft to resume",
         );
 
-        await user.click(opener);
+        const dialogName = kind === "filament" ? "New filament preset" : "New printer preset";
+        await user.click(
+          within(screen.getByRole("dialog", { name: dialogName })).getByRole("button", {
+            name: "Close",
+          }),
+        );
+        await waitFor(() =>
+          expect(screen.queryByRole("dialog", { name: dialogName })).not.toBeInTheDocument(),
+        );
         await user.click(opener);
 
         expect(
@@ -341,6 +351,33 @@ describe("FilamentProfilesCard", () => {
   });
 
   describe("creating a filament preset", () => {
+    it("labels preset cost with the configured currency", async () => {
+      const config = aVaultConfig({ currency: "EUR" });
+      await renderCard({
+        expand: false,
+        seed: [[queryKeys.vaultConfig, config]],
+        routes: { "GET /api/v1/config": json(config) },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "New filament profile" }));
+      expect(await screen.findByLabelText("Cost per kg (EUR)")).toHaveAccessibleDescription(
+        "Euro per kilogram. Enter zero or a positive amount.",
+      );
+    });
+
+    it("does not expose cached administrator currency to a member", async () => {
+      const app = await renderCard({
+        expand: false,
+        auth: memberSession(),
+        seed: [[queryKeys.vaultConfig, aVaultConfig({ currency: "EUR" })]],
+      });
+      await userEvent.click(screen.getByRole("button", { name: "New filament profile" }));
+      expect(screen.getByLabelText("Cost per kg")).toHaveAccessibleDescription(
+        "Enter zero or a positive amount.",
+      );
+      expect(
+        app.requestsWithMethod("GET").filter((request) => request.url.endsWith("/api/v1/config")),
+      ).toHaveLength(0);
+    });
     async function openForm(user: ReturnType<typeof userEvent.setup>) {
       await screen.findByText("Filament presets");
       await user.click(screen.getByRole("button", { name: /New filament/ }));
@@ -352,7 +389,7 @@ describe("FilamentProfilesCard", () => {
 
       await openForm(user);
 
-      expect(screen.getByRole("button", { name: "Add preset" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Add profile" })).toBeDisabled();
     });
 
     it("POSTs the preset the user described", async () => {
@@ -366,7 +403,7 @@ describe("FilamentProfilesCard", () => {
       await user.type(screen.getByPlaceholderText("Everyday PLA"), "PETG");
       await user.type(screen.getByPlaceholderText("PLA, PETG…"), "PETG");
 
-      await user.click(screen.getByRole("button", { name: "Add preset" }));
+      await user.click(screen.getByRole("button", { name: "Add profile" }));
 
       await waitFor(() =>
         expect(
@@ -390,7 +427,7 @@ describe("FilamentProfilesCard", () => {
       await openForm(user);
       await user.type(screen.getByPlaceholderText("Everyday PLA"), "PETG");
 
-      await user.click(screen.getByRole("button", { name: "Add preset" }));
+      await user.click(screen.getByRole("button", { name: "Add profile" }));
 
       await waitFor(() =>
         expect(
@@ -1144,7 +1181,11 @@ describe("FilamentProfilesCard", () => {
       });
       await screen.findByLabelText("Filament preset name 1");
 
-      await user.click(screen.getByRole("button", { name: /Delete filament preset/ }));
+      await user.click(
+        within(screen.getByRole("dialog", { name: "Edit filament preset" })).getByRole("button", {
+          name: /Delete filament preset/,
+        }),
+      );
 
       expect(requestsWithMethod("DELETE")).toHaveLength(0);
       expect(screen.getByRole("dialog", { name: "Delete filament preset?" })).toBeInTheDocument();
@@ -1192,7 +1233,7 @@ describe("FilamentProfilesCard", () => {
       await renderCard();
 
       await screen.findByText("Filament presets");
-      expect(screen.queryByRole("button", { name: /Sync Spoolman/ })).toBeNull();
+      expect(screen.getByRole("button", { name: /Sync Spoolman/ })).toBeDisabled();
     });
 
     it("pulls the filaments Spoolman knows about", async () => {
@@ -1287,7 +1328,9 @@ describe("FilamentProfilesCard", () => {
       await screen.findByText("Filament presets");
 
       await user.click(
-        await screen.findByRole("button", { name: "Delete filament preset Everyday PLA" }),
+        within(screen.getByRole("dialog", { name: "Edit filament preset" })).getByRole("button", {
+          name: "Delete filament preset Everyday PLA",
+        }),
       );
       await user.click(
         within(screen.getByRole("dialog", { name: "Delete filament preset?" })).getByRole(
@@ -1313,7 +1356,9 @@ describe("FilamentProfilesCard", () => {
       await openProfileRows();
 
       await user.click(
-        screen.getByRole("button", { name: "Delete printer preset Voron 2.4 — 0.4 mm" }),
+        within(screen.getByRole("dialog", { name: "Edit printer preset" })).getByRole("button", {
+          name: "Delete printer preset Voron 2.4 — 0.4 mm",
+        }),
       );
       await user.click(
         within(screen.getByRole("dialog", { name: "Delete printer preset?" })).getByRole("button", {
@@ -1338,7 +1383,9 @@ describe("FilamentProfilesCard", () => {
         },
       });
       await user.click(
-        await screen.findByRole("button", { name: "Delete filament preset Everyday PLA" }),
+        within(screen.getByRole("dialog", { name: "Edit filament preset" })).getByRole("button", {
+          name: "Delete filament preset Everyday PLA",
+        }),
       );
       await user.click(
         within(screen.getByRole("dialog", { name: "Delete filament preset?" })).getByRole(
@@ -1365,7 +1412,7 @@ describe("FilamentProfilesCard", () => {
       await user.click(screen.getByRole("button", { name: /New printer/ }));
       await user.type(screen.getByPlaceholderText("Voron 2.4 — 0.4 mm"), "Prusa MK4");
 
-      await user.click(screen.getByRole("button", { name: "Add preset" }));
+      await user.click(screen.getByRole("button", { name: "Add profile" }));
 
       await waitFor(() =>
         expect(
@@ -1507,7 +1554,17 @@ describe("Integrated profile settings", () => {
   });
 });
 
-describe("Collapsible profile rows", () => {
+async function closeProfileEditor() {
+  const dialog = screen.getByRole("dialog", { name: /Edit (filament|printer) preset/ });
+  await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: /Edit (filament|printer) preset/ }),
+    ).not.toBeInTheDocument(),
+  );
+}
+
+describe("Profile selection", () => {
   it("does not present a missing usage count as a number", async () => {
     await renderCard({
       expand: false,
@@ -1530,17 +1587,15 @@ describe("Collapsible profile rows", () => {
     const details = await screen.findByRole("complementary");
     expect(within(details).getByText("Everyday PLA")).toBeVisible();
     expect(within(details).getByText("PLA")).toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: "View details for Workshop PETG" }));
+    await user.click(await screen.findByRole("button", { name: /^Workshop PETG/ }));
     expect(within(details).getByText("Workshop PETG")).toBeVisible();
     expect(within(details).getByText("PETG")).toBeVisible();
   });
-
   it("shows the first profile's settings without opening its editor", async () => {
     await renderCard({ expand: false });
     expect(await screen.findByRole("heading", { name: "Everyday PLA" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Hide details for Everyday PLA" })).toHaveAttribute(
-      "aria-expanded",
+    expect(screen.getByRole("button", { name: /^Everyday PLA/ })).toHaveAttribute(
+      "aria-pressed",
       "true",
     );
     expect(screen.getByRole("region", { name: "Settings for Everyday PLA" })).toBeVisible();
@@ -1548,63 +1603,64 @@ describe("Collapsible profile rows", () => {
       screen.queryByRole("textbox", { name: "Filament preset name 1" }),
     ).not.toBeInTheDocument();
   });
-
-  it("opens details from the keyboard", async () => {
+  it("opens the selected profile editor using the keyboard", async () => {
     const user = userEvent.setup();
-    await renderCard({ expand: false });
-    await user.click(await screen.findByRole("button", { name: "Hide details for Everyday PLA" }));
-    const button = await screen.findByRole("button", { name: "View details for Everyday PLA" });
-    button.focus();
+    await renderCard({
+      expand: false,
+      filaments: [aFilamentProfile(), aFilamentProfile({ id: 2, name: "Workshop PETG" })],
+    });
+    const choice = await screen.findByRole("button", { name: /^Workshop PETG/ });
+    choice.focus();
     await user.keyboard("{Enter}");
+    expect(choice).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("region", { name: "Settings for Workshop PETG" })).toBeVisible();
     expect(
-      screen.queryByRole("textbox", { name: "Filament preset name 1" }),
+      screen.queryByRole("textbox", { name: "Filament preset name 2" }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Settings for Everyday PLA" })).toBeVisible();
-    expect(button).toHaveAttribute("aria-expanded", "true");
-    const edit = screen.getByRole("button", { name: "Edit profile Everyday PLA" });
+    const edit = screen.getByRole("button", { name: "Edit profile Workshop PETG" });
     edit.focus();
     await user.keyboard("{Enter}");
-    expect(screen.getByRole("textbox", { name: "Filament preset name 1" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Filament preset name 2" })).toBeVisible();
   });
-
-  it("collapses the full profile details", async () => {
+  it("switches the full details to the selected preset", async () => {
     const user = userEvent.setup();
-    await renderCard();
-    await user.click(screen.getByRole("button", { name: "Hide details for Everyday PLA" }));
-    expect(
-      screen.queryByRole("textbox", { name: "Filament preset name 1" }),
-    ).not.toBeInTheDocument();
+    await renderCard({
+      expand: false,
+      filaments: [aFilamentProfile(), aFilamentProfile({ id: 2, name: "Workshop PETG" })],
+    });
+    await user.click(await screen.findByRole("button", { name: /^Workshop PETG/ }));
     expect(
       screen.queryByRole("region", { name: "Settings for Everyday PLA" }),
     ).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Settings for Workshop PETG" })).toBeVisible();
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
-
-  it("preserves an invalid draft across collapsing", async () => {
-    const user = userEvent.setup();
-    const app = await renderCard();
-    const cost = screen.getByRole("textbox", { name: "Filament cost per kg 1" });
-    await user.clear(cost);
-    await user.type(cost, "-1");
-    await user.click(screen.getByRole("button", { name: "Hide details for Everyday PLA" }));
-    await user.click(screen.getByRole("button", { name: "View details for Everyday PLA" }));
+  it("preserves an invalid draft across profile selection", async () => {
+    const app = await renderCard({
+      filaments: [aFilamentProfile(), aFilamentProfile({ id: 2, name: "Workshop PETG" })],
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Filament cost per kg 1" }), {
+      target: { value: "-1" },
+    });
+    await closeProfileEditor();
+    await userEvent.click(screen.getByRole("button", { name: /^Workshop PETG/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Everyday PLA/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Edit profile Everyday PLA" }));
     expect(screen.getByRole("textbox", { name: "Filament cost per kg 1" })).toHaveValue("-1");
     expect(screen.getByText("Cost must be 0 or more.")).toBeVisible();
     expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
   });
-
-  it("saves edited values when closing details", async () => {
-    const user = userEvent.setup();
+  it("saves edited values when closing the editor", async () => {
     const app = await renderCard({
       routes: { "PATCH /api/v1/filament-profiles/1": json(aFilamentProfile({ cost_per_kg: 42 })) },
     });
-    const cost = screen.getByRole("textbox", { name: "Filament cost per kg 1" });
-    await user.clear(cost);
-    await user.type(cost, "42");
-    await user.click(screen.getByRole("button", { name: "Hide details for Everyday PLA" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Filament cost per kg 1" }), {
+      target: { value: "42" },
+    });
+    await closeProfileEditor();
     await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
     expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toEqual({ cost_per_kg: 42 });
   });
-
   it("shows long notes in a multiline control", async () => {
     const notes = "A long calibration note. ".repeat(12);
     await renderCard({ filaments: [aFilamentProfile({ notes })] });
@@ -1614,24 +1670,22 @@ describe("Collapsible profile rows", () => {
 });
 
 describe("Profile consultation and editing", () => {
-  it("isolates disclosure state by preset kind", async () => {
-    await renderCard();
+  it("isolates selection by preset kind", async () => {
+    await renderCard({ expand: false });
     await userEvent.click(screen.getByRole("tab", { name: /Printers/ }));
-    const printerDetails = screen.getByRole("button", {
-      name: "Hide details for Voron 2.4 — 0.4 mm",
-    });
-    expect(printerDetails).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /^Voron 2\.4/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit profile Voron 2.4 — 0.4 mm" })).toBeVisible();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: /Filaments/ }));
-    expect(screen.getByRole("button", { name: "Hide details for Everyday PLA" })).toHaveAttribute(
-      "aria-expanded",
+    expect(screen.getByRole("button", { name: /^Everyday PLA/ })).toHaveAttribute(
+      "aria-pressed",
       "true",
     );
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
-
   it.each(["filament", "printer"] as const)(
     "opens %s settings without editable fields or writes",
     async (kind) => {
@@ -1641,22 +1695,20 @@ describe("Profile consultation and editing", () => {
         printers: [aPrinterProfile({ notes: "Calibration notes" })],
       });
       if (kind === "printer") await userEvent.click(screen.getByRole("tab", { name: /Printers/ }));
-      await screen.findByRole("button", { name: /^Hide details for / });
-      expect(screen.getByText("Calibration notes")).toBeVisible();
+      expect(await screen.findByText("Calibration notes")).toBeVisible();
       expect(screen.getByRole("button", { name: /^Edit profile / })).toBeVisible();
+      expect(screen.getByRole("button", { name: /^Delete .* preset / })).toBeVisible();
       expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: /^Delete .* preset / })).not.toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: /^Hide details for / }));
       expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
+      expect(app.requestsWithMethod("DELETE")).toHaveLength(0);
     },
   );
-
   it("retains an invalid draft across editor toggles", async () => {
     const app = await renderCard();
     fireEvent.change(screen.getByRole("textbox", { name: "Filament cost per kg 1" }), {
       target: { value: "-1" },
     });
-    await userEvent.click(screen.getByRole("button", { name: "Close editor for Everyday PLA" }));
+    await closeProfileEditor();
     expect(
       screen.queryByRole("textbox", { name: "Filament cost per kg 1" }),
     ).not.toBeInTheDocument();
@@ -1665,7 +1717,6 @@ describe("Profile consultation and editing", () => {
     expect(screen.getByText("Cost must be 0 or more.")).toBeVisible();
     expect(app.requestsWithMethod("PATCH")).toHaveLength(0);
   });
-
   it("saves a changed value when returning from the editor to consultation", async () => {
     const app = await renderCard({
       routes: { "PATCH /api/v1/filament-profiles/1": json(aFilamentProfile({ cost_per_kg: 42 })) },
@@ -1673,7 +1724,7 @@ describe("Profile consultation and editing", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Filament cost per kg 1" }), {
       target: { value: "42" },
     });
-    await userEvent.click(screen.getByRole("button", { name: "Close editor for Everyday PLA" }));
+    await closeProfileEditor();
     await waitFor(() => expect(app.requestsWithMethod("PATCH")).toHaveLength(1));
     expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toEqual({ cost_per_kg: 42 });
     expect(

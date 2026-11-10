@@ -11,7 +11,7 @@ import { useMockApi } from "./_setup";
 useMockApi();
 
 test.describe("OpenDesign shell", () => {
-  test("the desktop rail opens a destination", async ({ page }) => {
+  test("the desktop rail opens its search context", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/");
     const rail = page.getByRole("navigation", { name: "Navigation" });
@@ -19,10 +19,10 @@ test.describe("OpenDesign shell", () => {
 
     await rail.getByRole("link", { name: "Search" }).click();
 
-    await expect(page).toHaveURL(/\/search/);
+    await expect(page.getByRole("complementary", { name: "Search panel" })).toBeVisible();
     await expect(rail.getByRole("link", { name: "Search" })).toHaveAttribute(
-      "aria-current",
-      "page",
+      "aria-expanded",
+      "true",
     );
   });
 
@@ -51,7 +51,7 @@ test.describe("OpenDesign shell", () => {
       const upload = page.getByRole("button", { name: "Upload", exact: true }).first();
       const current = page
         .getByRole("navigation", { name: "Navigation" })
-        .getByRole("link", { name: "Vault" });
+        .getByRole("link", { name: "Collections" });
 
       await expect(upload).toHaveCSS("background-color", "rgb(77, 111, 155)");
       await expect(upload).toHaveCSS("border-radius", "0px");
@@ -62,11 +62,15 @@ test.describe("OpenDesign shell", () => {
   test("the phone navigation remains usable at 320 pixels", async ({ page }) => {
     await page.setViewportSize({ width: 320, height: 700 });
     await page.goto("/");
+    // The development inspector launcher is absent from the shipping build.
+    // Keep the pointer path equal to production rather than clicking through it.
+    await page.addStyleTag({ content: ".tsqd-parent-container { display: none !important; }" });
+    await expect(page.locator(".tsqd-parent-container")).toBeHidden();
     const more = page.getByRole("navigation").getByRole("button", { name: "More", exact: true });
 
     await more.click();
 
-    await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
+    await expect(page.getByRole("menu")).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
   });
 });

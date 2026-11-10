@@ -217,13 +217,16 @@ export function InspectedPrintCard({
         <div className="flex flex-wrap gap-2">
           {canSend && (
             <>
-              <Button onClick={() => onSend("send")}>{uiText("Send to printer")}</Button>
-              <Button variant="outline" onClick={() => onSend("queue")}>
+              <Button size="sm" onClick={() => onSend("send")}>
+                {uiText("Send to printer")}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => onSend("queue")}>
                 {uiText("Add to queue")}
               </Button>
             </>
           )}
           <Button
+            size="sm"
             variant="ghost"
             onClick={() =>
               void downloadAuthenticatedFile(
@@ -235,7 +238,7 @@ export function InspectedPrintCard({
             {uiText("Download")}
           </Button>
         </div>
-        <Button variant="ghost" onClick={onCompare}>
+        <Button size="sm" variant="ghost" onClick={onCompare}>
           {uiText("Compare revisions")}
         </Button>
       </div>

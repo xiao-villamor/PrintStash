@@ -63,7 +63,7 @@ export function ViewerToolbar({
             variant="outline"
             size="sm"
             aria-label={uiText("Screenshot")}
-            disabled={!viewerReady || viewerMode !== "model"}
+            disabled={!viewerReady}
             onClick={() => {
               const result = controls.current?.screenshot();
               if (result)
@@ -76,7 +76,13 @@ export function ViewerToolbar({
             {uiText("Capture")}
           </Button>
           {onExpand && (
-            <Button variant="outline" size="sm" aria-pressed={expanded} onClick={onExpand}>
+            <Button
+              data-preview-expand
+              variant="outline"
+              size="sm"
+              aria-pressed={expanded}
+              onClick={onExpand}
+            >
               {expanded ? uiText("Collapse preview") : uiText("Expand")}
             </Button>
           )}
@@ -108,7 +114,7 @@ export function ViewerToolbar({
             </div>
           </div>
         )}
-        {viewerMode === "model" && (
+        {
           <>
             <div className="detail-viewer-control-group">
               <span>{uiText("Display")}</span>
@@ -118,7 +124,7 @@ export function ViewerToolbar({
                     key={mode}
                     size="sm"
                     variant="ghost"
-                    disabled={!viewerReady}
+                    disabled={!viewerReady || viewerMode !== "model"}
                     aria-pressed={displayMode === mode}
                     className={buttonClass(displayMode === mode)}
                     onClick={() => setDisplayMode(mode)}
@@ -161,7 +167,7 @@ export function ViewerToolbar({
               </div>
             </div>
           </>
-        )}
+        }
       </div>
       {viewerMode === "model" && (
         <div className="detail-viewer-dock">

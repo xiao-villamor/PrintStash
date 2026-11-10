@@ -74,9 +74,7 @@ test.describe("Library navigation", () => {
       const key = await page.evaluate(() => window.history.state.__TSR_key);
       await link.click();
       await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
-      await page
-        .getByRole("link", { name: kind === "Model" ? "Back" : "Multipart sets", exact: true })
-        .click();
+      await page.getByRole("link", { name: "Back", exact: true }).click();
 
       await expect(page).toHaveURL(origin);
       await expect(link).toBeVisible();
@@ -116,7 +114,7 @@ test.describe("Library navigation", () => {
         .getByRole("link", { name: /skadis_kitchen-roll_screw/ })
         .first();
       await scrollToLibraryEntry(page, link);
-      const before = await link.evaluate((element) => ({
+      let before = await link.evaluate((element) => ({
         top: element.getBoundingClientRect().top,
         offsets: Array.from(document.querySelectorAll("main, main .overflow-y-auto")).map(
           (node) => node.scrollTop,
@@ -127,6 +125,24 @@ test.describe("Library navigation", () => {
       if (!box) throw new Error("Reading anchor has no visible box");
       // Navigate through the card body; its upper-left corner selects it.
       await link.click({ position: { x: box.width / 2, y: box.height / 2 } });
+      const openPage = page
+        .locator("#model-drawer")
+        .getByRole("link", { name: "Open page", exact: true });
+      await expect(openPage).toBeVisible();
+      // The dock can change desktop columns. Record the actual departure layout.
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      before = await link.evaluate((element) => ({
+        top: element.getBoundingClientRect().top,
+        offsets: Array.from(document.querySelectorAll("main, main .overflow-y-auto")).map(
+          (node) => node.scrollTop,
+        ),
+      }));
+      await openPage.click();
       await expect(
         page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
       ).toBeVisible();
@@ -189,11 +205,18 @@ test.describe("Library navigation", () => {
         .getByRole("link", { name: /skadis_kitchen-roll_screw/ })
         .first();
       await scrollToLibraryEntry(page, link);
-      const before = await link.evaluate((node) => node.getBoundingClientRect().top);
+      let before = await link.evaluate((node) => node.getBoundingClientRect().top);
       const box = await link.boundingBox();
       if (!box) throw new Error("Reading anchor has no visible box");
       // Navigate through the card body; its upper-left corner selects it.
       await link.click({ position: { x: box.width / 2, y: box.height / 2 } });
+      const openPage = page
+        .locator("#model-drawer")
+        .getByRole("link", { name: "Open page", exact: true });
+      await expect(openPage).toBeVisible();
+      await page.clock.runFor(100);
+      before = await link.evaluate((node) => node.getBoundingClientRect().top);
+      await openPage.click();
       await expect(
         page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
       ).toBeVisible();

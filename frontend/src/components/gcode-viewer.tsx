@@ -7,13 +7,15 @@ import React, { useEffect, useMemo, useRef, useState, type ComponentType } from 
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
-import { AlertTriangle, Layers, Loader2 } from "lucide-react";
+import { AlertTriangle, Layers, Loader2, Minus, Plus } from "lucide-react";
 import { getDerivedText } from "@/lib/api/request";
 import { subscribeEvents } from "@/lib/events";
 import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
 import { previewPixelRatio, usePreviewPreferences } from "@/lib/preview-preferences";
 import type { ToolpathData } from "@/lib/gcode";
 import { parseGcodeInWorker, ToolpathParseError } from "@/lib/gcode-worker-client";
+
+import type { STLViewerControls, ViewerCameraPreset } from "@/components/stl-viewer";
 
 // ---- Three.js Scene ----
 
@@ -23,14 +25,20 @@ function GcodeScene({
   showTravel,
   showBed,
   printerBedMm,
+  showGrid,
+  onControlsReady,
+  screenshotName,
 }: {
   data: ToolpathData;
   currentLayer: number;
   showTravel: boolean;
   showBed: boolean;
   printerBedMm: { x: number; y: number } | null;
+  showGrid: boolean;
+  onControlsReady: (controls: STLViewerControls | null) => void;
+  screenshotName: string;
 }) {
-  const { camera } = useThree();
+  const { camera, gl, scene } = useThree();
   const orbitRef = useRef<any>(null);
 
   const extrudeGeo = useMemo(() => {
@@ -75,16 +83,51 @@ function GcodeScene({
     extrudeGeo.setDrawRange(0, count);
   }, [currentLayer, data, extrudeGeo]);
 
-  // Reset camera and OrbitControls when data changes
   useEffect(() => {
-    const d = data.bounds.maxDim;
-    camera.position.set(d * 0.8, d * 0.9, d * 1.2);
-    if (orbitRef.current) {
-      orbitRef.current.target.set(0, 0, 0);
-      orbitRef.current.update();
+    const distance = Math.max(data.bounds.maxDim, 1);
+    function setView(preset: ViewerCameraPreset) {
+      camera.up.set(0, 1, 0);
+      if (preset === "front") camera.position.set(0, 0, distance * 1.8);
+      else if (preset === "top") {
+        camera.up.set(0, 0, -1);
+        camera.position.set(0, distance * 1.8, 0);
+      } else camera.position.set(distance * 0.8, distance * 0.9, distance * 1.2);
+      orbitRef.current?.target.set(0, 0, 0);
+      camera.lookAt(0, 0, 0);
+      orbitRef.current?.update();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
+    function zoom(factor: number) {
+      const target = orbitRef.current?.target ?? new THREE.Vector3();
+      camera.position.sub(target).multiplyScalar(factor).add(target);
+      orbitRef.current?.update();
+    }
+    setView("isometric");
+    onControlsReady({
+      setView,
+      zoomIn: () => zoom(0.8),
+      zoomOut: () => zoom(1.25),
+      fit: () => setView("isometric"),
+      resetView: () => setView("isometric"),
+      screenshot: async () => {
+        gl.render(scene, camera);
+        const blob = await new Promise<Blob>((resolve, reject) =>
+          gl.domElement.toBlob(
+            (value) => (value ? resolve(value) : reject(new Error("screenshot_encoding_failed"))),
+            "image/png",
+          ),
+        );
+        const href = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = href;
+        link.download = `${screenshotName}.png`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(href);
+      },
+    });
+    return () => onControlsReady(null);
+  }, [data, camera, gl, scene, screenshotName, onControlsReady]);
 
   const gridHalfSize =
     showBed && printerBedMm
@@ -106,7 +149,7 @@ function GcodeScene({
       {showTravel && data.travelPositions.length > 0 && <primitive object={travelLines} />}
 
       {/* Bed platform (only in bed-fit mode) */}
-      {showBed && bedGeo && bedEdgesGeo && printerBedMm && (
+      {showGrid && showBed && bedGeo && bedEdgesGeo && printerBedMm && (
         <group position={[0, floorY - 0.5, 0]} rotation={[-Math.PI / 2, 0, 0]}>
           <mesh geometry={bedGeo}>
             <meshStandardMaterial
@@ -127,7 +170,7 @@ function GcodeScene({
       )}
 
       {/* Default floor grid (when not in bed-fit mode) */}
-      {!showBed && (
+      {showGrid && (!showBed || !printerBedMm) && (
         <gridHelper
           args={[gridHalfSize * 2, 20, "#475569", "#334155"]}
           position={[0, floorY - 0.5, 0]}
@@ -210,6 +253,9 @@ export interface GcodeViewerProps {
   url: string;
   printerBedMm?: { x: number; y: number } | null;
   screenshotName?: string;
+  showGrid?: boolean;
+  showDimensions?: boolean;
+  onControlsReady?: (controls: STLViewerControls | null) => void;
   canvasRenderer?: ComponentType<CanvasRendererProps>;
   toolpathParser?: typeof parseGcodeInWorker;
   toolpathFetcher?: typeof getDerivedText;
@@ -219,6 +265,10 @@ export interface GcodeViewerProps {
 export function GcodeViewer({
   url,
   printerBedMm = null,
+  screenshotName = "toolpath",
+  showGrid = true,
+  showDimensions = true,
+  onControlsReady,
   canvasRenderer,
   toolpathParser = parseGcodeInWorker,
   toolpathFetcher = getDerivedText,
@@ -235,6 +285,16 @@ export function GcodeViewer({
   const [currentLayer, setCurrentLayer] = useState(0);
   const [showTravel, setShowTravel] = useState(false);
   const [showBed, setShowBed] = useState(true);
+  const localControls = useRef<STLViewerControls | null>(null);
+  const [cameraPreset, setCameraPreset] = useState<ViewerCameraPreset>("isometric");
+  const connectControls = React.useCallback(
+    (controls: STLViewerControls | null) => {
+      localControls.current = controls;
+      if (controls) setCameraPreset("isometric");
+      onControlsReady?.(controls);
+    },
+    [onControlsReady],
+  );
 
   useEffect(() => {
     if (!privateEventsEnabled) return;
@@ -395,77 +455,122 @@ export function GcodeViewer({
             showTravel={showTravel}
             showBed={showBed}
             printerBedMm={printerBedMm ?? null}
+            showGrid={showGrid}
+            onControlsReady={connectControls}
+            screenshotName={screenshotName}
           />
         </CanvasRenderer>
       </GcodeErrorBoundary>
 
-      {/* Layer controls overlay */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 w-[min(90%,440px)]">
-        <div className="bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded px-3 py-2 flex flex-col gap-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-              {viewerCopy(i18n, "viewer.layer", {
-                current: String(currentLayer + 1),
-                total: String(data.totalLayers),
-              })}
-              {data.layerRanges[currentLayer] && (
-                <>
-                  {" · "}
-                  {viewerCopy(i18n, "viewer.z", {
-                    value: formatNumber(data.layerRanges[currentLayer].z, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    }),
-                  })}
-                </>
-              )}
-            </span>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setShowTravel((v) => !v)}
-                aria-pressed={showTravel}
-                aria-label={viewerCopy(
-                  i18n,
-                  showTravel ? "viewer.hideTravel" : "viewer.showTravel",
-                )}
-                className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
-                  showTravel
-                    ? "border-primary text-primary bg-secondary-container"
-                    : "border-outline-variant text-muted-foreground hover:text-foreground"
-                }`}
+      {showDimensions && (
+        <div className="absolute bottom-24 left-3 bg-card px-2 py-1 text-xs text-muted-foreground">
+          {formatNumber(data.bounds.sizeX, { maximumFractionDigits: 1 })} ×{" "}
+          {formatNumber(data.bounds.sizeY, { maximumFractionDigits: 1 })} ×{" "}
+          {uiText("{value1} mm", {
+            value1: formatNumber(data.bounds.sizeZ, { maximumFractionDigits: 1 }),
+          })}
+        </div>
+      )}
+      <div className="absolute bottom-3 left-3 right-3 z-10 border border-border bg-card p-1.5">
+        <div className="flex flex-wrap items-center gap-1 text-[13px]">
+          <div className="flex">
+            {(["isometric", "front", "top"] as const).map((preset) => (
+              <Button
+                key={preset}
+                size="sm"
+                variant="ghost"
+                aria-pressed={cameraPreset === preset}
+                className={cameraPreset === preset ? "bg-accent" : ""}
+                onClick={() => {
+                  localControls.current?.setView(preset);
+                  setCameraPreset(preset);
+                }}
               >
-                {viewerCopy(i18n, "viewer.travel")}
-              </button>
-              {printerBedMm && (
-                <button
-                  type="button"
-                  onClick={() => setShowBed((v) => !v)}
-                  aria-pressed={showBed}
-                  aria-label={viewerCopy(i18n, showBed ? "viewer.hideBed" : "viewer.showBed")}
-                  className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border transition-colors ${
-                    showBed
-                      ? "border-blue-500 dark:border-blue-400 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30"
-                      : "border-outline-variant text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {viewerCopy(i18n, "viewer.bed", {
-                    x: String(printerBedMm.x),
-                    y: String(printerBedMm.y),
-                  })}
-                </button>
-              )}
-            </div>
+                {uiText(
+                  preset === "isometric" ? "Isometric" : preset === "front" ? "Front" : "Top",
+                )}
+              </Button>
+            ))}
           </div>
+          <span className="whitespace-nowrap">
+            {viewerCopy(i18n, "viewer.layer", {
+              current: String(currentLayer + 1),
+              total: String(data.totalLayers),
+            })}
+          </span>
+          {data.layerRanges[currentLayer] && (
+            <span className="whitespace-nowrap px-1">
+              {uiText("{value1} mm", {
+                value1: formatNumber(data.layerRanges[currentLayer].z, {
+                  maximumFractionDigits: 2,
+                }),
+              })}
+            </span>
+          )}
           <input
             aria-label={viewerCopy(i18n, "viewer.currentLayer")}
             type="range"
             min={0}
             max={data.totalLayers - 1}
             value={currentLayer}
-            onChange={(e) => setCurrentLayer(Number(e.target.value))}
-            className="w-full h-1.5 accent-primary cursor-action"
+            onChange={(event) => setCurrentLayer(Number(event.target.value))}
+            className="h-1.5 min-w-16 flex-1 accent-primary"
           />
+          <div className="flex">
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={uiText("Zoom out")}
+              onClick={() => localControls.current?.zoomOut()}
+            >
+              <Minus className="h-3 w-3" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              aria-label={uiText("Fit to view")}
+              onClick={() => {
+                localControls.current?.fit();
+                setCameraPreset("isometric");
+              }}
+            >
+              {uiText("Fit")}
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              aria-label={uiText("Zoom in")}
+              onClick={() => localControls.current?.zoomIn()}
+            >
+              <Plus className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2 px-2 text-xs text-muted-foreground">
+          <p>{uiText("Drag to orbit · Scroll to zoom")}</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              aria-pressed={showTravel}
+              onClick={() => setShowTravel((value) => !value)}
+              className={showTravel ? "text-foreground underline" : ""}
+            >
+              {viewerCopy(i18n, "viewer.travel")}
+            </button>
+            {printerBedMm && (
+              <button
+                type="button"
+                aria-pressed={showBed}
+                onClick={() => setShowBed((value) => !value)}
+                className={showBed ? "text-foreground underline" : ""}
+              >
+                {viewerCopy(i18n, "viewer.bed", {
+                  x: String(printerBedMm.x),
+                  y: String(printerBedMm.y),
+                })}
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

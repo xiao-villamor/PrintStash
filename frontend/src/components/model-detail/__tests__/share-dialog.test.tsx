@@ -162,7 +162,7 @@ describe("ShareDialog", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderShare();
       await screen.findByRole("dialog");
-      await user.click(screen.getByRole("checkbox", { name: /download/i }));
+      await user.click(screen.getByRole("radio", { name: "On" }));
 
       await user.click(screen.getByRole("button", { name: /Create link|Create/ }));
 
@@ -230,18 +230,47 @@ describe("ShareDialog", () => {
       const { onClose } = renderShare();
       await screen.findByRole("dialog");
 
-      await user.click(screen.getByRole("button", { name: /Close/ }));
+      await user.click(screen.getAllByRole("button", { name: "Close" }).at(-1)!);
 
       expect(onClose).toHaveBeenCalled();
     });
   });
   describe("scoping a link to particular revisions", () => {
-    it("shares every revision by default", async () => {
-      // The common case is "here is the model"; requiring a selection for it
-      // would make every share a two-step decision.
+    it("defaults the share to the recommended revision", async () => {
+      const user = userEvent.setup();
+      const view = renderShare({
+        files: [aGcode({ is_recommended: true }), aGcode({ id: 21, gcode_revision_number: 2 })],
+      });
+      await screen.findByRole("dialog");
+
+      await user.click(screen.getByRole("button", { name: "Create link" }));
+
+      await waitFor(() =>
+        expect(JSON.parse(view.requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
+          revision_file_ids: [20],
+        }),
+      );
+    });
+
+    it("shares one revision chosen by its quick selector", async () => {
+      const user = userEvent.setup();
+      const view = renderShare({ files: [aGcode(), aGcode({ id: 21, gcode_revision_number: 2 })] });
+      await user.click(await screen.findByRole("radio", { name: "Rev 1" }));
+
+      await user.click(screen.getByRole("button", { name: "Create link" }));
+
+      await waitFor(() =>
+        expect(JSON.parse(view.requestsWithMethod("POST").at(-1)?.body ?? "{}")).toMatchObject({
+          revision_file_ids: [20],
+        }),
+      );
+    });
+
+    it("shares every revision after an explicit choice", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderShare();
       await screen.findByRole("dialog");
+      await user.click(screen.getByRole("radio", { name: "Every revision" }));
 
       await user.click(screen.getByRole("button", { name: /Create link|Create/ }));
 
@@ -260,9 +289,10 @@ describe("ShareDialog", () => {
         files: [aGcode(), aGcode({ id: 21, gcode_revision_number: 2 })],
       });
       await screen.findByRole("dialog");
-      await user.click(screen.getByRole("button", { name: "Selected revisions" }));
+      await user.click(screen.getByRole("radio", { name: "Selected revisions" }));
 
-      await user.click(screen.getAllByRole("checkbox")[1]);
+      await user.click(screen.getByRole("checkbox", { name: /^Rev 2/ }));
+      await user.click(screen.getByRole("checkbox", { name: /^Rev 1/ }));
       await user.click(screen.getByRole("button", { name: /Create link|Create/ }));
 
       await waitFor(() =>
@@ -278,10 +308,8 @@ describe("ShareDialog", () => {
       const user = userEvent.setup();
       renderShare();
       await screen.findByRole("dialog");
-      await user.click(screen.getByRole("button", { name: "Selected revisions" }));
-      await user.click(screen.getAllByRole("checkbox")[1]);
-
-      await user.click(screen.getAllByRole("checkbox")[1]);
+      await user.click(screen.getByRole("radio", { name: "Selected revisions" }));
+      await user.click(screen.getByRole("checkbox", { name: /^Rev 1/ }));
 
       expect(screen.getByRole("button", { name: /Create link|Create/ })).toBeDisabled();
     });

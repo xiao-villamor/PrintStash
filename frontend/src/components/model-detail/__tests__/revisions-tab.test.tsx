@@ -87,6 +87,7 @@ function renderRevisions(
   } = options;
   const onModel = vi.fn<(model: ModelRead) => void>();
   const onAddRevision = vi.fn<() => void>();
+  const onLogPrint = vi.fn<(fileId: number, state: "completed" | "failed") => void>();
   const content = (files: FileRead[]) => (
     <RevisionsTab
       modelId={1}
@@ -96,6 +97,7 @@ function renderRevisions(
       printerFilesByFileId={new Map<number, ModelPrinterFileRead[]>()}
       onModel={onModel}
       onAddRevision={onAddRevision}
+      onLogPrint={onLogPrint}
       canEdit
     />
   );
@@ -110,6 +112,7 @@ function renderRevisions(
     ...result,
     onModel,
     onAddRevision,
+    onLogPrint,
     rerenderRevisions: (files: FileRead[]) => result.rerender(content(files)),
   };
 }
@@ -123,6 +126,55 @@ afterEach(() => {
 });
 
 describe("RevisionsTab", () => {
+  describe("keyboard revision selection", () => {
+    it("moves revision focus with the arrow selection", async () => {
+      const user = userEvent.setup();
+      renderRevisions();
+      await user.click(await screen.findByRole("button", { name: /^Rev 1\s*PLA draft$/ }));
+
+      await user.keyboard("{ArrowDown}");
+
+      const next = screen.getByRole("button", { name: /^Rev 2\s*PLA draft$/ });
+      expect(next).toHaveFocus();
+      expect(next).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("keeps focus on the last revision at the boundary", async () => {
+      const user = userEvent.setup();
+      renderRevisions();
+      await user.click(await screen.findByRole("button", { name: /^Rev 2\s*PLA draft$/ }));
+
+      await user.keyboard("{ArrowDown}");
+
+      expect(screen.getByRole("button", { name: /^Rev 2\s*PLA draft$/ })).toHaveFocus();
+    });
+  });
+
+  describe("revision print shortcuts", () => {
+    it.each([
+      ["1", "completed"],
+      ["2", "failed"],
+    ] as const)("logs %s for the focused revision", async (key, state) => {
+      const user = userEvent.setup();
+      const view = renderRevisions();
+      await user.click(await screen.findByRole("button", { name: /^Rev 2\s*PLA draft$/ }));
+      await user.keyboard(key);
+      expect(view.onLogPrint).toHaveBeenCalledExactlyOnceWith(21, state);
+    });
+
+    it("preserves native keyboard editing in the revision label draft", async () => {
+      const user = userEvent.setup();
+      const view = renderRevisions();
+      await user.click((await screen.findAllByRole("button", { name: "Edit revision" }))[0]);
+      const label = await screen.findByPlaceholderText("Revision label");
+      await user.clear(label);
+      await user.type(label, "12{ArrowLeft}");
+      expect(label).toHaveValue("12");
+      expect(label).toHaveFocus();
+      expect(view.onLogPrint).not.toHaveBeenCalled();
+    });
+  });
+
   describe("comparison outcome ownership", () => {
     const recorded: ArtifactOutcomeRead = {
       file_id: 20,
@@ -258,7 +310,7 @@ describe("RevisionsTab", () => {
       const user = userEvent.setup();
       const { onAddRevision } = renderRevisions();
 
-      await user.click(await screen.findByRole("button", { name: "Add" }));
+      await user.click(await screen.findByRole("button", { name: "Add revision" }));
 
       expect(onAddRevision).toHaveBeenCalledTimes(1);
     });
@@ -286,7 +338,7 @@ describe("RevisionsTab", () => {
       await user.clear(label);
       await user.type(label, "PETG fast");
 
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save Revision" }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -303,7 +355,7 @@ describe("RevisionsTab", () => {
       });
       await user.click((await screen.findAllByRole("button", { name: "Editar revisión" }))[0]);
 
-      await user.click(screen.getByRole("button", { name: "Guardar" }));
+      await user.click(screen.getByRole("button", { name: "Guardar revisión" }));
 
       expect(await screen.findByText("Revisión actualizada")).toBeInTheDocument();
     });

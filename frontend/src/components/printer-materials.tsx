@@ -1,24 +1,25 @@
 "use client";
 
-import { knownUiText } from "@/lib/locale";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useState } from "react";
+import { useId, useState } from "react";
+import { createPortal } from "react-dom";
+import { Modal } from "@/components/ui/modal";
+import "./printer-detail-content.css";
 
 import { usePrinterMaterials } from "@/features/printers/materials";
 import { parseApiError } from "@/lib/errors";
 import { useSpoolmanStatus, useSpools } from "@/lib/queries";
 import { toast } from "@/lib/toast";
 import type { MaterialSlotRead, PrinterMaterialStateRead, PrinterRead } from "@/types";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const selectClassName =
-  "h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50";
+  "h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-disabled disabled:opacity-50";
 
 /** Whether a manual feed is loaded with filament, known empty, or unreported. */
 type SlotState = "loaded" | "empty" | "unknown";
@@ -29,7 +30,7 @@ type DraftSlot = {
   state: SlotState;
   material_type: string;
   material_brand: string;
-  color_hex: string;
+  color_hex: string | null;
   spool_id: number | null;
 };
 
@@ -42,14 +43,37 @@ function parseSlotState(value: string): SlotState {
 
 function sourceLabel(slot: MaterialSlotRead): string {
   if (slot.stale) return uiText("stale · treated as unknown");
-  return knownUiText(slot.confidence);
+  return uiText(
+    slot.confidence === "operator_set"
+      ? "Operator set"
+      : slot.confidence === "externally_tracked"
+        ? "Tracked spool"
+        : "Provider state",
+  );
 }
 
-export function PrinterMaterials({ printer }: { printer: PrinterRead }) {
-  return <MaterialEditor key={printer.id} printer={printer} />;
+function slotStateLabel(state: SlotState): string {
+  return uiText(state === "loaded" ? "Loaded" : state === "empty" ? "Empty" : "Unknown");
 }
-function MaterialEditor({ printer }: { printer: PrinterRead }) {
+
+export function PrinterMaterials({
+  printer,
+  actionsHost,
+}: {
+  printer: PrinterRead;
+  actionsHost?: HTMLDivElement | null;
+}) {
+  return <MaterialEditor key={printer.id} printer={printer} actionsHost={actionsHost} />;
+}
+function MaterialEditor({
+  printer,
+  actionsHost,
+}: {
+  printer: PrinterRead;
+  actionsHost?: HTMLDivElement | null;
+}) {
   useUiLocale();
+  const nozzleId = useId();
   const owner = usePrinterMaterials(printer.id);
   const [review, setReview] = useState<
     | { phase: "idle" | "required" | "loading" }
@@ -59,6 +83,9 @@ function MaterialEditor({ printer }: { printer: PrinterRead }) {
   const [nozzle, setNozzle] = useState("");
   const [slots, setSlots] = useState<DraftSlot[]>([]);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<DraftSlot | null>(null);
+  const [loadedTarget, setLoadedTarget] = useState<DraftSlot | null>(null);
+
   const spoolmanEnabled = useSpoolmanStatus().data?.enabled ?? false;
   const spools = useSpools({ enabled: spoolmanEnabled }).data ?? [];
 
@@ -75,7 +102,7 @@ function MaterialEditor({ printer }: { printer: PrinterRead }) {
           state: slot.state,
           material_type: slot.material_type ?? "",
           material_brand: slot.material_brand ?? "",
-          color_hex: slot.color_hex ?? "#808080",
+          color_hex: slot.color_hex,
           spool_id: slot.spool_id,
         })),
     );
@@ -94,33 +121,22 @@ function MaterialEditor({ printer }: { printer: PrinterRead }) {
   }
   const readFailed = owner.query.isError;
   const disabled = busy || readFailed || review.phase !== "idle" || !printer.access.can_print;
-  function patchSlot(index: number, patch: Partial<DraftSlot>) {
-    setSlots((current) =>
-      current.map((slot, slotIndex) => (slotIndex === index ? { ...slot, ...patch } : slot)),
-    );
-  }
-
   function addManualFeed() {
-    setSlots((current) => {
-      let suffix = 0;
-      while (current.some((slot) => slot.slot_key === `manual${suffix}`)) suffix += 1;
-      return [
-        ...current,
-        {
-          slot_key: `manual${suffix}`,
-          label: uiText("Manual feed {value1}", { value1: String(suffix + 1) }),
-          state: "unknown",
-          material_type: "",
-          material_brand: "",
-          color_hex: "#808080",
-          spool_id: null,
-        },
-      ];
+    let suffix = 0;
+    while (slots.some((slot) => slot.slot_key === `manual${suffix}`)) suffix += 1;
+    setEditing({
+      slot_key: `manual${suffix}`,
+      label: uiText("Manual feed {value1}", { value1: String(suffix + 1) }),
+      state: "unknown",
+      material_type: "",
+      material_brand: "",
+      color_hex: null,
+      spool_id: null,
     });
   }
 
-  async function save() {
-    if (!state || disabled) return;
+  async function save(nextSlots = slots) {
+    if (!state || disabled) return false;
     setBusy(true);
     try {
       const result = await owner.save({
@@ -134,7 +150,7 @@ function MaterialEditor({ printer }: { printer: PrinterRead }) {
             nozzle_diameter_mm: nozzle ? Number(nozzle) : null,
           },
         ],
-        slots: slots.map((slot) => {
+        slots: nextSlots.map((slot) => {
           const spool =
             slot.spool_id == null ? undefined : spools.find((row) => row.id === slot.spool_id);
           return {
@@ -155,14 +171,17 @@ function MaterialEditor({ printer }: { printer: PrinterRead }) {
           };
         }),
       });
-      if (!owner.current()) return;
+      if (!owner.current()) return false;
       setState(result);
+      setSlots(nextSlots);
       toast.success(uiText("Materials and tools saved"));
+      return true;
     } catch (error) {
-      if (!owner.current()) return;
+      if (!owner.current()) return false;
       const status = parseApiError(error).status;
       if ([0, 409, 412, 428].includes(status) || status >= 500) setReview({ phase: "required" });
       toast.error(error);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -189,262 +208,352 @@ function MaterialEditor({ printer }: { printer: PrinterRead }) {
   const providerSlots = (owner.query.data ?? state).slots.filter(
     (slot) => slot.source !== "manual",
   );
-  return (
-    <div className="space-y-5 animate-panel-in">
-      {(review.phase !== "idle" || readFailed) && (
-        <section role="alert" className="space-y-3 rounded border border-border p-4">
-          <p>{uiText("library.editConflict")}</p>
+  const reviewContent = (review.phase !== "idle" || readFailed) && (
+    <section role="alert" className="space-y-3 rounded border border-border p-4">
+      <p>{uiText("library.editConflict")}</p>
+      <Button disabled={busy || review.phase === "loading"} onClick={() => void reviewCurrent()}>
+        {uiText("Review current values")}
+      </Button>
+      {review.phase === "ready" && (
+        <>
+          <p>
+            {uiText("library.latestVersion")}:{" "}
+            {review.snapshot.tools.find((tool) => tool.tool_key === "tool0")?.nozzle_diameter_mm ??
+              uiText("Unknown")}
+          </p>
+          <ul>
+            {review.snapshot.slots
+              .filter((slot) => slot.source === "manual")
+              .map((slot) => (
+                <li key={slot.slot_key}>
+                  {slot.label}: {slot.material_type ?? uiText("Unknown")}
+                </li>
+              ))}
+          </ul>
           <Button
-            disabled={busy || review.phase === "loading"}
-            onClick={() => void reviewCurrent()}
+            disabled={busy}
+            onClick={() => {
+              adopt(review.snapshot);
+              setReview({ phase: "idle" });
+              setEditing(null);
+              setLoadedTarget(null);
+            }}
           >
-            {uiText("Review current values")}
+            {uiText("Use current values")}
           </Button>
-          {review.phase === "ready" && (
-            <>
-              <p>
-                {uiText("library.latestVersion")}:{" "}
-                {review.snapshot.tools.find((tool) => tool.tool_key === "tool0")
-                  ?.nozzle_diameter_mm ?? uiText("Unknown")}
-              </p>
-              <ul>
-                {review.snapshot.slots
-                  .filter((slot) => slot.source === "manual")
-                  .map((slot) => (
-                    <li key={slot.slot_key}>
-                      {slot.label}: {slot.material_type ?? uiText("Unknown")}
-                    </li>
-                  ))}
-              </ul>
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  adopt(review.snapshot);
-                  setReview({ phase: "idle" });
-                }}
-              >
-                {uiText("Use current values")}
-              </Button>
-            </>
-          )}
-        </section>
+        </>
       )}
-
-      <section className="rounded-lg border border-border bg-background">
-        <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-5 py-4">
-          <div>
-            <h2 className="text-sm font-semibold text-foreground">{uiText("Materials & tools")}</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {uiText("Loaded filament truth is kept here, independently from printer groups.")}
-            </p>
-          </div>
-          <Button size="sm" onClick={() => void save()} loading={busy} disabled={disabled}>
-            {uiText("Save state")}
-          </Button>
-        </div>
-        <div className="space-y-5 p-5">
-          <label className="block max-w-xs space-y-1.5 text-xs font-medium text-foreground">
-            {uiText("Tool 0 nozzle diameter (mm)")}
-            <Input
-              type="number"
-              min="0.1"
-              max="5"
-              step="0.01"
-              value={nozzle}
-              onChange={(event) => setNozzle(event.target.value)}
-              disabled={disabled}
-              placeholder={uiText("Unknown")}
-            />
-            {state.tools.find((tool) => tool.tool_key === "tool0")?.source !== "manual" && (
-              <span className="block font-normal text-muted-foreground">
-                {uiText(
-                  "Provider-reported nozzle is shown while fresh; saving creates the manual fallback.",
-                )}
-              </span>
-            )}
-          </label>
-
-          {providerSlots.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                {uiText("Provider state")}
-              </h3>
-              <div className="grid gap-2 md:grid-cols-2">
-                {providerSlots.map((slot) => (
-                  <div
-                    key={`${slot.source}-${slot.slot_key}`}
-                    className="rounded-md border border-border bg-muted/20 p-3"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium text-foreground">{slot.label}</span>
-                      <Badge variant={slot.stale ? "warning" : "outline"}>
-                        {knownUiText(slot.source)}
-                      </Badge>
-                    </div>
-                    <p className="mt-2 text-sm text-foreground">
-                      {slot.state === "loaded"
-                        ? [slot.material_brand, slot.material_type].filter(Boolean).join(" · ")
-                        : knownUiText(slot.state)}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {sourceLabel(slot)}
-                      {slot.observed_at
-                        ? ` · ${new Date(slot.observed_at).toLocaleString(currentLocale())}`
-                        : ""}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
+    </section>
+  );
+  const actions = (
+    <div className="flex flex-wrap gap-2">
+      <Button variant="outline" size="sm" disabled={disabled} onClick={addManualFeed}>
+        {uiText("Add feed")}
+      </Button>
+      <Button size="sm" onClick={() => void save()} loading={busy} disabled={disabled}>
+        {uiText("Save state")}
+      </Button>
+    </div>
+  );
+  function loaded(slot: DraftSlot): DraftSlot {
+    const spool = spools.find((row) => row.id === slot.spool_id);
+    return {
+      ...slot,
+      state: "loaded",
+      material_type: spool?.material ?? slot.material_type,
+      material_brand: spool?.vendor_name ?? slot.material_brand,
+      color_hex: spool?.color_hex
+        ? `#${spool.color_hex.replace(/^#/, "").slice(0, 6).toUpperCase()}`
+        : slot.color_hex,
+    };
+  }
+  function persistSlot(slot: DraftSlot) {
+    const next = slots.some((row) => row.slot_key === slot.slot_key)
+      ? slots.map((row) => (row.slot_key === slot.slot_key ? slot : row))
+      : [...slots, slot];
+    void save(next).then((saved) => {
+      if (saved) {
+        setEditing(null);
+        setLoadedTarget(null);
+      }
+    });
+  }
+  return (
+    <div className="printer-reference-surface printer-materials-reference">
+      {actionsHost ? (
+        createPortal(actions, actionsHost)
+      ) : (
+        <div className="flex justify-end">{actions}</div>
+      )}
+      {!editing && !loadedTarget && reviewContent}
+      <div className="printer-materials-nozzle">
+        <label htmlFor={nozzleId} className="space-y-2 text-[13px] font-medium text-foreground">
+          {uiText("Tool 0 nozzle diameter (mm)")}
+          {state.tools.some((tool) => tool.tool_key === "tool0" && tool.source !== "manual") && (
+            <span className="block text-xs font-normal leading-relaxed text-muted-foreground">
+              {uiText(
+                "Provider-reported nozzle is shown while fresh; saving creates the manual fallback.",
+              )}
+            </span>
           )}
-
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  {uiText("Manual feeds")}
-                </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {uiText(
-                    "Selecting a tracked spool does not mark it loaded; use “Set as loaded” explicitly.",
-                  )}
-                </p>
-              </div>
+        </label>
+        <Input
+          id={nozzleId}
+          className="h-[34px] text-[13px]"
+          type="number"
+          min="0.1"
+          max="5"
+          step="0.01"
+          value={nozzle}
+          onChange={(event) => setNozzle(event.target.value)}
+          disabled={disabled}
+          placeholder={uiText("Unknown")}
+        />
+      </div>
+      <div className="printer-reference-list">
+        {providerSlots.map((slot) => (
+          <div key={`${slot.source}-${slot.slot_key}`} className="printer-reference-row">
+            <div>
+              <h3>{slot.label}</h3>
+              <p>
+                {sourceLabel(slot)} ·{" "}
+                {slot.state === "loaded"
+                  ? [slot.material_brand, slot.material_type].filter(Boolean).join(" · ") ||
+                    uiText("Unknown")
+                  : slotStateLabel(slot.state)}
+                {slot.state === "loaded" ? ` · ${slotStateLabel(slot.state)}` : ""}
+                {slot.observed_at
+                  ? ` · ${new Date(slot.observed_at).toLocaleString(currentLocale())}`
+                  : ""}
+              </p>
+            </div>
+          </div>
+        ))}
+        {slots.map((slot) => (
+          <div key={slot.slot_key} className="printer-reference-row">
+            <div>
+              <h3>{slot.label}</h3>
+              <p>
+                {uiText("Manual feed")} · {slotStateLabel(slot.state)}
+                {slot.material_type ? ` · ${slot.material_type}` : ""}
+                {slot.material_brand ? ` · ${slot.material_brand}` : ""}
+                {slot.spool_id !== null
+                  ? ` · ${spools.find((spool) => spool.id === slot.spool_id)?.filament_name ?? uiText("Spool {value1}", { value1: String(slot.spool_id) })}`
+                  : ""}
+              </p>
+            </div>
+            <div className="printer-reference-actions">
               <Button
-                type="button"
-                variant="outline"
                 size="xs"
+                variant="outline"
                 disabled={disabled}
-                onClick={addManualFeed}
+                onClick={() => setEditing({ ...slot })}
               >
-                {uiText("Add feed")}
+                {uiText("Edit")}
+              </Button>
+              {slot.state !== "loaded" && (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={disabled}
+                  onClick={() => setLoadedTarget(loaded(slot))}
+                >
+                  {uiText("Set as loaded")}
+                </Button>
+              )}
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={disabled}
+                onClick={() =>
+                  setSlots((current) => current.filter((row) => row.slot_key !== slot.slot_key))
+                }
+              >
+                {uiText("Remove")}
               </Button>
             </div>
-            {slots.length === 0 && (
-              <p className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-                {uiText("No manual feeds. Add one for an external or unsupported filament path.")}
-              </p>
-            )}
-            {slots.map((slot, index) => (
-              <div
-                key={`${slot.slot_key}-${index}`}
-                className="grid gap-3 rounded-md border border-border p-4 md:grid-cols-2 lg:grid-cols-4"
-              >
+          </div>
+        ))}
+        {slots.length === 0 && providerSlots.length === 0 && (
+          <p className="py-5 text-sm text-muted-foreground">
+            {uiText("No manual feeds. Add one for an external or unsupported filament path.")}
+          </p>
+        )}
+      </div>
+      <p className="text-xs leading-relaxed text-muted-foreground">
+        {uiText(
+          "Selecting a tracked spool does not mark it loaded; use “Set as loaded” explicitly.",
+        )}
+      </p>
+      <Modal
+        open={editing !== null}
+        onClose={() => {
+          if (!busy) setEditing(null);
+        }}
+        title={uiText(
+          editing && slots.some((slot) => slot.slot_key === editing.slot_key)
+            ? "Edit manual feed"
+            : "Add manual feed",
+        )}
+        description={uiText("Set the feed state and material, then save.")}
+        footer={
+          <>
+            <Button variant="outline" disabled={busy} onClick={() => setEditing(null)}>
+              {uiText("Cancel")}
+            </Button>
+            <Button
+              loading={busy}
+              disabled={disabled || !editing?.label.trim()}
+              onClick={() => {
+                if (editing) persistSlot(editing);
+              }}
+            >
+              {uiText("Save state")}
+            </Button>
+          </>
+        }
+      >
+        {editing && (
+          <div className="space-y-5">
+            {reviewContent}
+            <fieldset className="space-y-4 border-t border-border pt-4">
+              <legend className="pr-3 text-sm font-semibold">{uiText("Feed state")}</legend>
+              <label className="block space-y-2 text-[13px] font-medium">
+                {uiText("Feed label")}
                 <Input
-                  value={slot.label}
-                  onChange={(event) => patchSlot(index, { label: event.target.value })}
+                  value={editing.label}
                   disabled={disabled}
-                  aria-label={uiText("Feed label")}
+                  onChange={(event) => setEditing({ ...editing, label: event.target.value })}
                 />
+              </label>
+              <label className="block space-y-2 text-[13px] font-medium">
+                {uiText("State")}
                 <select
                   className={selectClassName}
-                  value={slot.state}
-                  onChange={(event) =>
-                    patchSlot(index, { state: parseSlotState(event.target.value) })
-                  }
+                  value={editing.state}
                   disabled={disabled}
+                  onChange={(event) =>
+                    setEditing({ ...editing, state: parseSlotState(event.target.value) })
+                  }
                 >
                   <option value="unknown">{uiText("Unknown")}</option>
                   <option value="empty">{uiText("Empty")}</option>
                   <option value="loaded">{uiText("Loaded")}</option>
                 </select>
-                <Input
-                  value={slot.material_type}
-                  onChange={(event) => patchSlot(index, { material_type: event.target.value })}
-                  disabled={disabled || slot.state !== "loaded"}
-                  placeholder="PLA"
-                  aria-label={uiText("Material type")}
-                />
-                <Input
-                  value={slot.material_brand}
-                  onChange={(event) => patchSlot(index, { material_brand: event.target.value })}
-                  disabled={disabled || slot.state !== "loaded"}
-                  placeholder={uiText("Brand")}
-                  aria-label={uiText("Material brand")}
-                />
-                <label className="flex h-10 items-center gap-2 rounded-md border border-input px-3 text-xs text-muted-foreground">
-                  {uiText("Color")}
-                  <input
-                    type="color"
-                    value={slot.color_hex}
+              </label>
+            </fieldset>
+            <fieldset className="space-y-4 border-t border-border pt-4">
+              <legend className="pr-3 text-sm font-semibold">{uiText("Material")}</legend>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block space-y-2 text-[13px] font-medium">
+                  {uiText("Material type")}
+                  <Input
+                    value={editing.material_type}
+                    disabled={disabled || editing.state !== "loaded"}
                     onChange={(event) =>
-                      patchSlot(index, { color_hex: event.target.value.toUpperCase() })
+                      setEditing({ ...editing, material_type: event.target.value })
                     }
-                    disabled={disabled || slot.state !== "loaded"}
                   />
                 </label>
-                {spoolmanEnabled && (
-                  <select
-                    className={selectClassName}
-                    value={slot.spool_id ?? ""}
+                <label className="block space-y-2 text-[13px] font-medium">
+                  {uiText("Brand")}
+                  <Input
+                    value={editing.material_brand}
+                    disabled={disabled || editing.state !== "loaded"}
                     onChange={(event) =>
-                      patchSlot(index, {
-                        spool_id: event.target.value ? Number(event.target.value) : null,
-                      })
+                      setEditing({ ...editing, material_brand: event.target.value })
                     }
-                    disabled={disabled}
-                  >
-                    <option value="">{uiText("No tracked spool")}</option>
-                    {spools.map((spool) => (
-                      <option key={spool.id} value={spool.id}>
-                        {spool.filament_name ||
-                          spool.name ||
-                          uiText("Spool {value1}", { value1: String(spool.id) })}
-                      </option>
-                    ))}
-                  </select>
+                  />
+                </label>
+                <label className="block space-y-2 text-[13px] font-medium">
+                  {uiText("Color")}
+                  <div className="flex h-10 items-center gap-3 border border-input bg-card px-3">
+                    <input
+                      type="color"
+                      aria-label={uiText("Color")}
+                      value={editing.color_hex ?? "#808080"}
+                      disabled={disabled || editing.state !== "loaded"}
+                      onChange={(event) =>
+                        setEditing({ ...editing, color_hex: event.target.value.toUpperCase() })
+                      }
+                    />
+                    <span className="font-mono text-xs">
+                      {editing.color_hex ?? uiText("Unknown")}
+                    </span>
+                  </div>
+                </label>
+                {spoolmanEnabled && (
+                  <label className="block space-y-2 text-[13px] font-medium">
+                    {uiText("Tracked spool")}
+                    <select
+                      className={selectClassName}
+                      value={editing.spool_id ?? ""}
+                      disabled={disabled}
+                      onChange={(event) =>
+                        setEditing({
+                          ...editing,
+                          spool_id: event.target.value ? Number(event.target.value) : null,
+                        })
+                      }
+                    >
+                      <option value="">{uiText("No tracked spool")}</option>
+                      {spools.map((spool) => (
+                        <option key={spool.id} value={spool.id}>
+                          {spool.filament_name ||
+                            spool.name ||
+                            uiText("Spool {value1}", { value1: String(spool.id) })}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 )}
-                {slot.spool_id != null && slot.state !== "loaded" && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={disabled}
-                    onClick={() => {
-                      const spool = spools.find((row) => row.id === slot.spool_id);
-                      patchSlot(index, {
-                        state: "loaded",
-                        material_type: spool?.material ?? slot.material_type,
-                        material_brand: spool?.vendor_name ?? slot.material_brand,
-                        color_hex: spool?.color_hex
-                          ? `#${spool.color_hex.replace(/^#/, "").slice(0, 6).toUpperCase()}`
-                          : slot.color_hex,
-                      });
-                    }}
-                  >
-                    {uiText("Set as loaded")}
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={() =>
-                    setSlots((current) => current.filter((_, slotIndex) => slotIndex !== index))
-                  }
-                  disabled={disabled}
-                >
-                  {uiText("Remove")}
-                </Button>
-                <p className="text-xs text-muted-foreground lg:col-span-4">
-                  {uiText("Operator set")}
-                  {state.slots.find(
-                    (row) => row.source === "manual" && row.slot_key === slot.slot_key,
-                  )?.observed_at
-                    ? uiText(" · updated {value1}", {
-                        value1: String(
-                          new Date(
-                            state.slots.find(
-                              (row) => row.source === "manual" && row.slot_key === slot.slot_key,
-                            )!.observed_at!,
-                          ).toLocaleString(currentLocale()),
-                        ),
-                      })
-                    : uiText(" · not saved yet")}
-                </p>
               </div>
-            ))}
+            </fieldset>
           </div>
-        </div>
-      </section>
+        )}
+      </Modal>
+      <Modal
+        open={loadedTarget !== null}
+        onClose={() => {
+          if (!busy) setLoadedTarget(null);
+        }}
+        title={uiText("Set {value1} as loaded?", { value1: loadedTarget?.label ?? "" })}
+        description={uiText(
+          "This updates manually recorded material state. It does not change material physically loaded in the printer.",
+        )}
+        footer={
+          <>
+            <Button variant="outline" disabled={busy} onClick={() => setLoadedTarget(null)}>
+              {uiText("Cancel")}
+            </Button>
+            <Button
+              loading={busy}
+              disabled={disabled}
+              onClick={() => {
+                if (loadedTarget) persistSlot(loadedTarget);
+              }}
+            >
+              {uiText("Confirm loaded feed")}
+            </Button>
+          </>
+        }
+      >
+        {reviewContent}
+        <dl className="printer-reference-facts">
+          <div>
+            <dt>{uiText("Printer")}</dt>
+            <dd>{printer.name}</dd>
+          </div>
+          <div>
+            <dt>{uiText("Feed label")}</dt>
+            <dd>{loadedTarget?.label}</dd>
+          </div>
+          <div>
+            <dt>{uiText("Material")}</dt>
+            <dd>{loadedTarget?.material_type || uiText("Unknown")}</dd>
+          </div>
+        </dl>
+      </Modal>
     </div>
   );
 }

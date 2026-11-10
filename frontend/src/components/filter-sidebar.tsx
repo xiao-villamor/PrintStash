@@ -144,7 +144,8 @@ function DraggableModelLeaf({
         {...listeners}
         {...attributes}
         onDoubleClick={() => router.push(`/models/${model.id}`)}
-        role="button"
+        role="treeitem"
+        aria-level={(model.collection?.split("/").length ?? 0) + 1}
         tabIndex={0}
         onKeyDown={(event) => {
           if (event.key === "Enter") router.push(`/models/${model.id}`);
@@ -171,7 +172,8 @@ function MultipartLeaf({ multipart }: { multipart: OutlinerModelRead }) {
     <Localized>
       <div
         onDoubleClick={() => router.push(`/multipart-models/${multipart.id}`)}
-        role="button"
+        role="treeitem"
+        aria-level={(multipart.collection?.split("/").length ?? 0) + 1}
         tabIndex={0}
         onKeyDown={(event) => {
           if (event.key === "Enter") router.push(`/multipart-models/${multipart.id}`);
@@ -513,6 +515,7 @@ function CollectionTreeRow({
       <div
         style={isDragging ? { opacity: 0.3 } : undefined}
         className={isDragging ? "pointer-events-none" : undefined}
+        data-tree-node={node.path}
       >
         {confirming ? (
           <div className="my-0.5 rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-2 py-1.5">
@@ -560,7 +563,7 @@ function CollectionTreeRow({
         ) : (
           <div
             ref={rowRef}
-            className={`group/row relative flex min-w-32 items-center gap-1 rounded px-2 py-1 transition-colors ${
+            className={`collection-tree-row group/row relative flex min-w-32 items-center gap-1 rounded px-2 py-1 transition-colors ${
               isOver && dragging !== null && canDrop
                 ? "z-10 bg-accent"
                 : isSelected
@@ -579,6 +582,7 @@ function CollectionTreeRow({
                 className="rounded p-0.5 hover:bg-muted/80 flex-shrink-0"
                 aria-label={isOpen ? uiText("Collapse") : uiText("Expand")}
                 aria-expanded={isOpen}
+                data-tree-toggle
               >
                 <ChevronRight
                   className={`h-3 w-3 transition-transform ${isOpen ? "rotate-90" : ""}`}
@@ -599,6 +603,10 @@ function CollectionTreeRow({
               title={node.name}
               data-outliner-collection={node.path}
               {...attributes}
+              role="treeitem"
+              aria-selected={isSelected}
+              aria-expanded={hasNestedItems ? isOpen : undefined}
+              aria-level={node.path.split("/").length}
             >
               {isOpen || isSelected ? (
                 <FolderOpen className="h-3.5 w-3.5 flex-shrink-0 text-primary" />
@@ -751,6 +759,41 @@ export function FilterSidebarContent({
   const { ref: filtersRef, admitted: filtersVisible } = useViewportAdmission();
   const contentRef = useRef<HTMLDivElement>(null);
   const filtersRegionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    let focused: HTMLElement | null = null;
+    function updateStops() {
+      if (!content) return;
+      const rows = [
+        ...content.querySelectorAll<HTMLElement>(
+          "[data-outliner-collection], [data-outliner-entry]",
+        ),
+      ];
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      const current =
+        rows.find((row) => row === active) ??
+        (focused?.isConnected ? focused : null) ??
+        rows.find((row) => row.getAttribute("aria-selected") === "true") ??
+        rows[0];
+      for (const row of rows) row.tabIndex = row === current ? 0 : -1;
+    }
+    function focus(event: FocusEvent) {
+      if (event.target instanceof HTMLElement)
+        focused = event.target.closest<HTMLElement>(
+          "[data-outliner-collection], [data-outliner-entry]",
+        );
+      updateStops();
+    }
+    updateStops();
+    const observer = new MutationObserver(updateStops);
+    observer.observe(content, { childList: true, subtree: true });
+    content.addEventListener("focusin", focus);
+    return () => {
+      observer.disconnect();
+      content.removeEventListener("focusin", focus);
+    };
+  }, [loading]);
   useEffect(() => {
     // Canonical URL replacement creates a new startup generation while an
     // already focused filter remains the reader's explicit priority.
@@ -1034,7 +1077,62 @@ export function FilterSidebarContent({
           setDragging(null);
         }}
       >
-        <div ref={contentRef} className="min-h-0 flex-1 overflow-auto py-2 px-2 space-y-6">
+        <div
+          ref={contentRef}
+          className={`min-h-0 flex-1 overflow-auto space-y-6 ${collectionsOnly ? "px-1.5 pb-3" : "py-2 px-2"}`}
+          onKeyDown={(event) => {
+            if (
+              event.defaultPrevented ||
+              event.nativeEvent.isComposing ||
+              event.ctrlKey ||
+              event.metaKey ||
+              event.altKey
+            )
+              return;
+            const target = event.target instanceof HTMLElement ? event.target : null;
+            const row = target?.closest<HTMLElement>(
+              "[data-outliner-collection], [data-outliner-entry]",
+            );
+            if (!row || !contentRef.current) return;
+            const rows = [
+              ...contentRef.current.querySelectorAll<HTMLElement>(
+                "[data-outliner-collection], [data-outliner-entry]",
+              ),
+            ];
+            const index = rows.indexOf(row);
+            const node = row.closest<HTMLElement>("[data-tree-node]");
+            const toggle = node?.querySelector<HTMLButtonElement>("[data-tree-toggle]");
+            let next: HTMLElement | undefined | null;
+            if (event.key === "ArrowDown") next = rows[Math.min(index + 1, rows.length - 1)];
+            else if (event.key === "ArrowUp") next = rows[Math.max(index - 1, 0)];
+            else if (event.key === "Home") next = rows[0];
+            else if (event.key === "End") next = rows.at(-1);
+            else if (event.key === "ArrowRight") {
+              if (!row.dataset.outlinerCollection) return;
+              if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
+              else if (node?.contains(rows[index + 1] ?? null)) next = rows[index + 1];
+            } else if (event.key === "ArrowLeft") {
+              if (!row.dataset.outlinerCollection)
+                next = node?.querySelector<HTMLElement>("[data-outliner-collection]");
+              else if (toggle?.getAttribute("aria-expanded") === "true") toggle.click();
+              else
+                next = node?.parentElement
+                  ?.closest("[data-tree-node]")
+                  ?.querySelector<HTMLElement>("[data-outliner-collection]");
+            } else if (
+              event.key === "F2" &&
+              !navigationOnly &&
+              row.dataset.outlinerCollection === selectedCollection
+            ) {
+              window.dispatchEvent(
+                new CustomEvent("printstash:rename-collection", { detail: selectedCollection }),
+              );
+            } else return;
+            event.preventDefault();
+            event.stopPropagation();
+            next?.focus();
+          }}
+        >
           {!collectionsOnly && (
             <section>
               <h3 className="mb-2 pl-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">
@@ -1089,7 +1187,11 @@ export function FilterSidebarContent({
               </div>
             )}
             <div className="overflow-x-auto -mx-3 px-3">
-              <div className="min-w-0 space-y-0.5 pr-2">
+              <div
+                className="min-w-0 space-y-0.5 pr-2"
+                role={outlinerQ === "" ? "tree" : undefined}
+                aria-label={uiText("Collections")}
+              >
                 {outlinerQ !== "" ? (
                   searchText !== outlinerQ ? (
                     <Skeleton className="h-5 w-full" />
@@ -1404,9 +1506,9 @@ export function FilterSidebar(props: FilterSidebarProps) {
   const [collapseVersion, setCollapseVersion] = useState(0);
   const [sidebarWidth, setSidebarWidth] = useState(() => {
     try {
-      return parseInt(localStorage.getItem("ps-sidebar-width") ?? "320", 10);
+      return parseInt(localStorage.getItem("ps-sidebar-width") ?? "321", 10);
     } catch {
-      return 320;
+      return 321;
     }
   });
 
@@ -1442,44 +1544,49 @@ export function FilterSidebar(props: FilterSidebarProps) {
       <aside
         aria-label={props.collectionsOnly ? uiText("Collections") : undefined}
         style={{ width: sidebarWidth }}
-        className="bg-sidebar border-r border-border flex min-h-0 flex-col shrink-0 hidden md:flex relative"
+        className={`${props.collectionsOnly ? "collections-sidebar " : ""}bg-sidebar border-r border-border flex min-h-0 flex-col shrink-0 hidden md:flex relative`}
       >
         {props.collectionsOnly && (
-          <div className="flex h-10 shrink-0 items-center justify-between px-3">
-            <h2 className="font-mono text-2xs uppercase tracking-widest">
+          <div className="flex h-12 shrink-0 items-center justify-between pl-4 pr-2">
+            <h2 className="font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
               {uiText("Collections")}
             </h2>
             <div className="flex items-center">
               <Button
                 variant="ghost"
                 size="icon"
+                className="h-7 w-7"
                 aria-label={uiText("New collection")}
                 onClick={props.onCreateCollection}
               >
-                <FolderPlus className="h-3.5 w-3.5" />
+                <FolderPlus className="h-4 w-4" strokeWidth={1.6} />
               </Button>
               <Button
                 variant="ghost"
                 size="icon"
+                className="h-7 w-7"
                 aria-label={uiText("Collapse")}
                 onClick={() => setCollapseVersion((version) => version + 1)}
               >
-                <ChevronsUp className="h-3.5 w-3.5" />
+                <ChevronsUp className="h-4 w-4" strokeWidth={1.6} />
               </Button>
             </div>
           </div>
         )}
-        <div className="p-2 border-b border-border bg-sidebar">
+        <div
+          className={
+            props.collectionsOnly ? "mx-2.5 mb-2" : "p-2 border-b border-border bg-sidebar"
+          }
+        >
           <div className="relative">
             <span className="absolute inset-y-0 left-0 pl-2 flex items-center text-muted-foreground">
               <Search className="h-3.5 w-3.5" />
             </span>
             <input
-              className="block w-full pl-7 pr-6 py-1.5 text-sm border border-border rounded bg-muted text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              data-tree-filter
+              className={`block w-full pl-7 pr-6 border border-border rounded text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring ${props.collectionsOnly ? "h-[34px] bg-card text-xs" : "py-1.5 text-sm bg-muted"}`}
               placeholder={
-                props.collectionsOnly
-                  ? uiText("multipart.filterCollections")
-                  : uiText("Filter outliner...")
+                props.collectionsOnly ? uiText("Filter collections") : uiText("Filter outliner...")
               }
               type="text"
               value={outlinerFilter}

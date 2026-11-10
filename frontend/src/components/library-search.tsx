@@ -10,6 +10,11 @@ import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
+import {
+  CLOSE_SEARCH_SUGGESTIONS,
+  isTypingTarget,
+  keyboardOverlayOpen,
+} from "@/lib/keyboard-commands";
 
 export function LibrarySearch() {
   const { t } = useI18n();
@@ -30,6 +35,11 @@ export function LibrarySearch() {
   const wrapper = useRef<HTMLDivElement>(null);
   const publishTimer = useRef<number | undefined>(undefined);
   const visible = true;
+  useEffect(() => {
+    const closeSuggestions = () => setOpen(false);
+    window.addEventListener(CLOSE_SEARCH_SUGGESTIONS, closeSuggestions);
+    return () => window.removeEventListener(CLOSE_SEARCH_SUGGESTIONS, closeSuggestions);
+  }, []);
   if (synced !== q) {
     setSynced(q);
     // An earlier debounced browse update can land after a new keystroke.
@@ -50,15 +60,17 @@ export function LibrarySearch() {
     ),
   );
   useEffect(() => {
-    if (!visible) return;
     function focus(event: KeyboardEvent) {
-      const target = event.target instanceof HTMLElement ? event.target : null;
       if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
         event.key !== "/" ||
         event.metaKey ||
         event.ctrlKey ||
         event.altKey ||
-        target?.matches("input, textarea, select, [contenteditable='true']")
+        isTypingTarget(event.target) ||
+        keyboardOverlayOpen()
       )
         return;
       event.preventDefault();
@@ -66,7 +78,7 @@ export function LibrarySearch() {
     }
     window.addEventListener("keydown", focus);
     return () => window.removeEventListener("keydown", focus);
-  }, [visible]);
+  }, []);
   const params = searchParams.toString();
   useEffect(() => {
     if (!visible) return;
@@ -179,7 +191,10 @@ export function LibrarySearch() {
         ? "pr-10"
         : "pr-3";
   return (
-    <div ref={wrapper} className="ml-auto flex min-w-0 max-w-sm flex-1 items-center">
+    <div
+      ref={wrapper}
+      className="shell-search ml-auto flex min-w-0 max-w-[382px] flex-1 items-center"
+    >
       <DropdownMenu
         open={open && !!value.trim()}
         onOpenChange={setOpen}
@@ -215,8 +230,8 @@ export function LibrarySearch() {
               aria-label={t("aiSearch.searchLibrary")}
               aria-haspopup="dialog"
               aria-expanded={open && !!value.trim()}
-              className={`block h-9 w-full rounded border border-input bg-card py-2 pl-9 ${inputPadding} text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:hidden`}
-              placeholder={t("nav.search")}
+              className={`block h-9 w-full rounded border border-input bg-card py-2 pl-9 ${inputPadding} text-[13px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:hidden`}
+              placeholder={t("Search Models, files and tags")}
               value={value}
               onClick={() => setOpen(!!value.trim())}
               onChange={(event) => {
@@ -232,6 +247,14 @@ export function LibrarySearch() {
               }}
             />
             <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
+              {!value && !aiEnabled && !visualReady && (
+                <kbd
+                  aria-hidden
+                  className="pointer-events-none mr-1 border border-border bg-muted px-1 font-mono text-2xs text-muted-foreground"
+                >
+                  /
+                </kbd>
+              )}
               {aiEnabled && (
                 <Button
                   variant="ghost"

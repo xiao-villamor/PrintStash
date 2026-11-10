@@ -18,7 +18,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLocation } from "@tanstack/react-router";
 import { useRouter } from "@/lib/navigation";
@@ -144,14 +144,22 @@ async function openActions(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Model actions" }));
 }
 
-/** Open the edit form, which replaces the header title with an input. */
+/** Open the metadata drawer while the Model page remains visible. */
 async function openEdit(user: ReturnType<typeof userEvent.setup>) {
   await openActions(user);
   await user.click(screen.getByRole("menuitem", { name: /Edit details/ }));
-  await screen.findByPlaceholderText("Model name");
+  await screen.findByRole("textbox", { name: "Name (required)" });
 }
 
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
   window.localStorage.clear();
 });
 
@@ -520,8 +528,8 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.clear(screen.getByPlaceholderText("Model name"));
-      await user.type(screen.getByPlaceholderText("Model name"), "My draft");
+      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
+      await user.type(screen.getByRole("textbox", { name: "Name (required)" }), "My draft");
 
       act(() =>
         client.setQueryData(
@@ -533,10 +541,10 @@ describe("ModelDetail", () => {
           }),
         ),
       );
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       expect(headers).toEqual(['"model-1-eaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-v1"']);
-      expect(screen.getByPlaceholderText("Model name")).toHaveValue("My draft");
+      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("My draft");
     });
 
     it("keeps a confirmed edit after an older read finishes", async () => {
@@ -552,8 +560,8 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.clear(screen.getByPlaceholderText("Model name"));
-      await user.type(screen.getByPlaceholderText("Model name"), "Confirmed edit");
+      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
+      await user.type(screen.getByRole("textbox", { name: "Name (required)" }), "Confirmed edit");
       void client.invalidateQueries({ queryKey: queryKeys.model(1) });
       await waitFor(() =>
         expect(requests().some((r) => r.url === "/api/v1/models/1" && r.method === "GET")).toBe(
@@ -561,7 +569,7 @@ describe("ModelDetail", () => {
         ),
       );
 
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
       expect(await screen.findByText("Confirmed edit")).toBeVisible();
       await act(async () => {
         release(json(aModel()));
@@ -907,18 +915,18 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.clear(screen.getByPlaceholderText("Model name"));
-      await user.type(screen.getByPlaceholderText("Model name"), "My draft");
+      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
+      await user.type(screen.getByRole("textbox", { name: "Name (required)" }), "My draft");
 
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       expect(
         await screen.findByText(
           "This item changed elsewhere. Your draft has been kept. Review the latest version before saving again.",
         ),
       ).toBeVisible();
-      expect(screen.getByPlaceholderText("Model name")).toHaveValue("My draft");
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("My draft");
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
       await user.click(screen.getByRole("button", { name: "Review latest version" }));
       expect(await screen.findByRole("dialog", { name: "Latest saved version" })).toHaveTextContent(
         "Other editor",
@@ -941,9 +949,9 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.clear(screen.getByPlaceholderText("Model name"));
-      await user.type(screen.getByPlaceholderText("Model name"), "My draft");
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
+      await user.type(screen.getByRole("textbox", { name: "Name (required)" }), "My draft");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await screen.findByRole("dialog", { name: "Latest saved version" });
       let version: string | null = null;
@@ -976,14 +984,14 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await screen.findByRole("dialog", { name: "Latest saved version" });
 
       await user.click(screen.getByRole("button", { name: "Use latest version" }));
 
-      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Other editor");
-      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Other editor");
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeEnabled();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
 
@@ -996,14 +1004,14 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await screen.findByRole("dialog", { name: "Latest saved version" });
 
       await user.click(screen.getByRole("button", { name: "Keep my draft" }));
 
-      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     });
 
     it("requires another review when a reviewed version becomes stale", async () => {
@@ -1015,15 +1023,19 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await screen.findByRole("dialog", { name: "Latest saved version" });
 
       await user.click(screen.getByRole("button", { name: "Save my draft against this version" }));
 
-      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("dialog", { name: "Latest saved version" }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
       expect(app.requestsWithMethod("PATCH")).toHaveLength(2);
     });
 
@@ -1036,7 +1048,7 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await screen.findByRole("dialog", { name: "Latest saved version" });
 
@@ -1075,7 +1087,7 @@ describe("ModelDetail", () => {
 
       await user.click(screen.getByRole("menuitem", { name: /Edit details/ }));
 
-      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
     });
 
     it("saves the name the user typed", async () => {
@@ -1084,11 +1096,11 @@ describe("ModelDetail", () => {
         routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2", edit_version: 2 })) },
       });
       await openEdit(user);
-      const name = screen.getByPlaceholderText("Model name");
+      const name = screen.getByRole("textbox", { name: "Name (required)" });
       await user.clear(name);
       await user.type(name, "Benchy v2");
 
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -1102,11 +1114,14 @@ describe("ModelDetail", () => {
       const { requestsWithMethod } = renderDetail();
       await openEdit(user);
 
-      await user.clear(screen.getByPlaceholderText("Model name"));
+      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
 
-      expect(screen.getByPlaceholderText("Model name")).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveAttribute(
+        "aria-invalid",
+        "true",
+      );
       expect(screen.getByText("Model name is required.")).toBeVisible();
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
       expect(requestsWithMethod("PATCH")).toHaveLength(0);
     });
 
@@ -1118,11 +1133,11 @@ describe("ModelDetail", () => {
         routes: { "PATCH /api/v1/models/1": json(aModel({ name: "Benchy v2", edit_version: 2 })) },
       });
       await openEdit(user);
-      const name = screen.getByPlaceholderText("Model name");
+      const name = screen.getByRole("textbox", { name: "Name (required)" });
       await user.clear(name);
       await user.type(name, "Benchy v2");
 
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       expect(await screen.findByText("Benchy v2")).toBeInTheDocument();
     });
@@ -1138,7 +1153,7 @@ describe("ModelDetail", () => {
       await openEdit(user);
 
       await user.clear(screen.getByPlaceholderText("Optional description"));
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toHaveProperty(
         "description",
@@ -1158,7 +1173,7 @@ describe("ModelDetail", () => {
 
       await user.click(screen.getByPlaceholderText("Search or create — press Enter"));
       await user.keyboard("{Backspace}");
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       expect(JSON.parse(app.requestsWithMethod("PATCH")[0].body)).toHaveProperty("tags", []);
     });
@@ -1176,15 +1191,15 @@ describe("ModelDetail", () => {
         const app = renderDetail({ routes: { "PATCH /api/v1/models/1": failures[failure] } });
         await openEdit(user);
 
-        await user.click(screen.getByRole("button", { name: "Save" }));
+        await user.click(screen.getByRole("button", { name: "Save changes" }));
 
         expect(
           await screen.findByText(
             "The save was not confirmed. Review the latest version before retrying.",
           ),
         ).toBeVisible();
-        expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-        expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+        expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+        expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
         expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
       },
     );
@@ -1198,15 +1213,15 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "Review latest version" })).not.toBeDisabled(),
       );
 
-      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Benchy");
+      expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Benchy");
       expect(app.requestsWithMethod("PATCH")).toHaveLength(1);
     });
 
@@ -1219,9 +1234,9 @@ describe("ModelDetail", () => {
         },
       });
       await openEdit(user);
-      await user.clear(screen.getByPlaceholderText("Model name"));
-      await user.type(screen.getByPlaceholderText("Model name"), "Saved draft");
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.clear(screen.getByRole("textbox", { name: "Name (required)" }));
+      await user.type(screen.getByRole("textbox", { name: "Name (required)" }), "Saved draft");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
       await user.click(await screen.findByRole("button", { name: "Review latest version" }));
       await screen.findByRole("dialog", { name: "Latest saved version" });
 
@@ -1233,7 +1248,7 @@ describe("ModelDetail", () => {
         edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         edit_version: 7,
       });
-      expect(screen.getByPlaceholderText("Model name")).toHaveValue("Saved draft");
+      expect(screen.getByRole("textbox", { name: "Name (required)" })).toHaveValue("Saved draft");
     });
 
     it("clears a source URL the user emptied", async () => {
@@ -1247,7 +1262,7 @@ describe("ModelDetail", () => {
       await openEdit(user);
 
       await user.clear(screen.getByPlaceholderText("https://www.printables.com/model/..."));
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -1267,7 +1282,7 @@ describe("ModelDetail", () => {
 
       await user.click(screen.getByRole("button", { name: "Parts" }));
       await user.click(screen.getByRole("option", { name: "None" }));
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -1287,7 +1302,7 @@ describe("ModelDetail", () => {
         screen.getByPlaceholderText("https://www.printables.com/model/..."),
         "https://example.test/thing",
       );
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PATCH").at(-1)?.body ?? "{}")).toMatchObject({
@@ -1300,7 +1315,7 @@ describe("ModelDetail", () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderDetail();
       await openEdit(user);
-      const name = screen.getByPlaceholderText("Model name");
+      const name = screen.getByRole("textbox", { name: "Name (required)" });
       await user.clear(name);
       await user.type(name, "Something else");
 
@@ -1317,9 +1332,9 @@ describe("ModelDetail", () => {
       });
       await openEdit(user);
 
-      await user.click(screen.getByRole("button", { name: "Save" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
 
-      expect(await screen.findByPlaceholderText("Model name")).toBeInTheDocument();
+      expect(await screen.findByRole("textbox", { name: "Name (required)" })).toBeInTheDocument();
     });
   });
 
@@ -1526,6 +1541,38 @@ describe("ModelDetail", () => {
     });
   });
 
+  describe("details keyboard ownership", () => {
+    it.each([{ isComposing: true }, { repeat: true }, { shiftKey: true }])(
+      "ignores modified B during an excluded key event: %j",
+      async (extra) => {
+        renderDetail();
+        const details = await screen.findByTestId("model-detail-sidebar");
+        fireEvent.keyDown(window, {
+          key: "b",
+          code: "KeyB",
+          ctrlKey: true,
+          altKey: true,
+          ...extra,
+        });
+        expect(details).toBeVisible();
+      },
+    );
+
+    it("keeps the details panel visible while editing a modal draft", async () => {
+      const user = userEvent.setup();
+      renderDetail();
+      await openEdit(user);
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Name (required)" }), {
+        key: "b",
+        code: "KeyB",
+        ctrlKey: true,
+        altKey: true,
+      });
+      expect(screen.getByTestId("model-detail-sidebar")).toBeVisible();
+      expect(screen.getByRole("textbox", { name: "Name (required)" })).toBeVisible();
+    });
+  });
+
   describe("adding a revision", () => {
     it("opens the upload dialog from the revisions tab", async () => {
       const user = userEvent.setup();
@@ -1537,7 +1584,7 @@ describe("ModelDetail", () => {
       await screen.findByText("Benchy");
       await user.click(screen.getByRole("tab", { name: /Revisions/ }));
 
-      await user.click(await screen.findByRole("button", { name: /^Add$/ }));
+      await user.click(await screen.findByRole("button", { name: "Add revision" }));
 
       expect(await screen.findByText("Add G-code revision")).toBeInTheDocument();
     });

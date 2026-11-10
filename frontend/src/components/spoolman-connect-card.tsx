@@ -4,7 +4,8 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, PlugZap, Save } from "lucide-react";
+import { createPortal } from "react-dom";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 import { useSpoolmanCommands } from "@/lib/queries/settings-spoolman";
 import { captureEditingBase } from "@/lib/api/editing";
@@ -16,13 +17,20 @@ import { formatGrams } from "@/lib/format";
 import { parseApiError, userMessage } from "@/lib/errors";
 import type { SpoolmanStatus } from "@/types";
 import { Localized } from "@/components/ui/localized";
+import { Button } from "@/components/ui/button";
 
 const INPUT_CLASS =
-  "w-full px-2.5 py-1.5 text-sm rounded border border-border bg-background text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50";
+  "w-full px-2.5 py-1.5 text-sm rounded border border-border bg-card text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50";
 
 const SECRET_MASK = "********";
 
-export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
+export function SpoolmanConnectCard({
+  canEdit,
+  actionHost,
+}: {
+  canEdit: boolean;
+  actionHost?: HTMLElement | null;
+}) {
   useUiLocale();
   const formId = useId();
   const commands = useSpoolmanCommands(canEdit);
@@ -193,34 +201,35 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
     }
   }
 
+  const actions =
+    canEdit && status ? (
+      <>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={runTest}
+          disabled={busy || !baseUrl.trim() || review.phase !== "idle"}
+        >
+          {uiText("Test connection")}
+        </Button>
+        <Button
+          type="submit"
+          form={formId + "-connection"}
+          size="sm"
+          loading={busy}
+          disabled={busy || !baseUrl.trim() || review.phase !== "idle"}
+        >
+          {uiText("Save")}
+        </Button>
+      </>
+    ) : null;
+
   return (
     <Localized>
-      <div className="bg-card border border-border rounded overflow-hidden">
-        <div className="px-4 sm:px-6 lg:px-8 py-4 sm:py-5 border-b border-border flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-foreground">Spoolman</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {uiText(
-                "Track filament inventory and per-print consumption with a self-hosted Spoolman instance. Off by default.",
-              )}
-            </p>
-          </div>
-          <span
-            className={`font-mono text-3xs uppercase tracking-wider px-2 py-1 rounded border flex-shrink-0 ${
-              enabled && connected
-                ? "text-green-600 dark:text-green-400 border-green-600/40"
-                : "text-muted-foreground border-border"
-            }`}
-          >
-            {!enabled
-              ? uiText("Disabled")
-              : connected
-                ? uiText("Connected")
-                : uiText("Not connected")}
-          </span>
-        </div>
-
-        <div className="p-3 sm:p-4 lg:p-6 space-y-4">
+      <div className="overflow-hidden border border-border bg-card">
+        {actionHost && actions ? createPortal(actions, actionHost) : null}
+        <div className="space-y-1 p-4 sm:p-5">
           {!canEdit ? (
             <p className="text-xs text-muted-foreground italic">
               {uiText("Only an administrator can configure Spoolman.")}
@@ -281,33 +290,39 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                 </div>
               )}
               {/* Master switch */}
-              <label className="flex items-center justify-between gap-3 cursor-action">
-                <span className="text-sm text-foreground">
+              <label className="grid gap-2 border-b border-border py-3 text-sm sm:grid-cols-[240px_minmax(0,1fr)] sm:items-center sm:gap-6">
+                <span className="font-medium text-foreground">
                   {uiText("Enable Spoolman integration")}
                 </span>
-                <input
-                  type="checkbox"
-                  checked={enabled}
-                  disabled={busy || review.phase !== "idle"}
-                  onChange={(e) => toggleEnabled(e.target.checked)}
-                  className="h-4 w-4"
-                />
+                <span>
+                  <select
+                    value={enabled ? "enabled" : "disabled"}
+                    disabled={busy || review.phase !== "idle"}
+                    onChange={(e) => toggleEnabled(e.target.value === "enabled")}
+                    className={INPUT_CLASS}
+                  >
+                    <option value="enabled">{uiText("Enabled")}</option>
+                    <option value="disabled">{uiText("Disabled")}</option>
+                  </select>
+                  {enabled && (
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {uiText(connected ? "Connected" : "Not connected")}
+                    </span>
+                  )}
+                </span>
               </label>
 
               {/* Connection */}
               <form
                 ref={connectionForm}
-                className="space-y-3"
+                id={formId + "-connection"}
                 onSubmit={(e) => {
                   e.preventDefault();
                   saveConnection();
                 }}
               >
-                <div>
-                  <label
-                    className="block text-2xs text-muted-foreground mb-1"
-                    htmlFor={formId + "-base-url"}
-                  >
+                <div className="grid gap-2 border-b border-border py-3 sm:grid-cols-[240px_minmax(0,1fr)] sm:items-center sm:gap-6">
+                  <label className="text-sm font-medium" htmlFor={formId + "-base-url"}>
                     {uiText("Base URL")}
                   </label>
                   <input
@@ -323,11 +338,8 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                     className={INPUT_CLASS}
                   />
                 </div>
-                <div>
-                  <label
-                    className="block text-2xs text-muted-foreground mb-1"
-                    htmlFor={formId + "-api-key"}
-                  >
+                <div className="grid gap-2 border-b border-border py-3 sm:grid-cols-[240px_minmax(0,1fr)] sm:items-center sm:gap-6">
+                  <label className="text-sm font-medium" htmlFor={formId + "-api-key"}>
                     {uiText("API key ")}
                     <span className="opacity-60">{uiText("(optional)")}</span>
                   </label>
@@ -345,35 +357,15 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                     className={INPUT_CLASS}
                   />
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="submit"
-                    disabled={busy || !baseUrl.trim() || review.phase !== "idle"}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 disabled:cursor-disabled transition-opacity"
-                  >
-                    {busy ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Save className="h-3.5 w-3.5" />
-                    )}
-                    {uiText("Save")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={runTest}
-                    disabled={busy || !baseUrl.trim() || review.phase !== "idle"}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border text-muted-foreground font-mono text-xs uppercase tracking-wider hover:bg-muted disabled:opacity-50 transition-colors"
-                  >
-                    <PlugZap className="h-3.5 w-3.5" />
-                    {uiText("Test connection")}
-                  </button>
-                </div>
+                {!actionHost && (
+                  <div className="flex flex-wrap justify-end gap-2 pt-3">{actions}</div>
+                )}
               </form>
 
               {/* Write-back + double-count warning */}
               {enabled && (
-                <div className="space-y-2 pt-1 border-t border-border">
-                  <label className="flex items-center justify-between gap-3 cursor-action pt-3">
+                <div className="space-y-2">
+                  <label className="grid gap-2 border-b border-border py-3 sm:grid-cols-[240px_minmax(0,1fr)] sm:items-center sm:gap-6">
                     <span className="text-sm text-foreground">
                       {uiText("Write consumption back to Spoolman")}
                       <span className="block text-2xs text-muted-foreground">
@@ -382,13 +374,15 @@ export function SpoolmanConnectCard({ canEdit }: { canEdit: boolean }) {
                         )}
                       </span>
                     </span>
-                    <input
-                      type="checkbox"
-                      checked={!!status?.write_enabled}
+                    <select
+                      value={status?.write_enabled ? "enabled" : "disabled"}
                       disabled={busy || review.phase !== "idle"}
-                      onChange={(e) => toggleWrite(e.target.checked)}
-                      className="h-4 w-4 flex-shrink-0"
-                    />
+                      onChange={(e) => toggleWrite(e.target.value === "enabled")}
+                      className={INPUT_CLASS}
+                    >
+                      <option value="enabled">{uiText("Enabled")}</option>
+                      <option value="disabled">{uiText("Disabled")}</option>
+                    </select>
                   </label>
                   {status?.native_hook_detected && (
                     <div className="space-y-2 text-2xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded p-2">

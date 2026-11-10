@@ -14,7 +14,7 @@ import { useComboboxNav } from "@/lib/use-combobox-nav";
 import { InspectedPrintCard } from "./inspected-print-card";
 import { Localized } from "@/components/ui/localized";
 
-/** Edit-form state owned by the controller (Save lives in the page header). */
+/** Edit-form state owned by the controller (Save lives in the Model editor drawer). */
 export type ModelMetaEditor = {
   collection: string;
   collectionLabel: string | null;
@@ -49,6 +49,20 @@ export function OverviewTab({
   revision: React.ComponentProps<typeof InspectedPrintCard>;
 }) {
   useUiLocale();
+  return (
+    <Localized>
+      <>
+        {(revision.file || !model.files.some((file) => file.file_type === "resin")) && (
+          <InspectedPrintCard {...revision} />
+        )}
+        {editing && <ModelMetadataFields editor={editor} />}
+      </>
+    </Localized>
+  );
+}
+
+export function ModelMetadataFields({ editor }: { editor: ModelMetaEditor }) {
+  useUiLocale();
   const tagShown = editor.filteredTags.slice(0, 6);
   const tagItems = [...tagShown, ...(editor.canCreate ? [editor.tagInput.trim()] : [])];
   const tagNav = useComboboxNav(editor.tagInput ? tagItems.length : 0, {
@@ -71,180 +85,186 @@ export function OverviewTab({
   return (
     <Localized>
       <>
-        {(revision.file || !model.files.some((file) => file.file_type === "resin")) && (
-          <InspectedPrintCard {...revision} />
-        )}
-
-        {editing ? (
-          <div className="space-y-4">
-            {/* Collection picker */}
-            <div>
-              <label className="block font-mono text-3xs text-on-surface-variant tracking-wider uppercase mb-1.5">
-                {uiText("Collection")}
-              </label>
-              <DropdownMenu
-                open={editor.catOpen}
-                onOpenChange={editor.setCatOpen}
-                align="start"
-                role="dialog"
-                contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg p-2"
-                trigger={
-                  <button
-                    type="button"
-                    data-menu-trigger
-                    onClick={() => editor.setCatOpen((v) => !v)}
-                    aria-haspopup="dialog"
-                    aria-expanded={editor.catOpen}
-                    className="w-full h-10 flex items-center justify-between bg-surface text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                  >
-                    <span className={editor.collection ? "" : "text-on-surface-variant/60"}>
-                      {editor.collectionLabel || uiText("None")}
-                    </span>
-                    <ChevronDown className="h-4 w-4 text-on-surface-variant" />
-                  </button>
-                }
-              >
-                <CollectionPicker
-                  minRole="edit"
-                  selectedPath={editor.collection}
-                  noneLabel={editor.allowRoot ? uiText("None") : undefined}
-                  emptyLabel={uiText("No editable collections.")}
-                  onSelect={(collection) => {
-                    editor.setCollection(collection?.path ?? "", collection?.display_path ?? null);
-                    editor.setCatOpen(false);
-                  }}
-                />
-              </DropdownMenu>
-            </div>
-            {/* Description */}
-            <div>
-              <label className="block font-mono text-3xs text-on-surface-variant tracking-wider uppercase mb-1.5">
-                {uiText("Description")}
-              </label>
-              <textarea
-                value={editor.description}
-                onChange={(e) => editor.setDescription(e.target.value)}
-                rows={2}
-                className="w-full bg-surface text-on-surface font-mono text-sm border border-outline-variant rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
-                placeholder={uiText("Optional description")}
+        <div className="space-y-4">
+          {/* Collection picker */}
+          <div>
+            <label className="block text-[13px] font-medium text-foreground mb-1.5">
+              {uiText("Collection")}
+            </label>
+            <DropdownMenu
+              open={editor.catOpen}
+              onOpenChange={editor.setCatOpen}
+              align="start"
+              role="dialog"
+              contentClassName="w-full bg-surface-container-lowest border border-outline-variant rounded shadow-lg p-2"
+              trigger={
+                <button
+                  type="button"
+                  data-menu-trigger
+                  onClick={() => editor.setCatOpen((v) => !v)}
+                  aria-haspopup="dialog"
+                  aria-expanded={editor.catOpen}
+                  className="w-full h-10 flex items-center justify-between bg-card text-foreground text-sm border border-input rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                >
+                  <span className={editor.collection ? "" : "text-on-surface-variant/60"}>
+                    {editor.collectionLabel || uiText("None")}
+                  </span>
+                  <ChevronDown className="h-4 w-4 text-on-surface-variant" />
+                </button>
+              }
+            >
+              <CollectionPicker
+                minRole="edit"
+                selectedPath={editor.collection}
+                noneLabel={editor.allowRoot ? uiText("None") : undefined}
+                emptyLabel={uiText("No editable collections.")}
+                onSelect={(collection) => {
+                  editor.setCollection(collection?.path ?? "", collection?.display_path ?? null);
+                  editor.setCatOpen(false);
+                }}
               />
-            </div>
-            {/* Source URL */}
-            <div>
-              <label className="block font-mono text-3xs text-on-surface-variant tracking-wider uppercase mb-1.5">
-                {uiText("Source URL")}
-              </label>
+            </DropdownMenu>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {uiText("Only editable destinations; None only when permitted.")}
+            </p>
+          </div>
+          {/* Description */}
+          <div>
+            <label className="block text-[13px] font-medium text-foreground mb-1.5">
+              {uiText("Description")}
+            </label>
+            <textarea
+              value={editor.description}
+              onChange={(e) => editor.setDescription(e.target.value)}
+              rows={3}
+              className="w-full bg-card text-foreground text-sm border border-input rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent resize-y"
+              placeholder={uiText("Optional description")}
+            />
+          </div>
+          <h3 className="border-t border-border pt-5 text-sm font-semibold">
+            {uiText("Discovery")}
+          </h3>
+          {/* Source URL */}
+          <div>
+            <label className="block text-[13px] font-medium text-foreground mb-1.5">
+              {uiText("Source URL")}
+            </label>
+            <input
+              type="url"
+              value={editor.sourceUrl}
+              onChange={(e) => editor.setSourceUrl(e.target.value)}
+              className="w-full h-10 bg-card text-foreground text-sm border border-input rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+              placeholder="https://www.printables.com/model/..."
+            />
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {uiText("URL is preserved separately from captured provenance.")}
+            </p>
+          </div>
+          {/* Tags */}
+          <div>
+            <label className="block text-[13px] font-medium text-foreground mb-1.5">
+              {uiText("Model tags")}
+            </label>
+            <div className="relative">
               <input
-                type="url"
-                value={editor.sourceUrl}
-                onChange={(e) => editor.setSourceUrl(e.target.value)}
-                className="w-full h-10 bg-surface text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                placeholder="https://www.printables.com/model/..."
+                value={editor.tagInput}
+                onChange={(e) => {
+                  editor.setTagInput(e.target.value);
+                  tagNav.setActiveIndex(-1);
+                }}
+                {...tagNav.inputProps}
+                onKeyDown={(e) => {
+                  tagNav.inputProps.onKeyDown(e);
+                  if (e.defaultPrevented) return;
+                  if (e.key === "Backspace" && !editor.tagInput && editor.tags.length) {
+                    editor.setTags((p) => p.slice(0, -1));
+                  }
+                }}
+                placeholder={uiText("Search or create — press Enter")}
+                className="w-full h-10 bg-card text-foreground text-sm border border-input rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
               />
-            </div>
-            {/* Tags */}
-            <div>
-              <label className="block font-mono text-3xs text-on-surface-variant tracking-wider uppercase mb-1.5">
-                {uiText("Tags")}
-              </label>
-              <div className="relative">
-                <input
-                  value={editor.tagInput}
-                  onChange={(e) => {
-                    editor.setTagInput(e.target.value);
-                    tagNav.setActiveIndex(-1);
-                  }}
-                  {...tagNav.inputProps}
-                  onKeyDown={(e) => {
-                    tagNav.inputProps.onKeyDown(e);
-                    if (e.defaultPrevented) return;
-                    if (e.key === "Backspace" && !editor.tagInput && editor.tags.length) {
-                      editor.setTags((p) => p.slice(0, -1));
-                    }
-                  }}
-                  placeholder={uiText("Search or create — press Enter")}
-                  className="w-full h-10 bg-surface text-on-surface font-mono text-sm border border-outline-variant rounded px-3 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                />
-                {editor.tagInput && (editor.filteredTags.length > 0 || editor.canCreate) && (
-                  <div
-                    id={tagNav.listboxId}
-                    role="listbox"
-                    className="pop-in absolute left-0 right-0 top-full mt-1 z-dropdown bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-40 overflow-y-auto"
-                  >
-                    {tagShown.map((t, i) => (
-                      <div
-                        key={t.id}
-                        id={tagNav.optionId(i)}
-                        role="option"
-                        aria-selected={i === tagNav.activeIndex}
-                        className={`group flex items-center hover:bg-surface-container-low ${i === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => {
-                            editor.toggleTag(t.name);
-                            editor.setTagInput("");
-                          }}
-                          className="flex-1 min-w-0 text-left px-3 py-1.5 font-mono text-xs text-on-surface-variant flex justify-between gap-2"
-                        >
-                          <span className="truncate">{t.name}</span>
-                          <span className="opacity-50">({t.model_count})</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => editor.deleteTag(t)}
-                          title={uiText('Delete tag "{value1}"', { value1: String(t.name) })}
-                          aria-label={uiText("Delete tag {value1}", { value1: String(t.name) })}
-                          className="px-2 py-1.5 text-on-surface-variant/50 hover:text-error opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </button>
-                      </div>
-                    ))}
-                    {editor.canCreate && (
+              {editor.tagInput && (editor.filteredTags.length > 0 || editor.canCreate) && (
+                <div
+                  id={tagNav.listboxId}
+                  role="listbox"
+                  className="pop-in absolute left-0 right-0 top-full mt-1 z-dropdown bg-surface-container-lowest border border-outline-variant rounded shadow-lg py-1 max-h-40 overflow-y-auto"
+                >
+                  {tagShown.map((t, i) => (
+                    <div
+                      key={t.id}
+                      id={tagNav.optionId(i)}
+                      role="option"
+                      aria-selected={i === tagNav.activeIndex}
+                      className={`group flex items-center hover:bg-surface-container-low ${i === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
+                    >
                       <button
                         type="button"
-                        id={tagNav.optionId(tagShown.length)}
-                        role="option"
-                        aria-selected={tagShown.length === tagNav.activeIndex}
                         onClick={() => {
-                          editor.createTag(editor.tagInput);
+                          editor.toggleTag(t.name);
                           editor.setTagInput("");
                         }}
-                        className={`w-full text-left px-3 py-1.5 font-mono text-xs text-primary hover:bg-surface-container-low flex items-center gap-2 ${tagShown.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
+                        className="flex-1 min-w-0 text-left px-3 py-1.5 text-[13px] text-on-surface-variant flex justify-between gap-2"
                       >
-                        <Plus className="h-3 w-3" />
-                        {uiText(' Create "')}
-                        {editor.tagInput.trim()}
-                        {uiText('"')}
+                        <span className="truncate">{t.name}</span>
+                        <span className="opacity-50">({t.model_count})</span>
                       </button>
-                    )}
-                  </div>
-                )}
-              </div>
-              {editor.tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {editor.tags.map((name) => (
-                    <span
-                      key={name}
-                      className="inline-flex items-center gap-1 bg-secondary-container text-on-secondary-container pl-2 pr-1 py-0.5 rounded font-mono text-3xs tracking-wider"
-                    >
-                      {name}
                       <button
                         type="button"
-                        onClick={() => editor.toggleTag(name)}
-                        aria-label={uiText("Remove {value1}", { value1: String(name) })}
-                        className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-on-secondary-container/10"
+                        onClick={() => editor.deleteTag(t)}
+                        title={uiText('Delete tag "{value1}"', { value1: String(t.name) })}
+                        aria-label={uiText("Delete tag {value1}", { value1: String(t.name) })}
+                        className="px-2 py-1.5 text-on-surface-variant/50 hover:text-error opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
                       >
-                        <X className="h-3 w-3" />
+                        <Trash2 className="h-3 w-3" />
                       </button>
-                    </span>
+                    </div>
                   ))}
+                  {editor.canCreate && (
+                    <button
+                      type="button"
+                      id={tagNav.optionId(tagShown.length)}
+                      role="option"
+                      aria-selected={tagShown.length === tagNav.activeIndex}
+                      onClick={() => {
+                        editor.createTag(editor.tagInput);
+                        editor.setTagInput("");
+                      }}
+                      className={`w-full text-left px-3 py-1.5 text-[13px] text-primary hover:bg-surface-container-low flex items-center gap-2 ${tagShown.length === tagNav.activeIndex ? "bg-surface-container-low" : ""}`}
+                    >
+                      <Plus className="h-3 w-3" />
+                      {uiText(' Create "')}
+                      {editor.tagInput.trim()}
+                      {uiText('"')}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
+            <p className="mt-1.5 text-xs text-muted-foreground">
+              {uiText("Search existing or create with Enter.")}
+            </p>
+            {editor.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {editor.tags.map((name) => (
+                  <span
+                    key={name}
+                    className="inline-flex items-center gap-1 bg-secondary-container text-on-secondary-container pl-2 pr-1 py-0.5 rounded text-xs"
+                  >
+                    {name}
+                    <button
+                      type="button"
+                      onClick={() => editor.toggleTag(name)}
+                      aria-label={uiText("Remove {value1}", { value1: String(name) })}
+                      className="h-3.5 w-3.5 rounded-sm flex items-center justify-center hover:bg-on-secondary-container/10"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
-        ) : null}
+        </div>
       </>
     </Localized>
   );

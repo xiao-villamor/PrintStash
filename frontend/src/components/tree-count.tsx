@@ -16,6 +16,7 @@ export function TreeCount({ value, stale = false }: { value: number; stale?: boo
     <span
       key={shown.tick}
       data-stale={stale || undefined}
+      data-tree-count
       className={`block min-w-[18px] rounded bg-muted px-1 py-0.5 text-center text-2xs font-medium text-muted-foreground transition-opacity duration-press ease-out ${stale ? "opacity-50" : ""} ${motion}`}
     >
       {value}

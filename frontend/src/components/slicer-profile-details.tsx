@@ -3,6 +3,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link } from "@/lib/link";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Modal } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApiError, userMessage } from "@/lib/errors";
@@ -44,13 +45,21 @@ function SettingsTable({ settings }: { settings: Record<string, string> }) {
   );
 }
 
-function Variant({ variant, index }: { variant: SettingsVariant; index: number }) {
+function Variant({
+  variant,
+  index,
+  profileName,
+}: {
+  variant: SettingsVariant;
+  index: number;
+  profileName: string;
+}) {
   const { locale } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const source = variant.sources[0];
   const preset = variant.settings.filament_settings_id ?? variant.settings.printer_settings_id;
   return (
-    <article className="min-w-0 p-3 sm:p-4">
+    <article className="min-w-0 py-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1 space-y-1">
           <h4 className="break-words text-sm font-medium">
@@ -78,8 +87,33 @@ function Variant({ variant, index }: { variant: SettingsVariant; index: number }
           />
         </Button>
       </div>
-      {expanded && (
-        <div className="mt-3 space-y-3 border-t pt-3">
+      <Modal
+        open={expanded}
+        onClose={() => setExpanded(false)}
+        title={uiText("Captured setting variant")}
+        description={uiText("These values describe the saved files and are read-only.")}
+        className="max-w-3xl"
+      >
+        <div className="space-y-3">
+          <dl className="grid gap-3 border border-border bg-muted/30 p-4 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-muted-foreground">{uiText("Profile")}</dt>
+              <dd>{profileName}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">{uiText("Variant")}</dt>
+              <dd>
+                {index + 1}
+                {preset ? ` · ${preset}` : ""}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-muted-foreground">{uiText("Slicer")}</dt>
+              <dd>
+                {[source.slicer_name, source.slicer_version].filter(Boolean).join(" ") || "—"}
+              </dd>
+            </div>
+          </dl>
           <SettingsTable settings={variant.settings} />
           <p className="text-xs text-muted-foreground">{uiText("profiles.valuesHelp")}</p>
           <h5 className="text-xs font-semibold">{uiText("profiles.sourceFiles")}</h5>
@@ -107,7 +141,7 @@ function Variant({ variant, index }: { variant: SettingsVariant; index: number }
             ))}
           </ul>
         </div>
-      )}
+      </Modal>
     </article>
   );
 }
@@ -119,6 +153,7 @@ function ProfileSettingsContent({
   kind: ProfileSettingsKind;
   profile: Profile;
 }) {
+  const [compareOpen, setCompareOpen] = useState(false);
   const query = useInfiniteQuery(
     profileSettingsOptions(kind, profile.id, profile.edit_epoch, profile.edit_version),
   );
@@ -128,21 +163,92 @@ function ProfileSettingsContent({
     [denied, query.data],
   );
   const variants = useMemo(() => groupProfileSettings(kind, captures), [kind, captures]);
+  const first = variants[0]?.settings ?? {};
+  const second = variants[1]?.settings ?? {};
+  const differences = [...new Set([...Object.keys(first), ...Object.keys(second)])]
+    .filter((key) => first[key] !== second[key])
+    .sort();
   return (
     <div className="mt-3 space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="max-w-prose text-xs text-muted-foreground">
           {uiText("profiles.integratedHelp")}
         </p>
-        <Button
-          variant="outline"
-          size="xs"
-          onClick={() => void query.refetch()}
-          loading={query.isFetching}
-        >
-          {uiText("Refresh")}
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          {variants.length > 1 && (
+            <Button variant="outline" size="xs" onClick={() => setCompareOpen(true)}>
+              {uiText("Compare variants")}
+            </Button>
+          )}
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => void query.refetch()}
+            loading={query.isFetching}
+          >
+            {uiText("Refresh")}
+          </Button>
+        </div>
       </div>
+      <Modal
+        open={compareOpen && variants.length > 1}
+        onClose={() => setCompareOpen(false)}
+        title={uiText("Compare slicer variants")}
+        description={uiText("Values captured from the G-code; they are read-only.")}
+        className="max-w-3xl"
+      >
+        <div className="space-y-4">
+          <dl className="grid gap-3 border border-border bg-muted/30 p-4 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-muted-foreground">{uiText("Profile")}</dt>
+              <dd>{profile.name}</dd>
+            </div>
+            {[variants[0], variants[1]].map((variant, index) => (
+              <div key={variant?.key ?? index}>
+                <dt className="text-xs text-muted-foreground">
+                  {uiText(index === 0 ? "Variant 1" : "Variant 2")}
+                </dt>
+                <dd>
+                  {[
+                    variant?.settings.filament_settings_id ?? variant?.settings.printer_settings_id,
+                    variant?.sources[0]?.slicer_name,
+                    variant?.sources[0]?.slicer_version,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "—"}
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-sm text-muted-foreground">
+            {uiText("Only settings that differ are shown.")}
+          </p>
+          {differences.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{uiText("No differences.")}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b border-border">
+                    <th className="py-2 pr-4">{uiText("Setting")}</th>
+                    <th className="py-2 pr-4">{uiText("Variant 1")}</th>
+                    <th className="py-2">{uiText("Variant 2")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {differences.map((key) => (
+                    <tr key={key} className="border-b border-border">
+                      <th className="break-all py-2 pr-4 font-mono text-xs font-normal">{key}</th>
+                      <td className="break-all py-2 pr-4">{first[key] ?? "—"}</td>
+                      <td className="break-all py-2">{second[key] ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </Modal>
       {query.isError && (
         <div role="alert" className="space-y-2 text-sm text-destructive">
           <p>{userMessage(query.error)}</p>
@@ -171,11 +277,37 @@ function ProfileSettingsContent({
                     files: new Set(captures.map((file) => file.file_id)).size,
                   })}
                 </p>
-                <div className="divide-y divide-border overflow-hidden rounded-md border bg-background">
+                <div className="divide-y divide-border">
                   {variants.map((variant, index) => (
-                    <Variant key={variant.key} variant={variant} index={index} />
+                    <Variant
+                      key={variant.key}
+                      variant={variant}
+                      index={index}
+                      profileName={profile.name}
+                    />
                   ))}
                 </div>
+                <section aria-label={uiText("Used by")} className="border-t border-border pt-4">
+                  <h4 className="text-sm font-semibold">{uiText("Used by")}</h4>
+                  <div className="divide-y divide-border">
+                    {captures.map((file) => (
+                      <div
+                        key={file.file_id}
+                        className="flex flex-wrap items-center justify-between gap-3 py-4"
+                      >
+                        <div className="min-w-0">
+                          <p className="break-words text-sm font-medium">{file.model_name}</p>
+                          <p className="break-words text-xs text-muted-foreground">
+                            {file.filename}
+                          </p>
+                        </div>
+                        <Button variant="ghost" size="xs" asChild>
+                          <Link href={`/models/${file.model_id}`}>{uiText("Open Model")}</Link>
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
               </>
             )}
             {query.hasNextPage && (
@@ -219,7 +351,7 @@ export function ProfileSettingsDetails({
       <Button
         variant="ghost"
         size="xs"
-        className="-ml-2 font-semibold"
+        className="px-0 font-semibold"
         aria-label={uiText(
           expanded ? "profiles.closeProfileSettings" : "profiles.openProfileSettings",
         )}

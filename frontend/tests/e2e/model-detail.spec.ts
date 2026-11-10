@@ -16,7 +16,8 @@
  * at the default width and unreadable at the smallest one is a bug users hit by
  * dragging, and nothing else would catch it.
  */
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
+import { readFile } from "node:fs/promises";
 
 import { collectPageProblems, useMockApi } from "./_setup";
 import type { ModelRead } from "../../src/types/models";
@@ -24,7 +25,81 @@ import { aDerivative, aMetadata, aModel, aRevision } from "../../src/test-suppor
 
 useMockApi();
 
+async function openToolpath(page: Page) {
+  const gcode = await readFile(
+    new URL("../../../backend/tests/fixtures/real_orca_ender3_benchy.gcode", import.meta.url),
+    "utf8",
+  );
+  await page.route("**/api/v1/files/2/toolpath", (route) =>
+    route.fulfill({ contentType: "text/plain", body: gcode }),
+  );
+  await page.goto("/models/1");
+  const preview = page.getByRole("region", { name: "Preview", exact: true });
+  await preview.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(preview.getByRole("button", { name: "Screenshot", exact: true })).toBeEnabled();
+  return preview;
+}
+
 test.describe("model detail route", () => {
+  test("downloads a rendered toolpath capture", async ({ page }) => {
+    const preview = await openToolpath(page);
+    const completed = page.waitForEvent("download");
+
+    await preview.getByRole("button", { name: "Screenshot", exact: true }).click();
+
+    const download = await completed;
+    expect(download.suggestedFilename()).toMatch(/\.png$/);
+    const path = await download.path();
+    expect(path).not.toBeNull();
+    const image = await readFile(path!);
+    expect(image.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+    expect(image.length).toBeGreaterThan(1000);
+  });
+
+  test("changes the rendered toolpath camera to the top view", async ({ page }) => {
+    const preview = await openToolpath(page);
+    const canvas = preview.locator("canvas");
+    const before = await canvas.screenshot();
+
+    await preview.getByRole("button", { name: "Top", exact: true }).click();
+
+    await expect(preview.getByRole("button", { name: "Top", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect.poll(async () => (await canvas.screenshot()).equals(before)).toBe(false);
+  });
+
+  test("toggles the details panel from a focused search field", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/models/1");
+    const details = page.getByTestId("model-detail-sidebar");
+    await expect(details).toBeVisible();
+    await page.locator("header [data-model-search]").focus();
+
+    await page.keyboard.press("Control+Alt+b");
+
+    await expect(details).toBeHidden();
+    await page.keyboard.press("Control+Alt+b");
+    await expect(details).toBeVisible();
+  });
+
+  test("opens the focused revision failure note from the keyboard", async ({ page }) => {
+    await page.goto("/models/1");
+    await page.getByRole("tab", { name: /^Revisions/ }).click();
+    await page.getByRole("button", { name: "Rev 1", exact: true }).focus();
+
+    await page.keyboard.press("2");
+
+    const record = page.getByRole("dialog", { name: "Add print record" });
+    await expect(record).toBeVisible();
+    await expect(record.getByRole("radio", { name: "Failed", exact: true })).toBeChecked();
+    await expect(record.getByRole("textbox", { name: "Error (opt.)" })).toBeFocused();
+    await expect(
+      record.getByRole("group", { name: "G-code Revision", exact: true }).getByRole("radio"),
+    ).toBeChecked();
+  });
+
   for (const width of [320, 1920]) {
     test(`shows a current source access failure after processing succeeded at ${width}px`, async ({
       page,
@@ -351,12 +426,12 @@ test.describe("model detail route", () => {
     await page.goto("/models/1");
     await page.getByRole("button", { name: "Model actions" }).click();
     await page.getByRole("menuitem", { name: /Edit details/ }).click();
-    await page.getByPlaceholder("Model name").fill("Saved draft");
-    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByRole("textbox", { name: "Name (required)" }).fill("Saved draft");
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(
       page.getByText("The save was not confirmed. Review the latest version before retrying."),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Save changes", exact: true })).toBeDisabled();
 
     await page.getByRole("button", { name: "Review latest version" }).click();
     await expect(page.getByRole("dialog", { name: "Latest saved version" })).toContainText(
@@ -397,11 +472,13 @@ test.describe("model detail route", () => {
     await page.goto("/models/1");
     await page.getByRole("button", { name: "Model actions" }).click();
     await page.getByRole("menuitem", { name: /Edit details/ }).click();
-    await page.getByPlaceholder("Model name").fill("My browser draft");
-    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await page.getByRole("textbox", { name: "Name (required)" }).fill("My browser draft");
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
 
-    await expect(page.getByPlaceholder("Model name")).toHaveValue("My browser draft");
-    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+    await expect(page.getByRole("textbox", { name: "Name (required)" })).toHaveValue(
+      "My browser draft",
+    );
+    await expect(page.getByRole("button", { name: "Save changes", exact: true })).toBeDisabled();
     await page.getByRole("button", { name: "Review latest version" }).click();
     await expect(page.getByRole("dialog", { name: "Latest saved version" })).toContainText(
       "Other editor",
@@ -677,6 +754,7 @@ test.describe("model detail route", () => {
     await expect(page).toHaveURL(/\/\?type=all&sort=date-desc$/);
     const libraryUrl = page.url();
     await modelLink.click();
+    await page.getByRole("link", { name: "Open page", exact: true }).click();
     await expect(page).toHaveURL((url) => url.pathname === "/models/1");
     await expect(preview).toBeVisible();
     await expect(loadingPreview).toHaveCount(0);
@@ -684,6 +762,7 @@ test.describe("model detail route", () => {
     await page.goBack();
     await expect(page).toHaveURL(libraryUrl);
     await modelLink.click();
+    await page.getByRole("link", { name: "Open page", exact: true }).click();
     await expect(page).toHaveURL((url) => url.pathname === "/models/1");
     await expect(preview).toBeVisible();
 
@@ -706,7 +785,12 @@ test.describe("model detail route", () => {
         .getByRole("region", { name: "Recorded prints" })
         .getByRole("row", { name: "ender Successful 2" }),
     ).toBeVisible();
-    await expect(page.getByText(/1\/1 online/)).toBeVisible();
+    await page.getByRole("button", { name: "Send to printer", exact: true }).last().click();
+    await expect(
+      page
+        .getByRole("dialog", { name: "Send Rev 1 to printer" })
+        .getByRole("checkbox", { name: "Select ender" }),
+    ).toBeChecked();
     await expect(page.getByText("This page could not be found")).toHaveCount(0);
 
     const html = await page.content();
@@ -740,7 +824,7 @@ test.describe("model detail route", () => {
     page,
   }) => {
     await page.addInitScript(() => {
-      localStorage.setItem("ps-model-detail-sidebar-width", "400");
+      localStorage.setItem("ps-model-detail-inspector-preferred-width", "400");
     });
     await page.goto("/models/1");
     await page.getByRole("tab", { name: "Source info" }).click();
@@ -836,39 +920,41 @@ test.describe("model detail route", () => {
     await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: "Send to printer" }).last().click();
-    const dialog = page.getByRole("dialog", { name: "Send to printer" });
+    const dialog = page.getByRole("dialog", { name: "Send Rev 1 to printer" });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("checkbox", { name: "Select ender" })).toBeChecked();
-    await expect(dialog.getByLabel("G-code revision")).toBeVisible();
+    await expect(dialog.getByRole("group", { name: "G-code revision", exact: true })).toBeVisible();
     await expect(dialog.getByRole("checkbox", { name: "Start print immediately" })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Send to printer" })).toBeEnabled();
     const scrollRegion = dialog.getByTestId("send-dialog-scroll-region");
     const [scrollBox, revisionBox] = await Promise.all([
       scrollRegion.boundingBox(),
-      dialog.getByLabel("G-code revision").boundingBox(),
+      dialog.getByRole("group", { name: "G-code revision", exact: true }).boundingBox(),
     ]);
     expect(scrollBox).not.toBeNull();
     expect(revisionBox).not.toBeNull();
     expect(revisionBox!.x - scrollBox!.x).toBeGreaterThanOrEqual(2);
   });
 
-  test("logging a failed print opens a draft for the inspected revision", async ({ page }) => {
+  test("saves a revision failure note with Control Enter", async ({ page }) => {
     await page.goto("/models/1");
-    const writes: string[] = [];
-    page.on("request", (request) => {
-      if (request.method() === "POST" && /\/models\/1\/print-jobs/.test(request.url()))
-        writes.push(request.url());
+    await page.getByRole("tab", { name: /^Revisions/ }).click();
+    await page.getByRole("button", { name: "Rev 1", exact: true }).focus();
+    await page.keyboard.press("2");
+    const dialog = page.getByRole("dialog", { name: "Add print record", exact: true });
+    await expect(dialog.getByRole("radio", { name: "Failed", exact: true })).toBeChecked();
+    await dialog.getByRole("radio", { name: "ender", exact: true }).check();
+    await dialog.getByRole("textbox", { name: "Error (opt.)" }).fill("Corner lifted");
+    const saved = page.waitForRequest(
+      (request) => request.method() === "POST" && request.url().endsWith("/models/1/print-jobs"),
+    );
+    await page.keyboard.press("Control+Enter");
+    expect((await saved).postDataJSON()).toMatchObject({
+      file_id: 2,
+      printer_id: 3,
+      state: "failed",
+      error: "Corner lifted",
     });
-    await page
-      .getByRole("region", { name: "Recorded prints" })
-      .getByRole("button", { name: "Failed", exact: true })
-      .click();
-    const dialog = page.getByRole("dialog", { name: "Log a print", exact: true });
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByLabel("Result", { exact: true })).toHaveValue("failed");
-    await expect(dialog.getByLabel("G-code Revision", { exact: true })).toHaveValue("2");
-    expect(writes).toEqual([]);
-    await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
   });
 
@@ -916,9 +1002,13 @@ test.describe("model detail route", () => {
     ).toBeVisible();
     await page.getByRole("tab", { name: "Overview", exact: true }).click();
     await page.getByRole("button", { name: "Send to printer", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Send to printer", exact: true });
+    const dialog = page.getByRole("dialog", { name: "Send Rev 2 to printer", exact: true });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByLabel("G-code revision")).toHaveValue("12");
+    await expect(
+      dialog
+        .getByRole("group", { name: "G-code revision", exact: true })
+        .getByRole("radio", { name: /^Rev 2/ }),
+    ).toBeChecked();
     await page.keyboard.press("Escape");
     await page.getByRole("tab", { name: "Print settings", exact: true }).click();
     await picker.getByRole("button", { name: "Return to recommended revision" }).click();
@@ -961,6 +1051,27 @@ test.describe("model detail route", () => {
     });
   }
 
+  test("keeps an unresized inspector proportional to its available workspace", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto("/models/1");
+    const inspector = page.getByTestId("model-detail-sidebar");
+    const layout = page.locator(".model-detail-layout");
+    await expect
+      .poll(async () =>
+        Math.abs(
+          (await inspector.boundingBox())!.width -
+            Math.min(1000, ((await layout.boundingBox())!.width - 40) * 0.45),
+        ),
+      )
+      .toBeLessThan(2);
+    const wide = (await inspector.boundingBox())!.width;
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await expect.poll(async () => (await inspector.boundingBox())!.width).toBeLessThan(wide - 100);
+    expect(
+      await page.evaluate(() => localStorage.getItem("ps-model-detail-inspector-preferred-width")),
+    ).toBeNull();
+  });
+
   test("model detail tabs fit and details sidebar width persists", async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto("/models/1");
@@ -1000,16 +1111,16 @@ test.describe("model detail route", () => {
   test("add revision modal uses designed file picker and labeled fields", async ({ page }) => {
     await page.goto("/models/1");
     await page.getByRole("tab", { name: /Revisions/ }).click();
-    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await page.getByRole("button", { name: "Add revision", exact: true }).click();
 
     const dialog = page.getByRole("dialog", { name: "Add G-code revision" });
     await expect(dialog).toBeVisible();
-    await expect(
-      dialog.getByRole("button", { name: "Choose G-code or drop it here" }),
-    ).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Choose file", exact: true })).toBeVisible();
     await expect(dialog.getByLabel(/Revision label/)).toBeVisible();
     await expect(dialog.getByLabel(/Notes/)).toBeVisible();
-    await expect(dialog.getByRole("checkbox", { name: "Mark as recommended" })).toBeVisible();
+    await expect(
+      dialog.getByRole("radio", { name: "Make this Revision recommended" }),
+    ).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Add revision" })).toBeDisabled();
 
     await dialog.locator(`input[accept=".gcode,.g,.gco,.bgcode"]`).setInputFiles({

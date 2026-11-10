@@ -83,17 +83,17 @@ test.describe("Router boundaries", () => {
   test("keeps a lazy destination after outgoing Library canonicalization", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/");
-    const search = page
+    const destination = page
       .getByRole("navigation", { name: "Navigation" })
-      .getByRole("link", { name: "Search", exact: true });
-    await expect(search).toBeVisible();
+      .getByRole("link", { name: "Profiles", exact: true });
+    await expect(destination).toBeVisible();
 
-    await search.click();
+    await destination.click();
 
-    await expect(page).toHaveURL(/\/search$/);
-    await expect(search).toHaveAttribute("aria-current", "page");
-    await expect(page.getByRole("heading", { name: "Search results", exact: true })).toBeVisible();
+    await expect(page).toHaveURL(/\/profiles$/);
+    await expect(destination).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("heading", { name: "Profiles", exact: true })).toBeVisible();
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Search results", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Profiles", exact: true })).toBeVisible();
   });
 });

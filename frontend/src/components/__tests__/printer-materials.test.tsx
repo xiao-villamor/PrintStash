@@ -18,7 +18,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -73,6 +73,19 @@ function materialState(over: Partial<PrinterMaterialStateRead> = {}): PrinterMat
   };
 }
 
+async function editFeed() {
+  await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
+  return screen.findByRole("textbox", { name: "Material type" });
+}
+
+function saveFeed() {
+  return userEvent.click(
+    within(screen.getByRole("dialog", { name: /manual feed/i })).getByRole("button", {
+      name: "Save state",
+    }),
+  );
+}
+
 function renderMaterials(
   options: RenderAppOptions & { state?: PrinterMaterialStateRead; spoolman?: boolean } = {},
 ) {
@@ -108,19 +121,60 @@ describe("PrinterMaterials", () => {
     it("lists the printer's slots", async () => {
       renderMaterials();
 
-      expect(await screen.findByDisplayValue("Slot 1")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Slot 1" })).toBeInTheDocument();
     });
 
     it("shows the material loaded in a slot", async () => {
       renderMaterials();
 
-      expect(await screen.findByDisplayValue("PLA")).toBeInTheDocument();
+      expect(await screen.findByText(/Manual feed · Loaded · PLA/)).toBeInTheDocument();
     });
 
     it("shows the tool's nozzle diameter", async () => {
       renderMaterials();
 
       expect(await screen.findByDisplayValue("0.4")).toBeInTheDocument();
+    });
+  });
+
+  describe("manual feed dialogs", () => {
+    it("discards canceled material edits", async () => {
+      const view = renderMaterials();
+      const material = await editFeed();
+      await userEvent.clear(material);
+      await userEvent.type(material, "PETG");
+      await userEvent.click(
+        within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }),
+      );
+      expect(await screen.findByText(/Manual feed · Loaded · PLA/)).toBeVisible();
+      expect(view.requestsWithMethod("PUT")).toHaveLength(0);
+    });
+    it("keeps an unrecorded color null when saving another field", async () => {
+      const view = renderMaterials({
+        state: materialState({ slots: [aSlot({ color_hex: null })] }),
+      });
+      const material = await editFeed();
+      await userEvent.clear(material);
+      await userEvent.type(material, "PETG");
+      await saveFeed();
+      await waitFor(() =>
+        expect(JSON.parse(view.requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
+          slots: [expect.objectContaining({ color_hex: null, material_type: "PETG" })],
+        }),
+      );
+    });
+    it("waits for explicit loaded-feed confirmation", async () => {
+      const view = renderMaterials({
+        state: materialState({ slots: [aSlot({ state: "unknown" })] }),
+      });
+      await userEvent.click(await screen.findByRole("button", { name: "Set as loaded" }));
+      expect(view.requestsWithMethod("PUT")).toHaveLength(0);
+      await userEvent.click(screen.getByRole("button", { name: "Confirm loaded feed" }));
+      await waitFor(() =>
+        expect(JSON.parse(view.requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
+          slots: [expect.objectContaining({ state: "loaded" })],
+        }),
+      );
     });
   });
 
@@ -134,7 +188,8 @@ describe("PrinterMaterials", () => {
         }),
       });
 
-      await waitFor(() => expect(screen.queryByDisplayValue("Slot 1")).toBeNull());
+      await screen.findByRole("heading", { name: "Slot 1" });
+      expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     });
 
     it("offers no editing for a slot Spoolman tracks", async () => {
@@ -144,7 +199,8 @@ describe("PrinterMaterials", () => {
         }),
       });
 
-      await waitFor(() => expect(screen.queryByDisplayValue("Slot 1")).toBeNull());
+      await screen.findByRole("heading", { name: "Slot 1" });
+      expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
     });
   });
 
@@ -152,11 +208,11 @@ describe("PrinterMaterials", () => {
     it("sends the material the user typed", async () => {
       const user = userEvent.setup();
       const { requestsWithMethod } = renderMaterials();
-      const material = await screen.findByDisplayValue("PLA");
+      const material = await editFeed();
 
       await user.clear(material);
       await user.type(material, "PETG");
-      await user.click(screen.getByRole("button", { name: /Save/ }));
+      await saveFeed();
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -170,9 +226,9 @@ describe("PrinterMaterials", () => {
       // overwritten by a form built before it.
       const user = userEvent.setup();
       const { requestsWithMethod } = renderMaterials();
-      await screen.findByDisplayValue("PLA");
+      await screen.findByRole("heading", { name: "Slot 1" });
 
-      await user.click(screen.getByRole("button", { name: /Save/ }));
+      await user.click(screen.getByRole("button", { name: "Save state" }));
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -185,10 +241,10 @@ describe("PrinterMaterials", () => {
       // An empty string reads downstream as a real material named nothing.
       const user = userEvent.setup();
       const { requestsWithMethod } = renderMaterials();
-      const material = await screen.findByDisplayValue("PLA");
+      const material = await editFeed();
 
       await user.clear(material);
-      await user.click(screen.getByRole("button", { name: /Save/ }));
+      await saveFeed();
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -215,7 +271,7 @@ describe("PrinterMaterials", () => {
         },
       });
 
-      await screen.findByDisplayValue("PLA");
+      await editFeed();
       await waitFor(() => expect(screen.queryAllByText(/PETG black/).length).toBeGreaterThan(0));
     });
   });
@@ -239,7 +295,8 @@ describe("PrinterMaterials", () => {
       renderMaterials({ state: materialState({ slots: [] }) });
       const add = await screen.findByRole("button", { name: /Add manual feed|Add feed|Add/ });
       await user.click(add);
-
+      await saveFeed();
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       await user.click(add);
 
       expect(await screen.findByDisplayValue("Manual feed 2")).toBeInTheDocument();
@@ -251,10 +308,10 @@ describe("PrinterMaterials", () => {
       // "Empty" and "unknown" are different: one says the operator checked.
       const user = userEvent.setup();
       const { requestsWithMethod } = renderMaterials();
-      await screen.findByDisplayValue("PLA");
+      await editFeed();
 
       await user.selectOptions(screen.getAllByRole("combobox")[0], "empty");
-      await user.click(screen.getByRole("button", { name: /Save/ }));
+      await saveFeed();
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -268,14 +325,14 @@ describe("PrinterMaterials", () => {
       // only come from a tampered DOM — and "unknown" is the honest answer.
       const user = userEvent.setup();
       const { requestsWithMethod } = renderMaterials();
-      await screen.findByDisplayValue("PLA");
+      await editFeed();
       const stateSelect = screen.getAllByRole("combobox")[0];
       const rogue = document.createElement("option");
       rogue.value = "melted";
       stateSelect.append(rogue);
 
       await user.selectOptions(stateSelect, "melted");
-      await user.click(screen.getByRole("button", { name: /Save/ }));
+      await saveFeed();
 
       await waitFor(() =>
         expect(JSON.parse(requestsWithMethod("PUT").at(-1)?.body ?? "{}")).toMatchObject({
@@ -296,16 +353,18 @@ describe("Material entry ownership", () => {
         ),
       },
     });
-    const material = await screen.findByDisplayValue("PLA");
+    const material = await editFeed();
     await userEvent.clear(material);
     await userEvent.type(material, "PETG");
-    await userEvent.click(screen.getByRole("button", { name: "Save state" }));
+    await saveFeed();
     expect(await screen.findByRole("button", { name: "Review current values" })).toBeVisible();
     expect(material).toHaveValue("PETG");
     expect(
       view.requestsWithMethod("GET").filter((r) => r.url.includes("material-state")),
     ).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Save state" })).toBeDisabled();
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Save state" }),
+    ).toBeDisabled();
   });
   it("retires material reads when changing printer", async () => {
     const deferred = Promise.withResolvers<Response>();
@@ -323,10 +382,10 @@ describe("Material entry ownership", () => {
     });
     await waitFor(() => expect(signal).toBeDefined());
     view.rerender(<PrinterMaterials printer={aPrinter({ id: 5 })} />);
-    expect(await screen.findByDisplayValue("ABS")).toBeVisible();
+    expect(await screen.findByText(/Manual feed · Loaded · ABS/)).toBeVisible();
     await act(async () => deferred.resolve(json(materialState())));
     expect(signal?.aborted).toBe(true);
-    expect(screen.queryByDisplayValue("PLA")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Manual feed · Loaded · PLA/)).not.toBeInTheDocument();
   });
   it("separates material read failure from loading", async () => {
     const view = renderMaterials({
@@ -335,7 +394,7 @@ describe("Material entry ownership", () => {
     const retry = await screen.findByRole("button", { name: "Retry" });
     view.route({ "GET /api/v1/printers/4/material-state": json(materialState()) });
     await userEvent.click(retry);
-    expect(await screen.findByDisplayValue("PLA")).toBeVisible();
+    expect(await screen.findByText(/Manual feed · Loaded · PLA/)).toBeVisible();
   });
   it("adopts reviewed material state explicitly", async () => {
     const view = renderMaterials({
@@ -346,10 +405,10 @@ describe("Material entry ownership", () => {
         ),
       },
     });
-    const material = await screen.findByDisplayValue("PLA");
+    const material = await editFeed();
     await userEvent.clear(material);
     await userEvent.type(material, "PETG");
-    await userEvent.click(screen.getByRole("button", { name: "Save state" }));
+    await saveFeed();
     view.route({
       "GET /api/v1/printers/4/material-state": json(
         materialState({
@@ -361,12 +420,12 @@ describe("Material entry ownership", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Review current values" }));
     expect(material).toHaveValue("PETG");
     await userEvent.click(await screen.findByRole("button", { name: "Use current values" }));
-    expect(material).toHaveValue("ABS");
+    expect(await screen.findByText(/Manual feed · Loaded · ABS/)).toBeVisible();
     expect(view.requestsWithMethod("PUT")).toHaveLength(1);
   });
   it("preserves manual draft during provider refresh", async () => {
     const view = renderMaterials();
-    const material = await screen.findByDisplayValue("PLA");
+    const material = await editFeed();
     await userEvent.clear(material);
     await userEvent.type(material, "PETG");
     view.route({
@@ -382,7 +441,7 @@ describe("Material entry ownership", () => {
     });
     expect(material).toHaveValue("PETG");
     expect(await screen.findByText("Updated AMS")).toBeVisible();
-    await userEvent.click(screen.getByRole("button", { name: "Save state" }));
+    await saveFeed();
     expect(
       JSON.parse(view.requestsWithMethod("PUT").at(-1)?.body ?? "{}").expected_updated_at,
     ).toBe(FROZEN_NOW);

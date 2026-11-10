@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, LayoutGrid, List, Search } from "lucide-react";
+import { LayoutGrid, List, Search } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 
 import { SearchFilterControls } from "@/components/search-filter-controls";
@@ -13,6 +13,8 @@ import {
 } from "@/lib/search-filters";
 import { SearchSubjectPreview } from "@/components/search-evidence";
 import { SearchImageInput } from "@/components/search-image-input";
+import { Input } from "@/components/ui/input";
+import { uiText } from "@/lib/locale";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
@@ -143,17 +145,22 @@ function SearchContent() {
       (leg) => leg === "thumbnail" || leg === "multiview" || leg === "point_cloud",
     ) ??
       false);
+  function applySearch(next: typeof filters, query: string, order: typeof sort) {
+    const updated = writeSearchFilters(next, query, order);
+    if (mode === "lexical") updated.set("mode", mode);
+    types.forEach((type) => updated.append("type", type));
+    router.push(`/search?${updated}`);
+  }
   return (
     <div className="h-full overflow-y-auto bg-background pb-24 md:pb-0">
-      <div className="border-b border-border px-4 py-5 sm:px-6">
+      <div className="px-4 pb-6 pt-6 sm:px-6 sm:[&>div]:items-start [&_h1]:font-semibold">
         <PageHeader
           actions={
-            <Button variant="outline" onClick={() => router.push("/")}>
-              <ArrowLeft className="h-4 w-4" aria-hidden />
+            <Button variant="outline" size="xs" onClick={() => router.push("/")}>
               {t("aiSearch.backToLibrary")}
             </Button>
           }
-          title={t("aiSearch.resultsTitle")}
+          title={uiText("Search")}
           description={
             modelId
               ? t("aiSearch.relatedModels")
@@ -166,69 +173,104 @@ function SearchContent() {
         />
       </div>
       {!imageMode && !modelId && (
-        <section
-          aria-label={t("aiSearch.searchOptions")}
-          className="border-b border-border bg-muted/20 px-4 py-2 sm:px-6 sm:py-3"
-        >
-          <SearchFilterControls
+        <section aria-label={t("aiSearch.searchOptions")} className="px-4 sm:px-6">
+          <form
+            className="flex flex-wrap items-center gap-2"
             key={q}
-            filters={filters}
-            q={q}
-            sort={sort}
-            onChange={(next, query, order) => {
-              const updated = writeSearchFilters(next, query, order);
-              if (mode === "lexical") updated.set("mode", mode);
-              types.forEach((type) => updated.append("type", type));
-              router.push(`/search?${updated}`);
+            onSubmit={(event) => {
+              event.preventDefault();
+              const value = new FormData(event.currentTarget).get("q");
+              applySearch(filters, value === null || value instanceof File ? q : value, sort);
             }}
-          />
-          <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-2 sm:mt-3">
-            <div
-              className="flex flex-wrap items-center gap-1"
-              role="group"
-              aria-label={t("aiSearch.resultTypes")}
+          >
+            <Input
+              name="q"
+              defaultValue={q}
+              maxLength={512}
+              aria-label={t("aiSearch.residualQuery")}
+              className="h-9 w-full min-w-0 flex-1 basis-full sm:w-0 sm:basis-0"
+            />
+            <Button type="submit" size="xs" className="h-9">
+              {t("aiSearch.applySearch")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="h-9"
+              disabled={!visualReady}
+              onClick={() => router.push("/search?image=1")}
             >
-              <span className="sr-only mr-2 text-xs font-medium text-muted-foreground sm:not-sr-only">
-                {t("aiSearch.resultTypes")}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                className={`px-2 text-xs sm:px-3 sm:text-sm ${types.length === 0 ? "bg-accent text-accent-foreground" : ""}`}
-                aria-pressed={types.length === 0}
-                onClick={() => {
-                  const next = new URLSearchParams(params);
-                  next.delete("type");
-                  router.push(`/search?${next}`);
-                }}
-              >
-                {t("aiSearch.allResults")}
-              </Button>
-              {subjectTypes.map((type) => (
-                <Button
-                  key={type}
-                  size="sm"
-                  variant="ghost"
-                  className={`px-2 text-xs sm:px-3 sm:text-sm ${types.includes(type) ? "bg-accent text-accent-foreground" : ""}`}
-                  aria-pressed={types.includes(type)}
-                  onClick={() => changeType(type)}
-                >
-                  {t(`aiSearch.type.${type}`)}
-                </Button>
-              ))}
-            </div>
+              {uiText("Image search")}
+            </Button>
             {user && (
-              <div className="flex flex-wrap items-center gap-1 lg:ml-auto">
-                <SearchSavedViews
-                  userId={user.id}
-                  filters={{ ...filters, q, sort }}
-                  onSelect={(value) => router.push(`/search?${writeSearchFilters(value)}`)}
-                />
-                {preference.data && !preferencesInaccessible && (
-                  <SearchPreferences userId={user.id} value={preference.data} />
-                )}
-              </div>
+              <SearchSavedViews
+                userId={user.id}
+                filters={{ ...filters, q, sort }}
+                onSelect={(value) => router.push(`/search?${writeSearchFilters(value)}`)}
+              />
             )}
+          </form>
+          <div
+            className="mt-5 flex gap-6 overflow-x-auto border-b border-border"
+            role="group"
+            aria-label={t("aiSearch.resultTypes")}
+          >
+            <button
+              type="button"
+              className={`shrink-0 border-b-2 pb-3 text-sm ${types.length === 0 ? "border-foreground font-semibold" : "border-transparent"}`}
+              aria-pressed={types.length === 0}
+              onClick={() => {
+                const next = new URLSearchParams(params);
+                next.delete("type");
+                router.push(`/search?${next}`);
+              }}
+            >
+              {uiText("All results")}
+            </button>
+            {subjectTypes.map((type) => (
+              <button
+                key={type}
+                type="button"
+                className={`shrink-0 border-b-2 pb-3 text-sm ${types.includes(type) ? "border-foreground font-semibold" : "border-transparent"}`}
+                aria-pressed={types.includes(type)}
+                onClick={() => changeType(type)}
+              >
+                {t(`aiSearch.type.${type}`)}
+              </button>
+            ))}
+          </div>
+          <div className="mt-4 flex flex-wrap items-start justify-between gap-3">
+            <SearchFilterControls
+              key={q}
+              filters={filters}
+              q={q}
+              sort={sort}
+              showQuery={false}
+              onChange={applySearch}
+            />
+            <div className="flex h-9 items-center gap-2 text-xs text-muted-foreground">
+              {!!items.length && (
+                <span role="status" className="mr-1">
+                  {t("aiSearch.resultsShown", { count: items.length })}
+                </span>
+              )}
+              <div className="flex gap-1" role="group" aria-label={t("aiSearch.resultView")}>
+                {(["grid", "list"] as const).map((mode) => (
+                  <Button
+                    key={mode}
+                    variant="ghost"
+                    size="xs"
+                    className={view === mode ? "bg-accent text-accent-foreground" : undefined}
+                    aria-label={t(mode === "grid" ? "aiSearch.gridView" : "aiSearch.listView")}
+                    aria-pressed={view === mode}
+                    onClick={() => setView(mode)}
+                  >
+                    {uiText(mode === "grid" ? "Grid" : "List")}
+                  </Button>
+                ))}
+              </div>
+            </div>
           </div>
         </section>
       )}
@@ -248,7 +290,8 @@ function SearchContent() {
             {t("aiSearch.searchWithWords")}
           </Button>
         ) : (
-          visualReady && (
+          visualReady &&
+          !!modelId && (
             <Button
               variant="outline"
               className="mb-4"
@@ -325,36 +368,36 @@ function SearchContent() {
             />
           ) : items.length ? (
             <section aria-label={t("aiSearch.resultsTitle")}>
-              <div className="mb-4 flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                <span role="status">{t("aiSearch.resultsShown", { count: items.length })}</span>
-                <div className="flex gap-1" role="group" aria-label={t("aiSearch.resultView")}>
-                  <Button
-                    variant="ghost"
-                    className={view === "grid" ? "bg-accent text-accent-foreground" : undefined}
-                    size="icon-sm"
-                    aria-label={t("aiSearch.gridView")}
-                    aria-pressed={view === "grid"}
-                    onClick={() => setView("grid")}
-                  >
-                    <LayoutGrid className="h-4 w-4" aria-hidden />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    className={view === "list" ? "bg-accent text-accent-foreground" : undefined}
-                    size="icon-sm"
-                    aria-label={t("aiSearch.listView")}
-                    aria-pressed={view === "list"}
-                    onClick={() => setView("list")}
-                  >
-                    <List className="h-4 w-4" aria-hidden />
-                  </Button>
+              {(imageMode || !!modelId) && (
+                <div className="mb-4 flex items-center justify-between gap-3 text-sm text-muted-foreground">
+                  <span role="status">{t("aiSearch.resultsShown", { count: items.length })}</span>
+                  <div className="flex gap-1" role="group" aria-label={t("aiSearch.resultView")}>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t("aiSearch.gridView")}
+                      aria-pressed={view === "grid"}
+                      onClick={() => setView("grid")}
+                    >
+                      <LayoutGrid className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={t("aiSearch.listView")}
+                      aria-pressed={view === "list"}
+                      onClick={() => setView("list")}
+                    >
+                      <List className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
               <ul
                 aria-label={t("aiSearch.resultsTitle")}
                 className={
                   view === "grid"
-                    ? "grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] xl:grid-cols-[repeat(auto-fill,minmax(280px,1fr))]"
+                    ? "grid grid-cols-1 gap-3.5 sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))]"
                     : "divide-y divide-border border-y border-border"
                 }
               >
@@ -373,7 +416,7 @@ function SearchContent() {
                       aria-describedby={`search-result-type-${item.subject_type}-${item.subject_id}`}
                       className={
                         view === "grid"
-                          ? "group block h-full p-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                          ? "group flex h-full flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                           : "group flex min-w-0 items-center gap-3 px-2 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                       }
                     >
@@ -382,13 +425,19 @@ function SearchContent() {
                         subjectType={item.subject_type}
                         large={view === "grid"}
                       />
-                      <div className={view === "grid" ? "min-w-0 px-1 pb-1 pt-3" : "min-w-0"}>
-                        <h2 className="break-words text-sm font-semibold leading-snug text-foreground group-hover:text-primary sm:text-base">
+                      <div
+                        className={
+                          view === "grid"
+                            ? "flex min-h-40 min-w-0 flex-1 flex-col p-3.5"
+                            : "min-w-0"
+                        }
+                      >
+                        <h2 className="break-words text-sm font-semibold leading-snug text-foreground group-hover:text-primary">
                           {item.name}
                         </h2>
                         <p
                           id={`search-result-type-${item.subject_type}-${item.subject_id}`}
-                          className="mt-1 text-xs text-muted-foreground"
+                          className="mb-2 mt-5 text-xs text-muted-foreground"
                         >
                           {t(`aiSearch.type.${item.subject_type}`)}
                         </p>
@@ -409,7 +458,7 @@ function SearchContent() {
                           </div>
                         )}
                         {item.model?.print_summary && (
-                          <p className="mt-2 break-words font-mono text-3xs text-muted-foreground">
+                          <p className="mt-auto break-words pt-3 font-mono text-2xs text-muted-foreground">
                             {[
                               item.model.print_summary.estimated_time_s != null
                                 ? formatDuration(item.model.print_summary.estimated_time_s)
@@ -490,6 +539,11 @@ function SearchContent() {
               {t("aiSearch.loadMore")}
             </Button>
           )
+        )}
+        {user && preference.data && !preferencesInaccessible && !imageMode && !modelId && (
+          <div className="mt-4 flex justify-start">
+            <SearchPreferences userId={user.id} value={preference.data} />
+          </div>
         )}
         {pages.some((page) => page.truncated) && (
           <p className="mt-4 text-xs text-muted-foreground">{t("aiSearch.boundedResults")}</p>

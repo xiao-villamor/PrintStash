@@ -189,7 +189,9 @@ describe("BackgroundWorkPanel", () => {
   it("leads to a model's preview status", async () => {
     renderPanel(stubApi());
 
-    expect(await screen.findByRole("heading", { name: "What's happening now" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
     expect(screen.getByRole("heading", { name: "Checking a model's preview?" })).toBeVisible();
     expect(screen.getByText(/Open the model and look in Files/)).toBeVisible();
     expect(screen.getByRole("link", { name: "Browse models" })).toHaveAttribute("href", "/");
@@ -458,7 +460,7 @@ describe("BackgroundWorkPanel", () => {
     it("refreshes administrator maintenance independently", async () => {
       const api = stubApi();
       renderPanel(api);
-      await screen.findByRole("heading", { name: "What's happening now" });
+      await screen.findByRole("heading", { name: "Preview and metadata processing" });
       await waitFor(() => expect(socket.onmessage).not.toBeNull());
 
       socket.onmessage?.({
@@ -477,7 +479,7 @@ describe("BackgroundWorkPanel", () => {
     it("stops listening when it leaves the page", async () => {
       const api = stubApi();
       const { unmount } = renderPanel(api);
-      await screen.findByRole("heading", { name: "What's happening now" });
+      await screen.findByRole("heading", { name: "Preview and metadata processing" });
       await waitFor(() => expect(socket.onmessage).not.toBeNull());
 
       unmount();
@@ -517,7 +519,7 @@ describe("derivative controls", () => {
     const api = stubApi(overview, { overview: overviewReader });
     renderPanel(api);
     await user.click(
-      await screen.findByRole("checkbox", { name: "Mesh metadata and preview images" }),
+      await screen.findByRole("button", { name: "Turn off Mesh metadata and preview images" }),
     );
     await waitFor(() =>
       expect(api.setPolicy).toHaveBeenCalledWith(
@@ -527,8 +529,8 @@ describe("derivative controls", () => {
     );
     await waitFor(() =>
       expect(
-        screen.getByRole("checkbox", { name: "Mesh metadata and preview images" }),
-      ).not.toBeChecked(),
+        screen.getByRole("button", { name: "Turn on Mesh metadata and preview images" }),
+      ).toBeVisible(),
     );
     expect(screen.getByRole("button", { name: "Use deployment default" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Use deployment default" }));
@@ -549,13 +551,13 @@ describe("derivative controls", () => {
     });
     renderPanel(api);
     await user.click(
-      await screen.findByRole("checkbox", { name: "Mesh metadata and preview images" }),
+      await screen.findByRole("button", { name: "Turn off Mesh metadata and preview images" }),
     );
     await waitFor(() => expect(api.setPolicy).toHaveBeenCalled());
     await waitFor(() =>
       expect(
-        screen.getByRole("checkbox", { name: "Mesh metadata and preview images" }),
-      ).toBeChecked(),
+        screen.getByRole("button", { name: "Turn off Mesh metadata and preview images" }),
+      ).toBeVisible(),
     );
     expect(api.overview).toHaveBeenCalledTimes(1);
   });
@@ -563,7 +565,7 @@ describe("derivative controls", () => {
   it("refreshes on a policy notice", async () => {
     const api = stubApi();
     renderPanel(api);
-    await screen.findByRole("checkbox", { name: "Mesh metadata and preview images" });
+    await screen.findByRole("button", { name: "Turn off Mesh metadata and preview images" });
     await waitFor(() => expect(socket.onmessage).not.toBeNull());
     const calls = vi.mocked(api.overview).mock.calls.length;
     socket.onmessage?.({ data: JSON.stringify({ type: "derivative_policy" }) });
@@ -580,7 +582,9 @@ describe("work query ownership", () => {
         <BackgroundWorkPanel api={api} meshApi={meshApi} />
       </>,
     );
-    expect(await screen.findAllByRole("heading", { name: "What's happening now" })).toHaveLength(2);
+    expect(
+      await screen.findAllByRole("heading", { name: "Preview and metadata processing" }),
+    ).toHaveLength(2);
     expect(api.overview).toHaveBeenCalledTimes(1);
     expect(api.jobs).toHaveBeenCalledTimes(1);
   });
@@ -605,7 +609,9 @@ describe("work query ownership", () => {
     });
     expect(api.overview).toHaveBeenCalledTimes(1);
     act(() => deliver(aWorkOverview()));
-    expect(await screen.findByRole("heading", { name: "What's happening now" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
   });
 
   it("shows overview when Jobs reading fails", async () => {
@@ -613,7 +619,9 @@ describe("work query ownership", () => {
       jobs: vi.fn<BackgroundWorkApi["jobs"]>().mockRejectedValue(new Error("jobs offline")),
     });
     renderPanel(api);
-    expect(await screen.findByRole("heading", { name: "What's happening now" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
     expect(screen.getByRole("alert")).toBeVisible();
   });
 
@@ -830,7 +838,9 @@ describe("work drafts", () => {
     await act(async () => {});
     expect(api.overview).not.toHaveBeenCalled();
     expect(api.jobs).not.toHaveBeenCalled();
-    expect(screen.queryByRole("heading", { name: "What's happening now" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Preview and metadata processing" }),
+    ).not.toBeInTheDocument();
   });
 
   it("polls work only in a visible active view", async () => {
@@ -894,7 +904,7 @@ describe("work recovery authority", () => {
       expect(await screen.findByRole("alert")).toBeVisible();
       expect(screen.queryByText("Private admin job")).not.toBeInTheDocument();
       expect(
-        screen.queryByRole("heading", { name: "What's happening now" }),
+        screen.queryByRole("heading", { name: "Preview and metadata processing" }),
       ).not.toBeInTheDocument();
     },
   );
@@ -916,7 +926,9 @@ describe("work recovery authority", () => {
 
       expect(await screen.findByRole("alert")).toBeVisible();
       expect(screen.getByText("Private admin job")).toBeVisible();
-      expect(screen.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+      expect(
+        screen.getByRole("heading", { name: "Preview and metadata processing" }),
+      ).toBeVisible();
     },
   );
 
@@ -929,7 +941,9 @@ describe("work recovery authority", () => {
 
     renderPanel(api);
 
-    expect(await screen.findByRole("heading", { name: "What's happening now" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
     expect(await screen.findByText("Could not load this list.")).toBeVisible();
     expect(screen.queryByText("Nothing is running or waiting right now.")).not.toBeInTheDocument();
   });
@@ -941,7 +955,9 @@ describe("work recovery authority", () => {
 
     renderPanel(api);
 
-    expect(await screen.findByRole("heading", { name: "What's happening now" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
     expect(screen.getByText("Loading…")).toBeVisible();
     expect(screen.queryByText("Nothing is running or waiting right now.")).not.toBeInTheDocument();
   });
@@ -985,7 +1001,7 @@ describe("work authority recovery", () => {
     await user.click(screen.getByRole("button", { name: "Refresh" }));
 
     expect(await screen.findByText("Current admin job")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Preview and metadata processing" })).toBeVisible();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

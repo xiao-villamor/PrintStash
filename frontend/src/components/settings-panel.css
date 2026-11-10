@@ -1,0 +1,193 @@
+.settings-grouped {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.settings-imports {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.settings-maintenance {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.settings-notifications {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.settings-maintenance > .bg-card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-maintenance > .bg-card + .bg-card {
+  border-top: 1px solid var(--border);
+}
+
+.settings-imports > .bg-card,
+.settings-imports fieldset > section {
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
+.settings-imports > .bg-card {
+  border-top: 0;
+}
+
+.settings-imports fieldset {
+  margin-top: 0;
+}
+
+.settings-grouped > .settings-card,
+.settings-inline-groups > .settings-card {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-grouped > .settings-card + .settings-card,
+.settings-inline-groups > .settings-card + .settings-card {
+  border-top: 1px solid var(--border);
+}
+
+.settings-grouped > .settings-card > .settings-card-head,
+.settings-inline-groups > .settings-card > .settings-card-head {
+  border: 0;
+  padding-bottom: 12px;
+}
+
+.settings-grouped > .settings-card > :not(.settings-card-head),
+.settings-inline-groups > .settings-card > :not(.settings-card-head) {
+  margin-left: 64px;
+  padding-top: 0;
+  padding-left: 0;
+}
+
+.settings-grouped > [role="alert"],
+.settings-grouped > [role="status"] {
+  padding: 16px 20px;
+}
+
+.settings-card-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 20px 16px;
+}
+
+.settings-grouped > .settings-card > .settings-card-foot,
+.settings-inline-groups > .settings-card > .settings-card-foot {
+  padding-left: 0;
+}
+
+.settings-preference-fields {
+  padding-right: 20px;
+  padding-bottom: 12px;
+}
+
+.settings-safety-rows {
+  padding-right: 20px;
+  padding-bottom: 4px;
+  font-size: 13px;
+}
+
+.settings-safety-rows > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-safety-rows > div:last-child {
+  border-bottom: 0;
+}
+
+.settings-safety-rows dt {
+  font-weight: 500;
+}
+
+.settings-safety-rows dd {
+  text-align: right;
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.settings-preference-row {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 440px);
+  gap: 24px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-preference-row:last-child {
+  border-bottom: 0;
+}
+
+.settings-access-fields .settings-access-submit {
+  display: flex;
+  width: fit-content;
+  margin: 12px 0 0 auto;
+}
+
+.settings-storage-pane > .bg-card,
+.settings-storage-pane > [data-slot="card"] {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.settings-storage-pane > * + * {
+  border-top: 1px solid var(--border);
+}
+
+.settings-storage-summary > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-storage-summary > div:last-child {
+  border-bottom: 0;
+}
+
+.settings-storage-summary dt {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.settings-storage-summary dd {
+  max-width: 44ch;
+  overflow-wrap: anywhere;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.settings-storage-migration > .settings-card-head {
+  border-bottom: 0;
+}
+
+@media (max-width: 767px) {
+  .settings-grouped > .settings-card > :not(.settings-card-head),
+  .settings-inline-groups > .settings-card > :not(.settings-card-head) {
+    margin-left: 16px;
+    padding-right: 16px;
+  }
+
+  .settings-preference-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+}

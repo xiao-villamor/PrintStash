@@ -28,6 +28,7 @@ export function MultipartModelCard({
   selectable = false,
   selected = false,
   onToggleSelect,
+  favorites = false,
 }: {
   item: MultipartModelListItem;
   origin?: LibraryEntry;
@@ -40,6 +41,7 @@ export function MultipartModelCard({
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: number, range?: boolean) => void;
+  favorites?: boolean;
 }) {
   useUiLocale();
   const { t } = useI18n();
@@ -63,8 +65,9 @@ export function MultipartModelCard({
 
   return (
     <article
+      data-favorites={favorites || undefined}
       className={cn(
-        `${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} group group/selection-card relative flex h-full min-w-0 max-w-full flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-fast hover:border-primary active:scale-[0.99] `,
+        `${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} library-model-card group group/selection-card relative flex h-full min-w-0 max-w-full flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-fast hover:border-primary active:scale-[0.99] `,
         selected && "bg-accent text-accent-foreground",
       )}
     >
@@ -76,19 +79,21 @@ export function MultipartModelCard({
           onChange={() => onToggleSelect(item.id)}
         />
       )}
-      <button
-        type="button"
-        onClick={() => void toggleStar()}
-        disabled={starBusy}
-        aria-label={
-          starred
-            ? uiText("Remove {value1} from favorites", { value1: String(item.name) })
-            : uiText("Add {value1} to favorites", { value1: String(item.name) })
-        }
-        className="absolute right-2 top-2 z-10 rounded bg-card/90 p-2 text-muted-foreground shadow-sm transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
-      >
-        <Star className={cn("h-4 w-4", starred && "fill-current text-primary")} />
-      </button>
+      {!favorites && (
+        <button
+          type="button"
+          onClick={() => void toggleStar()}
+          disabled={starBusy}
+          aria-label={
+            starred
+              ? uiText("Remove {value1} from favorites", { value1: String(item.name) })
+              : uiText("Add {value1} to favorites", { value1: String(item.name) })
+          }
+          className="absolute right-2 top-2 z-10 rounded bg-card/90 p-2 text-muted-foreground shadow-sm transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
+        >
+          <Star className={cn("h-4 w-4", starred && "fill-current text-primary")} />
+        </button>
+      )}
       {canEditTags && (
         <div className="absolute right-2 top-12 z-10">
           {onEditTags ? (
@@ -185,6 +190,24 @@ export function MultipartModelCard({
           </div>
         </div>
       </LibraryItemLink>
+      {favorites && (
+        <div className="flex items-center justify-between gap-2 px-3 pb-3 pt-1">
+          <Button variant="outline" size="xs" asChild>
+            <LibraryItemLink origin={origin} href={detailHref(item.id, returnTo)}>
+              {uiText("Open")}
+            </LibraryItemLink>
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
+            disabled={starBusy}
+            onClick={() => void toggleStar()}
+            aria-label={uiText("Remove {value1} from favorites", { value1: item.name })}
+          >
+            {uiText("Remove favorite")}
+          </Button>
+        </div>
+      )}
     </article>
   );
 }

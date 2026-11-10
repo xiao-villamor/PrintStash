@@ -4,6 +4,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useNavigationShell } from "@/lib/navigation-shell";
+import { useCollectionsPane } from "@/lib/collections-pane-context";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -86,6 +87,8 @@ export function SavedViewSelector({
 }) {
   useUiLocale();
   const { request: requestStartup } = useLibraryStartup();
+  const pane = useCollectionsPane();
+  const railExpanded = railTrigger && pane?.open && pane.mode === "views";
   const { savedViewsRequested, consumeSavedViewsRequest, setSavedViewsOpen } = useNavigationShell();
   const [localOpen, setLocalOpen] = useState(false);
   const open = localOpen || (railTrigger && savedViewsRequested);
@@ -178,17 +181,23 @@ export function SavedViewSelector({
               variant={triggerVariant}
               data-menu-trigger
               role={triggerRole}
-              aria-haspopup="dialog"
+              aria-haspopup={railTrigger && pane ? undefined : "dialog"}
               aria-label={railTrigger ? uiText("Saved views") : undefined}
               title={railTrigger ? uiText("Saved views") : undefined}
-              aria-expanded={open}
-              onClick={() => setMenuOpen(!open)}
+              aria-expanded={railExpanded || open}
+              aria-controls={railTrigger && pane ? "collections-pane" : undefined}
+              onClick={() => {
+                if (railTrigger && pane) {
+                  if (railExpanded) pane.toggle();
+                  else pane.showSavedViews();
+                } else setMenuOpen(!open);
+              }}
               className={cn(
                 "max-w-44",
-                open && "bg-accent text-accent-foreground",
+                (open || railExpanded) && "bg-accent text-accent-foreground",
                 railTrigger &&
-                  open &&
-                  "relative before:absolute before:-left-1.5 before:bottom-2.5 before:top-2.5 before:w-0.5 before:bg-primary",
+                  (open || railExpanded) &&
+                  "relative before:absolute before:-left-1.5 before:bottom-[9px] before:top-[9px] before:w-[3px] before:bg-primary",
                 triggerClassName,
               )}
             >

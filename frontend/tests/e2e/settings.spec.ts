@@ -84,7 +84,7 @@ test.describe("settings route", () => {
 
     await page.getByRole("button", { name: "About" }).click();
     await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();
-    await page.getByRole("button", { name: "GPU", exact: true }).click();
+    await page.getByRole("button", { name: "GPU & rendering", exact: true }).click();
     await expect(card.getByText("GPU accessible from the API")).toBeVisible();
     expect(probes).toBe(answered);
 
@@ -160,8 +160,9 @@ test.describe("settings route", () => {
   test("settings sections are deep-linkable and preserve navigation state", async ({ page }) => {
     await page.goto("/settings?section=trash");
     await expect(page.getByRole("heading", { name: "Trash retention" })).toBeVisible();
-    await expect(page.getByLabel("Trash size")).toHaveText("1.5 MB reclaimable");
+    await expect(page.getByText("Known model storage: 1.5 MB")).toBeVisible();
     await expect(page.getByText("1 deleted item")).toBeVisible();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "About" }).click();
     await expect(page).toHaveURL(/\/settings\?section=about$/);
     await expect(page.getByRole("heading", { name: "Latest changes" })).toBeVisible();

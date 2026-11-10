@@ -1,6 +1,6 @@
 import { acceptsEditingSnapshot } from "@/features/library/editing";
 import type { EditingBase } from "@/types/editing";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createDocument,
   deleteDocument,
@@ -26,8 +26,8 @@ export function useDocuments(collection: string | null) {
   });
 }
 
-export function useDocument(id: number | null) {
-  return useQuery({
+export function documentDetailOptions(id: number | null) {
+  return queryOptions({
     queryKey: documentKeys.detail(id),
     queryFn: ({ signal }) => {
       if (id === null) throw new Error("Document id is required");
@@ -35,6 +35,10 @@ export function useDocument(id: number | null) {
     },
     enabled: id !== null,
   });
+}
+
+export function useDocument(id: number | null) {
+  return useQuery(documentDetailOptions(id));
 }
 
 /** Confirmed writes publish only after obsolete reads have been cancelled. */
