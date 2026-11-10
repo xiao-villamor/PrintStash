@@ -1,158 +1,282 @@
 "use client";
 
-import { uiText } from "@/lib/locale";
-import { useUiLocale } from "@/lib/i18n";
-
-import { Link } from "@/lib/link";
-import { usePathname } from "@/lib/navigation";
 import {
-  BookOpen,
-  Box,
-  Layers,
+  Bookmark,
+  FolderClosed,
   Inbox,
-  SlidersHorizontal,
+  Keyboard,
   LogIn,
-  LogOut,
   Printer,
-  Settings,
-  User,
+  Search,
+  SlidersHorizontal,
+  Star,
+  Trash2,
   type LucideIcon,
 } from "lucide-react";
-import { useAuth } from "@/lib/auth-context";
-import { BrandMark } from "@/components/brand-mark";
-import { useInboxCount } from "@/lib/queries/inbox";
-import { useI18n, type MessageKey } from "@/lib/i18n";
+import { useId, useState, useSyncExternalStore } from "react";
 
+import { DropdownMenu } from "@/components/ui/dropdown-menu";
+import { Modal } from "@/components/ui/modal";
+import { WorkspaceMenu } from "@/components/workspace-menu";
+import { useAuth } from "@/lib/auth-context";
+import { useI18n, useUiLocale, type MessageKey } from "@/lib/i18n";
+import { useLibraryStartup } from "@/lib/library-startup-context";
+import { lastVaultHref } from "@/lib/last-collection";
+import { Link } from "@/lib/link";
+import { uiText } from "@/lib/locale";
+import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
+import { useNavigationShell } from "@/lib/navigation-shell";
+import { useInboxCount } from "@/lib/queries/inbox";
+
+type RailDestination =
+  | "library"
+  | "search"
+  | "inbox"
+  | "favorites"
+  | "printers"
+  | "profiles"
+  | "trash";
 type NavItem = {
+  id: RailDestination;
   href: string;
   labelKey: MessageKey;
   icon: LucideIcon;
   adminOnly?: boolean;
-  external?: boolean;
 };
 
 const mainItems: NavItem[] = [
-  { href: "/", labelKey: "nav.vault", icon: Box },
-  { href: "/library/similar", labelKey: "similarity.title", icon: Layers },
-  { href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
-  { href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
-  { href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
+  { id: "library", href: "/", labelKey: "nav.vault", icon: FolderClosed },
+  { id: "search", href: "/search", labelKey: "Search", icon: Search },
+  { id: "inbox", href: "/inbox", labelKey: "nav.inbox", icon: Inbox },
+  { id: "favorites", href: "/?favorites=true", labelKey: "Favorites", icon: Star },
+];
+
+const utilityItems: NavItem[] = [
+  { id: "printers", href: "/printers", labelKey: "nav.printers", icon: Printer, adminOnly: true },
+  { id: "profiles", href: "/profiles", labelKey: "nav.profiles", icon: SlidersHorizontal },
   {
-    href: "https://www.printstash.org/docs/",
-    labelKey: "nav.wiki",
-    icon: BookOpen,
-    external: true,
+    id: "trash",
+    href: "/settings?section=trash",
+    labelKey: "settings.trash",
+    icon: Trash2,
+    adminOnly: true,
   },
 ];
 
-const bottomItems: NavItem[] = [{ href: "/settings", labelKey: "nav.settings", icon: Settings }];
+function subscribeLastVaultHref(onStoreChange: () => void): () => void {
+  window.addEventListener("storage", onStoreChange);
+  return () => window.removeEventListener("storage", onStoreChange);
+}
 
+function RailMark() {
+  const clipId = useId();
+  return (
+    <span className="flex h-7.5 w-7.5 items-center justify-center rounded-brand bg-primary text-primary-foreground">
+      <svg viewBox="0 0 30 30" className="h-7.5 w-7.5" fill="none" aria-hidden>
+        <clipPath id={clipId}>
+          <path
+            d="M10 6h6.6a5.2 5.2 0 0 1 0 10.4h-3V24H10zM13.6 9.4V13h2.9a1.8 1.8 0 0 0 0-3.6z"
+            fillRule="evenodd"
+            clipRule="evenodd"
+          />
+        </clipPath>
+        <g clipPath={`url(#${clipId})`} fill="currentColor">
+          {[6, 9, 12, 15, 18, 21].map((y) => (
+            <rect key={y} x="8" y={y} width="16" height={y === 21 ? 3 : 2.2} />
+          ))}
+        </g>
+      </svg>
+    </span>
+  );
+}
+
+/** Compact desktop navigation; the mobile navigation owns the same destinations on phones. */
 export function SidebarNav() {
   useUiLocale();
   const pathname = usePathname();
+  const params = useSearchParams();
+  const router = useRouter();
   const { user, logout } = useAuth();
   const { t } = useI18n();
-  const inbox = useInboxCount(user !== null);
+  const startup = useLibraryStartup();
+  const { requestSavedViews, savedViewsOpen, savedViewsAvailable, attachSavedViews } =
+    useNavigationShell();
+  const inbox = useInboxCount(user !== null && startup.canLoad("inbox"));
   const pendingCount = user ? (inbox.data ?? 0) : 0;
-  const visibleMainItems = mainItems.filter((item) => !item.adminOnly || user?.is_superuser);
+  const homeHref = useSyncExternalStore(subscribeLastVaultHref, lastVaultHref);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const favorites = pathname === "/" && params.get("favorites") === "true";
+
+  async function handleLogout() {
+    await logout();
+    setAccountOpen(false);
+    router.push("/login");
+  }
+
+  function isActive(id: RailDestination) {
+    switch (id) {
+      case "library":
+        return (
+          !savedViewsOpen &&
+          !favorites &&
+          (pathname === "/" || /^\/(models|multipart-models|documents)\//.test(pathname))
+        );
+      case "search":
+        return pathname.startsWith("/search");
+      case "inbox":
+        return pathname.startsWith("/inbox");
+      case "favorites":
+        return favorites && !savedViewsOpen;
+      case "printers":
+        return pathname.startsWith("/printers");
+      case "profiles":
+        return pathname.startsWith("/profiles");
+      case "trash":
+        return pathname === "/settings" && params.get("section") === "trash";
+    }
+  }
+
+  const railClass = (active: boolean) =>
+    `relative flex h-10 w-10 shrink-0 items-center justify-center transition-colors duration-press focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
+      active
+        ? "bg-accent text-accent-foreground before:absolute before:-left-1.5 before:bottom-2.5 before:top-2.5 before:w-0.5 before:bg-primary"
+        : "text-muted-foreground hover:bg-muted hover:text-foreground"
+    }`;
+
+  function itemLink(item: NavItem) {
+    if (item.adminOnly && !user?.is_superuser) return null;
+    const label = t(item.labelKey);
+    const active = isActive(item.id);
+    return (
+      <Link
+        key={item.id}
+        href={item.href}
+        title={label}
+        aria-current={active ? "page" : undefined}
+        className={railClass(active)}
+      >
+        <item.icon className="h-5 w-5" strokeWidth={1.6} aria-hidden />
+        <span className="sr-only">{label}</span>
+        {item.id === "inbox" && pendingCount > 0 && (
+          <span className="absolute right-0 top-0 min-w-4 rounded-full bg-secondary px-1 text-center font-mono text-3xs font-semibold leading-4 text-secondary-foreground">
+            {pendingCount}
+          </span>
+        )}
+      </Link>
+    );
+  }
 
   return (
-    <nav className="bg-card border-r border-border h-screen w-64 fixed left-0 top-0 flex-col py-6 px-4 z-50 hidden md:flex">
-      <div className="flex items-center gap-4 mb-10 px-1">
-        <div className="w-10 h-10 rounded bg-primary flex items-center justify-center text-primary-foreground flex-shrink-0">
-          <BrandMark className="h-7 w-7" />
-        </div>
-        <div>
-          <h1 className="text-xl font-bold text-foreground leading-tight tracking-tight">
-            PrintStash
-          </h1>
-          <p className="text-2xs text-muted-foreground font-mono">
-            {uiText("Your prints, organized")}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-1 flex-1">
-        {visibleMainItems.map((item) => {
-          const isActive = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-          const className = `flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] ${
-            isActive ? "text-accent-foreground bg-accent" : "text-muted-foreground hover:bg-muted"
-          }`;
-          if (item.external) {
-            return (
-              <a key={item.href} href={item.href} className={className}>
-                <item.icon className="h-5 w-5" />
-                <span className="font-mono text-xs tracking-wider uppercase">
-                  {t(item.labelKey)}
-                </span>
-              </a>
-            );
-          }
-          return (
-            <Link key={item.href} href={item.href} className={className}>
-              <item.icon className="h-5 w-5" />
-              <span className="font-mono text-xs tracking-wider uppercase">{t(item.labelKey)}</span>
-              {item.href === "/inbox" && pendingCount > 0 && (
-                <span className="ml-auto rounded-full bg-accent px-2 py-0.5 font-mono text-3xs text-accent-foreground">
-                  {pendingCount}
-                </span>
-              )}
-            </Link>
-          );
-        })}
-      </div>
-
-      {/* Bottom section */}
-      <div className="flex flex-col gap-1">
-        {user ? (
-          <div className="flex items-center gap-3 px-3 py-2 mb-1">
-            <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center text-white">
-              <User className="h-3.5 w-3.5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-mono text-foreground truncate">{user.username}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void logout()}
-              className="text-muted-foreground hover:text-red-500 transition-colors p-1"
-              title={uiText("Sign out")}
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
+    <>
+      <nav
+        aria-label={uiText("Navigation")}
+        className="hidden h-full w-rail shrink-0 flex-col items-center border-r border-border bg-rail py-2.5 md:flex"
+      >
+        <Link
+          href={homeHref}
+          aria-label="PrintStash"
+          className="mb-2.5 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
+          <RailMark />
+        </Link>
+        <div className="flex min-h-0 flex-1 flex-col items-center gap-1">
+          {mainItems.map(itemLink)}
+          <div ref={attachSavedViews}>
+            {!savedViewsAvailable && (
+              <button
+                type="button"
+                title={uiText("Saved views")}
+                aria-label={uiText("Saved views")}
+                aria-pressed={savedViewsOpen}
+                className={railClass(savedViewsOpen)}
+                onClick={() => {
+                  requestSavedViews();
+                  if (pathname !== "/") router.push("/");
+                }}
+              >
+                <Bookmark className="h-5 w-5" strokeWidth={1.6} aria-hidden />
+              </button>
+            )}
           </div>
-        ) : (
-          <Link
-            href="/login"
-            className={`flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] mb-1 ${
-              pathname.startsWith("/login")
-                ? "text-accent-foreground bg-accent"
-                : "text-muted-foreground hover:bg-muted"
-            }`}
+        </div>
+        <div className="flex shrink-0 flex-col items-center gap-1">
+          {utilityItems.map(itemLink)}
+          <button
+            type="button"
+            title={uiText("Keyboard shortcuts")}
+            aria-label={uiText("Keyboard shortcuts")}
+            className={railClass(false)}
+            onClick={() => setHelpOpen(true)}
           >
-            <LogIn className="h-5 w-5" />
-            <span className="font-mono text-xs tracking-wider uppercase">{t("nav.signIn")}</span>
-          </Link>
-        )}
-
-        {bottomItems.map((item) => {
-          const isActive = pathname.startsWith(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-4 px-3 py-2 rounded text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] ${
-                isActive
-                  ? "text-accent-foreground bg-accent"
-                  : "text-muted-foreground hover:bg-muted"
-              }`}
+            <Keyboard className="h-5 w-5" strokeWidth={1.6} aria-hidden />
+          </button>
+          {user ? (
+            <DropdownMenu
+              open={accountOpen}
+              onOpenChange={setAccountOpen}
+              align="start"
+              role="menu"
+              trigger={
+                <button
+                  type="button"
+                  data-menu-trigger
+                  aria-label={t("nav.myWorkspace")}
+                  aria-haspopup="menu"
+                  aria-expanded={accountOpen}
+                  onClick={() => setAccountOpen((open) => !open)}
+                  className="mt-1 flex h-10 w-10 items-center justify-center hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                >
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full border border-input bg-accent text-xs font-semibold text-accent-foreground">
+                    {user.username.charAt(0).toUpperCase()}
+                    <span className="sr-only">{user.username}</span>
+                  </span>
+                </button>
+              }
             >
-              <item.icon className="h-5 w-5" />
-              <span className="font-mono text-xs tracking-wider uppercase">{t(item.labelKey)}</span>
+              <WorkspaceMenu
+                pathname={pathname}
+                username={user.username}
+                printersInQuickAccess
+                isAdmin={user.is_superuser}
+                onNavigate={() => setAccountOpen(false)}
+                onLogout={handleLogout}
+              />
+            </DropdownMenu>
+          ) : (
+            <Link
+              href="/login"
+              title={t("nav.signIn")}
+              aria-label={t("nav.signIn")}
+              className={railClass(false)}
+            >
+              <LogIn className="h-5 w-5" strokeWidth={1.6} aria-hidden />
             </Link>
-          );
-        })}
-      </div>
-    </nav>
+          )}
+        </div>
+      </nav>
+      <Modal
+        open={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        title={uiText("Keyboard shortcuts")}
+      >
+        <dl className="divide-y divide-border text-sm">
+          <div className="flex items-center justify-between gap-4 py-3">
+            <dt>{uiText("Focus library search")}</dt>
+            <dd>
+              <kbd className="border border-border bg-muted px-2 py-1 font-mono">/</kbd>
+            </dd>
+          </div>
+          <div className="flex items-center justify-between gap-4 py-3">
+            <dt>{uiText("Clear selection")}</dt>
+            <dd>
+              <kbd className="border border-border bg-muted px-2 py-1 font-mono">
+                {t("keyboard.escape")}
+              </kbd>
+            </dd>
+          </div>
+        </dl>
+      </Modal>
+    </>
   );
 }

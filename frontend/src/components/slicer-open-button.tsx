@@ -50,10 +50,12 @@ export function SlicerOpenButton({
   fileId,
   fileType,
   size = "md",
+  showLabel = false,
 }: {
   fileId: number;
   fileType: string;
   size?: "sm" | "md";
+  showLabel?: boolean;
 }) {
   useUiLocale();
   const [open, setOpen] = useState(false);
@@ -95,6 +97,7 @@ export function SlicerOpenButton({
           className="inline-flex items-center gap-0.5 text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
         >
           <ExternalLink className={iconSize} />
+          {showLabel && <span className="px-1 text-xs">{uiText("Open in slicer")}</span>}
           <ChevronDown className={chevronSize} />
         </button>
       }

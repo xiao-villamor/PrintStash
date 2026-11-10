@@ -5,9 +5,12 @@ import { useEffect, useState } from "react";
 import { useRouter } from "@/lib/navigation";
 
 import { BottomNavBar } from "@/components/bottom-nav-bar";
+import { CollectionsPaneProvider, CollectionsPaneHost } from "@/components/collections-pane";
+import { SidebarNav } from "@/components/sidebar-nav";
 import { Toaster } from "@/components/toaster";
 import { TopBar } from "@/components/top-bar";
 import { MobileFilterProvider } from "@/lib/mobile-filter-provider";
+import { NavigationShellProvider } from "@/lib/navigation-shell-provider";
 import { LibraryStartupProvider } from "@/lib/library-startup-provider";
 import { PreviewActivityTracker } from "@/components/preview-activity-tracker";
 import { useAuth } from "@/lib/auth-context";
@@ -25,7 +28,7 @@ const ArchiveReviewDialog = lazyImport(() =>
   import("@/components/archive-review").then((module) => ({ default: module.ArchiveReviewDialog })),
 );
 
-const CHROMELESS_PREFIXES = ["/setup", "/login", "/getting-started"];
+const CHROMELESS_PREFIXES = ["/setup", "/login"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -131,33 +134,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           children
         ) : (
           <LibraryStartupProvider key={user?.id ?? "signed-out"} active={isVault}>
-            <MobileFilterProvider>
-              <div className="flex flex-col h-dvh overflow-hidden">
-                <TopBar />
-                <PreviewActivityTracker enabled={!!user?.is_superuser} />
-                <div className="flex flex-1 min-h-0 overflow-hidden">
-                  {isVault ? (
-                    children
-                  ) : (
-                    <main className="flex-1 min-w-0 overflow-hidden bg-background">{children}</main>
-                  )}
-                </div>
-                <BottomNavBar />
-                {archiveJobId && (
-                  <DeferredDialog
-                    open
-                    title={uiText("ZIP ready. Choose which files to add.")}
-                    onClose={() => setArchiveJobId(null)}
-                  >
-                    <ArchiveReviewDialog
-                      key={archiveJobId}
-                      jobId={archiveJobId}
-                      onClose={() => setArchiveJobId(null)}
-                    />
-                  </DeferredDialog>
-                )}
-              </div>
-            </MobileFilterProvider>
+            <CollectionsPaneProvider>
+              <NavigationShellProvider>
+                <MobileFilterProvider>
+                  <div className="flex h-dvh overflow-hidden">
+                    <SidebarNav />
+                    <CollectionsPaneHost />
+                    <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                      <TopBar />
+                      <PreviewActivityTracker enabled={!!user?.is_superuser} />
+                      <div className="flex min-h-0 flex-1 overflow-hidden">
+                        {isVault ? (
+                          children
+                        ) : (
+                          <main className="min-w-0 flex-1 overflow-hidden bg-background">
+                            {children}
+                          </main>
+                        )}
+                      </div>
+                      <BottomNavBar />
+                    </div>
+                    {archiveJobId && (
+                      <DeferredDialog
+                        open
+                        title={uiText("ZIP ready. Choose which files to add.")}
+                        onClose={() => setArchiveJobId(null)}
+                      >
+                        <ArchiveReviewDialog
+                          key={archiveJobId}
+                          jobId={archiveJobId}
+                          onClose={() => setArchiveJobId(null)}
+                        />
+                      </DeferredDialog>
+                    )}
+                  </div>
+                </MobileFilterProvider>
+              </NavigationShellProvider>
+            </CollectionsPaneProvider>
           </LibraryStartupProvider>
         )}
       </>

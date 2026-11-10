@@ -48,6 +48,7 @@ describe("EntityTagsDialog", () => {
       availableTags: [],
       canEdit: true,
       help: "Direct tags",
+      triggerMode: "command" as const,
     };
     const view = render(<EntityTagsDialog {...props} onSave={original} />);
     await userEvent.click(screen.getByRole("button", { name: "Edit tags" }));
@@ -68,6 +69,7 @@ describe("EntityTagsDialog", () => {
         tags={["Visible"]}
         availableTags={[]}
         canEdit={false}
+        triggerMode="command"
         help="Read only"
         onSave={async () => {}}
       />,

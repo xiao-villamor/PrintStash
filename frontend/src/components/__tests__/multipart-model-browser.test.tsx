@@ -463,6 +463,25 @@ describe("MultipartModelDetailPage", () => {
     expect(await screen.findByRole("list", { name: "Choose existing models" })).toBeVisible();
   });
 
+  it("shows the quantity required for a part", async () => {
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(
+          aMultipart({
+            part_count: 1,
+            model_count: 1,
+            parts: [{ id: 1, name: "Base", quantity: 3, sort_order: 0, models: [model] }],
+          }),
+        ),
+      },
+    });
+
+    const part = await screen.findByRole("region", { name: "Base" });
+    expect(within(part).getByText("× 3")).toBeVisible();
+  });
+
   it("shows an explicit empty description", async () => {
     renderApp(<MultipartModelDetailPage />, {
       at: "/multipart-models/7",
@@ -673,6 +692,40 @@ describe("MultipartModelDetailPage", () => {
     expect(input).not.toBeNull();
     await user.upload(input!, new File(["pdf"], "assembly.pdf", { type: "application/pdf" }));
 
+    expect(await screen.findByRole("link", { name: "Assembly" })).toHaveAttribute(
+      "href",
+      "/documents/44",
+    );
+  });
+
+  it("uploads a guide directly from the overview", async () => {
+    const user = userEvent.setup();
+    renderApp(<MultipartModelDetailPage />, {
+      at: "/multipart-models/7",
+      routePath: "/multipart-models/:id",
+      routes: {
+        "GET /api/v1/multipart-models/7": json(aMultipart()),
+        "POST /api/v1/documents/upload": json({
+          id: 44,
+          edit_epoch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          edit_version: 1,
+          name: "Assembly",
+          kind: "pdf",
+          collection: null,
+          collection_id: null,
+          multipart_model_id: 7,
+          filename: "assembly.pdf",
+          effective_role: "admin",
+          updated_at: "2026-01-02T00:00:00Z",
+          body: null,
+        }),
+      },
+    });
+
+    expect(await screen.findByRole("button", { name: "Upload guide" })).toBeEnabled();
+    const input = document.querySelector<HTMLInputElement>('input[type="file"][accept^=".pdf"]');
+    expect(input).not.toBeNull();
+    await user.upload(input!, new File(["pdf"], "assembly.pdf", { type: "application/pdf" }));
     expect(await screen.findByRole("link", { name: "Assembly" })).toHaveAttribute(
       "href",
       "/documents/44",

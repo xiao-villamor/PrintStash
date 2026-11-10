@@ -14,39 +14,40 @@ export function SetupFrame({ step, children }: { step: 1 | 2 | 3; children: Reac
       <Card
         role="region"
         aria-label={t("setup.welcome")}
-        className="w-full max-w-2xl overflow-hidden border-outline-variant bg-surface-container-low"
+        className="w-full max-w-[560px] overflow-hidden border-border bg-card"
       >
-        <header className="flex items-center justify-between gap-4 px-5 py-5 sm:px-8">
+        <header className="flex items-center justify-between gap-4 px-5 pt-6 sm:px-8 sm:pt-8">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-              <BrandMark className="h-7 w-7" />
+            <div className="flex h-7 w-7 items-center justify-center rounded-brand bg-primary text-primary-foreground">
+              <BrandMark className="h-5 w-5" />
             </div>
-            <span className="text-base font-semibold tracking-tight">PrintStash</span>
-            <h1 className="sr-only">{t("setup.welcome")}</h1>
+            <span className="text-[15px] font-semibold tracking-tight">PrintStash</span>
           </div>
           <div className="flex items-center gap-4">
             <LocaleToggle />
             <ThemeToggle />
           </div>
         </header>
-        <ol
-          aria-label={t("setup.progress")}
-          className="grid grid-cols-3 gap-2 border-y border-outline-variant bg-muted/30 px-5 py-3 sm:px-8"
-        >
+        <h1 className="mt-6 px-5 text-[22px] font-semibold tracking-tight sm:px-8">
+          {t("setup.welcome")}
+        </h1>
+        <ol aria-label={t("setup.progress")} className="mt-5 grid grid-cols-3 gap-2 px-5 sm:px-8">
           {(["account", "files", "start"] as const).map((key, index) => (
             <li
               key={key}
               aria-current={step === index + 1 ? "step" : undefined}
               className={cn(
-                "flex items-center justify-center gap-2 text-xs",
-                step === index + 1 ? "font-semibold text-foreground" : "text-muted-foreground",
+                "flex items-center gap-2 border-t-2 pt-2.5 text-xs",
+                step >= index + 1
+                  ? "border-primary font-medium text-foreground"
+                  : "border-border text-muted-foreground",
               )}
             >
               <span
                 className={cn(
                   "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-2xs",
                   step === index + 1
-                    ? "bg-accent text-accent-foreground"
+                    ? "bg-primary text-primary-foreground"
                     : "bg-muted text-muted-foreground",
                 )}
               >
@@ -56,7 +57,7 @@ export function SetupFrame({ step, children }: { step: 1 | 2 | 3; children: Reac
             </li>
           ))}
         </ol>
-        <div className="min-w-0 p-5 sm:p-8">{children}</div>
+        <div className="min-w-0 px-5 pb-6 pt-6 sm:px-8 sm:pb-8">{children}</div>
       </Card>
     </main>
   );

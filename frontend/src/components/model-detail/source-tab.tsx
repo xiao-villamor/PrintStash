@@ -1,9 +1,8 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useRef, useState, type ReactNode } from "react";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Image } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -127,13 +126,13 @@ function SourceField({
   };
   return (
     <div
-      className={`grid gap-2 px-3 py-3 @xl/source:grid-cols-[minmax(8rem,0.32fr)_minmax(0,1fr)] @xl/source:items-start ${last ? "" : "border-b border-surface-container-high"}`}
+      className={`grid gap-x-4 gap-y-2 py-4 @md/source:grid-cols-[minmax(6.25rem,.65fr)_minmax(0,2fr)] @md/source:items-start ${last ? "" : "border-b border-border"}`}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="font-mono text-2xs uppercase tracking-wider text-on-surface-variant">
-          {label}
-        </h3>
-        <Badge variant="secondary">{provenanceOriginLabel(field.effective_origin, i18n)}</Badge>
+      <div className="flex flex-col items-start gap-1">
+        <h3 className="text-sm font-medium text-foreground">{label}</h3>
+        <span className="text-xs text-muted-foreground">
+          {provenanceOriginLabel(field.effective_origin, i18n)}
+        </span>
       </div>
       {editing ? (
         <div className="space-y-2">
@@ -171,17 +170,17 @@ function SourceField({
           </div>
         </div>
       ) : (
-        <div className="flex min-w-0 flex-col items-start gap-3 @lg/source:flex-row @lg/source:justify-between">
+        <div className="flex min-w-0 flex-col items-start gap-2">
           <div className="w-full min-w-0 break-words whitespace-pre-wrap text-sm text-muted-foreground">
             {safeLink ? (
               <a
                 href={safeLink}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1 text-primary hover:underline"
+                className="inline-flex max-w-full items-start gap-1 text-primary hover:underline"
               >
-                {safeLink}
-                <ExternalLink className="h-3.5 w-3.5" />
+                <span className="min-w-0 [overflow-wrap:anywhere]">{safeLink}</span>
+                <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
               </a>
             ) : (
               field.effective_value ||
@@ -191,7 +190,7 @@ function SourceField({
             )}
           </div>
           {canEdit && (
-            <div className="flex shrink-0 flex-wrap gap-1 @lg/source:justify-end">
+            <div className="flex shrink-0 flex-wrap gap-1">
               {(field.field_name === "title" || field.field_name === "description") && (
                 <Button size="xs" variant="outline" onClick={applyToModel}>
                   {field.field_name === "title"
@@ -245,7 +244,7 @@ function SourceTags({ tags, last = false }: { tags: string[]; last?: boolean }) 
   if (tags.length === 0) return null;
   return (
     <div
-      className={`flex flex-col gap-2 px-3 py-3 @xl/source:grid @xl/source:grid-cols-[minmax(8rem,0.32fr)_minmax(0,1fr)] @xl/source:items-start ${last ? "" : "border-b border-surface-container-high"}`}
+      className={`flex flex-wrap items-baseline gap-x-4 gap-y-2 py-4 ${last ? "" : "border-b border-border"}`}
       aria-label={i18n?.t("source.tags") ?? uiText("Source tags")}
     >
       <span className="font-mono text-2xs uppercase tracking-wider text-on-surface-variant">
@@ -253,9 +252,12 @@ function SourceTags({ tags, last = false }: { tags: string[]; last?: boolean }) 
       </span>
       <div className="flex flex-wrap gap-1.5">
         {tags.map((tag) => (
-          <Badge key={tag} variant="secondary">
+          <span
+            key={tag}
+            className="min-w-0 max-w-full text-sm text-muted-foreground [overflow-wrap:anywhere]"
+          >
             {tag}
-          </Badge>
+          </span>
         ))}
       </div>
     </div>
@@ -340,62 +342,63 @@ function SourceCover({
   };
 
   return (
-    <section aria-labelledby={`cover-heading-${source.id}`}>
-      <h2
-        id={`cover-heading-${source.id}`}
-        className="mb-4 border-b border-outline-variant pb-1 text-lg font-semibold text-on-surface"
-      >
-        {t("source.cover")}
-      </h2>
-      <div className="overflow-hidden rounded border border-outline-variant bg-surface">
-        <div className="flex flex-col gap-2 px-3 py-2.5 @lg/source:flex-row @lg/source:items-center @lg/source:justify-between">
-          <p className="text-sm text-on-surface-variant" aria-live="polite" role="status">
-            {cover ? t("source.coverAvailable") : t("source.coverEmpty")}
-          </p>
-          {canEdit && (
-            <div className="flex flex-wrap gap-2">
-              <input
-                ref={inputRef}
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="sr-only"
-                aria-label={cover ? t("source.coverReplace") : t("source.coverUpload")}
-                onChange={(event) => {
-                  selectFile(event.currentTarget.files?.[0]);
-                  event.currentTarget.value = "";
-                }}
-              />
+    <section
+      aria-labelledby={`cover-heading-${source.id}`}
+      className="flex flex-wrap items-center gap-4 border-b border-border py-4"
+    >
+      <div className="flex h-24 w-32 shrink-0 items-center justify-center bg-muted/40">
+        {cover ? (
+          <SourceCoverImage
+            compact
+            cover={cover}
+            path={contentPath}
+            alt={`${t("source.cover")} - ${source.provider}`}
+          />
+        ) : (
+          <Image className="h-6 w-6 text-muted-foreground" aria-hidden />
+        )}
+      </div>
+      <div className="min-w-0 flex-1 space-y-2">
+        <h3 id={`cover-heading-${source.id}`} className="text-sm font-semibold">
+          {t("source.cover")}
+        </h3>
+        <p className="text-xs text-muted-foreground" aria-live="polite" role="status">
+          {cover ? t("source.coverAvailable") : t("source.coverEmpty")}
+        </p>
+        {canEdit && (
+          <div className="flex flex-wrap gap-2">
+            <input
+              ref={inputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              aria-label={cover ? t("source.coverReplace") : t("source.coverUpload")}
+              onChange={(event) => {
+                selectFile(event.currentTarget.files?.[0]);
+                event.currentTarget.value = "";
+              }}
+            />
+            <Button
+              size="xs"
+              variant="ghost"
+              disabled={blocked}
+              onClick={() => inputRef.current?.click()}
+            >
+              {cover ? t("source.coverReplace") : t("source.coverUpload")}
+            </Button>
+            {cover && (
               <Button
                 size="xs"
-                variant="outline"
+                variant="ghost"
                 disabled={blocked}
-                onClick={() => inputRef.current?.click()}
+                onClick={() => {
+                  setDeleteBase(snapshot);
+                  setDeleteOpen(true);
+                }}
               >
-                {cover ? t("source.coverReplace") : t("source.coverUpload")}
+                {t("source.coverDelete")}
               </Button>
-              {cover && (
-                <Button
-                  size="xs"
-                  variant="destructive"
-                  disabled={blocked}
-                  onClick={() => {
-                    setDeleteBase(snapshot);
-                    setDeleteOpen(true);
-                  }}
-                >
-                  {t("source.coverDelete")}
-                </Button>
-              )}
-            </div>
-          )}
-        </div>
-        {cover && (
-          <div className="border-t border-surface-container-high bg-surface-container-low p-3">
-            <SourceCoverImage
-              cover={cover}
-              path={contentPath}
-              alt={`${t("source.cover")} - ${source.provider}`}
-            />
+            )}
           </div>
         )}
       </div>
@@ -429,7 +432,6 @@ function SourceCover({
 function SourceIdentityRow({
   label,
   children,
-  last = false,
 }: {
   label: string;
   children: ReactNode;
@@ -437,13 +439,9 @@ function SourceIdentityRow({
 }) {
   useUiLocale();
   return (
-    <div
-      className={`flex flex-col gap-1 px-3 py-2.5 @lg/source:flex-row @lg/source:items-center @lg/source:justify-between ${last ? "" : "border-b border-surface-container-high"}`}
-    >
-      <dt className="shrink-0 font-mono text-xs uppercase tracking-wider text-on-surface-variant">
-        {label}
-      </dt>
-      <dd className="min-w-0 text-sm text-on-surface @lg/source:text-right">{children}</dd>
+    <div className="min-w-0 space-y-1">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words text-sm text-foreground">{children}</dd>
     </div>
   );
 }
@@ -492,7 +490,7 @@ function SourceTabContent({
   const editable = canEdit && !editor.editDenied && !blocked;
   const reviewed = state.phase === "blocked" ? state.reviewed : null;
   return (
-    <div className="@container/source space-y-8">
+    <div className="@container/source space-y-6">
       {editor.query.isError && (
         <div role="alert">
           <p>{uiText("Couldn’t load this model")}</p>
@@ -545,52 +543,63 @@ function SourceTabContent({
         const canonicalUrl = safeHttpUrl(source.canonical_url);
         const fieldCount = source.fields.length + (source.tags?.length ? 1 : 0);
         return (
-          <article key={source.id} className="space-y-7">
+          <article key={source.id} className="min-w-0">
             <section aria-labelledby={`source-heading-${source.id}`}>
-              <h2
-                id={`source-heading-${source.id}`}
-                className="mb-4 border-b border-outline-variant pb-1 text-lg font-semibold text-on-surface"
-              >
-                {t("source.title")}
-              </h2>
-              <dl
-                className="overflow-hidden rounded border border-outline-variant bg-surface"
-                data-testid="source-identity-panel"
-              >
-                <SourceIdentityRow label={t("source.provider")}>
-                  <span className="inline-flex flex-wrap items-center justify-start gap-2 @lg/source:justify-end">
-                    <span className="capitalize">{source.provider}</span>
-                    <Badge variant="secondary">{t("source.capturedStatus")}</Badge>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h2 id={`source-heading-${source.id}`} className="text-base font-semibold">
+                  {uiText("Source information")}
+                </h2>
+                {canonicalUrl && (
+                  <a
+                    href={canonicalUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-foreground hover:underline"
+                  >
+                    {uiText("Open source page")}
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                  </a>
+                )}
+              </div>
+              <div className="space-y-3 border-b border-border py-4">
+                <h3 className="text-lg font-semibold capitalize">
+                  {source.provider}
+                  <span className="ml-2 text-xs font-normal normal-case text-muted-foreground">
+                    {t("source.capturedStatus")}
                   </span>
-                </SourceIdentityRow>
-                <SourceIdentityRow label={t("source.url")}>
+                </h3>
+                <p className="break-words text-xs text-muted-foreground">
                   {canonicalUrl ? (
                     <a
                       href={canonicalUrl}
                       target="_blank"
                       rel="noreferrer"
-                      className="flex min-w-0 max-w-full items-start gap-1 text-left text-primary hover:underline @lg/source:justify-end @lg/source:text-right"
+                      className="hover:underline"
                     >
-                      <span className="min-w-0 break-words">{canonicalUrl}</span>
-                      <ExternalLink className="h-3.5 w-3.5 shrink-0" />
+                      {canonicalUrl}
                     </a>
                   ) : (
-                    <span className="break-all text-muted-foreground">{source.canonical_url}</span>
+                    source.canonical_url
                   )}
-                </SourceIdentityRow>
-                <SourceIdentityRow label={t("source.sourceId")}>
-                  {source.source_item_id || t("source.notSuppliedGeneric")}
-                </SourceIdentityRow>
-                <SourceIdentityRow label={t("source.revision")}>
-                  {source.source_revision || t("source.notSuppliedGeneric")}
-                </SourceIdentityRow>
-                <SourceIdentityRow label={t("source.captured")}>
-                  {new Date(source.first_captured_at).toLocaleDateString(i18n?.locale)}
-                </SourceIdentityRow>
-                <SourceIdentityRow label={t("source.checked")} last>
-                  {new Date(source.last_checked_at).toLocaleDateString(i18n?.locale)}
-                </SourceIdentityRow>
-              </dl>
+                </p>
+                <dl
+                  className="grid grid-cols-2 gap-4 @xl/source:grid-cols-4"
+                  data-testid="source-identity-panel"
+                >
+                  <SourceIdentityRow label={t("source.sourceId")}>
+                    {source.source_item_id || t("source.notSuppliedGeneric")}
+                  </SourceIdentityRow>
+                  <SourceIdentityRow label={t("source.revision")}>
+                    {source.source_revision || t("source.notSuppliedGeneric")}
+                  </SourceIdentityRow>
+                  <SourceIdentityRow label={t("source.captured")}>
+                    {new Date(source.first_captured_at).toLocaleDateString(i18n?.locale)}
+                  </SourceIdentityRow>
+                  <SourceIdentityRow label={t("source.checked")} last>
+                    {new Date(source.last_checked_at).toLocaleDateString(i18n?.locale)}
+                  </SourceIdentityRow>
+                </dl>
+              </div>
             </section>
             <SourceCover
               modelId={modelId}
@@ -603,14 +612,10 @@ function SourceTabContent({
             />
             {fieldCount > 0 && (
               <section aria-labelledby={`metadata-heading-${source.id}`}>
-                <h2
-                  id={`metadata-heading-${source.id}`}
-                  className="mb-4 border-b border-outline-variant pb-1 text-lg font-semibold text-on-surface"
-                >
+                <h2 id={`metadata-heading-${source.id}`} className="sr-only">
                   {t("source.metadata")}
                 </h2>
-                <div className="overflow-hidden rounded border border-outline-variant bg-surface">
-                  <SourceTags tags={source.tags ?? []} last={source.fields.length === 0} />
+                <div>
                   {source.fields.map((field, index) => (
                     <SourceField
                       key={field.field_name}
@@ -623,6 +628,7 @@ function SourceTabContent({
                       last={index === source.fields.length - 1}
                     />
                   ))}
+                  <SourceTags tags={source.tags ?? []} last />
                 </div>
               </section>
             )}
@@ -685,10 +691,12 @@ function SourceCoverImage({
   cover,
   path,
   alt,
+  compact = false,
 }: {
   cover: ModelSourceCoverRead;
   path: string;
   alt: string;
+  compact?: boolean;
 }) {
   // Metadata identifies the displayed bytes. A reviewed replacement must not
   // reuse a blob fetched for the old cover at the same content endpoint.
@@ -696,7 +704,11 @@ function SourceCoverImage({
     `${path}?v=${cover.id}-${encodeURIComponent(cover.updated_at)}`,
   );
   return imageUrl ? (
-    <img src={imageUrl} alt={alt} className="max-h-64 w-full rounded object-contain" />
+    <img
+      src={imageUrl}
+      alt={alt}
+      className={compact ? "h-full w-full object-contain" : "max-h-64 w-full object-contain"}
+    />
   ) : (
     <p className="text-sm text-muted-foreground">{uiText("source.coverUnavailable")}</p>
   );

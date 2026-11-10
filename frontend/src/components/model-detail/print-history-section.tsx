@@ -5,7 +5,7 @@ import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Check, CheckCircle2, Clock, Loader2, Plus, RefreshCw, XCircle } from "lucide-react";
 
 import { createManualPrintJob, getModelPrintJobs, importPrintJobsFromPrinter } from "@/lib/api";
@@ -17,6 +17,7 @@ import { PrintJobReproducibility } from "@/components/print-job-reproducibility"
 import { printJobArtifactLabel } from "@/lib/print-job-reproducibility";
 
 import { PRINT_JOB_PRESENTATION, printJobToneClass } from "./presentation";
+import { Modal } from "@/components/ui/modal";
 import { Localized } from "@/components/ui/localized";
 
 const PRINT_HISTORY_MODES = ["manual", "auto"] as const;
@@ -27,14 +28,17 @@ export function PrintHistorySection({
   modelId,
   gcodeFiles,
   onJobCreated,
+  initialEntry,
 }: {
   jobs: ModelPrintJobRead[];
   modelId: number;
   gcodeFiles: FileRead[];
   onJobCreated: (job: ModelPrintJobRead) => void;
+  initialEntry?: { fileId: number; state: "completed" | "failed" } | null;
 }) {
   useUiLocale();
-  const [showAdd, setShowAdd] = useState(false);
+  const formId = useId();
+  const [showAdd, setShowAdd] = useState(!!initialEntry);
   const [mode, setMode] = useState<PrintHistoryMode>("manual");
 
   // Manual form state
@@ -45,9 +49,11 @@ export function PrintHistorySection({
   // When the printer isn't a registered one, log against this free-text name.
   const [adhocPrinter, setAdhocPrinter] = useState(false);
   const [adhocPrinterName, setAdhocPrinterName] = useState("");
-  const [selectedFileId, setSelectedFileId] = useState<number | null>(gcodeFiles[0]?.id ?? null);
+  const [selectedFileId, setSelectedFileId] = useState<number | null>(
+    initialEntry?.fileId ?? gcodeFiles[0]?.id ?? null,
+  );
   const [selectedSpoolId, setSelectedSpoolId] = useState<number | null>(null);
-  const [jobState, setJobState] = useState("completed");
+  const [jobState, setJobState] = useState<string>(initialEntry?.state ?? "completed");
   const [startedAt, setStartedAt] = useState("");
   const [finishedAt, setFinishedAt] = useState("");
   const [jobError, setJobError] = useState("");
@@ -151,7 +157,7 @@ export function PrintHistorySection({
           </h2>
           <button
             onClick={openAdd}
-            className="inline-flex items-center gap-1.5 rounded border border-outline-variant px-2 py-1 font-mono text-3xs uppercase tracking-wider text-on-surface-variant transition-colors hover:bg-surface-container-low"
+            className="inline-flex items-center gap-1.5 rounded border border-outline-variant px-2 py-1 text-xs font-medium text-on-surface-variant transition-colors hover:bg-surface-container-low"
           >
             <Plus className="h-3.5 w-3.5" />
             {uiText(" Add Record")}
@@ -159,8 +165,15 @@ export function PrintHistorySection({
         </div>
 
         {/* Add record panel */}
-        {showAdd && (
-          <div className="mb-4 border border-outline-variant rounded bg-surface-container-low p-3 space-y-3">
+        <Modal
+          open={showAdd}
+          onClose={() => {
+            if (!submitting && !importing) setShowAdd(false);
+          }}
+          title={uiText("Log a print")}
+          className="max-h-[calc(100dvh-2rem)] max-w-xl overflow-y-auto"
+        >
+          <div className="space-y-4">
             {/* Mode toggle */}
             <div className="flex gap-1">
               {PRINT_HISTORY_MODES.map((m) => (
@@ -171,7 +184,7 @@ export function PrintHistorySection({
                     setImportResults([]);
                     setImportDone(false);
                   }}
-                  className={`px-3 py-1 font-mono text-3xs uppercase tracking-wider rounded transition-colors ${
+                  className={`px-3 py-1 text-xs font-medium rounded transition-colors ${
                     mode === m
                       ? "bg-accent text-accent-foreground"
                       : "text-on-surface-variant hover:bg-surface-container-high"
@@ -184,12 +197,16 @@ export function PrintHistorySection({
 
             {mode === "manual" ? (
               <div className="space-y-2">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-1`}
+                    >
                       {uiText("Printer")}
                     </label>
                     <select
+                      id={`${formId}-1`}
                       value={adhocPrinter ? "__adhoc__" : (selectedPrinterId ?? "")}
                       onChange={(e) => {
                         const v = e.target.value;
@@ -201,7 +218,7 @@ export function PrintHistorySection({
                           setSelectedPrinterId(v ? Number(v) : null);
                         }
                       }}
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-8 bg-surface text-on-surface text-sm border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     >
                       <option value="">{uiText("Select printer…")}</option>
                       {printers.map((p) => (
@@ -213,15 +230,19 @@ export function PrintHistorySection({
                     </select>
                   </div>
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-2`}
+                    >
                       {uiText("G-code Revision")}
                     </label>
                     <select
+                      id={`${formId}-2`}
                       value={selectedFileId ?? ""}
                       onChange={(e) =>
                         setSelectedFileId(e.target.value ? Number(e.target.value) : null)
                       }
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-8 bg-surface text-on-surface text-sm border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     >
                       <option value="">{uiText("Select revision…")}</option>
                       {gcodeFiles.map((f, i) => (
@@ -235,26 +256,34 @@ export function PrintHistorySection({
                 </div>
                 {adhocPrinter && (
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-3`}
+                    >
                       {uiText("Printer name")}
                     </label>
                     <input
+                      id={`${formId}-3`}
                       value={adhocPrinterName}
                       onChange={(e) => setAdhocPrinterName(e.target.value)}
                       maxLength={128}
                       placeholder={uiText("e.g. Garage Prusa MK4")}
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-8 bg-surface text-on-surface text-sm border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                 )}
                 <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                  <label
+                    className="block text-xs font-medium text-on-surface-variant mb-1"
+                    htmlFor={`${formId}-4`}
+                  >
                     {uiText("Result")}
                   </label>
                   <select
+                    id={`${formId}-4`}
                     value={jobState}
                     onChange={(e) => setJobState(e.target.value)}
-                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="min-w-0 w-full h-8 bg-surface text-on-surface text-sm border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option value="completed">{uiText("Completed")}</option>
                     <option value="failed">{uiText("Failed")}</option>
@@ -263,15 +292,19 @@ export function PrintHistorySection({
                 </div>
                 {spoolmanEnabled && spools.length > 0 && (
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-5`}
+                    >
                       {uiText("Spool (opt.)")}
                     </label>
                     <select
+                      id={`${formId}-5`}
                       value={selectedSpoolId ?? ""}
                       onChange={(e) =>
                         setSelectedSpoolId(e.target.value ? Number(e.target.value) : null)
                       }
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-8 bg-surface text-on-surface text-sm border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     >
                       <option value="">{uiText("No spool")}</option>
                       {spools.map((s) => (
@@ -290,40 +323,52 @@ export function PrintHistorySection({
                     </select>
                   </div>
                 )}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-6`}
+                    >
                       {uiText("Started (opt.)")}
                     </label>
                     <input
+                      id={`${formId}-6`}
                       type="datetime-local"
                       value={startedAt}
                       onChange={(e) => setStartedAt(e.target.value)}
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-8 bg-surface text-on-surface text-sm border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-7`}
+                    >
                       {uiText("Finished (opt.)")}
                     </label>
                     <input
+                      id={`${formId}-7`}
                       type="datetime-local"
                       value={finishedAt}
                       onChange={(e) => setFinishedAt(e.target.value)}
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-8 bg-surface text-on-surface text-sm border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                 </div>
                 {jobState === "failed" && (
                   <div>
-                    <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                    <label
+                      className="block text-xs font-medium text-on-surface-variant mb-1"
+                      htmlFor={`${formId}-8`}
+                    >
                       {uiText("Error (opt.)")}
                     </label>
                     <input
+                      id={`${formId}-8`}
                       value={jobError}
                       onChange={(e) => setJobError(e.target.value)}
                       placeholder={uiText("Describe what went wrong…")}
-                      className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                      className="min-w-0 w-full h-8 bg-surface text-on-surface text-sm border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                     />
                   </div>
                 )}
@@ -331,7 +376,7 @@ export function PrintHistorySection({
                   <button
                     onClick={submitManual}
                     disabled={submitting || !manualPrinterReady || !selectedFileId}
-                    className="flex-1 h-8 bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+                    className="flex-1 h-8 bg-primary text-primary-foreground text-sm uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
                   >
                     {submitting ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -342,7 +387,7 @@ export function PrintHistorySection({
                   </button>
                   <button
                     onClick={() => setShowAdd(false)}
-                    className="px-3 h-8 border border-outline-variant rounded font-mono text-xs text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                    className="px-3 h-8 border border-outline-variant rounded text-sm text-on-surface-variant hover:bg-surface-container-high transition-colors"
                   >
                     {uiText("Cancel")}
                   </button>
@@ -350,23 +395,27 @@ export function PrintHistorySection({
               </div>
             ) : (
               <div className="space-y-2">
-                <p className="font-mono text-2xs text-on-surface-variant">
+                <p className="text-xs text-on-surface-variant">
                   {uiText(
                     "Fetch recent print history from a Moonraker printer and import jobs matching this model's G-code files.",
                   )}
                 </p>
                 <div>
-                  <label className="block font-mono text-3xs uppercase tracking-wider text-on-surface-variant mb-1">
+                  <label
+                    className="block text-xs font-medium text-on-surface-variant mb-1"
+                    htmlFor={`${formId}-9`}
+                  >
                     {uiText("Printer")}
                   </label>
                   <select
+                    id={`${formId}-9`}
                     value={selectedPrinterId ?? ""}
                     onChange={(e) => {
                       setSelectedPrinterId(e.target.value ? Number(e.target.value) : null);
                       setImportResults([]);
                       setImportDone(false);
                     }}
-                    className="w-full h-8 bg-surface text-on-surface font-mono text-xs border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
+                    className="min-w-0 w-full h-8 bg-surface text-on-surface text-sm border border-outline-variant rounded px-2 focus:outline-none focus:ring-1 focus:ring-primary"
                   >
                     <option value="">{uiText("Select printer…")}</option>
                     {printers.map((p) => (
@@ -379,7 +428,7 @@ export function PrintHistorySection({
                 {importDone && importResults.length > 0 && (
                   <div className="space-y-1">
                     {importResults.map((r) => (
-                      <div key={r.filename} className="flex items-center gap-2 font-mono text-2xs">
+                      <div key={r.filename} className="flex items-center gap-2 text-xs">
                         {r.imported ? (
                           <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
                         ) : (
@@ -398,7 +447,7 @@ export function PrintHistorySection({
                   </div>
                 )}
                 {importDone && importResults.length === 0 && (
-                  <p className="font-mono text-2xs text-on-surface-variant">
+                  <p className="text-xs text-on-surface-variant">
                     {uiText("No matching jobs found on this printer.")}
                   </p>
                 )}
@@ -406,7 +455,7 @@ export function PrintHistorySection({
                   <button
                     onClick={runAutoImport}
                     disabled={importing || !selectedPrinterId}
-                    className="flex-1 h-8 bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
+                    className="flex-1 h-8 bg-primary text-primary-foreground text-sm uppercase tracking-wider rounded disabled:opacity-50 hover:opacity-90 transition-opacity flex items-center justify-center gap-1.5"
                   >
                     {importing ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -417,7 +466,7 @@ export function PrintHistorySection({
                   </button>
                   <button
                     onClick={() => setShowAdd(false)}
-                    className="px-3 h-8 border border-outline-variant rounded font-mono text-xs text-on-surface-variant hover:bg-surface-container-high transition-colors"
+                    className="px-3 h-8 border border-outline-variant rounded text-sm text-on-surface-variant hover:bg-surface-container-high transition-colors"
                   >
                     {uiText("Close")}
                   </button>
@@ -425,10 +474,10 @@ export function PrintHistorySection({
               </div>
             )}
           </div>
-        )}
+        </Modal>
 
         {jobs.length === 0 ? (
-          <p className="font-mono text-xs text-on-surface-variant">
+          <p className="text-sm text-on-surface-variant">
             {uiText("No print history yet. Add a record manually or import from a printer.")}
           </p>
         ) : (
@@ -467,23 +516,23 @@ export function PrintHistorySection({
                       </span>
                     </div>
                     <span
-                      className={`shrink-0 border rounded px-1.5 py-0.5 font-mono text-3xs uppercase tracking-wider ${printJobToneClass(present.tone)}`}
+                      className={`shrink-0 border rounded px-1.5 py-0.5 text-xs font-medium ${printJobToneClass(present.tone)}`}
                     >
                       {present.label}
                     </span>
                   </div>
-                  <p className="font-mono text-2xs text-on-surface-variant">
+                  <p className="text-xs text-on-surface-variant">
                     {job.material_type ? `${job.material_type} · ` : ""}
                     {timeAgo(job.created_at)}
                   </p>
                   {job.source === "external" && (
-                    <p className="font-mono text-2xs uppercase tracking-wider text-on-surface-variant">
+                    <p className="text-xs uppercase tracking-wider text-on-surface-variant">
                       {knownUiText(job.artifact_evidence)}
                     </p>
                   )}
                   <PrintJobReproducibility job={job} previewHref={`/models/${modelId}`} />
                   {(job.actual_duration_s != null || job.filament_used_g != null) && (
-                    <p className="font-mono text-2xs text-on-surface-variant">
+                    <p className="text-xs text-on-surface-variant">
                       <span className="text-emerald-600">{uiText("measured")}</span>
                       {job.actual_duration_s != null
                         ? ` · ${formatDuration(job.actual_duration_s)}`
@@ -493,13 +542,11 @@ export function PrintHistorySection({
                     </p>
                   )}
                   {job.spool_name && (
-                    <p className="font-mono text-2xs text-on-surface-variant">
+                    <p className="text-xs text-on-surface-variant">
                       {uiText("spool · {value1}", { value1: String(job.spool_name ?? "") })}
                     </p>
                   )}
-                  {job.error && (
-                    <p className="font-mono text-2xs text-error break-words">{job.error}</p>
-                  )}
+                  {job.error && <p className="text-xs text-error break-words">{job.error}</p>}
                 </div>
               );
             })}

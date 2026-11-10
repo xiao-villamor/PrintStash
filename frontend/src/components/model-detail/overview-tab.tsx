@@ -3,16 +3,15 @@
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
-import { ChevronDown, ExternalLink, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, Plus, Trash2, X } from "lucide-react";
 
-import { FileRead, FileRevisionUpdate, ModelRead, TagRead } from "@/types";
+import { ModelRead, TagRead } from "@/types";
 
 import { CollectionPicker } from "@/components/collection-picker";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { useComboboxNav } from "@/lib/use-combobox-nav";
-import { safeHttpUrl } from "./source-url";
 
-import { RecommendedPrintCard } from "./recommended-print-card";
+import { InspectedPrintCard } from "./inspected-print-card";
 import { Localized } from "@/components/ui/localized";
 
 /** Edit-form state owned by the controller (Save lives in the page header). */
@@ -42,29 +41,14 @@ export function OverviewTab({
   model,
   editing,
   editor,
-  recommendedFile,
-  hasGcode,
-  revisionSaving,
-  onSend,
-  canSend,
-  onCompare,
-  onMark,
-  onAddRevision,
+  revision,
 }: {
   model: ModelRead;
   editing: boolean;
   editor: ModelMetaEditor;
-  recommendedFile: FileRead | null;
-  hasGcode: boolean;
-  revisionSaving: number | null;
-  onSend: (fileId: number) => void;
-  canSend: boolean;
-  onCompare: () => void;
-  onMark: (file: FileRead, patch: FileRevisionUpdate) => void;
-  onAddRevision: () => void;
+  revision: React.ComponentProps<typeof InspectedPrintCard>;
 }) {
   useUiLocale();
-  const sourceUrl = model.source_url ? safeHttpUrl(model.source_url) : null;
   const tagShown = editor.filteredTags.slice(0, 6);
   const tagItems = [...tagShown, ...(editor.canCreate ? [editor.tagInput.trim()] : [])];
   const tagNav = useComboboxNav(editor.tagInput ? tagItems.length : 0, {
@@ -87,26 +71,8 @@ export function OverviewTab({
   return (
     <Localized>
       <>
-        {(hasGcode || !model.files.some((file) => file.file_type === "resin")) && (
-          <RecommendedPrintCard
-            file={recommendedFile}
-            hasGcode={hasGcode}
-            saving={revisionSaving}
-            onSend={onSend}
-            canSend={canSend}
-            onCompare={onCompare}
-            onMark={onMark}
-            onAddRevision={onAddRevision}
-          />
-        )}
-
-        {!editing && model.description && (
-          <section aria-labelledby="model-description-heading" className="space-y-1">
-            <h2 id="model-description-heading" className="text-sm font-medium">
-              {uiText("Description")}
-            </h2>
-            <p className="whitespace-pre-wrap text-sm text-muted-foreground">{model.description}</p>
-          </section>
+        {(revision.file || !model.files.some((file) => file.file_type === "resin")) && (
+          <InspectedPrintCard {...revision} />
         )}
 
         {editing ? (
@@ -278,34 +244,7 @@ export function OverviewTab({
               )}
             </div>
           </div>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {sourceUrl && (
-              <a
-                href={sourceUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 bg-surface-container text-on-surface px-3 py-1 rounded font-mono text-xs uppercase tracking-wider hover:text-primary transition-colors"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-                {uiText("Source model")}
-              </a>
-            )}
-            {model.collection_label && (
-              <span className="min-w-0 max-w-full wrap-anywhere bg-surface-container text-on-surface px-3 py-1 rounded font-mono text-xs tracking-wider">
-                {model.collection_label}
-              </span>
-            )}
-            {model.tags.map((t) => (
-              <span
-                key={t}
-                className="bg-secondary-container text-on-secondary-container px-3 py-1 rounded font-mono text-xs tracking-wider"
-              >
-                {t}
-              </span>
-            ))}
-          </div>
-        )}
+        ) : null}
       </>
     </Localized>
   );

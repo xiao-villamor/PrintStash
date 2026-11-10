@@ -27,7 +27,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 
 import { PrintersPage } from "@/components/printers-list";
 import { writePrinterCardImagePreference } from "@/lib/printer-card-display";
@@ -98,13 +98,13 @@ function renderPrintersPage(seed: { printers?: PrinterRead[]; dashboard?: Dashbo
   client.setQueryData(queryKeys.fleetSummary, EMPTY_FLEET_SUMMARY);
 
   return render(
-    <MemoryRouter>
+    <TestRouter>
       <QueryClientProvider client={client}>
         <AuthContext.Provider value={ADMIN_AUTH}>
           <PrintersPage />
         </AuthContext.Provider>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </TestRouter>,
   );
 }
 

@@ -20,7 +20,8 @@
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
+import { useRouter } from "@/lib/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelDetail } from "@/components/model-detail";
@@ -82,12 +83,12 @@ function aModel(over: Partial<ModelRead> = {}): ModelRead {
 
 function DetailLocation() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigation = useRouter();
   return (
     <>
-      <output aria-label="Current detail location">{location.pathname + location.search}</output>
-      <button onClick={() => navigate("/models/1?tab=files")}>Open Files URL</button>
-      <button onClick={() => navigate(-1)}>Previous detail</button>
+      <output aria-label="Current detail location">{location.pathname + location.searchStr}</output>
+      <button onClick={() => navigation.push("/models/1?tab=files")}>Open Files URL</button>
+      <button onClick={() => navigation.back()}>Previous detail</button>
     </>
   );
 }
@@ -473,16 +474,16 @@ describe("ModelDetail", () => {
       },
     });
     expect(await screen.findByText(/provider rejected authentication/)).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Reset view" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Fit to view" })).toBeDisabled();
     expect(screen.queryByText("10×20×30 mm")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "GCode" }));
-    expect(screen.queryByRole("button", { name: "Reset view" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Layers" }));
+    expect(screen.queryByRole("button", { name: "Fit to view" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom in" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Zoom out" })).not.toBeInTheDocument();
     expect(screen.queryByText("10×20×30 mm")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "3D" }));
+    await user.click(screen.getByRole("button", { name: "3D model" }));
     expect(await screen.findByText(/provider rejected authentication/)).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Reset view" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Fit to view" })).toBeDisabled();
     expect(screen.queryByText("10×20×30 mm")).not.toBeInTheDocument();
   });
 
@@ -599,20 +600,6 @@ describe("ModelDetail", () => {
         ),
       ).toBe(true);
     });
-
-    it.each([
-      { label: "containing collection", collection: "parts", expected: "/?c=parts" },
-      {
-        label: "nested collection with special characters",
-        collection: "Wall mounts/Backpack & gear #2",
-        expected: "/?c=Wall%20mounts%2FBackpack%20%26%20gear%20%232",
-      },
-      { label: "root for an uncollected model", collection: null, expected: "/" },
-    ])("returns to $label", async ({ collection, expected }) => {
-      renderDetail({ model: aModel({ collection }) });
-
-      expect(await screen.findByRole("link", { name: "Back" })).toHaveAttribute("href", expected);
-    });
   });
 
   describe("what it shows", () => {
@@ -681,7 +668,7 @@ describe("ModelDetail", () => {
 
       await user.click(await screen.findByRole("button", { name: /Plate 02/ }));
 
-      expect(screen.getByText(/Viewing: rack\.3mf · Plate 02/)).toBeVisible();
+      expect(screen.getByText(/rack\.3mf · Plate 02/)).toBeVisible();
     });
 
     it("offers no plate choice for a single-plate 3MF", async () => {
@@ -733,7 +720,7 @@ describe("ModelDetail", () => {
         ),
       ).toBeInTheDocument();
       await user.click(screen.getByRole("tab", { name: /Files/ }));
-      expect(await screen.findByText("plate.dxf")).toBeInTheDocument();
+      expect(await screen.findByRole("article", { name: "plate.dxf" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: /Download/ })).toBeInTheDocument();
     });
 
@@ -833,9 +820,9 @@ describe("ModelDetail", () => {
       renderDetail();
       await screen.findByText("Benchy");
 
-      await user.click(screen.getByRole("tab", { name: /Settings/ }));
+      await user.click(screen.getByRole("tab", { name: /Print settings/ }));
 
-      expect(screen.getByRole("tab", { name: /Settings/ })).toHaveAttribute(
+      expect(screen.getByRole("tab", { name: /Print settings/ })).toHaveAttribute(
         "aria-selected",
         "true",
       );
@@ -1069,7 +1056,7 @@ describe("ModelDetail", () => {
       renderDetail();
 
       await screen.findByText("Benchy");
-      expect(screen.getByRole("tab", { name: /Settings/ })).toBeInTheDocument();
+      expect(screen.getByRole("tab", { name: /Print settings/ })).toBeInTheDocument();
     });
 
     it("keeps a view-only user out of destructive actions", async () => {
@@ -1452,6 +1439,9 @@ describe("ModelDetail", () => {
     });
   });
   describe("resizing the details panel", () => {
+    beforeEach(() => {
+      vi.stubGlobal("innerWidth", 1920);
+    });
     /** The drag handle, which keyboard users reach instead of dragging. */
     async function handle() {
       return screen.findByRole("separator", { name: "Resize details panel" });
@@ -1574,9 +1564,11 @@ describe("ModelDetail", () => {
 });
 
 describe("ModelDetail file hashes", () => {
-  it("replaces the AI caption panel in Overview", async () => {
+  it("shows source file hashes in Files without an AI caption panel", async () => {
+    const user = userEvent.setup();
     renderDetail();
-    const hashes = await screen.findByRole("region", { name: "File hashes" });
+    await user.click(await screen.findByRole("tab", { name: /Files/ }));
+    const hashes = await screen.findByRole("article");
     expect(within(hashes).getByTitle("a".repeat(64), { exact: true })).toBeVisible();
     expect(screen.queryByRole("region", { name: "AI caption" })).not.toBeInTheDocument();
   });

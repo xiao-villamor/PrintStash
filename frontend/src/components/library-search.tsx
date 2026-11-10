@@ -19,7 +19,8 @@ export function LibrarySearch() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const q = searchParams.get("q") ?? "";
+  const q = pathname === "/" || pathname === "/search" ? (searchParams.get("q") ?? "") : "";
+  const [engaged, setEngaged] = useState(false);
   const [value, setValue] = useState(q);
   const [synced, setSynced] = useState(q);
   const [published, setPublished] = useState(q);
@@ -28,14 +29,19 @@ export function LibrarySearch() {
   const input = useRef<HTMLInputElement>(null);
   const wrapper = useRef<HTMLDivElement>(null);
   const publishTimer = useRef<number | undefined>(undefined);
-  const visible = pathname === "/" || pathname === "/search";
+  const visible = true;
   if (synced !== q) {
     setSynced(q);
     // An earlier debounced browse update can land after a new keystroke.
     // Only navigation from outside this input replaces the current draft.
     if (q !== published) setValue(q);
   }
-  const status = useQuery(searchStatusOptions(user?.id, visible && statusEnabled));
+  const status = useQuery(
+    searchStatusOptions(
+      user?.id,
+      visible && statusEnabled && (pathname === "/" || pathname === "/search" || engaged),
+    ),
+  );
   const suggestions = useQuery(
     searchSuggestionsOptions(
       user?.id,
@@ -101,6 +107,10 @@ export function LibrarySearch() {
   }
   function submit() {
     setOpen(false);
+    if (pathname !== "/" && pathname !== "/search") {
+      openResults();
+      return;
+    }
     if (pathname === "/search") {
       if (searchParams.get("mode") === "lexical" && value.trim()) {
         router.push(`/search?${new URLSearchParams({ q: value.trim(), mode: "lexical" })}`);
@@ -169,7 +179,7 @@ export function LibrarySearch() {
         ? "pr-10"
         : "pr-3";
   return (
-    <div ref={wrapper} className="mx-3 flex min-w-0 max-w-2xl flex-1 items-center gap-2 sm:mx-8">
+    <div ref={wrapper} className="ml-auto flex min-w-0 max-w-sm flex-1 items-center">
       <DropdownMenu
         open={open && !!value.trim()}
         onOpenChange={setOpen}
@@ -192,7 +202,10 @@ export function LibrarySearch() {
             />
             <input
               ref={input}
-              onFocus={() => startup.request("search")}
+              onFocus={() => {
+                setEngaged(true);
+                startup.request("search");
+              }}
               data-model-search
               data-menu-trigger
               type="search"
@@ -202,7 +215,7 @@ export function LibrarySearch() {
               aria-label={t("aiSearch.searchLibrary")}
               aria-haspopup="dialog"
               aria-expanded={open && !!value.trim()}
-              className={`block w-full rounded-lg border border-border bg-muted py-2 pl-9 ${inputPadding} text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:bg-background focus:outline-none focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:hidden`}
+              className={`block h-9 w-full rounded border border-input bg-card py-2 pl-9 ${inputPadding} text-sm text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:hidden`}
               placeholder={t("nav.search")}
               value={value}
               onClick={() => setOpen(!!value.trim())}

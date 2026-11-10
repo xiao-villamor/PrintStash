@@ -260,7 +260,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
           }}
         >
           <div>
-            <h2 ref={heading} tabIndex={-1} className="text-2xl font-bold tracking-tight">
+            <h2 ref={heading} tabIndex={-1} className="text-base font-semibold tracking-tight">
               {t(step === 1 ? "setup.account" : "setup.files")}
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -268,16 +268,9 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
             </p>
           </div>
           {step === 1 ? (
-            <div className="grid gap-5 sm:grid-cols-2">
-              {(["username", "password", "confirm", "email"] as const).map((field) => (
-                <div
-                  key={field}
-                  className={
-                    field === "username" || field === "email"
-                      ? "space-y-2 sm:col-span-2"
-                      : "space-y-2"
-                  }
-                >
+            <div className="grid gap-4">
+              {(["username", "email", "password", "confirm"] as const).map((field) => (
+                <div key={field} className="space-y-2">
                   <label
                     htmlFor={`setup-${field}`}
                     className="block text-xs font-medium text-on-surface-variant"

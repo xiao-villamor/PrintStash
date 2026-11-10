@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useState, type ComponentProps } from "react";
-import { useLocation, useNavigate, useNavigationType } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
+import { useRouter, useHistoryAction } from "@/lib/navigation";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Box, Columns2, ScanSearch, SlidersHorizontal } from "lucide-react";
 
@@ -140,28 +141,28 @@ function SimilarityEmptyState({
 export function SimilarityQueue({ modelId }: { modelId?: number }) {
   const modelDetail = modelId !== undefined;
   const { t } = useI18n();
-  const navigate = useNavigate();
+  const navigation = useRouter();
   const searchParams = useSearchParams();
   const location = useLocation();
-  const navigationType = useNavigationType();
+  const navigationAction = useHistoryAction();
   const filterOwner = useId();
-  const currentUrl = location.pathname + location.search;
+  const currentUrl = location.pathname + location.searchStr;
   const [filterDraft, setFilterDraft] = useState(() => ({
-    entry: location.key,
+    entry: location.state.__TSR_key,
     modelId,
     filters: readSimilarityFilters(modelId === undefined ? searchParams : new URLSearchParams()),
     dirty: false,
   }));
   // Router replacements may commit after the next input event. Only a new
   // navigation (including Back/Forward) may replace the live draft with URL state.
-  if (filterDraft.modelId !== modelId || filterDraft.entry !== location.key) {
+  if (filterDraft.modelId !== modelId || filterDraft.entry !== location.state.__TSR_key) {
     const ownReplacement =
       modelId === undefined &&
       filterDraft.modelId === modelId &&
-      navigationType === "REPLACE" &&
+      navigationAction === "REPLACE" &&
       location.state?.similarityFilterOwner === filterOwner;
     setFilterDraft({
-      entry: location.key,
+      entry: location.state.__TSR_key,
       modelId,
       filters:
         ownReplacement || (modelId !== undefined && filterDraft.modelId === modelId)
@@ -184,11 +185,10 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
   const filterUrl = similarityFiltersHref(filters);
   useEffect(() => {
     if (modelId !== undefined || !filterDraft.dirty || currentUrl === filterUrl) return;
-    void navigate(filterUrl, {
-      replace: true,
+    navigation.replace(filterUrl, {
       state: { similarityFilterOwner: filterOwner },
     });
-  }, [modelId, filterDraft.dirty, currentUrl, filterUrl, navigate, filterOwner]);
+  }, [modelId, filterDraft.dirty, currentUrl, filterUrl, navigation, filterOwner]);
 
   // Input intent is immediate. Only the bounded candidate read waits for rapid
   // slider/key changes to settle, so route acknowledgements cannot reset it.
@@ -262,20 +262,19 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
   const modelReturnParams = new URLSearchParams(searchParams);
   modelReturnParams.set("tab", "similar");
   const returnTo = modelId === undefined ? filterUrl : `/models/${modelId}?${modelReturnParams}`;
+  const QueueFrame = modelDetail ? "div" : Card;
   return (
     <>
       {modelDetail && (
-        <h2 className="text-lg font-semibold text-on-surface mb-4 pb-1 border-b border-outline-variant">
-          {t("similarity.review")}
-        </h2>
+        <h2 className="mb-4 text-base font-semibold text-on-surface">{t("similarity.review")}</h2>
       )}
       <SimilaritySearch modelId={modelId} />
-      <Card
+      <QueueFrame
         role="region"
         aria-label={t("similarity.review")}
         className={cn(
           "@container/similarity min-w-0 overflow-hidden",
-          modelDetail && "rounded border-outline-variant bg-surface text-on-surface shadow-none",
+          modelDetail && "bg-transparent text-on-surface",
         )}
       >
         <div
@@ -633,7 +632,7 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
             </Button>
           </div>
         )}
-      </Card>
+      </QueueFrame>
     </>
   );
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
 import { useMediaQuery } from "@/lib/use-media-query";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -44,7 +44,7 @@ export function LibraryStartupProvider({
   const location = useLocation();
   const auth = useAuth();
   const desktop = useMediaQuery("(min-width: 768px)");
-  const key = `${location.key}:${active}`;
+  const key = `${location.state.__TSR_key}:${active}`;
   const [state, setState] = useState(() => navigation(key));
   if (state.key !== key) setState(navigation(key));
   const id = state.id;
@@ -80,9 +80,9 @@ export function LibraryStartupProvider({
   // or the most recently prepared start timestamp.
   useLayoutEffect(() => {
     performance.mark("printstash:navigation:current", {
-      detail: { navigation: id, historyKey: location.key, active },
+      detail: { navigation: id, historyKey: location.state.__TSR_key, active },
     });
-  }, [id, location.key, active]);
+  }, [id, location.state.__TSR_key, active]);
 
   useEffect(() => {
     if (!active) return;

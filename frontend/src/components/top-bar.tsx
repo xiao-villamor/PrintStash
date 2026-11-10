@@ -3,28 +3,25 @@
 import { useUiLocale } from "@/lib/i18n";
 
 import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
-import { useRouter, usePathname } from "@/lib/navigation";
+import { useRouter, usePathname, useSearchParams } from "@/lib/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@/lib/link";
-import {
-  BarChart3,
-  Bell,
-  Box,
-  ChevronDown,
-  BookOpen,
-  Inbox,
-  LogOut,
-  Printer,
-  Settings,
-  SlidersHorizontal,
-} from "lucide-react";
+import { ArrowLeft, Bell, ChevronDown, BookOpen, PanelLeft, Upload } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
+import { useCollectionsPane } from "@/lib/collections-pane-context";
+import { useCollectionSearch } from "@/lib/queries";
+import { modelDetailOptions } from "@/features/library/model-detail";
+import { LibraryBackLink } from "@/features/library/navigation";
+import { uiText } from "@/lib/locale";
+import { userMessage } from "@/lib/errors";
 import { lastVaultHref } from "@/lib/last-collection";
 import { LibrarySearch } from "@/components/library-search";
 import { BrandMark } from "@/components/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { WorkspaceMenu } from "@/components/workspace-menu";
 import { LocaleToggle } from "@/components/locale-toggle";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, type MessageKey } from "@/lib/i18n";
 import { TaskList } from "@/components/task-list";
 import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
@@ -41,6 +38,23 @@ import {
 
 const WIKI_URL = "https://www.printstash.org/docs/";
 
+function pageTitle(pathname: string): MessageKey | null {
+  if (pathname === "/") return "nav.vault";
+  if (pathname.startsWith("/inbox")) return "nav.inbox";
+  if (pathname.startsWith("/printers")) return "nav.printers";
+  if (pathname.startsWith("/profiles")) return "nav.profiles";
+  if (pathname.startsWith("/statistics")) return "nav.statistics";
+  if (pathname.startsWith("/settings")) return "nav.settings";
+  if (pathname.startsWith("/search")) return "Search";
+  if (pathname.startsWith("/getting-started")) return "nav.gettingStarted";
+  if (pathname.startsWith("/documents")) return "nav.document";
+  if (pathname.startsWith("/multipart-models")) return "nav.multipart";
+  if (pathname.startsWith("/library/similar")) return "similarity.title";
+  if (pathname.startsWith("/builds")) return "build.title";
+  if (pathname.startsWith("/models/")) return "nav.model";
+  return null;
+}
+
 // `lastVaultHref` reads the remembered collection out of localStorage — an
 // external store. Same-tab writes are picked up on the next render (a route
 // change re-renders the bar); the `storage` event covers other tabs.
@@ -53,10 +67,33 @@ export function TopBar() {
   useUiLocale();
   const { t } = useI18n();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const pane = useCollectionsPane();
+  const attachBreadcrumbs = pane?.attachBreadcrumbs;
+  const titleKey =
+    pathname === "/settings" && searchParams.get("section") === "trash"
+      ? "settings.trash"
+      : pageTitle(pathname);
   const desktop = useMediaQuery("(min-width: 768px)");
   const router = useRouter();
   const { user, loading, logout } = useAuth();
   const startup = useLibraryStartup();
+  const modelMatch = /^\/models\/(\d+)\/?$/.exec(pathname);
+  const parsedModelId = modelMatch ? Number(modelMatch[1]) : null;
+  const modelId =
+    parsedModelId !== null && Number.isSafeInteger(parsedModelId) && parsedModelId > 0
+      ? parsedModelId
+      : null;
+  const detail = useQuery({ ...modelDetailOptions(modelId), enabled: false });
+  // Library already owns this exact probe. Off-library the header keeps one
+  // observer active so members do not get an upload action without edit access.
+  const writableProbe = useCollectionSearch("", "edit", {
+    enabled: !!user && !user.is_superuser && pathname !== "/",
+  });
+  const canUpload =
+    !!user &&
+    (user.is_superuser ||
+      (!writableProbe.isError && (writableProbe.data?.pages[0]?.items.length ?? 0) > 0));
   const activityEnabled = startup.canLoad("activity");
   const [tasks, setTasks] = useState<TaskItem[]>(() => listTasks());
   const [tasksOpen, setTasksOpen] = useState(false);
@@ -65,6 +102,11 @@ export function TopBar() {
   // was in rather than always resetting to "All Models", so it reflects the
   // remembered collection at click time.
   const homeHref = useSyncExternalStore(subscribeLastVaultHref, lastVaultHref);
+  const modelBackHref = detail.data?.collection
+    ? `/?c=${encodeURIComponent(detail.data.collection)}`
+    : detail.data
+      ? "/"
+      : homeHref;
 
   useEffect(() => {
     const unsubscribe = subscribeTasks(() => setTasks(listTasks()));
@@ -77,6 +119,16 @@ export function TopBar() {
 
   useEffect(() => subscribeArchiveReviewRequests(() => setTasksOpen(false)), []);
 
+  function openUpload() {
+    if (!canUpload) return;
+    const target = new URL(
+      pathname === "/" ? `/?${searchParams}` : homeHref,
+      window.location.origin,
+    );
+    target.searchParams.set("upload", "1");
+    router.push(`${target.pathname}?${target.searchParams}`);
+  }
+
   async function handleLogout() {
     await logout();
     setProfileOpen(false);
@@ -84,11 +136,20 @@ export function TopBar() {
   }
 
   return (
-    <header className="h-16 bg-background border-b border-border flex items-center justify-between px-4 z-dropdown relative">
+    <header className="relative z-dropdown flex h-14 shrink-0 items-center gap-2 border-b border-border bg-card px-2 sm:gap-3 sm:px-3">
+      {!desktop && modelId !== null && (
+        <LibraryBackLink
+          href={modelBackHref}
+          aria-label={uiText("Back")}
+          className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground md:hidden"
+        >
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+        </LibraryBackLink>
+      )}
       {/* Logo */}
       <Link
         href={homeHref}
-        className="flex items-center space-x-2 hover:opacity-80 transition-opacity"
+        className="flex shrink-0 items-center space-x-2 transition-opacity hover:opacity-80 md:hidden"
       >
         <div className="w-8 h-8 bg-primary rounded flex items-center justify-center flex-shrink-0">
           <BrandMark className="h-6 w-6 text-primary-foreground" />
@@ -98,22 +159,87 @@ export function TopBar() {
         </span>
       </Link>
 
+      {pane && (
+        <button
+          type="button"
+          aria-label={uiText("Collections")}
+          aria-controls="collections-pane"
+          aria-expanded={pane.open}
+          onClick={pane.toggle}
+          className="hidden h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex"
+        >
+          <PanelLeft className="h-4 w-4" aria-hidden />
+        </button>
+      )}
+      {pathname === "/" && pane ? (
+        <div ref={attachBreadcrumbs} className="hidden min-w-0 flex-1 md:block" />
+      ) : (
+        <nav
+          aria-label={uiText("Breadcrumbs")}
+          aria-hidden={!desktop || undefined}
+          className="hidden min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap text-sm md:flex"
+        >
+          {modelId !== null ? (
+            <LibraryBackLink
+              href={modelBackHref}
+              aria-label={uiText("Back")}
+              className="shrink-0 text-muted-foreground hover:text-foreground"
+            >
+              {uiText("Collections")}
+            </LibraryBackLink>
+          ) : (
+            <Link href={homeHref} className="shrink-0 text-muted-foreground hover:text-foreground">
+              PrintStash
+            </Link>
+          )}
+          <span aria-hidden className="text-muted-foreground">
+            /
+          </span>
+          <span className="min-w-0 truncate font-medium text-foreground" aria-current="page">
+            {modelId !== null && detail.data
+              ? detail.data.name
+              : titleKey
+                ? t(titleKey)
+                : t("Page not found")}
+          </span>
+        </nav>
+      )}
+
       {/* Search */}
       <Suspense fallback={<span className="flex-1" />}>
         <LibrarySearch />
       </Suspense>
 
       {/* Right Actions & Profile */}
-      <div className="flex items-center space-x-4">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+        <Button
+          type="button"
+          size="sm"
+          onClick={openUpload}
+          disabled={!canUpload}
+          aria-label={uiText("Upload")}
+          title={
+            writableProbe.isError
+              ? userMessage(writableProbe.error)
+              : canUpload
+                ? uiText("Upload artifacts")
+                : uiText("Sign in and get edit access to upload")
+          }
+        >
+          <Upload className="h-4 w-4" aria-hidden />
+          <span className="hidden sm:inline">{uiText("Upload")}</span>
+        </Button>
         <a
           href={WIKI_URL}
-          className="hidden sm:flex items-center gap-1.5 rounded border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="hidden h-8 w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:flex md:hidden"
         >
           <BookOpen className="h-4 w-4" />
-          {t("nav.wiki")}
+          <span className="sr-only">{t("nav.wiki")}</span>
         </a>
-        <ThemeToggle />
-        <LocaleToggle />
+        <div className="flex md:hidden">
+          <ThemeToggle />
+          <LocaleToggle />
+        </div>
         <DropdownMenu
           open={tasksOpen}
           onOpenChange={(open) => {
@@ -131,7 +257,7 @@ export function TopBar() {
                 startup.request("activity");
                 setTasksOpen((v) => !v);
               }}
-              className="relative text-muted-foreground hover:text-foreground p-1 rounded-full hover:bg-muted transition-colors"
+              className="relative flex h-8 w-8 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={t("nav.notifications")}
               title={t("nav.notifications")}
               aria-haspopup="dialog"
@@ -155,7 +281,7 @@ export function TopBar() {
             }}
           />
         </DropdownMenu>
-        <div className="h-8 w-px bg-muted hidden sm:block" />
+
         {/* Profile — hidden on mobile, where the bottom nav's "More" sheet owns
             the account actions (the avatar menu only duplicated nav links). */}
         {!loading && !user ? (
@@ -173,7 +299,7 @@ export function TopBar() {
             onOpenChange={setProfileOpen}
             align="end"
             role="menu"
-            className="hidden sm:block"
+            className="hidden sm:block md:hidden"
             trigger={
               <Button
                 type="button"
@@ -187,15 +313,13 @@ export function TopBar() {
               >
                 <div
                   aria-hidden="true"
-                  className="w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground font-medium text-sm"
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-input bg-accent text-xs font-semibold text-accent-foreground"
                 >
                   {user?.username.charAt(0).toUpperCase() ?? "…"}
                 </div>
-                <span className="text-sm font-medium text-foreground group-hover:text-foreground hidden sm:block">
-                  {t("nav.myWorkspace")}
-                </span>
+                <span className="sr-only">{t("nav.myWorkspace")}</span>
                 <ChevronDown
-                  className={`h-4 w-4 text-muted-foreground transition-transform group-hover:text-muted-foreground hidden sm:block ${profileOpen ? "rotate-180" : ""}`}
+                  className={`hidden h-4 w-4 text-muted-foreground transition-transform ${profileOpen ? "rotate-180" : ""}`}
                 />
               </Button>
             }
@@ -212,75 +336,5 @@ export function TopBar() {
         )}
       </div>
     </header>
-  );
-}
-
-function WorkspaceMenu({
-  pathname,
-  username,
-  printersInQuickAccess,
-  isAdmin,
-  onNavigate,
-  onLogout,
-}: {
-  pathname: string;
-  username: string;
-  printersInQuickAccess: boolean;
-  isAdmin: boolean;
-  onNavigate: () => void;
-  onLogout: () => void;
-}) {
-  useUiLocale();
-  const { t } = useI18n();
-  const items = [
-    { href: "/", label: t("nav.vault"), icon: Box },
-    { href: "/inbox", label: t("nav.inbox"), icon: Inbox },
-    { href: "/printers", label: t("nav.printers"), icon: Printer, adminOnly: true },
-    { href: "/statistics", label: t("nav.statistics"), icon: BarChart3, adminOnly: true },
-    { href: "/profiles", label: t("nav.profiles"), icon: SlidersHorizontal },
-    { href: "/settings", label: t("nav.settings"), icon: Settings },
-  ].filter(
-    (item) => (!item.adminOnly || isAdmin) && !(item.href === "/printers" && printersInQuickAccess),
-  );
-
-  return (
-    <div className="w-64 overflow-hidden rounded-lg border border-border bg-popover py-1 shadow-xl">
-      <div className="border-b border-border px-3 py-2">
-        <p className="truncate text-sm font-medium text-popover-foreground" title={username}>
-          {username}
-        </p>
-        <p className="text-xs text-muted-foreground">{t("nav.myWorkspace")}</p>
-      </div>
-      {items.map((item) => {
-        const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-        const className = `flex items-center gap-3 px-3 py-2.5 text-sm transition-colors ${
-          active
-            ? "bg-accent text-accent-foreground"
-            : "text-foreground hover:bg-popover-hover hover:text-foreground"
-        } focus-visible:bg-popover-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset`;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            role="menuitem"
-            aria-current={active ? "page" : undefined}
-            onClick={onNavigate}
-            className={className}
-          >
-            <item.icon className="h-4 w-4" />
-            <span>{item.label}</span>
-          </Link>
-        );
-      })}
-      <button
-        type="button"
-        role="menuitem"
-        onClick={onLogout}
-        className="flex w-full items-center gap-3 rounded-md border-t border-border px-3 py-2.5 text-left text-sm text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-      >
-        <LogOut className="h-4 w-4" />
-        <span>{t("nav.logOut")}</span>
-      </button>
-    </div>
   );
 }

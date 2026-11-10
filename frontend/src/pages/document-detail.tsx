@@ -15,7 +15,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useParams } from "react-router-dom";
+import { useParams } from "@tanstack/react-router";
 import { ArrowLeft, Download, Eye, Loader2, Pencil, Save } from "lucide-react";
 
 import { MarkdownView } from "@/components/markdown-view";
@@ -26,6 +26,7 @@ import { Link } from "@/lib/link";
 import { toast } from "@/lib/toast";
 import { useDocument, useDocumentMutations } from "@/lib/queries/documents";
 import { Button } from "@/components/ui/button";
+import { PageFailure } from "@/components/page-failure";
 import { getSessionVersion } from "@/lib/session-transport";
 import { ApiError, parseApiError, userMessage } from "@/lib/errors";
 import type { DocumentRead } from "@/types";
@@ -68,7 +69,7 @@ export default function DocumentDetailPage({
   pdfViewer?: ComponentType<{ file: Blob }>;
 } = {}) {
   const locale = useUiLocale();
-  const { id } = useParams();
+  const { id } = useParams({ strict: false });
   const isNew = id === "new";
   const docId = Number(id);
   const { user } = useAuth();
@@ -335,19 +336,29 @@ export default function DocumentDetailPage({
   if (notFound && !liveDraft) return <NotFound />;
   if (accessDenied && !liveDraft) {
     return (
-      <div role="alert" className="p-6">
-        {userMessage(documentQuery.error)}
-      </div>
+      <PageFailure
+        kind={
+          documentQuery.error instanceof ApiError && documentQuery.error.status === 401
+            ? "authentication"
+            : "forbidden"
+        }
+        description={userMessage(documentQuery.error)}
+      />
     );
   }
   if (documentQuery.isError && !doc && !isNew) {
     return (
-      <div role="alert" className="p-6">
-        <p>{userMessage(documentQuery.error)}</p>
-        <Button variant="outline" onClick={() => void documentQuery.refetch()}>
-          {uiText("Retry")}
-        </Button>
-      </div>
+      <PageFailure
+        kind={
+          documentQuery.error instanceof ApiError &&
+          documentQuery.error.code === "network_unreachable"
+            ? "offline"
+            : "unavailable"
+        }
+        description={userMessage(documentQuery.error)}
+        onRetry={() => void documentQuery.refetch()}
+        retrying={documentQuery.isFetching}
+      />
     );
   }
   if (!doc) {
@@ -410,8 +421,14 @@ export default function DocumentDetailPage({
           )}
         </div>
       )}
-      <div className="mx-auto w-full max-w-4xl flex flex-col flex-1 min-h-0 px-4 sm:px-6 py-6">
-        <div className="flex items-center gap-3 mb-4">
+      <div className="shrink-0 px-4 pt-5 sm:px-6">
+        <h1 className="break-words text-xl font-semibold text-foreground">
+          {mode === "edit" ? draftName : doc.name}
+        </h1>
+        <p className="mt-1 text-sm text-muted-foreground">{uiText("nav.document")}</p>
+      </div>
+      <div className="mx-4 my-6 flex min-h-0 flex-1 flex-col overflow-hidden border border-border bg-card sm:mx-6 lg:mx-auto lg:w-full lg:max-w-4xl">
+        <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 sm:px-6">
           <Link
             href={backHref}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
@@ -426,48 +443,58 @@ export default function DocumentDetailPage({
               disabled={saving}
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
-              className="flex-1 bg-surface text-foreground text-lg font-semibold border border-border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-ring"
+              className="min-w-0 flex-1 bg-surface text-foreground text-lg font-semibold border border-border rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-ring max-sm:basis-full"
             />
           ) : (
-            <h1 className="flex-1 text-xl font-bold text-foreground truncate">{doc.name}</h1>
+            <input
+              aria-label={uiText("documents.name")}
+              readOnly
+              value={doc.name}
+              className="min-w-0 flex-1 border border-border bg-surface px-2 py-1 text-sm font-semibold text-foreground max-sm:basis-full"
+            />
           )}
 
-          {isMarkdown && canEdit && mode === "preview" && (
-            <button
-              onClick={() => {
-                setDraft(
-                  liveDraft ?? { docId: doc.id, base: doc, name: doc.name, body: doc.body ?? "" },
-                );
-                setModeChoice({ docId: docKey, mode: "edit" });
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
-            >
-              <Pencil className="w-3.5 h-3.5" />
-              {uiText(" Edit")}
-            </button>
-          )}
-          {isMarkdown && mode === "edit" && (
-            <>
+          {isMarkdown && (canEdit || mode === "edit") && (
+            <div role="group" aria-label={uiText("Display")} className="flex items-center">
               <button
+                type="button"
+                aria-pressed={mode === "edit"}
+                disabled={!canEdit}
+                onClick={() => {
+                  setDraft(
+                    liveDraft ?? { docId: doc.id, base: doc, name: doc.name, body: doc.body ?? "" },
+                  );
+                  setModeChoice({ docId: docKey, mode: "edit" });
+                }}
+                className={`flex items-center gap-1.5 border border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50 ${mode === "edit" ? "bg-muted" : "bg-background"}`}
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                {uiText(" Edit")}
+              </button>
+              <button
+                type="button"
+                aria-pressed={mode === "preview"}
                 onClick={() => setModeChoice({ docId: docKey, mode: "preview" })}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted"
+                className={`flex items-center gap-1.5 border border-l-0 border-border px-3 py-1.5 text-xs font-medium text-foreground hover:bg-muted ${mode === "preview" ? "bg-muted" : "bg-background"}`}
               >
                 <Eye className="w-3.5 h-3.5" />
                 {uiText(" Preview")}
               </button>
-              <button
-                onClick={save}
-                disabled={saving || uploading || !canEdit || !!activeRecovery}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover disabled:opacity-50"
-              >
-                {saving ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Save className="w-3.5 h-3.5" />
-                )}
-                {uiText("Save")}
-              </button>
-            </>
+            </div>
+          )}
+          {isMarkdown && mode === "edit" && (
+            <button
+              onClick={save}
+              disabled={saving || uploading || !canEdit || !!activeRecovery}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover disabled:opacity-50"
+            >
+              {saving ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Save className="w-3.5 h-3.5" />
+              )}
+              {uiText("Save")}
+            </button>
           )}
           {!isMarkdown && !accessDenied && (
             <button
@@ -480,7 +507,7 @@ export default function DocumentDetailPage({
           )}
         </div>
 
-        <div className="flex-1 min-h-0 overflow-auto pb-24 md:pb-0">
+        <div className="min-h-0 flex-1 overflow-auto px-4 py-5 pb-24 sm:px-6 md:pb-6">
           {/* Markdown: edit or preview */}
           {isMarkdown &&
             (mode === "edit" ? (

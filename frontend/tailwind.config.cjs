@@ -17,6 +17,7 @@ const config = {
       },
     },
     extend: {
+      width: { rail: "3.3125rem" },
       colors: {
         border: "var(--border)",
         input: "var(--input)",
@@ -95,6 +96,7 @@ const config = {
         "on-tertiary-container": "var(--on-tertiary-container)",
         "on-secondary-container": "var(--on-secondary-container)",
         sidebar: "var(--sidebar-bg)",
+        rail: "var(--rail-bg)",
       },
       fontFamily: {
         sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
@@ -102,9 +104,10 @@ const config = {
       },
       borderRadius: {
         DEFAULT: "var(--radius)",
+        brand: "0.4375rem",
         lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 0.125rem)",
+        md: "var(--radius)",
+        sm: "var(--radius)",
       },
       fontSize: {
         // The app's mono-label ramp, previously text-[11px]/text-[10px].

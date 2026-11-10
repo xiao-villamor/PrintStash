@@ -8,7 +8,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { LibraryItemLink } from "@/features/library/navigation";
 import { memo, useEffect, useState } from "react";
 import { ModelListItem, FileRevisionStatus } from "@/types";
-import { FileText, Star, Tags, ScanSearch } from "lucide-react";
+import { Box, Star, Tags, ScanSearch } from "lucide-react";
 import { LibraryCardSelection } from "@/components/library-card-selection";
 import { Button } from "@/components/ui/button";
 import { useLibraryStar } from "@/features/library/mutations";
@@ -16,6 +16,7 @@ import { toast } from "@/lib/toast";
 import { timeAgoShort } from "@/lib/format";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { Localized } from "@/components/ui/localized";
+import "./library-items.css";
 import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
 
 import {
@@ -38,27 +39,25 @@ const REVISION_CONFIG = {
     get label() {
       return uiText("Known Good");
     },
-    classes:
-      "bg-green-50 dark:bg-green-950/50 text-green-700 border-green-200 dark:border-green-800",
+    classes: "text-success",
   },
   needs_test: {
     get label() {
       return uiText("Needs Test");
     },
-    classes:
-      "bg-amber-50 dark:bg-amber-950/50 text-amber-700 border-amber-200 dark:border-amber-800",
+    classes: "text-warning",
   },
   failed: {
     get label() {
       return uiText("Failed");
     },
-    classes: "bg-red-50 dark:bg-red-950/50 text-red-700 border-red-200 dark:border-red-800",
+    classes: "text-destructive",
   },
   archived: {
     get label() {
       return uiText("Archived");
     },
-    classes: "bg-muted text-muted-foreground border-border",
+    classes: "text-muted-foreground",
   },
 } satisfies Record<FileRevisionStatus, { label: string; classes: string }>;
 
@@ -118,7 +117,12 @@ function RevisionBadge({
   label?: string | null;
 }) {
   useUiLocale();
-  if (!status) return null;
+  if (!status)
+    return (
+      <span className="bg-card/90 px-1.5 py-0.5 text-2xs text-muted-foreground">
+        {uiText("library.noRevisionStatus")}
+      </span>
+    );
   const cfg = REVISION_CONFIG[status];
   const accessibleLabel = label
     ? uiText("Revision status: {status}; label: {label}", { status: cfg.label, label })
@@ -127,7 +131,7 @@ function RevisionBadge({
     <span
       aria-label={accessibleLabel}
       title={accessibleLabel}
-      className={`inline-flex items-center gap-1 text-3xs font-mono font-semibold px-1.5 py-0.5 rounded border uppercase tracking-tight shrink-0 ${cfg.classes}`}
+      className={`inline-flex max-w-full flex-wrap items-center gap-1 text-2xs font-medium px-1.5 py-0.5 bg-card/90 shrink-0 ${cfg.classes}`}
     >
       <span>{cfg.label}</span>
       {label && (
@@ -152,11 +156,13 @@ function MetricCell({
   useUiLocale();
   const cfg = METRIC_CONFIG[id];
   return (
-    <div className={`py-2 px-1 text-center bg-muted/50 ${isLast ? "" : "border-r border-border"}`}>
-      <p className="text-3xs font-bold text-muted-foreground uppercase tracking-wider mb-0.5">
+    <div className={`min-w-0 ${isLast ? "" : "pr-2"}`}>
+      <p className="text-3xs font-normal text-muted-foreground uppercase tracking-wider mb-0.5">
         {cfg.abbr}
       </p>
-      <p className="text-2xs font-bold text-foreground font-mono truncate">{cfg.getValue(model)}</p>
+      <p className="text-2xs font-normal text-foreground font-mono truncate">
+        {cfg.getValue(model)}
+      </p>
     </div>
   );
 }
@@ -223,7 +229,7 @@ function ModelCardInner({
             : undefined
         }
         onDragEnd={() => setDragging(false)}
-        className={`${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} group group/selection-card relative flex h-full flex-col bg-card border rounded transition-[color,background-color,border-color,box-shadow,opacity,transform] duration-fast active:scale-[0.99] overflow-hidden ${
+        className={`${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} group group/selection-card relative flex h-full flex-col min-w-0 bg-card border rounded transition-[color,background-color,border-color,opacity,transform] duration-fast active:scale-[0.99] overflow-hidden ${
           draggable ? "cursor-grab active:cursor-grabbing" : ""
         } ${dragging ? "opacity-40" : ""} ${
           selected
@@ -252,7 +258,7 @@ function ModelCardInner({
               ? uiText("Remove {value1} from favorites", { value1: String(model.name) })
               : uiText("Add {value1} to favorites", { value1: String(model.name) })
           }
-          className="absolute right-2 top-2 z-10 rounded bg-card/90 p-2 text-muted-foreground shadow-sm transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
+          className="absolute right-2 top-28 z-10 rounded bg-card/90 p-1.5 text-muted-foreground transition-[color,background-color,transform] duration-press ease-out hover:bg-card hover:text-primary active:scale-[0.98] disabled:opacity-50"
         >
           <Star className={`h-4 w-4 ${starred ? "fill-current text-primary" : ""}`} />
         </button>
@@ -272,7 +278,7 @@ function ModelCardInner({
                 : uiText("Add tags to {value1}", { value1: String(model.name) })
             }
             title={model.tags.length > 0 ? uiText("Edit tags") : uiText("Add tags")}
-            className="absolute right-2 top-12 z-10 bg-card/90 text-muted-foreground shadow-sm hover:bg-card hover:text-primary"
+            className="absolute right-10 top-28 z-10 bg-card/90 text-muted-foreground hover:bg-card hover:text-primary"
           >
             <Tags className="h-4 w-4" />
           </Button>
@@ -280,8 +286,9 @@ function ModelCardInner({
         <LibraryItemLink
           origin={origin}
           href={`/models/${model.id}`}
+          aria-label={model.name}
           draggable={false}
-          className="flex flex-col h-full overflow-hidden"
+          className="flex min-w-0 flex-col h-full overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           onPointerEnter={() => !selectable && onIntent?.(model.id)}
           onFocus={() => !selectable && onIntent?.(model.id)}
           onPointerLeave={() => onIntent?.(null)}
@@ -298,17 +305,26 @@ function ModelCardInner({
             path={model.thumbnail_url}
             alt={model.name}
             fade
-            className="bg-muted relative overflow-hidden h-48 border-b border-border shrink-0"
-            imageClassName="w-full h-full object-cover"
+            className="library-preview relative overflow-hidden h-36 border-b border-border shrink-0"
+            imageClassName="w-full h-full object-contain"
             placeholder={
-              <div className="flex h-full w-full items-center justify-center">
-                <FileText className="h-10 w-10 text-muted-foreground/40" />
+              <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-3 text-center">
+                <Box className="h-6 w-6 text-muted-foreground" />
+                <span className="text-2xs text-muted-foreground">
+                  {uiText("library.previewMissing")}
+                </span>
               </div>
             }
           >
+            <div className="absolute right-2 top-2 max-w-[calc(100%-3rem)]">
+              <RevisionBadge
+                status={model.recommended_revision_status}
+                label={model.recommended_revision_label}
+              />
+            </div>
             {hasPrinter && (
-              <div className="absolute bottom-2 right-2">
-                <span className="text-3xs font-bold text-green-700 bg-green-50 dark:bg-green-950/60 px-1.5 py-0.5 border border-green-200 dark:border-green-800 rounded-sm uppercase">
+              <div className="absolute bottom-2 left-2">
+                <span className="text-3xs font-medium text-success bg-card/90 px-1.5 py-0.5">
                   {uiText("On printer")}
                 </span>
               </div>
@@ -316,17 +332,13 @@ function ModelCardInner({
           </ProtectedThumbnail>
 
           {/* Title + revision */}
-          <div className="px-3 pt-3 pb-1 flex items-start justify-between gap-2">
+          <div className="px-3 pt-4 pb-2 flex min-w-0 items-start justify-between gap-2">
             <h2
               title={model.name}
-              className="text-sm font-bold text-foreground tracking-tight line-clamp-2 leading-tight"
+              className="min-w-0 break-words text-sm font-semibold text-foreground tracking-tight line-clamp-2 leading-snug"
             >
               {model.name}
             </h2>
-            <RevisionBadge
-              status={model.recommended_revision_status}
-              label={model.recommended_revision_label}
-            />
           </div>
 
           {Boolean(model.similarity?.open_candidates) && (
@@ -346,7 +358,7 @@ function ModelCardInner({
 
           {/* Configurable metrics grid */}
           <div className="px-3 pb-2">
-            <div className="grid grid-cols-3 border border-border rounded-sm overflow-hidden">
+            <div className="grid grid-cols-3 gap-2 border-t border-border pt-2">
               {metrics.map((id, i) => (
                 <MetricCell key={id} id={id} model={model} isLast={i === 2} />
               ))}
@@ -354,41 +366,35 @@ function ModelCardInner({
           </div>
 
           {/* Footer chips */}
-          <div className="px-3 pb-3 mt-auto flex items-end justify-between gap-2 border-t border-border pt-2">
-            <div className="flex flex-wrap gap-1.5 min-w-0">
+          <div className="px-3 pb-3 mt-auto flex min-w-0 items-end justify-between gap-2 pt-1">
+            <div className="flex flex-wrap gap-1 min-w-0">
               {collectionLabel && (
                 <span
                   title={collectionLabel}
-                  className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground tracking-tight"
+                  className="max-w-full truncate text-2xs text-muted-foreground"
                 >
                   {collectionLabel.split("/").at(-1)}
                 </span>
               )}
               {ps?.slicer_name && (
-                <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
-                  GCODE
-                </span>
+                <span className="text-3xs font-mono text-muted-foreground">GCODE</span>
               )}
-              <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
+              <span className="text-3xs font-mono text-muted-foreground">
                 {uiText("counts.cardFiles", { count: model.file_count })}
               </span>
               {ps?.material_type && (
-                <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground uppercase tracking-tight">
-                  {ps.material_type}
-                </span>
+                <span className="text-3xs font-mono text-muted-foreground">{ps.material_type}</span>
               )}
               {model.tags.slice(0, 2).map((tag) => (
                 <span
                   key={tag}
-                  className="px-2 py-0.5 bg-accent border border-primary-soft rounded text-xs font-mono font-semibold text-accent-foreground tracking-tight"
+                  className="max-w-full truncate border border-border px-1 py-0.5 text-3xs text-muted-foreground"
                 >
                   {tag}
                 </span>
               ))}
               {model.tags.length > 2 && (
-                <span className="px-2 py-0.5 bg-muted border border-border rounded text-xs font-mono font-semibold text-muted-foreground">
-                  +{model.tags.length - 2}
-                </span>
+                <span className="text-3xs text-muted-foreground">+{model.tags.length - 2}</span>
               )}
             </div>
             <p className="text-2xs text-muted-foreground font-mono uppercase shrink-0">

@@ -20,7 +20,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { InboxItem } from "@/types";
@@ -102,9 +102,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -134,9 +134,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -180,9 +180,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -205,9 +205,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -226,9 +226,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -260,9 +260,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -294,9 +294,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );
@@ -339,9 +339,9 @@ describe("InboxPage", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <I18nProvider>
-          <MemoryRouter>
+          <TestRouter>
             <InboxPage deps={deps} />
-          </MemoryRouter>
+          </TestRouter>
         </I18nProvider>
       </QueryClientProvider>,
     );

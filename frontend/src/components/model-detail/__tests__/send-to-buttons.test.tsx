@@ -18,7 +18,7 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SendToButtons, type SendToCommands } from "@/components/model-detail/send-to-buttons";
@@ -179,6 +179,8 @@ function spoolmanStatus(enabled: boolean): SpoolmanStatus {
 }
 
 interface PanelOptions {
+  initialDeliveryMode?: "send" | "queue";
+  open?: boolean;
   /** Slicer metadata on the single G-code revision the panel offers. */
   metadata?: MetadataRead | null;
   spools?: SpoolRead[];
@@ -194,6 +196,8 @@ function renderPanel({
   spools,
   filename = "cube.gcode",
   printers = [printer],
+  initialDeliveryMode = "send",
+  open,
 }: PanelOptions = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Number.POSITIVE_INFINITY } },
@@ -203,11 +207,14 @@ function renderPanel({
   client.setQueryData(queryKeys.spools, spools ?? []);
 
   const rendered = render(
-    <MemoryRouter>
+    <TestRouter>
       <QueryClientProvider client={client}>
         <AuthContext.Provider value={adminAuth}>
           <SendToButtons
             commands={commands}
+            initialDeliveryMode={initialDeliveryMode}
+            open={open}
+            compact={open !== undefined}
             gcodeFiles={[
               {
                 id: 42,
@@ -223,7 +230,7 @@ function renderPanel({
           />
         </AuthContext.Provider>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </TestRouter>,
   );
   return { ...rendered, client };
 }
@@ -495,4 +502,13 @@ describe("SendToQueue", () => {
 
     expect(screen.getAllByRole("button", { name: "Send to printer" }).at(-1)).toBeDisabled();
   });
+});
+
+it("opens the overview queue action with the queue mode selected", async () => {
+  renderPanel({ initialDeliveryMode: "queue", open: true });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Add to queue", pressed: true })).toBeVisible(),
+  );
+  expect(screen.queryByRole("button", { name: "Send to printer" })).not.toBeInTheDocument();
+  expect(enqueueFleetJob).not.toHaveBeenCalled();
 });

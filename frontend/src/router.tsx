@@ -1,210 +1,27 @@
-/* eslint-disable react-refresh/only-export-components */
-import { createBrowserRouter } from "react-router-dom";
-import { Suspense } from "react";
-import { lazyImport } from "@/lib/lazy-component";
+import { createRouter } from "@tanstack/react-router";
+import { recoverRouteChunk } from "@/lib/lazy-component";
+import { routeTree } from "@/routeTree.gen";
+import { parseAppSearch, stringifyAppSearch } from "@/lib/router-search";
 
-import { RouteError } from "@/components/route-error";
+export const router = createRouter({
+  routeTree,
+  defaultOnCatch: (error) => {
+    if (error instanceof Error) recoverRouteChunk(error);
+  },
+  parseSearch: parseAppSearch,
+  stringifySearch: stringifyAppSearch,
+  // Existing feature intent prefetch owns entity reads; links never fetch 3D bytes.
+  defaultPreload: false,
+  // Library owns its nested containers and history anchors.
+  scrollRestoration: false,
+});
 
-import RootLayout from "@/root-layout";
-import HomePage from "@/pages/home";
-
-// After a rebuild the browser may still hold an index.html referencing an
-// old chunk hash that no longer exists on disk, so the dynamic import 404s.
-// Reload once to pick up the fresh index.html/chunk map; a session flag
-// stops an infinite reload loop if the import keeps failing for another
-// reason.
-const SearchPage = lazyImport(() => import("@/pages/search"));
-const SimilarModelComparisonPage = lazyImport(() => import("@/pages/similar-model-comparison"));
-const SimilarModelsPage = lazyImport(() => import("@/pages/similar-models"));
-const ModelDetailPage = lazyImport(() => import("@/pages/model-detail"));
-const MultipartBuildsPage = lazyImport(() => import("@/pages/multipart-builds"));
-const MultipartModelDetailPage = lazyImport(() => import("@/pages/multipart-model-detail"));
-const DocumentDetailPage = lazyImport(() => import("@/pages/document-detail"));
-const LoginPage = lazyImport(() => import("@/pages/login"));
-const GettingStartedPage = lazyImport(() => import("@/pages/getting-started"));
-const SetupPage = lazyImport(() => import("@/pages/setup"));
-const ProfilesPage = lazyImport(() => import("@/pages/profiles"));
-const StatisticsPage = lazyImport(() => import("@/pages/statistics"));
-const SettingsPage = lazyImport(() => import("@/pages/settings"));
-const InboxPage = lazyImport(() => import("@/pages/inbox"));
-const InboxDetailPage = lazyImport(() => import("@/pages/inbox-detail"));
-const PrintersRoute = lazyImport(() => import("@/pages/printers"));
-const PrinterDetailRoute = lazyImport(() => import("@/pages/printer-detail"));
-const SharePage = lazyImport(() => import("@/pages/share"));
-const NotFound = lazyImport(() => import("@/pages/not-found"));
-
-function RouteChunk({ children }: { children: React.ReactNode }) {
-  return (
-    <Suspense fallback={<div className="min-h-screen w-full bg-background" aria-busy="true" />}>
-      {children}
-    </Suspense>
-  );
+declare module "@tanstack/react-router" {
+  interface Register {
+    router: typeof router;
+  }
+  interface HistoryState {
+    libraryOrigin?: string;
+    similarityFilterOwner?: string;
+  }
 }
-
-export const router = createBrowserRouter([
-  // Public, unauthenticated share viewer — deliberately mounted OUTSIDE
-  // RootLayout so it bypasses auth/setup gating and the app chrome.
-  {
-    path: "share/:token",
-    errorElement: <RouteError />,
-    element: (
-      <RouteChunk>
-        <SharePage />
-      </RouteChunk>
-    ),
-  },
-  {
-    element: <RootLayout />,
-    errorElement: <RouteError />,
-    children: [
-      {
-        path: "search",
-        element: (
-          <RouteChunk>
-            <SearchPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "library/similar/:id",
-        element: (
-          <RouteChunk>
-            <SimilarModelComparisonPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "library/similar",
-        element: (
-          <RouteChunk>
-            <SimilarModelsPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        index: true,
-        element: <HomePage />,
-      },
-      {
-        path: "models/:id",
-        element: (
-          <RouteChunk>
-            <ModelDetailPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "builds/:id?",
-        element: (
-          <RouteChunk>
-            <MultipartBuildsPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "multipart-models/:id",
-        element: (
-          <RouteChunk>
-            <MultipartModelDetailPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "documents/:id",
-        element: (
-          <RouteChunk>
-            <DocumentDetailPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "login",
-        element: (
-          <RouteChunk>
-            <LoginPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "getting-started",
-        element: (
-          <RouteChunk>
-            <GettingStartedPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "setup",
-        element: (
-          <RouteChunk>
-            <SetupPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "profiles",
-        element: (
-          <RouteChunk>
-            <ProfilesPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "statistics",
-        element: (
-          <RouteChunk>
-            <StatisticsPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "settings",
-        element: (
-          <RouteChunk>
-            <SettingsPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "inbox",
-        element: (
-          <RouteChunk>
-            <InboxPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "inbox/:id",
-        element: (
-          <RouteChunk>
-            <InboxDetailPage />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "printers",
-        element: (
-          <RouteChunk>
-            <PrintersRoute />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "printers/:id",
-        element: (
-          <RouteChunk>
-            <PrinterDetailRoute />
-          </RouteChunk>
-        ),
-      },
-      {
-        path: "*",
-        element: (
-          <RouteChunk>
-            <NotFound />
-          </RouteChunk>
-        ),
-      },
-    ],
-  },
-]);

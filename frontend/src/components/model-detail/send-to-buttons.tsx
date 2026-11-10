@@ -82,6 +82,8 @@ export function SendToButtons({
   onOpenChange,
   preselectFileId,
   commands = API_COMMANDS,
+  compact = false,
+  initialDeliveryMode = "send",
 }: {
   gcodeFiles: Pick<
     FileRead,
@@ -98,6 +100,8 @@ export function SendToButtons({
   onOpenChange?: (open: boolean) => void;
   preselectFileId?: number;
   commands?: SendToCommands;
+  compact?: boolean;
+  initialDeliveryMode?: "send" | "queue";
 }) {
   useUiLocale();
   const commandClient = useQueryClient();
@@ -125,7 +129,10 @@ export function SendToButtons({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSend, preselectFileId, gcodeFiles]);
   const [startPrint, setStartPrint] = useState(false);
-  const [deliveryMode, setDeliveryMode] = useState<"send" | "queue">("send");
+  const [deliveryMode, setDeliveryMode] = useState<"send" | "queue">(initialDeliveryMode);
+  useEffect(() => {
+    if (showSend) setDeliveryMode(initialDeliveryMode);
+  }, [showSend, initialDeliveryMode]);
   const [routingStrategy, setRoutingStrategy] = useState<RoutingStrategy>("least_busy");
   const [quantity, setQuantity] = useState(1);
   const [priority, setPriority] = useState<JobPriority>("normal");
@@ -436,8 +443,8 @@ export function SendToButtons({
           )}
           confirmLabel={uiText("Print anyway")}
         />
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
+        <div className={compact ? "detail-printer-status" : "space-y-3"}>
+          <div className="flex items-center justify-between gap-3">
             <span className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
               {uiText("Printer status")}
             </span>
@@ -482,7 +489,11 @@ export function SendToButtons({
             </div>
           )}
 
-          {printers.length === 0 ? (
+          {compact ? (
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/printers">{uiText("Manage printers")}</Link>
+            </Button>
+          ) : printers.length === 0 ? (
             <div className="space-y-2 rounded border border-outline-variant bg-surface-container-lowest p-3">
               <div className="flex items-center gap-2">
                 <WifiOff className="h-4 w-4 text-on-surface-variant" />
@@ -565,6 +576,7 @@ export function SendToButtons({
               <div className="grid grid-cols-2 gap-2">
                 <Button
                   type="button"
+                  aria-pressed={deliveryMode === "send"}
                   variant={deliveryMode === "send" ? "secondary" : "outline"}
                   onClick={() => setDeliveryMode("send")}
                 >
@@ -572,6 +584,7 @@ export function SendToButtons({
                 </Button>
                 <Button
                   type="button"
+                  aria-pressed={deliveryMode === "queue"}
                   variant={deliveryMode === "queue" ? "secondary" : "outline"}
                   onClick={() => {
                     setDeliveryMode("queue");

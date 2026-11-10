@@ -37,7 +37,7 @@ export function EntityTagsDialog({
   help: string;
   onSave: (tags: string[], signal: AbortSignal) => Promise<void>;
   reviewLatest?: (signal: AbortSignal) => Promise<TagsReview>;
-  triggerMode?: "inline" | "icon";
+  triggerMode?: "inline" | "icon" | "command";
   triggerClassName?: string;
 }) {
   useUiLocale();
@@ -57,7 +57,23 @@ export function EntityTagsDialog({
 
   return (
     <>
-      {triggerMode === "icon" ? (
+      {triggerMode === "command" ? (
+        canEdit ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={openDialog}
+            aria-label={tags.length ? uiText("Edit tags") : uiText("Add tags")}
+            className={triggerClassName}
+          >
+            <Tags className="h-3.5 w-3.5" aria-hidden />
+            {uiText("Tags")}
+          </Button>
+        ) : tags.length > 0 ? (
+          <span className="text-xs text-muted-foreground">{tags.join(" · ")}</span>
+        ) : null
+      ) : triggerMode === "icon" ? (
         canEdit ? (
           <Button
             type="button"

@@ -919,7 +919,11 @@ describe("FilamentProfilesCard", () => {
         };
         app.route({ [`GET /api/v1/${kind}-profiles`]: json([current]) });
         await user.click(screen.getByRole("button", { name: "Review current values" }));
-        expect(await screen.findByText("Other editor notes")).toBeVisible();
+        expect(
+          await within(screen.getByRole("status", { name: "Current preset values" })).findByText(
+            "Other editor notes",
+          ),
+        ).toBeVisible();
         const saved = { ...current, edit_version: 3, name: "My draft" };
         let revisedHeaders = new Headers();
         app.route({
@@ -1504,13 +1508,42 @@ describe("Integrated profile settings", () => {
 });
 
 describe("Collapsible profile rows", () => {
-  it("starts with a compact summary", async () => {
+  it("does not present a missing usage count as a number", async () => {
+    await renderCard({
+      expand: false,
+      routes: {
+        "GET /api/v1/filament-profiles": json([{ ...aFilamentProfile(), usage_count: undefined }]),
+      },
+    });
+    expect(await screen.findByRole("heading", { name: "Everyday PLA" })).toBeVisible();
+    expect(screen.queryByText(/undefined|NaN/)).not.toBeInTheDocument();
+  });
+  it("shows the selected preset's real facts beside the list", async () => {
+    const user = userEvent.setup();
+    await renderCard({
+      expand: false,
+      filaments: [
+        aFilamentProfile({ id: 1, name: "Everyday PLA", material_type: "PLA" }),
+        aFilamentProfile({ id: 2, name: "Workshop PETG", material_type: "PETG" }),
+      ],
+    });
+    const details = await screen.findByRole("complementary");
+    expect(within(details).getByText("Everyday PLA")).toBeVisible();
+    expect(within(details).getByText("PLA")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "View details for Workshop PETG" }));
+    expect(within(details).getByText("Workshop PETG")).toBeVisible();
+    expect(within(details).getByText("PETG")).toBeVisible();
+  });
+
+  it("shows the first profile's settings without opening its editor", async () => {
     await renderCard({ expand: false });
     expect(await screen.findByRole("heading", { name: "Everyday PLA" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "View details for Everyday PLA" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Hide details for Everyday PLA" })).toHaveAttribute(
       "aria-expanded",
-      "false",
+      "true",
     );
+    expect(screen.getByRole("region", { name: "Settings for Everyday PLA" })).toBeVisible();
     expect(
       screen.queryByRole("textbox", { name: "Filament preset name 1" }),
     ).not.toBeInTheDocument();
@@ -1519,6 +1552,7 @@ describe("Collapsible profile rows", () => {
   it("opens details from the keyboard", async () => {
     const user = userEvent.setup();
     await renderCard({ expand: false });
+    await user.click(await screen.findByRole("button", { name: "Hide details for Everyday PLA" }));
     const button = await screen.findByRole("button", { name: "View details for Everyday PLA" });
     button.focus();
     await user.keyboard("{Enter}");
@@ -1584,17 +1618,16 @@ describe("Profile consultation and editing", () => {
     await renderCard();
     await userEvent.click(screen.getByRole("tab", { name: /Printers/ }));
     const printerDetails = screen.getByRole("button", {
-      name: "View details for Voron 2.4 — 0.4 mm",
+      name: "Hide details for Voron 2.4 — 0.4 mm",
     });
-    expect(printerDetails).toHaveAttribute("aria-expanded", "false");
+    expect(printerDetails).toHaveAttribute("aria-expanded", "true");
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    await userEvent.click(printerDetails);
     expect(screen.getByRole("button", { name: "Edit profile Voron 2.4 — 0.4 mm" })).toBeVisible();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("tab", { name: /Filaments/ }));
-    expect(screen.getByRole("button", { name: "View details for Everyday PLA" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Hide details for Everyday PLA" })).toHaveAttribute(
       "aria-expanded",
-      "false",
+      "true",
     );
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
   });
@@ -1608,7 +1641,7 @@ describe("Profile consultation and editing", () => {
         printers: [aPrinterProfile({ notes: "Calibration notes" })],
       });
       if (kind === "printer") await userEvent.click(screen.getByRole("tab", { name: /Printers/ }));
-      await userEvent.click(await screen.findByRole("button", { name: /^View details for / }));
+      await screen.findByRole("button", { name: /^Hide details for / });
       expect(screen.getByText("Calibration notes")).toBeVisible();
       expect(screen.getByRole("button", { name: /^Edit profile / })).toBeVisible();
       expect(screen.queryByRole("textbox")).not.toBeInTheDocument();

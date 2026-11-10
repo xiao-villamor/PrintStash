@@ -102,7 +102,7 @@ export function BottomNavBar() {
 
   return (
     <>
-      <nav className="md:hidden fixed bottom-0 left-0 z-40 flex w-full items-stretch border-t border-border bg-card/95 backdrop-blur-md pb-safe">
+      <nav className="md:hidden fixed bottom-0 left-0 z-40 flex w-full items-stretch border-t border-border bg-card pb-safe">
         {tabs.map((item) => (
           <NavTab
             key={item.href}
@@ -179,9 +179,9 @@ function TabIcon({ icon: Icon, active }: { icon: LucideIcon; active: boolean }) 
   useUiLocale();
   return (
     <span
-      className={`flex h-7 w-[3.25rem] items-center justify-center rounded-full transition-colors ${
+      className={`flex h-7 w-[3.25rem] items-center justify-center rounded-md transition-colors ${
         active
-          ? "bg-accent text-primary"
+          ? "bg-accent text-accent-foreground"
           : "text-muted-foreground group-hover:bg-muted group-hover:text-foreground"
       }`}
     >
@@ -195,7 +195,7 @@ function TabLabel({ active, children }: { active: boolean; children: React.React
   return (
     <span
       className={`text-3xs font-medium leading-none tracking-tight ${
-        active ? "text-primary" : "text-muted-foreground"
+        active ? "text-accent-foreground" : "text-muted-foreground"
       }`}
     >
       {children}
@@ -237,7 +237,7 @@ function MoreSheet({
       side="bottom"
       ariaLabel={t("nav.more")}
       containerClassName="md:hidden"
-      className="max-h-[85dvh] overflow-y-auto rounded-t-2xl border-t border-border bg-card px-4 pt-3 pb-safe shadow-2xl"
+      className="max-h-[85dvh] overflow-y-auto rounded-none border-t border-border bg-card px-4 pt-3 pb-safe shadow-2xl"
     >
       <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/25" />
       <div className="mb-3 flex items-center justify-between">
@@ -255,9 +255,9 @@ function MoreSheet({
         <div className="grid grid-cols-3 gap-2">
           {items.map((item) => {
             const active = isItemActive(item, pathname);
-            const className = `flex flex-col items-center justify-center gap-2 rounded-xl border p-4 text-center transition-[color,background-color,border-color,transform] duration-press active:scale-[0.98] ${
+            const className = `flex flex-col items-center justify-center gap-2 rounded-none border p-4 text-center transition-[color,background-color,border-color,transform] duration-press active:scale-[0.98] ${
               active
-                ? "border-primary-soft bg-accent text-primary"
+                ? "border-border bg-accent text-accent-foreground"
                 : "border-border bg-background text-foreground hover:bg-muted"
             }`;
             const inner = (

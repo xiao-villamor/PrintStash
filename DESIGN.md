@@ -11,11 +11,12 @@ only when nothing fits, and add it as a token, never as a one-off value.**
 
 ## Personality
 
-PrintStash is a **productivity app** — a crisp dashboard, not a showy consumer
-product. Motion is subtle, fast, and functional. It exists to explain where
-something came from, to confirm a press landed, or to soften a jarring swap.
-Nothing bounces. Nothing announces itself. If an animation draws attention to
-itself, it is wrong.
+PrintStash is a **productivity app** for working with a print library. Its
+OpenDesign language is compact and technical: neutral surfaces, fine dividers,
+square controls, and restrained blue for actions. Inter carries interface text;
+JetBrains Mono is reserved for compact technical values and labels. Motion is
+subtle, fast, and functional. It explains a change or confirms an action; it
+never turns routine navigation into a performance.
 
 ## Tokens
 
@@ -27,10 +28,11 @@ variable** — `bg-primary`, not `bg-[var(--primary)]`.
 
 ### Color
 
-Every color has a light and a dark value. Primary actions stay blue in both
-themes so their meaning does not change with appearance. Never hand-encode a
-theme swap (`blue-600 dark:orange-400`) — use the semantic token and it follows
-the theme for free.
+Every color has a light and a dark value. The base palette is `#F6F7F9` /
+`#0C0F14`, panels are `#FFFFFF` / `#13171E`, and primary actions use
+`#4D6F9B` in both themes. Neutral selection uses `#EEF0F3` in light and a
+translucent white fill in dark. Use semantic tokens instead of hand-encoding a
+theme swap so colors remain consistent throughout the application.
 
 | Token | Use |
 | --- | --- |
@@ -40,7 +42,7 @@ the theme for free.
 | `popover-hover` | Perceptible hover/focus fill for items inside floating panels |
 | `muted` / `muted-foreground` | Recessed fills, secondary text |
 | `primary` / `primary-foreground` | Primary action only. `primary-hover` for hover, `primary-soft` for focus/selection rings |
-| `accent` / `accent-foreground` | Tinted hover/selected controls; use together without an additional border or ring |
+| `accent` / `accent-foreground` | Neutral hover/selected controls; use together without a colored border or ring |
 | `destructive` / `destructive-foreground` | Delete and other irreversible actions |
 | `success`, `warning` | Status only — never as decoration |
 | `border`, `input`, `ring` | Edges and focus rings |
@@ -62,25 +64,32 @@ Primary actions and selected controls are deliberately different:
   `bg-primary text-primary-foreground hover:bg-primary-hover` or the default
   `Button` variant.
 - A control that represents current state (segmented option, view mode, active
-  filter or selected tab) uses `bg-accent text-accent-foreground`.
+  filter or selected tab) uses neutral `bg-accent text-accent-foreground`.
 - Do not put `bg-primary text-primary-foreground` on selected controls. It gives
   navigation the same weight as a primary action.
-- Do not add a border or ring to a filled selected control. Its tinted fill is
-  the state indicator; outlines are reserved for keyboard focus via
+- Do not add a colored border or ring to a filled selected control. Its neutral
+  fill is the state indicator; outlines are reserved for keyboard focus via
   `focus-visible:ring-ring`.
 - Orange belongs to `warning` or explicitly tertiary/status content. It is not
   an action or selection color.
 
 ### Radius, type, elevation
 
-- Radius derives from `--radius` (0.375rem): `rounded-sm|md|DEFAULT|lg`. No
-  arbitrary `rounded-[6px]`.
+- Standard control and panel radii derive from `--radius` (zero):
+  `rounded-sm|md|DEFAULT|lg`. Circular avatars, status dots and count badges
+  remain circular where their shape communicates their role.
 - Type ramp adds `text-2xs` (0.6875rem) and `text-3xs` (0.625rem) for the mono
   label style. No `text-[11px]`.
 - Layering uses the named scale: `z-dropdown` (50) for menus and popovers,
   `z-overlay` (100) for modals and drawers. No arbitrary `z-[60]`.
 
 ## Layout
+
+On desktop, a 53px rail keeps primary destinations visible beside the work
+area. A compact header carries search and global actions; the library retains
+its resizable collection panel. On narrow screens a bottom navigation and its
+More drawer replace the rail. Labels remain available to assistive technology
+for icon-only destinations, and keyboard focus is always visible.
 
 A page is either a **document** or a **surface**, and the choice is not a matter
 of taste.
@@ -155,7 +164,7 @@ Compose the pattern from existing primitives:
 1. Start with `Card className="overflow-hidden"` below the `PageHeader`.
 2. Put local tabs, filters, and batch actions in a compact toolbar using
    `border-b bg-muted/30 p-3`. `TabBar` uses an inset background frame and
-   `accent` for the active state; commands remain regular `Button` variants.
+   neutral `accent` for the active state; commands remain regular `Button` variants.
 3. Introduce the current section with `border-b px-4 py-4 sm:px-5`, a square
    `h-8 w-8 rounded-md bg-muted` icon anchor, a `text-sm font-semibold` title,
    and a `text-xs text-muted-foreground` description.

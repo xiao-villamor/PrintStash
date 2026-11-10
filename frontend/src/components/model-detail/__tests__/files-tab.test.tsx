@@ -269,3 +269,43 @@ describe("FilesTab", () => {
     expect(screen.getByText("Linked")).toBeVisible();
   });
 });
+
+describe("FilesTab recorded identity", () => {
+  it("places the complete Artifact hashes beside their owning filename", () => {
+    renderApp(
+      <FilesTab
+        modelId={1}
+        sourceFiles={[{ ...artifact, geometric_sha256: "c".repeat(64) }]}
+        canEdit={false}
+        onModel={() => {}}
+      />,
+    );
+
+    const file = within(screen.getByRole("article", { name: "bracket.stl" }));
+    expect(file.getByRole("button", { name: "Copy File SHA-256 for bracket.stl" })).toHaveAttribute(
+      "title",
+      artifact.sha256,
+    );
+    expect(
+      file.getByRole("button", { name: "Copy Geometry SHA-256 for bracket.stl" }),
+    ).toHaveAttribute("title", "c".repeat(64));
+  });
+  it("offers comparison through the existing owner callback", async () => {
+    let comparing = false;
+    renderApp(
+      <FilesTab
+        modelId={1}
+        sourceFiles={[artifact]}
+        canEdit={false}
+        onModel={() => {}}
+        onCompare={() => {
+          comparing = true;
+        }}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Compare" }));
+
+    expect(comparing).toBe(true);
+  });
+});

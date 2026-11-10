@@ -19,7 +19,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test-support/router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "@/lib/i18n";
@@ -209,12 +209,12 @@ function currentPath(): string {
 function renderSetup() {
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/setup"]}>
+      <TestRouter initialEntries={["/setup"]}>
         <I18nProvider>
           <SetupPage deps={deps} />
         </I18nProvider>
         <CurrentPath />
-      </MemoryRouter>
+      </TestRouter>
     </QueryClientProvider>,
   );
 }
@@ -240,6 +240,17 @@ beforeEach(() => {
 });
 
 describe("SetupPage", () => {
+  it("shows the current setup step and the account fields in reading order", async () => {
+    renderSetup();
+    await screen.findByLabelText("Username");
+
+    expect(screen.getByRole("heading", { name: "Welcome to PrintStash" })).toBeVisible();
+    expect(
+      screen.getByRole("list", { name: "Setup progress" }).querySelector('[aria-current="step"]'),
+    ).toHaveTextContent("Your account");
+    const fields = screen.getAllByRole("textbox").map((field) => field.getAttribute("id"));
+    expect(fields.indexOf("setup-username")).toBeLessThan(fields.indexOf("setup-email"));
+  });
   it.each([
     ["unavailable", "This connection requires the full API image."],
     ["unknown", "Choose an available storage provider."],
@@ -700,12 +711,12 @@ describe("setup source ownership", () => {
 
     view.rerender(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/setup"]}>
+        <TestRouter initialEntries={["/setup"]}>
           <I18nProvider>
             <SetupPage deps={replacement} />
           </I18nProvider>
           <CurrentPath />
-        </MemoryRouter>
+        </TestRouter>
       </QueryClientProvider>,
     );
     await screen.findByRole("button", { name: "Sign in" });

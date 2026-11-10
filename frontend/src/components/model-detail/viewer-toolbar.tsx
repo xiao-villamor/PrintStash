@@ -1,17 +1,18 @@
-"use client";
-
+import { useState } from "react";
+import { Camera, Minus, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
-
-import { Camera, Code2, Grid3x3, Layers, Maximize2 } from "lucide-react";
 import { toast } from "sonner";
-import type { STLViewerControls, ViewerDisplayMode } from "@/components/stl-viewer";
-import { Localized } from "@/components/ui/localized";
+import type {
+  STLViewerControls,
+  ViewerDisplayMode,
+  ViewerCameraPreset,
+} from "@/components/stl-viewer";
 
 export type ViewerMode = "model" | "gcode";
-
-/** Display modes in the order the toolbar offers them. */
 const DISPLAY_MODES: readonly ViewerDisplayMode[] = ["solid", "xray", "wireframe"];
+const CAMERA_PRESETS: readonly ViewerCameraPreset[] = ["isometric", "front", "top"];
 
 export function ViewerToolbar({
   displayMode,
@@ -23,119 +24,204 @@ export function ViewerToolbar({
   setViewerMode,
   hasGcode,
   viewerReady,
+  filename,
+  expanded = false,
+  onExpand,
+  showDimensions = true,
+  onDimensions,
   notifyScreenshotError = toast.error,
 }: {
   displayMode: ViewerDisplayMode;
-  setDisplayMode: (m: ViewerDisplayMode) => void;
+  setDisplayMode: (mode: ViewerDisplayMode) => void;
   showGrid: boolean;
-  setShowGrid: (v: boolean) => void;
+  setShowGrid: (visible: boolean) => void;
   controls: React.RefObject<STLViewerControls | null>;
   viewerMode: ViewerMode;
-  setViewerMode: (m: ViewerMode) => void;
+  setViewerMode: (mode: ViewerMode) => void;
   hasGcode: boolean;
   viewerReady: boolean;
+  filename?: string;
+  expanded?: boolean;
+  onExpand?: () => void;
+  showDimensions?: boolean;
+  onDimensions?: (visible: boolean) => void;
   notifyScreenshotError?: (message: string) => void;
 }) {
   useUiLocale();
-  const cluster =
-    "flex bg-surface-container-lowest/90 backdrop-blur border border-outline-variant rounded overflow-hidden shadow-sm";
-  const iconBtn =
-    "disabled:cursor-disabled disabled:opacity-50 flex h-11 w-11 items-center justify-center text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-primary sm:h-9 sm:w-9";
-
+  const [camera, setCamera] = useState<ViewerCameraPreset>("isometric");
+  const buttonClass = (active: boolean) =>
+    active ? "bg-accent text-accent-foreground" : "text-foreground";
   return (
-    <Localized>
-      <div className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-1.5">
-        {/* 3D ↔ G-code toggle */}
+    <div className="detail-viewer-controls">
+      <div className="detail-preview-heading">
+        <div className="min-w-0 flex flex-wrap items-baseline gap-3">
+          <h2>{uiText("Model preview")}</h2>
+          {filename && <span className="break-all text-xs text-muted-foreground">{filename}</span>}
+        </div>
+        <div className="flex shrink-0 gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label={uiText("Screenshot")}
+            disabled={!viewerReady || viewerMode !== "model"}
+            onClick={() => {
+              const result = controls.current?.screenshot();
+              if (result)
+                void result.catch(() =>
+                  notifyScreenshotError(uiText("Screenshot could not be created")),
+                );
+            }}
+          >
+            <Camera className="h-3.5 w-3.5" />
+            {uiText("Capture")}
+          </Button>
+          {onExpand && (
+            <Button variant="outline" size="sm" aria-pressed={expanded} onClick={onExpand}>
+              {expanded ? uiText("Collapse preview") : uiText("Expand")}
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="detail-viewer-commandbar">
         {hasGcode && (
-          <div className={cluster}>
-            <button
-              onClick={() => setViewerMode("model")}
-              className={`flex h-11 items-center gap-1.5 px-2.5 font-mono text-2xs uppercase tracking-wider transition-colors sm:h-9 ${
-                viewerMode === "model"
-                  ? "bg-accent text-accent-foreground"
-                  : "text-on-surface-variant hover:bg-surface-container-high"
-              }`}
-              title={uiText("3D model view")}
-            >
-              <Code2 className="h-3.5 w-3.5" /> 3D
-            </button>
-            <button
-              onClick={() => setViewerMode("gcode")}
-              className={`flex h-11 items-center gap-1.5 px-2.5 font-mono text-2xs uppercase tracking-wider transition-colors sm:h-9 ${
-                viewerMode === "gcode"
-                  ? "bg-accent text-accent-foreground"
-                  : "text-on-surface-variant hover:bg-surface-container-high"
-              }`}
-              title={uiText("G-code toolpath preview")}
-            >
-              <Layers className="h-3.5 w-3.5" /> GCode
-            </button>
+          <div className="detail-viewer-control-group">
+            <span>{uiText("Preview")}</span>
+            <div>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-pressed={viewerMode === "model"}
+                className={buttonClass(viewerMode === "model")}
+                onClick={() => setViewerMode("model")}
+              >
+                {uiText("3D model")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-pressed={viewerMode === "gcode"}
+                className={buttonClass(viewerMode === "gcode")}
+                onClick={() => setViewerMode("gcode")}
+              >
+                {uiText("Layers")}
+              </Button>
+            </div>
           </div>
         )}
-
-        {/* 3D model controls */}
         {viewerMode === "model" && (
           <>
-            <div className={cluster}>
-              {DISPLAY_MODES.map((m) => (
-                <button
-                  key={m}
-                  disabled={!viewerReady}
-                  onClick={() => setDisplayMode(m)}
-                  className={`disabled:cursor-disabled disabled:opacity-50 h-11 px-2.5 font-mono text-2xs uppercase tracking-wider transition-colors sm:h-9 ${
-                    displayMode === m
-                      ? "bg-accent text-accent-foreground"
-                      : "text-on-surface-variant hover:bg-surface-container-high"
-                  }`}
-                >
-                  {m === "wireframe"
-                    ? uiText("Wire")
-                    : m === "xray"
-                      ? uiText("X-Ray")
-                      : uiText("Solid")}
-                </button>
-              ))}
+            <div className="detail-viewer-control-group">
+              <span>{uiText("Display")}</span>
+              <div>
+                {DISPLAY_MODES.map((mode) => (
+                  <Button
+                    key={mode}
+                    size="sm"
+                    variant="ghost"
+                    disabled={!viewerReady}
+                    aria-pressed={displayMode === mode}
+                    className={buttonClass(displayMode === mode)}
+                    onClick={() => setDisplayMode(mode)}
+                  >
+                    {mode === "wireframe"
+                      ? uiText("Wireframe")
+                      : mode === "xray"
+                        ? uiText("X-Ray")
+                        : uiText("Solid")}
+                  </Button>
+                ))}
+              </div>
             </div>
-
-            <div className={cluster}>
-              <button
-                disabled={!viewerReady}
-                onClick={() => controls.current?.fit()}
-                className={`${iconBtn} border-r border-outline-variant`}
-                title={uiText("Fit to view")}
-                aria-label={uiText("Fit to view")}
-              >
-                <Maximize2 className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => {
-                  const screenshot = controls.current?.screenshot();
-                  if (screenshot) {
-                    void screenshot.catch(() =>
-                      notifyScreenshotError("Screenshot could not be created"),
-                    );
-                  }
-                }}
-                disabled={!viewerReady}
-                className={`${iconBtn} border-r border-outline-variant disabled:cursor-disabled disabled:opacity-50`}
-                title={uiText("Screenshot")}
-                aria-label={uiText("Screenshot")}
-              >
-                <Camera className="h-4 w-4" />
-              </button>
-              <button
-                disabled={!viewerReady}
-                onClick={() => setShowGrid(!showGrid)}
-                className={`${iconBtn} ${showGrid ? "text-primary bg-secondary-container" : ""}`}
-                title={uiText("Build plate grid")}
-                aria-label={uiText("Build plate grid")}
-              >
-                <Grid3x3 className="h-4 w-4" />
-              </button>
+            <div className="detail-viewer-control-group">
+              <span>{uiText("Overlays")}</span>
+              <div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={!viewerReady}
+                  aria-label={uiText("Build plate grid")}
+                  aria-pressed={showGrid}
+                  className={buttonClass(showGrid)}
+                  onClick={() => setShowGrid(!showGrid)}
+                >
+                  {uiText("Grid")}
+                </Button>
+                {onDimensions && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={!viewerReady}
+                    aria-pressed={showDimensions}
+                    className={buttonClass(showDimensions)}
+                    onClick={() => onDimensions(!showDimensions)}
+                  >
+                    {uiText("Dimensions")}
+                  </Button>
+                )}
+              </div>
             </div>
           </>
         )}
       </div>
-    </Localized>
+      {viewerMode === "model" && (
+        <div className="detail-viewer-dock">
+          <div className="flex">
+            {CAMERA_PRESETS.map((preset) => (
+              <Button
+                key={preset}
+                size="sm"
+                variant="ghost"
+                disabled={!viewerReady}
+                aria-pressed={camera === preset}
+                className={buttonClass(camera === preset)}
+                onClick={() => {
+                  controls.current?.setView(preset);
+                  setCamera(preset);
+                }}
+              >
+                {preset === "isometric"
+                  ? uiText("Isometric")
+                  : preset === "front"
+                    ? uiText("Front")
+                    : uiText("Top")}
+              </Button>
+            ))}
+          </div>
+          <p>{uiText("Drag to orbit · Scroll to zoom")}</p>
+          <div className="flex">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={!viewerReady}
+              aria-label={uiText("Zoom out")}
+              onClick={() => controls.current?.zoomOut()}
+            >
+              <Minus className="h-3 w-3" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!viewerReady}
+              aria-label={uiText("Fit to view")}
+              onClick={() => {
+                controls.current?.fit();
+                setCamera("isometric");
+              }}
+            >
+              {uiText("Fit")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              disabled={!viewerReady}
+              aria-label={uiText("Zoom in")}
+              onClick={() => controls.current?.zoomIn()}
+            >
+              <Plus className="h-3 w-3" />
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

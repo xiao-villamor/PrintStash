@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { LibraryBackLink, LibraryItemLink } from "../navigation";
 import { useLibraryEntry } from "../navigation-state";
 import { renderApp } from "@/test-support/render";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
 
 function Library() {
   const location = useLocation();
@@ -68,7 +68,7 @@ function BackProbe({ target, cancel = false }: { target?: string; cancel?: boole
       </LibraryBackLink>
       <output aria-label="Route">
         {location.pathname}
-        {location.search}
+        {location.searchStr}
       </output>
     </>
   );

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,7 +88,7 @@ function Variant({ variant, index }: { variant: SettingsVariant; index: number }
               <li key={file.file_id} className="min-w-0 space-y-1 rounded-md bg-muted/30 p-3">
                 <Link
                   className="break-words text-sm text-primary underline underline-offset-2"
-                  to={`/models/${file.model_id}`}
+                  href={`/models/${file.model_id}`}
                 >
                   {file.filename} · {file.model_name}
                 </Link>

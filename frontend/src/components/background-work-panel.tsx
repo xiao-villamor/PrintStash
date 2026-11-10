@@ -20,7 +20,7 @@ import {
   Server,
   SlidersHorizontal,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -453,7 +453,7 @@ function BackgroundWorkView({
               {uiText("Uploads and imports also appear in the Tasks menu.")}
             </p>
             <Link
-              to="/"
+              href="/"
               className="inline-flex rounded text-sm font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {uiText("Browse models")}
@@ -808,7 +808,7 @@ function ActiveWorkJobs({
                 </p>
                 {job.model_id !== null && (
                   <Link
-                    to={`/models/${job.model_id}`}
+                    href={`/models/${job.model_id}`}
                     className="mt-1 inline-block text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {uiText("Open model")}

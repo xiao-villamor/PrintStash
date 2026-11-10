@@ -84,7 +84,7 @@ test.describe("Library navigation", () => {
         }));
         expect(Math.max(...before.offsets)).toBeGreaterThan(100);
         const origin = page.url();
-        const originKey = await page.evaluate(() => history.state.key);
+        const originKey = await page.evaluate(() => history.state.__TSR_key);
         const box = await link.boundingBox();
         if (!box) throw new Error("Missing visible reading anchor");
         // The upper-left corner is the selection control; navigate through
@@ -94,7 +94,7 @@ test.describe("Library navigation", () => {
         await page.getByRole("link", { name: "Back", exact: true }).click();
 
         await expect(page).toHaveURL(origin);
-        expect(await page.evaluate(() => history.state.key)).toBe(originKey);
+        expect(await page.evaluate(() => history.state.__TSR_key)).toBe(originKey);
         await expect
           .poll(() => link.evaluate((node) => node.getBoundingClientRect().top))
           .toBeCloseTo(before.top, 0);

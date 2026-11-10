@@ -24,7 +24,7 @@ import { StrictMode } from "react";
 import { createTask, listTasks, resetTasksForNewSetup } from "@/lib/task-center";
 import { storeLogin } from "@/lib/auth-store";
 import { screen, waitFor } from "@testing-library/react";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppShell } from "@/components/app-shell";
@@ -140,6 +140,12 @@ describe("AppShell", () => {
   });
 
   describe("a signed-in user", () => {
+    it("shows the authenticated getting-started guide inside the workspace", async () => {
+      renderShell({ at: "/getting-started" });
+
+      expect(await screen.findByText("at /getting-started")).toBeVisible();
+      expect(screen.getAllByRole("navigation").length).toBeGreaterThan(0);
+    });
     it("renders the page inside the frame", async () => {
       renderShell();
 

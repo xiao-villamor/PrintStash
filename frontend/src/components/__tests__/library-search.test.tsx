@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import SearchPage from "@/pages/search";
-import { Route, Routes } from "react-router-dom";
+import { Outlet } from "@tanstack/react-router";
 import { LibrarySearch } from "@/components/library-search";
 import { usePathname, useSearchParams } from "@/lib/navigation";
 import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
@@ -67,12 +67,15 @@ describe("LibrarySearch", () => {
     renderApp(
       <>
         <LibrarySearch />
-        <Routes>
-          <Route path="/" element={<h1>Library</h1>} />
-          <Route path="/search" element={<SearchPage />} />
-        </Routes>
+        <Outlet />
       </>,
-      { at: "/search?q=bracket" },
+      {
+        at: "/search?q=bracket",
+        routerRoutes: [
+          { path: "/", element: <h1>Library</h1> },
+          { path: "/search", element: <SearchPage /> },
+        ],
+      },
     );
     let finish: (response: Response) => void = () => {};
     const pending = new Promise<Response>((resolve) => {

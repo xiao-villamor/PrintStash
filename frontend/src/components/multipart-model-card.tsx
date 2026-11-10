@@ -88,7 +88,7 @@ export function MultipartModelCard({
   return (
     <article
       className={cn(
-        `${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} group group/selection-card relative flex aspect-square h-full min-w-0 max-w-full flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-fast hover:-translate-y-0.5 hover:border-primary active:scale-[0.99] `,
+        `${origin ? "" : "animate-card-in"} ${arriving ? "animate-card-arrive" : ""} group group/selection-card relative flex h-full min-w-0 max-w-full flex-col overflow-hidden rounded border border-border bg-card text-card-foreground transition-[border-color,box-shadow,transform] duration-fast hover:border-primary active:scale-[0.99] `,
         selected && "bg-accent text-accent-foreground",
       )}
     >
@@ -140,16 +140,16 @@ export function MultipartModelCard({
         }}
         className="flex h-full min-w-0 flex-col overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <div className="relative h-3/5 shrink-0 overflow-hidden border-b border-border bg-muted/40">
+        <div className="library-preview relative h-36 shrink-0 overflow-hidden border-b border-border bg-muted/40">
           <Cover src={item.cover_thumbnail_url} alt="" />
           <span className="absolute left-2 bottom-2 max-w-[calc(100%-6rem)] truncate rounded border border-primary/30 bg-card/90 px-2 py-1 font-mono text-3xs font-semibold uppercase tracking-wider text-primary shadow-sm">
             {t("multipart.badge")}
           </span>
         </div>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col p-3">
+        <div className="flex min-h-40 min-w-0 flex-1 flex-col p-3">
           <h3
             title={item.name}
-            className="line-clamp-2 break-words text-sm font-bold tracking-tight"
+            className="line-clamp-2 break-words text-sm font-semibold tracking-tight"
           >
             {item.name}
           </h3>

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, type ParsedLocation } from "@tanstack/react-router";
 import { onAuthChange } from "@/lib/auth-store";
 import { getSessionVersion } from "@/lib/session-transport";
 
@@ -31,30 +31,20 @@ const MAX_HISTORY_ENTRIES = 64;
 const stop = onAuthChange(() => entries.clear());
 if (import.meta.hot) import.meta.hot.dispose(stop);
 
-// Browser history state is foreign input; only Router's integer index is useful.
-// oxlint-disable anti-slop/no-runtime-typeof -- Parse the browser-owned history envelope at its I/O boundary.
-export function historyIndex(): number | null {
-  const state: unknown = window.history.state;
-  return state !== null &&
-    typeof state === "object" &&
-    "idx" in state &&
-    typeof state.idx === "number" &&
-    Number.isInteger(state.idx)
-    ? state.idx
-    : null;
+/** The installed TanStack history envelope owns the index, including memory history. */
+export function historyIndex(state: ParsedLocation["state"]): number | null {
+  return Number.isInteger(state.__TSR_index) ? state.__TSR_index : null;
 }
-
-// oxlint-enable anti-slop/no-runtime-typeof
 
 /** Bind identity to a settled visual snapshot, rather than the requested route. */
 export function useLibraryEntry(href: string, ready: boolean) {
   const location = useLocation();
   const [session] = useState(getSessionVersion);
   const current = useSyncExternalStore(onAuthChange, getSessionVersion);
-  const entry = useMemo(
-    () => ({ key: location.key, href, session, index: historyIndex() }),
-    [location.key, href, session],
-  );
+  const key = location.state.__TSR_key;
+  const index = historyIndex(location.state);
+  if (key === undefined) throw new Error("Router history entry has no identity");
+  const entry = useMemo(() => ({ key, href, session, index }), [key, href, session, index]);
   useLayoutEffect(() => {
     if (!ready || session !== current) return;
     const previous = entries.get(entry.key);

@@ -226,7 +226,8 @@ export function observeInteraction(element, { event, target }) {
 /** Runs in the page: only the committed history destination can supply phases. */
 export function currentNavigationStart() {
   const current = performance.getEntriesByName("printstash:navigation:current").at(-1)?.detail;
-  if (!current?.active || current.historyKey !== (history.state?.key ?? "default")) return null;
+  if (!current?.active || current.historyKey !== (history.state?.__TSR_key ?? "default"))
+    return null;
   return (
     performance.getEntriesByName(`printstash:navigation:${current.navigation}:start`)[0] ?? null
   );

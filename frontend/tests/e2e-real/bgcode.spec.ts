@@ -34,7 +34,7 @@ test.describe("BGCODE toolpath", () => {
       await expect(modelCard(page, name)).toBeVisible({ timeout: 5000 });
     }).toPass({ timeout: 60000 });
     await modelCard(page, name).click();
-    await page.getByRole("button", { name: "GCode", exact: true }).click();
+    await page.getByRole("button", { name: "Layers", exact: true }).click();
     const slider = page.getByRole("slider", { name: "Current layer" });
     await expect(slider).toBeVisible({ timeout: 30000 });
     // The upstream fixture has exactly 31 printed layers; travel lifts add none.

@@ -243,6 +243,17 @@ const SETTINGS_SECTIONS: {
   { id: "about", labelKey: "settings.about", icon: Info },
 ];
 
+const SETTINGS_GROUPS: { labelKey: MessageKey; ids: SettingsSection[] }[] = [
+  { labelKey: "Global settings", ids: ["overview"] },
+  {
+    labelKey: "Library",
+    ids: ["storage", "backup", "remote-storage", "imports", "ai-search", "libraries", "trash"],
+  },
+  { labelKey: "Hardware & integrations", ids: ["spoolman", "notifications"] },
+  { labelKey: "Account", ids: ["access", "sso"] },
+  { labelKey: "System", ids: ["maintenance", "work", "design", "previews", "gpu", "about"] },
+];
+
 /** True when the `?section=` value names one of the sections we ship. */
 function isSettingsSection(value: string | null): value is SettingsSection {
   return SETTINGS_SECTIONS.some((section) => section.id === value);
@@ -450,7 +461,7 @@ function SettingsCard({
       role="group"
       aria-label={title}
       className={cn(
-        "overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm",
+        "overflow-hidden rounded-lg border border-border bg-card text-card-foreground",
         className,
       )}
     >
@@ -1946,7 +1957,7 @@ export function SettingsPanel() {
   return (
     <Localized>
       <div className="w-full space-y-6">
-        <GettingStartedReminder />
+        {activeSection !== "trash" && <GettingStartedReminder />}
         <ConfirmModal
           open={restartConfirmOpen}
           onClose={() => {
@@ -2123,58 +2134,97 @@ export function SettingsPanel() {
           confirmLabel={uiText("Download & enable")}
         />
 
-        <PageHeader title={t("settings.title")} description={t("settings.description")} />
+        <PageHeader
+          title={activeSection === "trash" ? t("settings.trash") : t("settings.title")}
+          description={
+            activeSection === "trash" ? uiText("multipart.trashHelp") : t("settings.description")
+          }
+          actions={
+            activeSection === "trash" ? (
+              <Button variant="outline" onClick={() => changeSection("overview")}>
+                {t("settings.title")}
+              </Button>
+            ) : undefined
+          }
+        />
 
-        <div ref={mobileTabsRef} className="border-b border-border pb-3 lg:hidden">
-          <TabBar
-            tabs={visibleSettingsSections.map((section) => {
-              const Icon = section.icon;
-              return {
-                key: section.id,
-                label: (
-                  <>
-                    <Icon className="h-4 w-4" />
-                    {t(section.labelKey)}
-                  </>
-                ),
-              };
-            })}
-            active={activeSection}
-            onChange={changeSection}
-            className="gap-1 overflow-x-auto"
-            tabClassName="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-[color,background-color,transform] duration-press active:scale-[0.99] hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-            activeTabClassName="bg-accent text-accent-foreground"
-            showIndicator={false}
-          />
-        </div>
+        {activeSection !== "trash" && (
+          <div ref={mobileTabsRef} className="border-b border-border pb-3 lg:hidden">
+            <TabBar
+              tabs={visibleSettingsSections.map((section) => {
+                const Icon = section.icon;
+                return {
+                  key: section.id,
+                  label: (
+                    <>
+                      <Icon className="h-4 w-4" />
+                      {t(section.labelKey)}
+                    </>
+                  ),
+                };
+              })}
+              active={activeSection}
+              onChange={changeSection}
+              className="gap-1 overflow-x-auto"
+              tabClassName="inline-flex shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-[color,background-color,transform] duration-press active:scale-[0.99] hover:bg-popover-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+              activeTabClassName="bg-accent text-accent-foreground"
+              showIndicator={false}
+            />
+          </div>
+        )}
 
-        <div className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-6">
-          <nav
-            aria-label={uiText("Settings sections")}
-            className="sticky top-0 hidden rounded-lg border border-border bg-card p-2 shadow-sm lg:block"
-          >
-            {visibleSettingsSections.map((section) => {
-              const Icon = section.icon;
-              const isActive = section.id === activeSection;
-              return (
-                <button
-                  key={section.id}
-                  type="button"
-                  aria-current={isActive ? "page" : undefined}
-                  onClick={() => changeSection(section.id)}
-                  className={cn(
-                    "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                    isActive
-                      ? "bg-accent text-accent-foreground"
-                      : "text-muted-foreground hover:bg-popover-hover hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-4 w-4 shrink-0" />
-                  <span>{t(section.labelKey)}</span>
-                </button>
-              );
-            })}
-          </nav>
+        <div
+          className={
+            activeSection === "trash"
+              ? ""
+              : "lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-6"
+          }
+        >
+          {activeSection !== "trash" && (
+            <nav
+              aria-label={uiText("Settings sections")}
+              className="sticky top-0 hidden rounded-lg border border-border bg-card p-2 lg:block"
+            >
+              {SETTINGS_GROUPS.map((group) => {
+                const sections = group.ids.flatMap((id) => {
+                  const section = visibleSettingsSections.find((item) => item.id === id);
+                  return section ? [section] : [];
+                });
+                if (!sections.length) return null;
+                return (
+                  <div
+                    key={group.labelKey}
+                    className="border-b border-border px-1 py-2 last:border-b-0"
+                  >
+                    <p className="px-2 pb-1 text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      {uiText(group.labelKey)}
+                    </p>
+                    {sections.map((section) => {
+                      const Icon = section.icon;
+                      const isActive = section.id === activeSection;
+                      return (
+                        <button
+                          key={section.id}
+                          type="button"
+                          aria-current={isActive ? "page" : undefined}
+                          onClick={() => changeSection(section.id)}
+                          className={cn(
+                            "flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm font-medium transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                            isActive
+                              ? "bg-accent text-accent-foreground"
+                              : "text-muted-foreground hover:bg-popover-hover hover:text-foreground",
+                          )}
+                        >
+                          <Icon className="h-4 w-4 shrink-0" />
+                          <span>{t(section.labelKey)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+            </nav>
+          )}
 
           <main className="min-w-0">
             {user?.is_superuser &&
@@ -2234,7 +2284,7 @@ export function SettingsPanel() {
                 </div>
               )}
 
-            {user?.is_superuser && healthRead.isError && (
+            {activeSection !== "trash" && user?.is_superuser && healthRead.isError && (
               <div role="alert" className="flex items-center gap-2 text-sm">
                 <p>{uiText("settings.healthLoadFailed")}</p>
                 <Button variant="outline" onClick={() => void healthRead.refetch()}>
@@ -2242,7 +2292,7 @@ export function SettingsPanel() {
                 </Button>
               </div>
             )}
-            {user?.is_superuser && releaseRead.isError && (
+            {activeSection !== "trash" && user?.is_superuser && releaseRead.isError && (
               <div role="alert" className="flex items-center gap-2 text-sm">
                 <p>{uiText("settings.releaseLoadFailed")}</p>
                 <Button variant="outline" onClick={() => void checkForUpdates(true)}>
@@ -2250,40 +2300,43 @@ export function SettingsPanel() {
                 </Button>
               </div>
             )}
-            {releaseStatus?.update_available && releaseStatus.latest_version && (
-              <div
-                role="status"
-                aria-live="polite"
-                className="mb-6 flex flex-col gap-4 rounded-lg border border-warning/30 bg-warning/10 p-4 sm:flex-row sm:items-center"
-              >
-                <div className="flex min-w-0 flex-1 items-start gap-3">
-                  <CircleArrowUp className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">
-                      {uiText("PrintStash v{value1} is available", {
-                        value1: String(releaseStatus.latest_version ?? ""),
-                      })}
-                    </p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {uiText(
-                        "This vault is running v{value1}. Review release notes before updating your self-hosted installation.",
-                        { value1: String(releaseStatus.current_version ?? "") },
-                      )}
-                    </p>
-                  </div>
-                </div>
-                <a
-                  href={
-                    releaseStatus.release_url ?? `https://github.com/${GITHUB_REPO}/releases/latest`
-                  }
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  className={BTN_SECONDARY}
+            {activeSection !== "trash" &&
+              releaseStatus?.update_available &&
+              releaseStatus.latest_version && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="mb-6 flex flex-col gap-4 rounded-lg border border-warning/30 bg-warning/10 p-4 sm:flex-row sm:items-center"
                 >
-                  {uiText("View release")}
-                </a>
-              </div>
-            )}
+                  <div className="flex min-w-0 flex-1 items-start gap-3">
+                    <CircleArrowUp className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">
+                        {uiText("PrintStash v{value1} is available", {
+                          value1: String(releaseStatus.latest_version ?? ""),
+                        })}
+                      </p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {uiText(
+                          "This vault is running v{value1}. Review release notes before updating your self-hosted installation.",
+                          { value1: String(releaseStatus.current_version ?? "") },
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href={
+                      releaseStatus.release_url ??
+                      `https://github.com/${GITHUB_REPO}/releases/latest`
+                    }
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    className={BTN_SECONDARY}
+                  >
+                    {uiText("View release")}
+                  </a>
+                </div>
+              )}
 
             {activeSection === "overview" && (
               <div className="space-y-6 animate-panel-in">
@@ -2304,155 +2357,148 @@ export function SettingsPanel() {
                   </div>
                 )}
                 <ImportCopyWarning storageHealth={storageHealth} />
-                {/* KPI tiles */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  {kpiItems.map((item) => {
-                    const Icon = item.icon;
-                    return (
+                <div className="overflow-hidden border border-border bg-card">
+                  <div className="grid grid-cols-2 gap-y-4 border-b border-border p-4 sm:p-5 lg:grid-cols-4">
+                    {kpiItems.map((item) => (
                       <div
                         key={item.label}
-                        className="bg-card border border-border rounded p-4 sm:p-5"
+                        className="min-w-0 border-l border-border px-4 first:border-l-0 first:pl-0"
                       >
-                        <div className="flex items-center justify-between">
-                          <p className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-                            {item.label}
-                          </p>
-                          <Icon className="h-4 w-4 text-muted-foreground/50" />
-                        </div>
-                        <p className="mt-2 text-2xl font-semibold text-foreground truncate">
+                        <p className="text-xs text-muted-foreground">{item.label}</p>
+                        <p className="mt-1 break-words text-2xl font-semibold text-foreground">
                           {item.value}
                         </p>
-                        <p className="mt-1 text-xs text-muted-foreground truncate">{item.desc}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{item.desc}</p>
                       </div>
-                    );
-                  })}
-                </div>
+                    ))}
+                  </div>
 
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-                  {/* System information */}
-                  <SettingsCard
-                    icon={Server}
-                    title={uiText("System")}
-                    description={uiText("Server status and vault configuration")}
-                    action={
-                      user?.is_superuser && health?.capabilities?.restart ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setRestartConfirmOpen(true)}
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" aria-hidden />
-                          {t("settings.restartAction")}
-                        </Button>
-                      ) : undefined
-                    }
-                  >
-                    <div className="px-4 sm:px-5">
-                      {systemItems.map((item) => (
-                        <div
-                          key={item.label}
-                          className="flex items-center gap-4 py-3 border-b border-border last:border-b-0"
-                        >
-                          <div className="w-9 h-9 rounded bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
-                            <item.icon className="h-4 w-4" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-foreground">{item.label}</p>
-                            <p className="text-xs text-muted-foreground truncate">{item.desc}</p>
-                          </div>
-                          <span className="font-mono text-xs sm:text-sm text-foreground text-right flex-shrink-0">
-                            {item.value}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </SettingsCard>
-
-                  <SettingsCard
-                    icon={Download}
-                    title={uiText("Library migration")}
-                    description={uiText(
-                      "Portable archive with models, metadata, print history, and original artifacts",
-                    )}
-                  >
-                    <div className="p-4 sm:p-5 space-y-4">
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {uiText(
-                          "Export a versioned archive for migration to another PrintStash installation. Accounts, credentials, settings, and trash are excluded.",
-                        )}
-                      </p>
-                      <div className="flex flex-wrap items-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void exportArchive()}
-                          disabled={archiveBusy !== null}
-                          className={BTN_SECONDARY}
-                        >
-                          <Download className="h-3.5 w-3.5" />{" "}
-                          {archiveBusy === "export"
-                            ? uiText("Exporting")
-                            : uiText("Export full library")}
-                        </button>
-                        {user?.is_superuser && (
-                          <label
-                            className={`${BTN_SECONDARY} ${archiveBusy !== null ? "pointer-events-none opacity-50" : "cursor-action"}`}
+                  <div className="divide-y divide-border">
+                    {/* System information */}
+                    <SettingsCard
+                      icon={Server}
+                      title={uiText("System")}
+                      description={uiText("Server status and vault configuration")}
+                      action={
+                        user?.is_superuser && health?.capabilities?.restart ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setRestartConfirmOpen(true)}
                           >
-                            <Download className="h-3.5 w-3.5 rotate-180" />{" "}
-                            {archiveBusy === "import"
-                              ? uiText("Importing")
-                              : uiText("Import archive")}
-                            <input
-                              type="file"
-                              accept=".zip,application/zip"
-                              className="sr-only"
-                              disabled={archiveBusy !== null}
-                              onChange={(event) => {
-                                const file = event.target.files?.[0];
-                                if (file) void importArchive(file);
-                                event.target.value = "";
-                              }}
-                            />
-                          </label>
-                        )}
+                            <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                            {t("settings.restartAction")}
+                          </Button>
+                        ) : undefined
+                      }
+                    >
+                      <div className="px-4 sm:px-5">
+                        {systemItems.map((item) => (
+                          <div
+                            key={item.label}
+                            className="flex items-center gap-4 py-3 border-b border-border last:border-b-0"
+                          >
+                            <div className="w-9 h-9 rounded bg-muted flex items-center justify-center text-muted-foreground flex-shrink-0">
+                              <item.icon className="h-4 w-4" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-foreground">{item.label}</p>
+                              <p className="text-xs text-muted-foreground truncate">{item.desc}</p>
+                            </div>
+                            <span className="font-mono text-xs sm:text-sm text-foreground text-right flex-shrink-0">
+                              {item.value}
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                    </div>
-                  </SettingsCard>
+                    </SettingsCard>
 
-                  {/* Data export */}
-                  <SettingsCard
-                    icon={Download}
-                    title={uiText("Data export")}
-                    description={uiText("Metadata only — no raw STL/3MF/G-code files")}
-                  >
-                    <div className="p-4 sm:p-5 space-y-4">
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        {uiText(
-                          "Download your searchable library context for spreadsheets, audits, migrations, or local AI prompts.",
-                        )}
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => exportData("json")}
-                          disabled={exporting !== null}
-                          className={BTN_SECONDARY}
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          {exporting === "json" ? uiText("Exporting") : "JSON"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => exportData("csv")}
-                          disabled={exporting !== null}
-                          className={BTN_SECONDARY}
-                        >
-                          <Download className="h-3.5 w-3.5" />
-                          {exporting === "csv" ? uiText("Exporting") : uiText("CSV")}
-                        </button>
+                    <SettingsCard
+                      icon={Download}
+                      title={uiText("Library migration")}
+                      description={uiText(
+                        "Portable archive with models, metadata, print history, and original artifacts",
+                      )}
+                    >
+                      <div className="p-4 sm:p-5 space-y-4">
+                        <p className="text-sm text-muted-foreground leading-relaxed">
+                          {uiText(
+                            "Export a versioned archive for migration to another PrintStash installation. Accounts, credentials, settings, and trash are excluded.",
+                          )}
+                        </p>
+                        <div className="flex flex-wrap items-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void exportArchive()}
+                            disabled={archiveBusy !== null}
+                            className={BTN_SECONDARY}
+                          >
+                            <Download className="h-3.5 w-3.5" />{" "}
+                            {archiveBusy === "export"
+                              ? uiText("Exporting")
+                              : uiText("Export full library")}
+                          </button>
+                          {user?.is_superuser && (
+                            <label
+                              className={`${BTN_SECONDARY} ${archiveBusy !== null ? "pointer-events-none opacity-50" : "cursor-action"}`}
+                            >
+                              <Download className="h-3.5 w-3.5 rotate-180" />{" "}
+                              {archiveBusy === "import"
+                                ? uiText("Importing")
+                                : uiText("Import archive")}
+                              <input
+                                type="file"
+                                accept=".zip,application/zip"
+                                className="sr-only"
+                                disabled={archiveBusy !== null}
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0];
+                                  if (file) void importArchive(file);
+                                  event.target.value = "";
+                                }}
+                              />
+                            </label>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </SettingsCard>
+                    </SettingsCard>
+
+                    {/* Data export */}
+                    <SettingsCard
+                      icon={Download}
+                      title={uiText("Data export")}
+                      description={uiText("Metadata only — no raw STL/3MF/G-code files")}
+                    >
+                      <div className="p-4 sm:p-5 space-y-4">
+                        <p className="text-sm text-muted-foreground leading-relaxed">
+                          {uiText(
+                            "Download your searchable library context for spreadsheets, audits, migrations, or local AI prompts.",
+                          )}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => exportData("json")}
+                            disabled={exporting !== null}
+                            className={BTN_SECONDARY}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            {exporting === "json" ? uiText("Exporting") : "JSON"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => exportData("csv")}
+                            disabled={exporting !== null}
+                            className={BTN_SECONDARY}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            {exporting === "csv" ? uiText("Exporting") : uiText("CSV")}
+                          </button>
+                        </div>
+                      </div>
+                    </SettingsCard>
+                  </div>
                 </div>
               </div>
             )}
@@ -4719,353 +4765,361 @@ export function SettingsPanel() {
                     </Button>
                   </div>
                 )}
-                <SettingsCard
-                  icon={Trash2}
-                  title={uiText("Trash retention")}
-                  description={uiText(
-                    "Soft-deleted models stay restorable until the retention window expires.",
-                  )}
-                  action={
-                    <button
-                      type="button"
-                      onClick={loadTrash}
-                      disabled={trashLoading}
-                      className={BTN_ICON}
-                      title={uiText("Refresh trash")}
-                    >
-                      <RefreshCw className={`h-4 w-4 ${trashLoading ? "animate-spin" : ""}`} />
-                    </button>
-                  }
-                >
-                  <div className="p-4 sm:p-5 grid gap-3 sm:grid-cols-[160px_auto_auto] sm:items-end">
-                    <label className="block">
-                      <span className="block text-2xs text-muted-foreground mb-1">
-                        {uiText("Days")}
-                      </span>
-                      <input
-                        type="number"
-                        min={-1}
-                        value={trashRetentionText}
-                        onChange={(event) => {
-                          const text = event.target.value;
-                          if (remoteConfigData)
-                            setTrashRetentionDraft((previous) => ({
-                              text,
-                              base: previous?.base ?? captureEditingBase(remoteConfigData),
-                            }));
-                        }}
+                <div className="divide-y divide-border overflow-hidden border border-border bg-card">
+                  <SettingsCard
+                    className="border-0"
+                    icon={Trash2}
+                    title={uiText("Trash retention")}
+                    description={uiText(
+                      "Soft-deleted models stay restorable until the retention window expires.",
+                    )}
+                    action={
+                      <button
+                        type="button"
+                        onClick={loadTrash}
+                        disabled={trashLoading}
+                        className={BTN_ICON}
+                        title={uiText("Refresh trash")}
+                      >
+                        <RefreshCw className={`h-4 w-4 ${trashLoading ? "animate-spin" : ""}`} />
+                      </button>
+                    }
+                  >
+                    <div className="p-4 sm:p-5 grid gap-3 sm:grid-cols-[160px_auto_auto] sm:items-end">
+                      <label className="block">
+                        <span className="block text-2xs text-muted-foreground mb-1">
+                          {uiText("Days")}
+                        </span>
+                        <input
+                          type="number"
+                          min={-1}
+                          value={trashRetentionText}
+                          onChange={(event) => {
+                            const text = event.target.value;
+                            if (remoteConfigData)
+                              setTrashRetentionDraft((previous) => ({
+                                text,
+                                base: previous?.base ?? captureEditingBase(remoteConfigData),
+                              }));
+                          }}
+                          disabled={
+                            !user?.is_superuser ||
+                            !remoteConfigData ||
+                            remoteConfig.isError ||
+                            trashRetentionBusy
+                          }
+                          className={INPUT}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={saveTrashRetention}
                         disabled={
                           !user?.is_superuser ||
                           !remoteConfigData ||
                           remoteConfig.isError ||
-                          trashRetentionBusy
+                          preferenceCommand.blocked ||
+                          backupPolicy.isPending ||
+                          parsedTrashRetentionDays === null
                         }
-                        className={INPUT}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      onClick={saveTrashRetention}
-                      disabled={
-                        !user?.is_superuser ||
-                        !remoteConfigData ||
-                        remoteConfig.isError ||
-                        preferenceCommand.blocked ||
-                        backupPolicy.isPending ||
-                        parsedTrashRetentionDays === null
-                      }
-                      className={BTN_PRIMARY}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPurgeExpiredOpen(true)}
-                      disabled={
-                        !user?.is_superuser ||
-                        trashBusy === "gc" ||
-                        parsedTrashRetentionDays === null ||
-                        trashRetentionDays < 0 ||
-                        gcRead.isError ||
-                        gcRead.isPending ||
-                        (gcPlan !== null &&
-                          ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
-                      }
-                      className={BTN_SECONDARY}
-                    >
-                      <Eraser className="h-3.5 w-3.5" />
-                      {trashBusy === "gc" ? uiText("Preparing") : uiText("Review expired")}
-                    </button>
-                  </div>
-                  {trashPurgeResult && (
-                    <div
-                      role="status"
-                      aria-live="polite"
-                      className={cn(
-                        "border-t px-4 py-3 text-xs sm:px-5",
-                        (trashPurgeResult.storage_cleanup_status ?? "completed") === "completed"
-                          ? "border-success/30 bg-success/10 text-success"
-                          : "border-warning/30 bg-warning/10 text-warning",
-                      )}
-                    >
-                      {cleanupStatusMessage(t, trashPurgeResult)}
+                        className={BTN_PRIMARY}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPurgeExpiredOpen(true)}
+                        disabled={
+                          !user?.is_superuser ||
+                          trashBusy === "gc" ||
+                          parsedTrashRetentionDays === null ||
+                          trashRetentionDays < 0 ||
+                          gcRead.isError ||
+                          gcRead.isPending ||
+                          (gcPlan !== null &&
+                            ["preview", "quarantined", "finalizing"].includes(gcPlan.state))
+                        }
+                        className={BTN_SECONDARY}
+                      >
+                        <Eraser className="h-3.5 w-3.5" />
+                        {trashBusy === "gc" ? uiText("Preparing") : uiText("Review expired")}
+                      </button>
                     </div>
-                  )}
-                  {gcPlan && (
-                    <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-semibold text-foreground">
-                            {uiText("GC plan #{value1} · {value2}", {
-                              value1: String(gcPlan.id ?? ""),
-                              value2: String(gcPlan.state ?? ""),
-                            })}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {uiText(
-                              "{value1} of {value2} expired resources · {value3} storage keys · {value4}",
-                              {
-                                value1: String(gcPlan.resource_count ?? ""),
-                                value2: String(gcPlan.candidate_pool_count ?? ""),
-                                value3: String(gcPlan.key_count ?? ""),
-                                value4: String(formatBytes(gcPlan.size_bytes) ?? ""),
-                              },
-                            )}
-                          </p>
-                        </div>
-                        <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                          {gcPlan.backup_id ? uiText("backup verified") : uiText("no backup bound")}
-                        </span>
+                    {trashPurgeResult && (
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className={cn(
+                          "border-t px-4 py-3 text-xs sm:px-5",
+                          (trashPurgeResult.storage_cleanup_status ?? "completed") === "completed"
+                            ? "border-success/30 bg-success/10 text-success"
+                            : "border-warning/30 bg-warning/10 text-warning",
+                        )}
+                      >
+                        {cleanupStatusMessage(t, trashPurgeResult)}
                       </div>
-                      <p className="mt-3 text-2xs text-muted-foreground">
-                        {uiText("Exact plan digest")}
-                      </p>
-                      <code className="mt-1 block break-all rounded border border-border bg-background px-2 py-2 text-3xs text-foreground">
-                        {gcPlan.digest}
-                      </code>
-                      {gcPlan.state === "preview" && (
-                        <div className="mt-3 space-y-3">
-                          <p className="text-xs text-muted-foreground">
-                            {uiText(
-                              "Approval is fail-closed: paste the exact digest below. The server will also require verified storage and a recent backup on an independent S3 provider before starting the quarantine.",
-                            )}
-                          </p>
-                          <input
-                            className={INPUT}
-                            aria-label={uiText("Confirm GC plan digest")}
-                            placeholder={uiText("Paste the 64-character digest")}
-                            value={gcDigestConfirmation}
-                            disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
-                            onChange={(event) => setGcDigestConfirmation(event.target.value.trim())}
-                          />
-                        </div>
-                      )}
-                      {gcPlan.state === "quarantined" && gcPlan.quarantine_until && (
-                        <p className="mt-3 text-xs text-muted-foreground">
-                          {uiText(
-                            "Recovery quarantine ends {value1}. The plan and backup are reverified before final deletion.",
-                            { value1: String(formatDateTime(gcPlan.quarantine_until) ?? "") },
-                          )}
-                        </p>
-                      )}
-                      {gcPlan.last_error && (
-                        <p className="mt-3 text-xs text-destructive">{gcPlan.last_error}</p>
-                      )}
-                      <div className="mt-3 flex flex-wrap justify-end gap-2">
-                        {gcPlan.state === "preview" && (
-                          <button
-                            type="button"
-                            className={BTN_PRIMARY}
-                            disabled={
-                              gcRead.isError ||
-                              gcRead.isPending ||
-                              trashBusy === "gc" ||
-                              gcDigestConfirmation !== gcPlan.digest
-                            }
-                            onClick={approveExpiredGcPlan}
-                          >
-                            <ShieldCheck className="h-3.5 w-3.5" />
-                            {uiText("Verify backup and quarantine")}
-                          </button>
-                        )}
-                        {gcPlan.state === "quarantined" && (
-                          <button
-                            type="button"
-                            className={BTN_PRIMARY}
-                            disabled={
-                              gcRead.isError ||
-                              gcRead.isPending ||
-                              trashBusy === "gc" ||
-                              !gcPlan.quarantine_until ||
-                              !gcQuarantineReady
-                            }
-                            onClick={finalizeExpiredGcPlan}
-                          >
-                            <Eraser className="h-3.5 w-3.5" />
-                            {uiText("Reverify and finalize")}
-                          </button>
-                        )}
-                        {["preview", "quarantined"].includes(gcPlan.state) && (
-                          <button
-                            type="button"
-                            className={BTN_SECONDARY}
-                            disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
-                            onClick={abortExpiredGcPlan}
-                          >
-                            {uiText("Abort plan")}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )}
-                </SettingsCard>
-
-                <SettingsCard
-                  icon={Boxes}
-                  title={uiText("trash.itemsTitle")}
-                  description={uiText("multipart.trashHelp")}
-                >
-                  {trashItems.length > 0 && (
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground sm:px-5">
-                      <span className="flex items-center gap-3">
-                        <Checkbox
-                          checked={selectedTrash.length === trashItems.length}
-                          onChange={toggleAllTrash}
-                          disabled={trashBusy !== null}
-                          ariaLabel={uiText("trash.selectAll")}
-                        />
-                        {selectedTrash.length > 0
-                          ? uiText("trash.selectedCount", {
-                              value1: String(selectedTrash.length),
-                              count: selectedTrash.length,
-                            })
-                          : uiText("trash.itemsCount", {
-                              value1: String(trashItems.length),
-                              count: Number(trashItems.length),
-                            })}
-                      </span>
-                      {selectedTrash.length > 0 && (
-                        <span className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={restoreSelectedTrash}
-                            disabled={trashBusy !== null}
-                            className={BTN_SECONDARY}
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" />
-                            {uiText("Restore selected")}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPurgeSelectionOpen(true)}
-                            disabled={trashBusy !== null}
-                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-disabled"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            {uiText("Delete selected")}
-                          </button>
-                        </span>
-                      )}
-                      <span className="font-mono tabular-nums" aria-label={uiText("Trash size")}>
-                        {uiText("{value1} reclaimable", {
-                          value1: String(
-                            formatBytes(
-                              trashItems.reduce(
-                                (total, item) =>
-                                  total + (item.kind === "model" ? item.size_bytes : 0),
-                                0,
-                              ),
-                            ) ?? "",
-                          ),
-                        })}
-                      </span>
-                    </div>
-                  )}
-                  <div className="divide-y divide-border">
-                    {!user ? (
-                      <p className="p-4 sm:p-5 text-sm text-muted-foreground">
-                        {uiText("Sign in to manage the trash.")}
-                      </p>
-                    ) : trashLoading ? (
-                      <p className="p-4 sm:p-5 text-sm text-muted-foreground">
-                        {uiText("Loading...")}
-                      </p>
-                    ) : trashRead.isError ? (
-                      <p role="alert" className="p-4 text-sm">
-                        {uiText("settings.trashLoadFailed")}
-                      </p>
-                    ) : trashItems.length === 0 ? (
-                      <p className="p-4 sm:p-5 text-sm text-muted-foreground">
-                        {uiText("Trash is empty.")}
-                      </p>
-                    ) : (
-                      trashItems.map((item) => (
-                        <div
-                          key={trashRowKey(item)}
-                          className="grid gap-3 p-4 sm:p-5 lg:grid-cols-[auto_1fr_auto] lg:items-center"
-                        >
-                          <Checkbox
-                            checked={trashSelection.has(trashRowKey(item))}
-                            onChange={() => toggleTrashItem(trashRowKey(item))}
-                            disabled={trashBusy !== null}
-                            ariaLabel={uiText(
-                              item.kind === "multipart"
-                                ? "multipart.selectTrashed"
-                                : "Select deleted model {value1}",
-                              {
-                                value1: String(item.name),
-                              },
-                            )}
-                          />
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="truncate text-sm font-medium text-foreground">
-                                {item.name}
-                              </p>
-                              <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
-                                {item.kind === "multipart"
-                                  ? uiText("multipart.trashLabel")
-                                  : uiText("{value1} files", { value1: String(item.file_count) })}
-                              </span>
-                              <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
-                                {item.kind === "multipart"
-                                  ? uiText("multipart.partsCount", { count: item.part_count })
-                                  : formatBytes(item.size_bytes)}
-                              </span>
-                            </div>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              {uiText("Deleted {value1} · Expires {value2}", {
-                                value1: String(formatDate(item.deleted_at) ?? ""),
-                                value2: String(formatDate(item.expires_at) ?? ""),
+                    )}
+                    {gcPlan && (
+                      <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-semibold text-foreground">
+                              {uiText("GC plan #{value1} · {value2}", {
+                                value1: String(gcPlan.id ?? ""),
+                                value2: String(gcPlan.state ?? ""),
                               })}
                             </p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {uiText(
+                                "{value1} of {value2} expired resources · {value3} storage keys · {value4}",
+                                {
+                                  value1: String(gcPlan.resource_count ?? ""),
+                                  value2: String(gcPlan.candidate_pool_count ?? ""),
+                                  value3: String(gcPlan.key_count ?? ""),
+                                  value4: String(formatBytes(gcPlan.size_bytes) ?? ""),
+                                },
+                              )}
+                            </p>
                           </div>
-                          <div className="flex flex-wrap gap-2 lg:justify-end">
+                          <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                            {gcPlan.backup_id
+                              ? uiText("backup verified")
+                              : uiText("no backup bound")}
+                          </span>
+                        </div>
+                        <p className="mt-3 text-2xs text-muted-foreground">
+                          {uiText("Exact plan digest")}
+                        </p>
+                        <code className="mt-1 block break-all rounded border border-border bg-background px-2 py-2 text-3xs text-foreground">
+                          {gcPlan.digest}
+                        </code>
+                        {gcPlan.state === "preview" && (
+                          <div className="mt-3 space-y-3">
+                            <p className="text-xs text-muted-foreground">
+                              {uiText(
+                                "Approval is fail-closed: paste the exact digest below. The server will also require verified storage and a recent backup on an independent S3 provider before starting the quarantine.",
+                              )}
+                            </p>
+                            <input
+                              className={INPUT}
+                              aria-label={uiText("Confirm GC plan digest")}
+                              placeholder={uiText("Paste the 64-character digest")}
+                              value={gcDigestConfirmation}
+                              disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
+                              onChange={(event) =>
+                                setGcDigestConfirmation(event.target.value.trim())
+                              }
+                            />
+                          </div>
+                        )}
+                        {gcPlan.state === "quarantined" && gcPlan.quarantine_until && (
+                          <p className="mt-3 text-xs text-muted-foreground">
+                            {uiText(
+                              "Recovery quarantine ends {value1}. The plan and backup are reverified before final deletion.",
+                              { value1: String(formatDateTime(gcPlan.quarantine_until) ?? "") },
+                            )}
+                          </p>
+                        )}
+                        {gcPlan.last_error && (
+                          <p className="mt-3 text-xs text-destructive">{gcPlan.last_error}</p>
+                        )}
+                        <div className="mt-3 flex flex-wrap justify-end gap-2">
+                          {gcPlan.state === "preview" && (
                             <button
                               type="button"
-                              onClick={() => restoreTrashItem(trashRowKey(item))}
+                              className={BTN_PRIMARY}
+                              disabled={
+                                gcRead.isError ||
+                                gcRead.isPending ||
+                                trashBusy === "gc" ||
+                                gcDigestConfirmation !== gcPlan.digest
+                              }
+                              onClick={approveExpiredGcPlan}
+                            >
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                              {uiText("Verify backup and quarantine")}
+                            </button>
+                          )}
+                          {gcPlan.state === "quarantined" && (
+                            <button
+                              type="button"
+                              className={BTN_PRIMARY}
+                              disabled={
+                                gcRead.isError ||
+                                gcRead.isPending ||
+                                trashBusy === "gc" ||
+                                !gcPlan.quarantine_until ||
+                                !gcQuarantineReady
+                              }
+                              onClick={finalizeExpiredGcPlan}
+                            >
+                              <Eraser className="h-3.5 w-3.5" />
+                              {uiText("Reverify and finalize")}
+                            </button>
+                          )}
+                          {["preview", "quarantined"].includes(gcPlan.state) && (
+                            <button
+                              type="button"
+                              className={BTN_SECONDARY}
+                              disabled={gcRead.isError || gcRead.isPending || trashBusy === "gc"}
+                              onClick={abortExpiredGcPlan}
+                            >
+                              {uiText("Abort plan")}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </SettingsCard>
+
+                  <SettingsCard
+                    className="border-0"
+                    icon={Boxes}
+                    title={uiText("trash.itemsTitle")}
+                    description={uiText("multipart.trashHelp")}
+                  >
+                    {trashItems.length > 0 && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-4 py-3 text-xs text-muted-foreground sm:px-5">
+                        <span className="flex items-center gap-3">
+                          <Checkbox
+                            checked={selectedTrash.length === trashItems.length}
+                            onChange={toggleAllTrash}
+                            disabled={trashBusy !== null}
+                            ariaLabel={uiText("trash.selectAll")}
+                          />
+                          {selectedTrash.length > 0
+                            ? uiText("trash.selectedCount", {
+                                value1: String(selectedTrash.length),
+                                count: selectedTrash.length,
+                              })
+                            : uiText("trash.itemsCount", {
+                                value1: String(trashItems.length),
+                                count: Number(trashItems.length),
+                              })}
+                        </span>
+                        {selectedTrash.length > 0 && (
+                          <span className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={restoreSelectedTrash}
                               disabled={trashBusy !== null}
                               className={BTN_SECONDARY}
                             >
                               <RotateCcw className="h-3.5 w-3.5" />
-                              {uiText("Restore")}
+                              {uiText("Restore selected")}
                             </button>
                             <button
                               type="button"
-                              onClick={() => purgeTrashItem(trashRowKey(item))}
+                              onClick={() => setPurgeSelectionOpen(true)}
                               disabled={trashBusy !== null}
                               className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-disabled"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
-                              {uiText("Delete")}
+                              {uiText("Delete selected")}
                             </button>
-                          </div>
-                        </div>
-                      ))
+                          </span>
+                        )}
+                        <span className="font-mono tabular-nums" aria-label={uiText("Trash size")}>
+                          {uiText("{value1} reclaimable", {
+                            value1: String(
+                              formatBytes(
+                                trashItems.reduce(
+                                  (total, item) =>
+                                    total + (item.kind === "model" ? item.size_bytes : 0),
+                                  0,
+                                ),
+                              ) ?? "",
+                            ),
+                          })}
+                        </span>
+                      </div>
                     )}
-                  </div>
-                </SettingsCard>
+                    <div className="divide-y divide-border">
+                      {!user ? (
+                        <p className="p-4 sm:p-5 text-sm text-muted-foreground">
+                          {uiText("Sign in to manage the trash.")}
+                        </p>
+                      ) : trashLoading ? (
+                        <p className="p-4 sm:p-5 text-sm text-muted-foreground">
+                          {uiText("Loading...")}
+                        </p>
+                      ) : trashRead.isError ? (
+                        <p role="alert" className="p-4 text-sm">
+                          {uiText("settings.trashLoadFailed")}
+                        </p>
+                      ) : trashItems.length === 0 ? (
+                        <p className="p-4 sm:p-5 text-sm text-muted-foreground">
+                          {uiText("Trash is empty.")}
+                        </p>
+                      ) : (
+                        trashItems.map((item) => (
+                          <div
+                            key={trashRowKey(item)}
+                            className="grid grid-cols-[auto_minmax(0,1fr)] gap-3 p-4 sm:p-5 lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center"
+                          >
+                            <Checkbox
+                              checked={trashSelection.has(trashRowKey(item))}
+                              onChange={() => toggleTrashItem(trashRowKey(item))}
+                              disabled={trashBusy !== null}
+                              ariaLabel={uiText(
+                                item.kind === "multipart"
+                                  ? "multipart.selectTrashed"
+                                  : "Select deleted model {value1}",
+                                {
+                                  value1: String(item.name),
+                                },
+                              )}
+                            />
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="break-words text-sm font-medium text-foreground">
+                                  {item.name}
+                                </p>
+                                <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                                  {item.kind === "multipart"
+                                    ? uiText("multipart.trashLabel")
+                                    : uiText("{value1} files", { value1: String(item.file_count) })}
+                                </span>
+                                <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                                  {item.kind === "multipart"
+                                    ? uiText("multipart.partsCount", { count: item.part_count })
+                                    : formatBytes(item.size_bytes)}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {uiText("Deleted {value1} · Expires {value2}", {
+                                  value1: String(formatDate(item.deleted_at) ?? ""),
+                                  value2: String(formatDate(item.expires_at) ?? ""),
+                                })}
+                              </p>
+                            </div>
+                            <div className="col-start-2 flex flex-wrap gap-2 lg:col-start-auto lg:justify-end">
+                              <button
+                                type="button"
+                                onClick={() => restoreTrashItem(trashRowKey(item))}
+                                disabled={trashBusy !== null}
+                                className={BTN_SECONDARY}
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                {uiText("Restore")}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => purgeTrashItem(trashRowKey(item))}
+                                disabled={trashBusy !== null}
+                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-disabled"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                {uiText("Delete")}
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </SettingsCard>
+                </div>
               </div>
             )}
 

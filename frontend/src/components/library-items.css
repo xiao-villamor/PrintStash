@@ -1,0 +1,24 @@
+.library-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+}
+.library-items-compact {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  gap: 8px;
+}
+.library-virtual-row {
+  display: grid;
+  align-items: stretch;
+}
+.library-items-grid > [data-library-key],
+.library-virtual-row > [data-library-key] {
+  height: 100%;
+}
+.library-preview {
+  background-color: var(--surface-container-low);
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 16px 16px;
+}

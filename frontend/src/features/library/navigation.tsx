@@ -1,7 +1,8 @@
-import { Link, useLocation, useNavigate, type LinkProps } from "react-router-dom";
+import { useLocation, useRouter } from "@tanstack/react-router";
+import { Link, type LinkProps } from "@/lib/link";
 import { historyIndex, knownOrigin, type LibraryEntry } from "./navigation-state";
 
-type LibraryLinkProps = Omit<LinkProps, "to" | "state"> & { href: string };
+type LibraryLinkProps = Omit<LinkProps, "state"> & { href: string };
 
 /** Native links retain a deep-link fallback; same-tab navigation also names its source entry. */
 export function LibraryItemLink({
@@ -15,8 +16,12 @@ export function LibraryItemLink({
   return (
     <Link
       {...props}
-      to={`${target.pathname}${target.search}${target.hash}`}
-      state={origin && location.key === origin.key ? { libraryOrigin: origin.key } : null}
+      href={`${target.pathname}${target.search}${target.hash}`}
+      state={
+        origin && location.state.__TSR_key === origin.key
+          ? { libraryOrigin: origin.key }
+          : undefined
+      }
       data-library-entry={target.pathname}
     />
   );
@@ -35,12 +40,12 @@ function libraryReturn(search: string, fallback: string): string {
 /** Reuse the immediate source entry; a replaced/unknown entry uses the safe URL fallback. */
 export function LibraryBackLink({ href: fallback, onClick, ...props }: LibraryLinkProps) {
   const location = useLocation();
-  const navigate = useNavigate();
-  const href = libraryReturn(location.search, fallback);
+  const router = useRouter();
+  const href = libraryReturn(location.searchStr, fallback);
   return (
     <Link
       {...props}
-      to={href}
+      href={href}
       onClick={(event) => {
         onClick?.(event);
         if (
@@ -54,10 +59,10 @@ export function LibraryBackLink({ href: fallback, onClick, ...props }: LibraryLi
         )
           return;
         const origin = knownOrigin(location.state);
-        const index = historyIndex();
+        const index = historyIndex(location.state);
         if (origin && origin.href === href && origin.index !== null && index === origin.index + 1) {
           event.preventDefault();
-          navigate(-1);
+          router.history.back();
         }
       }}
     />

@@ -26,7 +26,7 @@ function applyTheme(theme: Theme) {
   return () => window.clearTimeout(id);
 }
 
-export function ThemeToggle() {
+export function ThemeToggle({ menuItem = false }: { menuItem?: boolean }) {
   useUiLocale();
   // The pre-paint script in index.html already resolved the theme onto <html>;
   // read it back rather than re-resolving, so state can never disagree with the DOM.
@@ -46,6 +46,8 @@ export function ThemeToggle() {
     <Button
       variant="ghost"
       size="icon"
+      role={menuItem ? "menuitem" : undefined}
+      className={menuItem ? "w-full justify-start gap-3 px-3 text-sm" : undefined}
       onClick={toggle}
       title={theme === "dark" ? uiText("Switch to light mode") : uiText("Switch to dark mode")}
       aria-label={uiText("Toggle theme")}
@@ -53,6 +55,7 @@ export function ThemeToggle() {
       <span key={theme} className="animate-theme-icon inline-flex">
         {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
       </span>
+      {menuItem && <span>{uiText("Toggle theme")}</span>}
     </Button>
   );
 }

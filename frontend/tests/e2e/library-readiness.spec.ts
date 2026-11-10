@@ -76,7 +76,7 @@ test.describe("Library readiness", () => {
     );
     await page.goto("/");
     await page.evaluate(() => {
-      history.replaceState({ key: "destination" }, "");
+      history.replaceState({ __TSR_key: "destination" }, "");
       performance.mark("printstash:navigation:3:start");
       performance.mark("printstash:navigation:4:start");
       performance.mark("printstash:navigation:current", {
@@ -89,10 +89,10 @@ test.describe("Library readiness", () => {
     expect(await page.evaluate(`(${currentNavigationStart.toString()})()?.name`)).toBe(
       "printstash:navigation:3:start",
     );
-    await page.evaluate(() => history.replaceState({ key: "next" }, ""));
+    await page.evaluate(() => history.replaceState({ __TSR_key: "next" }, ""));
     expect(await page.evaluate(currentNavigationStart)).toBeNull();
     await page.evaluate(() => {
-      history.replaceState({ key: "destination" }, "");
+      history.replaceState({ __TSR_key: "destination" }, "");
       performance.mark("printstash:navigation:current", {
         detail: { navigation: 3, historyKey: "destination", active: false },
       });

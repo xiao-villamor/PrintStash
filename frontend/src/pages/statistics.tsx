@@ -5,7 +5,7 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 import {
   Area,
   AreaChart,
@@ -19,12 +19,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { BarChart3, Boxes, Clock, Coins, Layers, Settings2, Weight } from "lucide-react";
+import { BarChart3, Settings2 } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageContainer } from "@/components/ui/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { TabBar } from "@/components/ui/tabs";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { usePrintStatistics, useVaultConfig } from "@/lib/queries";
 import type { StatsPeriod } from "@/lib/api";
@@ -188,40 +189,16 @@ function Segmented<T extends string>({
   );
 }
 
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  tone = "blue",
-}: {
-  icon: typeof Coins;
-  label: string;
-  value: string;
-  tone?: "blue" | "cyan" | "violet";
-}) {
+function MetricCard({ label, value }: { label: string; value: string }) {
   useUiLocale();
   const { locale } = useI18n();
-  const toneClasses = {
-    blue: "bg-accent text-primary",
-    cyan: "bg-chart-cyan-soft text-chart-cyan",
-    violet: "bg-chart-violet-soft text-chart-violet",
-  }[tone];
   return (
-    <Card className="overflow-hidden">
-      <CardContent className="flex items-center gap-3 p-4">
-        <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-md ${toneClasses}`}
-        >
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="min-w-0">
-          <div className="truncate text-xs uppercase tracking-wider text-muted-foreground">
-            {translateUiText(locale, label)}
-          </div>
-          <div className="truncate text-xl font-bold text-foreground">{value}</div>
-        </div>
-      </CardContent>
-    </Card>
+    <div className="min-w-0 py-1">
+      <div className="text-xs text-muted-foreground">{translateUiText(locale, label)}</div>
+      <div className="mt-1 break-words text-xl font-semibold tabular-nums text-foreground">
+        {value}
+      </div>
+    </div>
   );
 }
 
@@ -494,10 +471,12 @@ function StatsContent({
   stats,
   currency,
   visibleWidgets,
+  section,
 }: {
   stats: PrintStatisticsRead;
   currency: string | null;
   visibleWidgets: Set<WidgetId>;
+  section: "overview" | "rankings";
 }) {
   useUiLocale();
   const { locale, t } = useI18n();
@@ -516,7 +495,7 @@ function StatsContent({
             )}
           </p>
           <Button variant="outline" className="mt-2" asChild>
-            <Link to="/printers">{translateUiText(locale, "Manage printers")}</Link>
+            <Link href="/printers">{translateUiText(locale, "Manage printers")}</Link>
           </Button>
         </CardContent>
       </Card>
@@ -548,51 +527,52 @@ function StatsContent({
 
   return (
     <div className="space-y-6 animate-panel-in">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        <MetricCard
-          icon={Coins}
-          label={uiText("Total cost")}
-          value={
-            currency === null
-              ? t("stats.costUnavailable")
-              : formatCurrency(stats.total_cost, currency)
-          }
-        />
-        <MetricCard
-          icon={Boxes}
-          label={uiText("Prints")}
-          value={String(stats.total_prints)}
-          tone="cyan"
-        />
-        <MetricCard
-          icon={Weight}
-          label={uiText("Filament used")}
-          value={formatFilament(stats.total_filament_g)}
-          tone="violet"
-        />
-        <MetricCard
-          icon={Layers}
-          label={uiText("Avg / print")}
-          value={formatFilament(stats.avg_filament_g)}
-        />
-        <MetricCard
-          icon={Clock}
-          label={uiText("Print time")}
-          value={formatDuration(stats.total_print_time_s)}
-        />
-        <MetricCard
-          icon={Weight}
-          label={uiText("7-day forecast")}
-          value={formatFilament(weeklyFilament)}
-          tone="violet"
-        />
+      <div hidden={section !== "overview"} className="space-y-6">
+        <div className="space-y-5 border-b border-border pb-5">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
+            <MetricCard
+              label={uiText("Total cost")}
+              value={
+                currency === null
+                  ? t("stats.costUnavailable")
+                  : formatCurrency(stats.total_cost, currency)
+              }
+            />
+            <MetricCard
+              label={uiText("Print time")}
+              value={formatDuration(stats.total_print_time_s)}
+            />
+            <MetricCard
+              label={uiText("Filament used")}
+              value={formatFilament(stats.total_filament_g)}
+            />
+          </div>
+          <div className="flex flex-wrap gap-x-8 gap-y-2 text-xs text-muted-foreground">
+            <span>
+              {uiText("Prints")}{" "}
+              <strong className="ml-1 font-semibold text-foreground">{stats.total_prints}</strong>
+            </span>
+            <span>
+              {uiText("Avg / print")}{" "}
+              <strong className="ml-1 font-semibold text-foreground">
+                {formatFilament(stats.avg_filament_g)}
+              </strong>
+            </span>
+            <span>
+              {uiText("7-day forecast")}{" "}
+              <strong className="ml-1 font-semibold text-foreground">
+                {formatFilament(weeklyFilament)}
+              </strong>
+            </span>
+          </div>
+        </div>
+
+        <TimeSeriesCard stats={stats} currency={currency} />
+
+        <p className="-mt-3 text-xs text-muted-foreground">
+          {translateUiText(locale, "7-day forecast uses selected period’s daily filament average.")}
+        </p>
       </div>
-
-      <TimeSeriesCard stats={stats} currency={currency} />
-
-      <p className="-mt-3 text-xs text-muted-foreground">
-        {translateUiText(locale, "7-day forecast uses selected period’s daily filament average.")}
-      </p>
 
       <div className="grid gap-6 lg:grid-cols-2">
         {visibleWidgets.has("models") && (
@@ -639,6 +619,7 @@ export default function StatisticsPage() {
   const { locale, t } = useI18n();
   const { user } = useAuth();
   const [period, setPeriod] = useState<StatsPeriod>("30d");
+  const [section, setSection] = useState<"overview" | "rankings">("overview");
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [visibleWidgets, setVisibleWidgets] = useState<Set<WidgetId>>(loadVisibleWidgets);
   const { data, error, isLoading, isError, refetch } = usePrintStatistics(period);
@@ -713,6 +694,19 @@ export default function StatisticsPage() {
         }
       />
 
+      <TabBar
+        tabs={[
+          { key: "overview", label: t("Overview") },
+          { key: "rankings", label: t("Rankings") },
+        ]}
+        active={section}
+        onChange={setSection}
+        showIndicator={false}
+        className="gap-1 border-b border-border pb-3"
+        tabClassName="px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        activeTabClassName="bg-accent text-accent-foreground"
+      />
+
       {user?.is_superuser && config.isError && (
         <div role="alert" className="flex items-center gap-2 text-sm">
           <p>{t("settings.configLoadFailed")}</p>
@@ -737,7 +731,12 @@ export default function StatisticsPage() {
         </Card>
       )}
       {data && !denied && (
-        <StatsContent stats={data} currency={currency} visibleWidgets={visibleWidgets} />
+        <StatsContent
+          stats={data}
+          currency={currency}
+          visibleWidgets={visibleWidgets}
+          section={section}
+        />
       )}
     </PageContainer>
   );

@@ -82,6 +82,17 @@ afterEach(() => {
 });
 
 describe("StatisticsPage", () => {
+  it("switches between overview and rankings while retaining the chart choice", async () => {
+    const user = userEvent.setup();
+    renderStatistics();
+    await screen.findByText("Most printed models");
+    await user.click(screen.getByRole("button", { name: "Line" }));
+    await user.click(screen.getByRole("tab", { name: "Rankings" }));
+    expect(screen.getByText("Most printed models")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Line" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Overview" }));
+    expect(screen.getByRole("button", { name: "Line" })).toHaveAttribute("aria-pressed", "true");
+  });
   describe("read recovery", () => {
     it.each([
       [403, false],

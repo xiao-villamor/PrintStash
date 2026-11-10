@@ -253,12 +253,18 @@ describe("Getting started", () => {
     expect(screen.getByLabelText("Folder path on the server")).toHaveValue("/libraries/models");
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
   });
-  it("prioritizes the first Model", async () => {
+  it("prioritizes the first Model while keeping optional setup links available", async () => {
     renderGuide();
     expect(await screen.findByRole("button", { name: "Upload my first files" })).toBeVisible();
     expect(screen.getByRole("button", { name: /^Connect an existing folder/ })).toBeVisible();
-    expect(screen.queryByRole("link", { name: "Set up a backup" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Connect a printer" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Configure a backup" })).toHaveAttribute(
+      "href",
+      "/settings?section=backup",
+    );
+    expect(screen.getByRole("link", { name: "Connect a printer" })).toHaveAttribute(
+      "href",
+      "/printers",
+    );
   });
   it("returns from folder connection with its draft", async () => {
     const guide = renderGuide();
@@ -268,7 +274,7 @@ describe("Getting started", () => {
     await userEvent.type(screen.getByLabelText("Folder name"), "Workshop");
     await userEvent.type(screen.getByLabelText("Folder path on the server"), "/mounted/models");
     await userEvent.click(screen.getByRole("button", { name: "Back to your first model" }));
-    expect(screen.getByRole("heading", { name: "Make room for your first model" })).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "Have a model on your computer?" })).toHaveFocus();
     await userEvent.click(screen.getByRole("button", { name: /^Connect an existing folder/ }));
     expect(screen.getByLabelText("Folder name")).toHaveValue("Workshop");
     expect(screen.getByLabelText("Folder path on the server")).toHaveValue("/mounted/models");

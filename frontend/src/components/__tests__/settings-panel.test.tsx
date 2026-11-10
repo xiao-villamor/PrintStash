@@ -182,7 +182,6 @@ describe("SettingsPanel", () => {
       "design",
       "previews",
       "gpu",
-      "trash",
       "about",
     ])("opens the %s section from the URL", async (section) => {
       renderSettings({ at: `/settings?section=${section}` });
@@ -2252,6 +2251,13 @@ describe("SettingsPanel", () => {
   });
 
   describe("retention configuration editing", () => {
+    it("presents Trash as its own workspace and can return to Settings", async () => {
+      const user = userEvent.setup();
+      renderSettings({ at: "/settings?section=trash" });
+      expect(await screen.findByRole("heading", { name: "Trash" })).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Settings" }));
+      expect(await screen.findByRole("navigation", { name: "Settings sections" })).toBeVisible();
+    });
     it("keeps retention editing unavailable to members", async () => {
       const app = renderSettings({ at: "/settings?section=trash", auth: memberSession() });
       const input = await screen.findByLabelText("Days");

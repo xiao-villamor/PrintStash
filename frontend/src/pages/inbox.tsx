@@ -321,50 +321,60 @@ export default function InboxPage({ deps = inboxPageDeps }: { deps?: InboxPageDe
           </Button>
         }
       />
+      <div className="flex flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <TabBar
+          tabs={[
+            {
+              key: "queue",
+              label: (
+                <>
+                  <Inbox className="h-4 w-4" aria-hidden="true" />
+                  {t("inbox.queue")}
+                  <Badge
+                    variant="secondary"
+                    className="border-0 bg-transparent px-0 text-muted-foreground"
+                  >
+                    {groups.queue.length}
+                  </Badge>
+                </>
+              ),
+            },
+            {
+              key: "completed",
+              label: (
+                <>
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                  {t("inbox.completed")}
+                  <Badge
+                    variant="secondary"
+                    className="border-0 bg-transparent px-0 text-muted-foreground"
+                  >
+                    {groups.done.length}
+                  </Badge>
+                </>
+              ),
+            },
+          ]}
+          active={activeTab}
+          onChange={setActiveTab}
+          showIndicator={false}
+          className="gap-1"
+          tabClassName={tabClass}
+          activeTabClassName="bg-accent text-accent-foreground"
+        />
+        {groups.done.length > 0 && (
+          <Button
+            type="button"
+            size="xs"
+            variant="outline"
+            onClick={() => setClearCompletedOpen(true)}
+          >
+            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+            {t("inbox.clearCompleted")}
+          </Button>
+        )}
+      </div>
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-3 border-b bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
-          <TabBar
-            tabs={[
-              {
-                key: "queue",
-                label: (
-                  <>
-                    <Inbox className="h-4 w-4" aria-hidden="true" />
-                    {t("inbox.queue")}
-                    <Badge variant="secondary">{groups.queue.length}</Badge>
-                  </>
-                ),
-              },
-              {
-                key: "completed",
-                label: (
-                  <>
-                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                    {t("inbox.completed")}
-                    <Badge variant="secondary">{groups.done.length}</Badge>
-                  </>
-                ),
-              },
-            ]}
-            active={activeTab}
-            onChange={setActiveTab}
-            showIndicator={false}
-            className="gap-1 rounded-lg bg-background p-1 shadow-sm ring-1 ring-border"
-            tabClassName={tabClass}
-            activeTabClassName="bg-accent text-accent-foreground"
-          />
-          {groups.done.length > 0 && (
-            <Button
-              type="button"
-              size="xs"
-              variant="outline"
-              onClick={() => setClearCompletedOpen(true)}
-            >
-              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("inbox.clearCompleted")}
-            </Button>
-          )}
-        </div>
         <div className="flex items-start gap-3 border-b px-4 py-4 sm:px-5">
           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
             {activeTab === "queue" ? (

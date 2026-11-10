@@ -304,12 +304,12 @@ test.describe("Model detail Similar controls", () => {
       );
       await page.goto("/models/1");
       const pane = page.getByTestId("model-detail-sidebar");
-      await pane.getByRole("tab", { name: "Settings", exact: true }).click();
-      const settingsHeading = pane.getByRole("heading", { name: "Print Settings", exact: true });
+      await page.getByRole("tab", { name: "Print settings", exact: true }).click();
+      const settingsHeading = pane.getByRole("heading", { name: "Print settings", exact: true });
       await expect(settingsHeading).toBeVisible();
       const settingsStyle = await settingsHeading.evaluate((heading) => {
         const title = getComputedStyle(heading);
-        const frame = getComputedStyle(heading.nextElementSibling!);
+        const frame = getComputedStyle(heading.closest("section")!);
         return {
           fontSize: title.fontSize,
           fontWeight: title.fontWeight,
@@ -319,7 +319,7 @@ test.describe("Model detail Similar controls", () => {
           borderRadius: frame.borderRadius,
         };
       });
-      await pane.getByRole("tab", { name: "Similar", exact: true }).click();
+      await page.getByRole("tab", { name: "Similar", exact: true }).click();
       const heading = pane.getByRole("heading", { name: "Model matches", exact: true });
       const frame = pane.getByRole("region", { name: "Model matches", exact: true });
       await expect(heading).toBeVisible();
@@ -364,10 +364,10 @@ test.describe("Model detail Similar controls", () => {
 
   for (const scenario of [
     {
-      label: "default480desktop",
+      label: "default840desktop",
       width: 1920,
       height: 1080,
-      pane: 480,
+      pane: 840,
       locale: "en",
       tab: "Similar",
       states: ["To review", "Confirmed", "Later", "Rejected"],
@@ -415,8 +415,11 @@ test.describe("Model detail Similar controls", () => {
     test(`keeps every review action reachable in ${scenario.label}`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width: scenario.width, height: scenario.height });
       await page.addInitScript(
-        (locale) => localStorage.setItem("printstash.locale", locale),
-        scenario.locale,
+        ({ locale, pane }) => {
+          localStorage.setItem("printstash.locale", locale);
+          if (pane === 400) localStorage.setItem("ps-model-detail-sidebar-width", String(pane));
+        },
+        { locale: scenario.locale, pane: scenario.pane },
       );
       await page.route("**/api/v1/similarity/status", (route) =>
         route.fulfill({ json: similarityStatus() }),
@@ -426,15 +429,16 @@ test.describe("Model detail Similar controls", () => {
       );
       await page.goto("/models/1");
       const pane = page.getByTestId("model-detail-sidebar");
-      if (scenario.pane === 400) {
-        const resize = page.getByRole("separator", { name: scenario.resize, exact: true });
-        await resize.focus();
-        for (let step = 0; step < 5; step++) await resize.press("ArrowRight");
+      if (scenario.width >= 1100) {
+        await expect
+          .poll(async () => (await pane.boundingBox())!.width)
+          .toBeCloseTo(scenario.pane, 0);
+      } else {
+        await expect
+          .poll(async () => (await pane.boundingBox())!.width)
+          .toBeLessThanOrEqual(scenario.width);
       }
-      await expect
-        .poll(async () => (await pane.boundingBox())!.width)
-        .toBeCloseTo(scenario.pane, 0);
-      await pane.getByRole("tab", { name: scenario.tab, exact: true }).click();
+      await page.getByRole("tab", { name: scenario.tab, exact: true }).click();
       const firstState = pane.getByRole("tab", { name: scenario.states[0], exact: true });
       await firstState.scrollIntoViewIfNeeded();
       await page.evaluate(() => document.fonts.ready);

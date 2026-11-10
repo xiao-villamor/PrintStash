@@ -102,36 +102,44 @@ export function DocumentBrowser({
             : uiText("This document will be moved to trash.")
         }
       />
-      <div className="p-4 sm:p-6">
-        {canCreate && (
-          <div className="flex items-center gap-2 mb-4">
-            <button
-              onClick={newMarkdown}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover"
-            >
-              <Plus className="w-4 h-4" />
-              {uiText("New document")}
-            </button>
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={busy}
-              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted disabled:opacity-50"
-            >
-              <Upload className="w-4 h-4 text-muted-foreground" />
-              {uiText("Upload file")}
-            </button>
-            <input
-              ref={fileRef}
-              type="file"
-              aria-label={uiText("Upload file")}
-              onChange={onFilePicked}
-              className="hidden"
-            />
+      <section className="mx-4 my-5 overflow-hidden border border-border bg-card sm:mx-6">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-4 sm:px-5">
+          <div>
+            <h2 className="text-sm font-semibold">{uiText("Documents")}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {uiText("Guides, notes and files in this collection.")}
+            </p>
           </div>
-        )}
+          {canCreate && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={newMarkdown}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-primary-foreground bg-primary rounded hover:bg-primary-hover"
+              >
+                <Plus className="w-4 h-4" />
+                {uiText("New document")}
+              </button>
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={busy}
+                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-foreground bg-background border border-border rounded hover:bg-muted disabled:opacity-50"
+              >
+                <Upload className="w-4 h-4 text-muted-foreground" />
+                {uiText("Upload file")}
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                aria-label={uiText("Upload file")}
+                onChange={onFilePicked}
+                className="hidden"
+              />
+            </div>
+          )}
+        </div>
 
         {documents.isError ? (
-          <div role="alert" className="py-8 text-sm text-destructive">
+          <div role="alert" className="p-5 text-sm text-destructive">
             <p>{userMessage(documents.error)}</p>
             <Button variant="outline" onClick={() => void documents.refetch()}>
               {uiText("Retry")}
@@ -154,19 +162,18 @@ export function DocumentBrowser({
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(240px,1fr))]">
+          <div className="divide-y divide-border">
             {docs.map((doc) => (
-              <div
-                key={doc.id}
-                className="group relative flex items-start gap-3 rounded-lg border border-border bg-background p-3 hover:border-primary transition-colors"
-              >
+              <div key={doc.id} className="flex items-center gap-3 px-4 py-3 sm:px-5">
                 <Link
                   href={`/documents/${doc.id}`}
-                  className="flex items-start gap-3 min-w-0 flex-1"
+                  className="flex min-w-0 flex-1 items-center gap-3 hover:text-primary"
                 >
                   <KindIcon kind={doc.kind} />
                   <div className="min-w-0">
-                    <div className="text-sm font-medium text-foreground truncate">{doc.name}</div>
+                    <div className="break-words text-sm font-medium text-foreground">
+                      {doc.name}
+                    </div>
                     <div className="text-xs text-muted-foreground mt-0.5 uppercase font-mono">
                       {doc.kind} · {timeAgoShort(doc.updated_at)}
                     </div>
@@ -176,7 +183,7 @@ export function DocumentBrowser({
                   <button
                     onClick={() => remove(doc)}
                     title={uiText("Delete document")}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-red-600 transition-opacity"
+                    className="p-2 text-muted-foreground hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -185,7 +192,7 @@ export function DocumentBrowser({
             ))}
           </div>
         )}
-      </div>
+      </section>
     </>
   );
 }

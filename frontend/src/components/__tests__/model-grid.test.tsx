@@ -22,7 +22,8 @@ import { outlinerRoutes } from "@/test-support/outliner";
 import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
+import { useRouter } from "@/lib/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LibraryStartupProvider } from "@/lib/library-startup-provider";
@@ -211,17 +212,17 @@ function renderVault(
 
 function HistoryProbe() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigation = useRouter();
   return (
     <>
-      <output data-testid="vault-location">{location.pathname + location.search}</output>
-      <button onClick={() => navigate("/?c=missing&cid=9")}>Open missing collection</button>
-      <button onClick={() => navigate(-1)}>History back</button>
-      <button onClick={() => navigate(1)}>History forward</button>
-      <button onClick={() => navigate("/?type=multipart&sort=name-asc")}>
+      <output data-testid="vault-location">{location.pathname + location.searchStr}</output>
+      <button onClick={() => navigation.push("/?c=missing&cid=9")}>Open missing collection</button>
+      <button onClick={() => navigation.back()}>History back</button>
+      <button onClick={() => navigation.forward()}>History forward</button>
+      <button onClick={() => navigation.push("/?type=multipart&sort=name-asc")}>
         Open multipart location
       </button>
-      <button onClick={() => navigate("/?v=docs&type=all&sort=date-desc")}>
+      <button onClick={() => navigation.push("/?v=docs&type=all&sort=date-desc")}>
         Open documents location
       </button>
     </>
@@ -345,6 +346,20 @@ describe("ModelBrowser", () => {
       expect(within(actions).queryByRole("button", { name: "Select" })).not.toBeInTheDocument();
       expect(within(actions).getByRole("button", { name: "New collection" })).toBeDisabled();
       expect(screen.queryByRole("checkbox", { name: "Select Benchy" })).not.toBeInTheDocument();
+    });
+    it("names the favorites view when the filter is active", async () => {
+      renderVault({ at: "/?favorites=true" });
+
+      expect(await screen.findByRole("heading", { name: "Favorites", level: 1 })).toBeVisible();
+    });
+    it("offers a way back from an empty favorites view", async () => {
+      const user = userEvent.setup();
+      renderVault({ at: "/?favorites=true" });
+
+      expect(await screen.findByText("No favorites yet")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: "Back to library" }));
+
+      expect(await screen.findByRole("heading", { name: "All Models", level: 1 })).toBeVisible();
     });
     it("keeps Favorites in quick access", async () => {
       const user = userEvent.setup();
@@ -1911,6 +1926,38 @@ describe("ModelBrowser", () => {
   describe("upload deep link", () => {
     it("opens the upload dialog for ?upload=1", async () => {
       renderVault({ at: "/?upload=1" });
+
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    });
+
+    it("waits for a member's permission and dismisses an unauthorized intent", async () => {
+      const permission = Promise.withResolvers<Response>();
+      const app = renderVault({
+        at: "/?upload=1",
+        auth: memberSession(),
+        historyProbe: true,
+        routes: { "GET /api/v1/collections/search": () => permission.promise },
+      });
+
+      await waitFor(() =>
+        expect(app.requests().some((request) => request.url.includes("/collections/search"))).toBe(
+          true,
+        ),
+      );
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      await act(async () => permission.resolve(json({ items: [], next_cursor: null })));
+      await waitFor(() =>
+        expect(screen.getByTestId("vault-location")).not.toHaveTextContent("upload=1"),
+      );
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("opens an upload intent for a member with an editable collection", async () => {
+      renderVault({
+        at: "/?upload=1",
+        auth: memberSession(),
+        collections: [aCollection({ effective_role: "edit" })],
+      });
 
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
     });
@@ -3985,10 +4032,10 @@ describe("ModelBrowser", () => {
       };
     }
 
-    it("loads the next page when the end comes into view, with no button", async () => {
+    it("loads the next page automatically while retaining its explicit button", async () => {
       renderVault({ routes: pagedRoutes(() => false) });
       expect(await screen.findByText("First page")).toBeVisible();
-      expect(screen.queryByRole("button", { name: /Load more/ })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Load more/ })).toBeVisible();
       expect(screen.queryByText("Next page")).not.toBeInTheDocument();
 
       reachTheEnd();
@@ -3996,7 +4043,15 @@ describe("ModelBrowser", () => {
       expect(await screen.findByText("Next page")).toBeVisible();
     });
 
-    it("brings the button back after a failed read instead of retrying without end", async () => {
+    it("loads a page through the explicit button when an observer is available", async () => {
+      const user = userEvent.setup();
+      renderVault({ routes: pagedRoutes(() => false) });
+      expect(await screen.findByText("First page")).toBeVisible();
+      await user.click(screen.getByRole("button", { name: /Load more/ }));
+      expect(await screen.findByText("Next page")).toBeVisible();
+    });
+
+    it("keeps explicit retry after a continuation fails", async () => {
       renderVault({ routes: pagedRoutes(() => true) });
       expect(await screen.findByText("First page")).toBeVisible();
 
@@ -4745,5 +4800,45 @@ describe("ModelBrowser", () => {
       await user.click(screen.getByRole("button", { name: "Back to library" }));
       expect(await screen.findByRole("heading", { name: "All Models", level: 1 })).toBeVisible();
     });
+  });
+});
+
+describe("OpenDesign Library strip", () => {
+  it("filters revisions through an authoritative status shortcut", async () => {
+    const user = userEvent.setup();
+    const app = renderVault({
+      models: [aModelListItem({ name: "Status shortcut Model" })],
+      routes: {
+        "GET /api/v1/models/facets": json({
+          ...EMPTY_FACETS,
+          revision_status: [{ value: "known_good", count: 6 }],
+        }),
+      },
+    });
+    await user.click(await screen.findByRole("button", { name: /^Known Good/ }));
+    await waitFor(() =>
+      expect(lastModelsQuery(app.requests).getAll("revision_status")).toEqual(["known_good"]),
+    );
+  });
+  it("clears the revision shortcut while retaining another filter", async () => {
+    const user = userEvent.setup();
+    const app = renderVault({
+      at: "/?revision_status=needs_test&tag=Workshop",
+      models: [aModelListItem({ name: "Retained tag Model" })],
+    });
+    await screen.findByText("Retained tag Model");
+    await user.click(screen.getByRole("button", { name: /^All$/ }));
+    await waitFor(() =>
+      expect(lastModelsQuery(app.requests).getAll("revision_status")).toEqual([]),
+    );
+    expect(lastModelsQuery(app.requests).getAll("tag")).toEqual(["Workshop"]);
+  });
+  it("opens the list from its direct view control", async () => {
+    const user = userEvent.setup();
+    renderVault({ models: [aModelListItem({ name: "List control Model" })] });
+    await screen.findByText("List control Model");
+    await user.click(screen.getByRole("button", { name: /^List View$/ }));
+    expect(screen.getByText("Thumb", { exact: true })).toBeVisible();
+    expect(screen.getByRole("link", { name: /List control Model/ })).toBeVisible();
   });
 });

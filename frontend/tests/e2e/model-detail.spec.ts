@@ -70,7 +70,7 @@ test.describe("model detail route", () => {
       // must reuse the observed failure without adding a storage read.
       const readsBeforeFiles = reads;
       const pane = page.getByTestId("model-detail-sidebar");
-      await pane.getByRole("tab", { name: /Files/ }).click();
+      await page.getByRole("tab", { name: /Files/ }).click();
       const card = pane.getByRole("article", { name: failedFile.original_filename });
       const message = card.getByText(/provider rejected authentication/);
       await expect(message).toBeVisible();
@@ -127,10 +127,10 @@ test.describe("model detail route", () => {
       if (width === 1920) {
         const resize = page.getByRole("separator", { name: "Resize details panel", exact: true });
         await resize.focus();
-        for (let step = 0; step < 5; step++) await resize.press("ArrowRight");
+        await resize.press("Home");
         await expect.poll(async () => (await pane.boundingBox())!.width).toBeCloseTo(400, 0);
       }
-      await pane.getByRole("tab", { name: /Files/ }).click();
+      await page.getByRole("tab", { name: /Files/ }).click();
       const card = pane.getByRole("article", { name: filename });
       const explanation = card.getByText(/provider rejected authentication/);
       await expect(explanation).toBeVisible();
@@ -279,14 +279,16 @@ test.describe("model detail route", () => {
   }
 
   for (const width of [320, 1280]) {
-    test(`wraps the full nested collection path in Overview at ${width}px`, async ({ page }) => {
+    test(`wraps the full nested collection path in model information at ${width}px`, async ({
+      page,
+    }) => {
       const collectionLabel = "PrintStash/Organization/Gridfinity/" + "NestedCollection".repeat(20);
       await page.setViewportSize({ width, height: 900 });
       await page.route("**/api/v1/models/1", (route) =>
         route.fulfill({ json: aModel({ id: 1, collection_label: collectionLabel }) }),
       );
       await page.goto("/models/1");
-      const sidebar = page.getByTestId("model-detail-sidebar");
+      const sidebar = page.getByRole("region", { name: "About this model" });
       const path = sidebar.getByText(collectionLabel, { exact: true });
       await expect(path).toBeVisible();
       await path.scrollIntoViewIfNeeded();
@@ -518,10 +520,10 @@ test.describe("model detail route", () => {
       await expect(cause).toBeVisible();
       await cause.scrollIntoViewIfNeeded();
       const labelBox = await panel
-        .getByText(/Viewing:/)
+        .getByRole("heading", { name: "Model preview", exact: true })
         .locator("..")
         .boundingBox();
-      const statusBox = await panel.getByRole("status").boundingBox();
+      const statusBox = await cause.boundingBox();
       expect(labelBox).not.toBeNull();
       expect(statusBox).not.toBeNull();
       expect(statusBox!.y).toBeGreaterThanOrEqual(labelBox!.y + labelBox!.height);
@@ -534,7 +536,7 @@ test.describe("model detail route", () => {
       ).toBe(true);
       await expect(panel.getByRole("button", { name: "Solid", exact: true })).toBeDisabled();
       await expect(panel.getByRole("button", { name: "Fit to view", exact: true })).toBeDisabled();
-      await expect(panel.getByTitle("Zoom in")).toHaveCount(0);
+      await expect(panel.getByRole("button", { name: "Zoom in", exact: true })).toBeDisabled();
       expect(
         await panel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
       ).toBe(true);
@@ -557,7 +559,12 @@ test.describe("model detail route", () => {
       route.fulfill({
         json: aModel({
           files: [
-            aRevision({ id: 1, file_type: "stl", original_filename: "cube.stl" }),
+            aRevision({
+              id: 1,
+              file_type: "stl",
+              original_filename: "cube.stl",
+              metadata: aMetadata({ bbox_x_mm: 10, bbox_y_mm: 20, bbox_z_mm: 30 }),
+            }),
             aRevision({
               id: 2,
               file_type: "gcode",
@@ -573,14 +580,14 @@ test.describe("model detail route", () => {
     await page.goto("/models/1");
     const panel = page.getByRole("region", { name: "Preview", exact: true });
     await expect(panel.getByRole("button", { name: "Screenshot", exact: true })).toBeEnabled();
-    await expect(panel.getByTitle("Reset view")).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Isometric", exact: true })).toBeVisible();
     await expect(panel.getByText("10×20×30 mm", { exact: true })).toBeVisible();
-    await panel.getByRole("button", { name: "GCode", exact: true }).click();
-    await expect(panel.getByTitle("Reset view")).toHaveCount(0);
+    await panel.getByRole("button", { name: "Layers", exact: true }).click();
+    await expect(panel.getByRole("button", { name: "Isometric", exact: true })).toHaveCount(0);
     await expect(panel.getByText("10×20×30 mm", { exact: true })).toHaveCount(0);
-    await panel.getByRole("button", { name: "3D", exact: true }).click();
+    await panel.getByRole("button", { name: "3D model", exact: true }).click();
     await expect(panel.getByRole("button", { name: "Screenshot", exact: true })).toBeEnabled();
-    await expect(panel.getByTitle("Reset view")).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Isometric", exact: true })).toBeVisible();
     await expect(panel.getByText("10×20×30 mm", { exact: true })).toBeVisible();
   });
 
@@ -597,9 +604,9 @@ test.describe("model detail route", () => {
       page.getByRole("button", { name: "Fit to view" }),
       page.getByRole("button", { name: "Screenshot" }),
       page.getByRole("button", { name: "Build plate grid" }),
-      page.getByTitle("Zoom in"),
-      page.getByTitle("Zoom out"),
-      page.getByTitle("Reset view"),
+      page.getByRole("button", { name: "Zoom in", exact: true }),
+      page.getByRole("button", { name: "Zoom out", exact: true }),
+      page.getByRole("button", { name: "Isometric", exact: true }),
     ];
     const controlBoxes = await Promise.all(controls.map((control) => control.boundingBox()));
 
@@ -620,15 +627,17 @@ test.describe("model detail route", () => {
     await page.goto("/models/1");
 
     await expect(page.getByRole("button", { name: "Screenshot", exact: true })).toBeEnabled();
-    const viewingLabel = page.getByText(/Viewing:/).locator("..");
+    const viewingLabel = page
+      .getByRole("heading", { name: "Model preview", exact: true })
+      .locator("..");
     await expect(viewingLabel).toBeVisible();
     const modeControls = [
       page.getByRole("button", { name: "Solid" }),
       page.getByRole("button", { name: "X-Ray" }),
-      page.getByRole("button", { name: "Wire" }),
-      page.getByTitle("Zoom in"),
-      page.getByTitle("Zoom out"),
-      page.getByTitle("Reset view"),
+      page.getByRole("button", { name: "Wireframe" }),
+      page.getByRole("button", { name: "Zoom in", exact: true }),
+      page.getByRole("button", { name: "Zoom out", exact: true }),
+      page.getByRole("button", { name: "Isometric", exact: true }),
     ];
     const labelBox = await viewingLabel.boundingBox();
     const modeBoxes = await Promise.all(modeControls.map((control) => control.boundingBox()));
@@ -692,8 +701,12 @@ test.describe("model detail route", () => {
       "href",
       /printables\.com\/model\/123-skadis-kitchen-roll-screw/,
     );
-    await expect(page.getByText("Printed OK").first()).toBeVisible();
-    await expect(page.getByText("1/1 online")).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "Recorded prints" })
+        .getByRole("row", { name: "ender Successful 2" }),
+    ).toBeVisible();
+    await expect(page.getByText(/1\/1 online/)).toBeVisible();
     await expect(page.getByText("This page could not be found")).toHaveCount(0);
 
     const html = await page.content();
@@ -704,11 +717,13 @@ test.describe("model detail route", () => {
 
   test("Source tab displays and replaces a private representative cover", async ({ page }) => {
     await page.goto("/models/1");
-    await page.getByRole("tab", { name: "Source" }).click();
+    await page.getByRole("tab", { name: "Source info" }).click();
 
-    await expect(page.getByRole("heading", { name: "Source", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Source information", exact: true }),
+    ).toBeVisible();
     await expect(page.getByTestId("source-identity-panel")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Captured metadata" })).toBeVisible();
+    await expect(page.getByRole("region", { name: "Captured metadata" })).toBeVisible();
     await expect(page.getByRole("img", { name: /private representative cover/i })).toBeVisible();
     await page.getByLabel("Replace cover").setInputFiles({
       name: "replacement.png",
@@ -728,10 +743,10 @@ test.describe("model detail route", () => {
       localStorage.setItem("ps-model-detail-sidebar-width", "400");
     });
     await page.goto("/models/1");
-    await page.getByRole("tab", { name: "Source" }).click();
+    await page.getByRole("tab", { name: "Source info" }).click();
 
     const sidebar = page.getByTestId("model-detail-sidebar");
-    const sourceUrlLabel = page.getByText("Source URL", { exact: true });
+    const sourceHeading = page.getByRole("heading", { name: "Source information", exact: true });
     const sourceUrl = page.getByRole("link", {
       name: "https://www.printables.com/model/41-capture-bracket",
     });
@@ -743,17 +758,20 @@ test.describe("model detail route", () => {
 
     await expect(sidebar).toBeVisible();
     await expect(description).toBeVisible();
-    const [sidebarBox, sourceUrlLabelBox, sourceUrlBox, descriptionBox, useDescriptionBox] =
+    const [sidebarBox, sourceHeadingBox, sourceUrlBox, descriptionBox, useDescriptionBox] =
       await Promise.all([
         sidebar.boundingBox(),
-        sourceUrlLabel.boundingBox(),
+        sourceHeading.boundingBox(),
         sourceUrl.boundingBox(),
         description.boundingBox(),
         useDescription.boundingBox(),
       ]);
 
     expect(sidebarBox?.width).toBeCloseTo(400, 0);
-    expect(sourceUrlBox!.y).toBeGreaterThan(sourceUrlLabelBox!.y + sourceUrlLabelBox!.height);
+    expect(sourceUrlBox!.y).toBeGreaterThan(sourceHeadingBox!.y + sourceHeadingBox!.height);
+    expect(sourceUrlBox!.x + sourceUrlBox!.width).toBeLessThanOrEqual(
+      sidebarBox!.x + sidebarBox!.width,
+    );
     expect(descriptionBox!.width).toBeGreaterThan(240);
     expect(useDescriptionBox!.y).toBeGreaterThan(descriptionBox!.y + descriptionBox!.height);
   });
@@ -834,12 +852,121 @@ test.describe("model detail route", () => {
     expect(revisionBox!.x - scrollBox!.x).toBeGreaterThanOrEqual(2);
   });
 
+  test("logging a failed print opens a draft for the inspected revision", async ({ page }) => {
+    await page.goto("/models/1");
+    const writes: string[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && /\/models\/1\/print-jobs/.test(request.url()))
+        writes.push(request.url());
+    });
+    await page
+      .getByRole("region", { name: "Recorded prints" })
+      .getByRole("button", { name: "Failed", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", { name: "Log a print", exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Result", { exact: true })).toHaveValue("failed");
+    await expect(dialog.getByLabel("G-code Revision", { exact: true })).toHaveValue("2");
+    expect(writes).toEqual([]);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+  });
+
+  test("keeps an inspected revision independent of its recommendation", async ({ page }) => {
+    const first = aRevision({
+      id: 11,
+      version: 1,
+      gcode_revision_number: 1,
+      is_recommended: true,
+      original_filename: "recommended.gcode",
+      metadata: aMetadata({ material_type: "PLA", printer_model: "Prusa MK4" }),
+    });
+    const second = aRevision({
+      id: 12,
+      version: 2,
+      gcode_revision_number: 2,
+      original_filename: "inspected.gcode",
+      metadata: aMetadata({ material_type: "PETG", printer_model: "Prusa MK4" }),
+    });
+    let writes = 0;
+    await page.route("**/api/v1/models/1", (route) =>
+      route.fulfill({ json: aModel({ files: [first, second] }) }),
+    );
+    page.on("request", (request) => {
+      if (
+        ["PATCH", "PUT", "POST"].includes(request.method()) &&
+        /\/files\/(11|12)/.test(request.url())
+      )
+        writes++;
+    });
+    await page.goto("/models/1");
+    await page.getByRole("tab", { name: "Print settings", exact: true }).click();
+    const picker = page.getByRole("region", { name: "Inspect revision" });
+    await picker.getByRole("button", { name: "Rev 2", exact: true }).click();
+    await expect(picker.getByRole("button", { name: "Rev 2", exact: true })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("PETG", { exact: true }),
+    ).toBeVisible();
+    await page.getByRole("tab", { name: "Print settings", exact: true }).click();
+    await expect(
+      page.getByTestId("model-detail-sidebar").getByText("PETG", { exact: true }),
+    ).toBeVisible();
+    await page.getByRole("tab", { name: "Overview", exact: true }).click();
+    await page.getByRole("button", { name: "Send to printer", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Send to printer", exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("G-code revision")).toHaveValue("12");
+    await page.keyboard.press("Escape");
+    await page.getByRole("tab", { name: "Print settings", exact: true }).click();
+    await picker.getByRole("button", { name: "Return to recommended revision" }).click();
+    await expect(picker.getByRole("button", { name: /Rev 1/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(writes).toBe(0);
+  });
+
+  for (const viewport of [
+    { width: 1920, height: 1080 },
+    { width: 1908, height: 905 },
+    { width: 390, height: 844 },
+  ]) {
+    test(`keeps source facts beside a persistent preview at ${viewport.width}×${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto("/models/1");
+      const preview = page.getByRole("region", { name: "Preview", exact: true });
+      const original = await preview.elementHandle();
+      const about = page.getByRole("region", { name: "About this model" });
+      await expect(about).toBeVisible();
+      await page.getByRole("tab", { name: "Print settings", exact: true }).click();
+      await expect(about).toBeVisible();
+      expect(await original!.evaluate((node) => node.isConnected)).toBe(true);
+      await page.getByRole("tab", { name: "Overview", exact: true }).click();
+      const tabs = (await page.getByRole("tablist").boundingBox())!;
+      const viewer = (await preview.boundingBox())!;
+      const inspector = (await page.getByTestId("model-detail-sidebar").boundingBox())!;
+      expect(tabs.y + tabs.height).toBeLessThanOrEqual(viewer.y);
+      if (viewport.width > 767) {
+        expect(tabs.width).toBeGreaterThan(viewer.width + inspector.width);
+        expect(inspector.y + inspector.height).toBeLessThanOrEqual(viewport.height);
+      }
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
+    });
+  }
+
   test("model detail tabs fit and details sidebar width persists", async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.setViewportSize({ width: 1920, height: 1080 });
     await page.goto("/models/1");
 
     const sidebar = page.getByTestId("model-detail-sidebar");
-    const tablist = sidebar.getByRole("tablist");
+    const tablist = page.getByRole("tablist");
     const lastTab = tablist.getByRole("tab", { name: /History/ });
     const [tablistBox, lastTabBox] = await Promise.all([
       tablist.boundingBox(),

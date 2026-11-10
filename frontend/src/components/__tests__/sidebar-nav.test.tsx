@@ -62,24 +62,47 @@ describe("SidebarNav", () => {
       expect(screen.getByRole("link", { name: /Vault/i })).toHaveAttribute("href", "/");
     });
 
+    it("opens Favorites using the existing library filter", () => {
+      renderNav();
+
+      expect(screen.getByRole("link", { name: "Favorites" })).toHaveAttribute(
+        "href",
+        "/?favorites=true",
+      );
+    });
+
+    it("opens Trash through its settings section", () => {
+      renderNav({ auth: adminSession() });
+
+      expect(screen.getByRole("link", { name: "Trash" })).toHaveAttribute(
+        "href",
+        "/settings?section=trash",
+      );
+    });
+
     it("links to the inbox", () => {
       renderNav();
 
       expect(screen.getByRole("link", { name: /Pending/i })).toHaveAttribute("href", "/inbox");
     });
 
-    it("links to settings", () => {
+    it("links to settings from the account menu", async () => {
+      const user = userEvent.setup();
       renderNav();
+      await user.click(screen.getByRole("button", { name: "My workspace" }));
 
-      expect(screen.getByRole("link", { name: /Settings/i })).toHaveAttribute("href", "/settings");
+      expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveAttribute(
+        "href",
+        "/settings",
+      );
     });
 
-    it("sends the wiki link out to the docs site", () => {
-      // It leaves the app, so it is a plain anchor rather than a router link —
-      // routing to it would 404 inside the SPA.
+    it("sends the wiki link out to the docs site", async () => {
+      const user = userEvent.setup();
       renderNav();
+      await user.click(screen.getByRole("button", { name: "My workspace" }));
 
-      expect(screen.getByRole("link", { name: /Wiki/i })).toHaveAttribute(
+      expect(screen.getByRole("menuitem", { name: "Wiki" })).toHaveAttribute(
         "href",
         "https://www.printstash.org/docs/",
       );
@@ -99,6 +122,65 @@ describe("SidebarNav", () => {
       renderNav({ auth: memberSession() });
 
       expect(screen.queryByRole("link", { name: /Printers/i })).toBeNull();
+    });
+  });
+
+  describe("the current destination", () => {
+    it("marks Favorites when the filter is active", () => {
+      renderNav({ at: "/?favorites=true" });
+
+      expect(screen.getByRole("link", { name: "Favorites" })).toHaveAttribute(
+        "aria-current",
+        "page",
+      );
+      expect(screen.getByRole("link", { name: "Vault" })).not.toHaveAttribute("aria-current");
+    });
+
+    it("marks a nested inbox route in the rail", () => {
+      renderNav({ at: "/inbox/41" });
+
+      expect(screen.getByRole("link", { name: "Pending" })).toHaveAttribute("aria-current", "page");
+    });
+
+    it("does not mark the vault on a different route", () => {
+      renderNav({ at: "/inbox" });
+
+      expect(screen.getByRole("link", { name: "Vault" })).not.toHaveAttribute("aria-current");
+    });
+
+    it("returns the brand link to the remembered collection", () => {
+      localStorage.setItem("printstash.last.collection", "Calibration/Boats");
+      renderNav({ at: "/settings" });
+
+      expect(screen.getByRole("link", { name: "PrintStash" })).toHaveAttribute(
+        "href",
+        "/?c=Calibration%2FBoats",
+      );
+    });
+
+    it("returns focus to the account button after Escape", async () => {
+      const user = userEvent.setup();
+      renderNav();
+      const account = screen.getByRole("button", { name: "My workspace" });
+      await user.click(account);
+
+      await user.keyboard("{Escape}");
+
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      expect(account).toHaveFocus();
+    });
+  });
+
+  describe("keyboard help", () => {
+    it("lists the supported library shortcut", async () => {
+      const user = userEvent.setup();
+      renderNav();
+
+      await user.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+
+      expect(screen.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveTextContent(
+        "Focus library search",
+      );
     });
   });
 
@@ -149,7 +231,8 @@ describe("SidebarNav", () => {
       const logout = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
       renderNav({ auth: adminSession({ logout }) });
 
-      await user.click(screen.getByTitle("Sign out"));
+      await user.click(screen.getByRole("button", { name: "My workspace" }));
+      await user.click(screen.getByRole("menuitem", { name: "Log out" }));
 
       expect(logout).toHaveBeenCalled();
     });

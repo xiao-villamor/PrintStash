@@ -133,6 +133,19 @@ describe("DocumentDetailPage", () => {
 
       expect(screen.queryByPlaceholderText(/Write markdown/)).toBeNull();
     });
+
+    it("exposes the selected mode while switching between editing and preview", async () => {
+      const user = userEvent.setup();
+      renderDocument();
+      const edit = await screen.findByRole("button", { name: "Edit" });
+      const preview = screen.getByRole("button", { name: "Preview" });
+
+      expect(edit).toHaveAttribute("aria-pressed", "false");
+      expect(preview).toHaveAttribute("aria-pressed", "true");
+      await user.click(edit);
+      expect(edit).toHaveAttribute("aria-pressed", "true");
+      expect(preview).toHaveAttribute("aria-pressed", "false");
+    });
   });
 
   describe("saving an edit", () => {

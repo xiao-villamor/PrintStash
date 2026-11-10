@@ -26,12 +26,14 @@ test.describe("G-code layer controls", () => {
       await modelCard(page, name).click();
       const modelId = new URL(page.url()).pathname.split("/").at(-1);
       try {
-        await expect(page.getByRole("button", { name: "Reset view" })).toBeVisible();
-        await page.getByRole("button", { name: "GCode", exact: true }).click();
+        await expect(page.getByRole("button", { name: "Fit to view" })).toBeEnabled({
+          timeout: 30_000,
+        });
+        await page.getByRole("button", { name: "Layers", exact: true }).click();
         const slider = page.getByRole("slider", { name: "Current layer" });
         await expect(slider).toBeVisible({ timeout: 30_000 });
         await expect(slider).toHaveAttribute("max", "30");
-        await expect(page.getByRole("button", { name: "Reset view" })).toHaveCount(0);
+        await expect(page.getByRole("button", { name: "Fit to view" })).toHaveCount(0);
         await slider.scrollIntoViewIfNeeded();
         await slider.focus();
         await slider.press("Home");
@@ -56,8 +58,10 @@ test.describe("G-code layer controls", () => {
           expect(layer).toBeLessThanOrEqual(Math.round(30 * fraction) + 2);
         }
         await page.screenshot({ path: testInfo.outputPath(`layers-${width}.png`) });
-        await page.getByRole("button", { name: "3D", exact: true }).click();
-        await expect(page.getByRole("button", { name: "Reset view" })).toBeVisible();
+        await page.getByRole("button", { name: "3D model", exact: true }).click();
+        await expect(page.getByRole("button", { name: "Fit to view" })).toBeEnabled({
+          timeout: 30_000,
+        });
       } finally {
         expect((await page.request.delete(`/api/v1/models/${modelId}`)).ok()).toBeTruthy();
         expect((await page.request.delete(`/api/v1/models/${modelId}/purge`)).ok()).toBeTruthy();

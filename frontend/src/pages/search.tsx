@@ -25,6 +25,8 @@ import {
 } from "@/lib/queries/search";
 import { useAuth } from "@/lib/auth-context";
 import { ApiError, parseApiError } from "@/lib/errors";
+import { filterValueText } from "@/lib/filter-labels";
+import { formatDuration, formatNumber } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import { useRouter, useSearchParams } from "@/lib/navigation";
@@ -173,7 +175,6 @@ function SearchContent() {
             filters={filters}
             q={q}
             sort={sort}
-            showQuery={false}
             onChange={(next, query, order) => {
               const updated = writeSearchFilters(next, query, order);
               if (mode === "lexical") updated.set("mode", mode);
@@ -190,6 +191,19 @@ function SearchContent() {
               <span className="sr-only mr-2 text-xs font-medium text-muted-foreground sm:not-sr-only">
                 {t("aiSearch.resultTypes")}
               </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`px-2 text-xs sm:px-3 sm:text-sm ${types.length === 0 ? "bg-accent text-accent-foreground" : ""}`}
+                aria-pressed={types.length === 0}
+                onClick={() => {
+                  const next = new URLSearchParams(params);
+                  next.delete("type");
+                  router.push(`/search?${next}`);
+                }}
+              >
+                {t("aiSearch.allResults")}
+              </Button>
               {subjectTypes.map((type) => (
                 <Button
                   key={type}
@@ -378,6 +392,40 @@ function SearchContent() {
                         >
                           {t(`aiSearch.type.${item.subject_type}`)}
                         </p>
+                        {(item.model?.recommended_revision_label ||
+                          item.model?.recommended_revision_status) && (
+                          <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-2 text-xs text-muted-foreground">
+                            {item.model.recommended_revision_label && (
+                              <span>{item.model.recommended_revision_label}</span>
+                            )}
+                            {item.model.recommended_revision_status && (
+                              <span>
+                                {filterValueText(
+                                  "revision_status",
+                                  item.model.recommended_revision_status,
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {item.model?.print_summary && (
+                          <p className="mt-2 break-words font-mono text-3xs text-muted-foreground">
+                            {[
+                              item.model.print_summary.estimated_time_s != null
+                                ? formatDuration(item.model.print_summary.estimated_time_s)
+                                : null,
+                              item.model.print_summary.filament_weight_g != null
+                                ? `${formatNumber(item.model.print_summary.filament_weight_g)} g`
+                                : null,
+                              item.model.print_summary.layer_height_mm != null
+                                ? `${formatNumber(item.model.print_summary.layer_height_mm)} mm`
+                                : null,
+                              item.model.print_summary.material_type,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </p>
+                        )}
                       </div>
                     </Link>
                   </li>

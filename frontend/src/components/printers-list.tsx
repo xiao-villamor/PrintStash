@@ -47,9 +47,7 @@ import {
   Clock3,
   Search,
   Check,
-  CircleAlert,
   Layers3,
-  Play,
 } from "lucide-react";
 
 // `satisfies` keeps the literal keys (so a status can't be misspelled here) while
@@ -214,7 +212,8 @@ export function PrintersPage() {
             onChange={setActiveView}
             className="border-b border-border"
             tabClassName="px-4 py-2.5 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            activeTabClassName="text-foreground"
+            activeTabClassName="bg-accent text-accent-foreground"
+            showIndicator={false}
           />
 
           {activeView === "fleet" && (
@@ -230,59 +229,43 @@ export function PrintersPage() {
                   aria-label={uiText("Fleet summary")}
                   className="animate-panel-in space-y-3"
                 >
-                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <div className="grid grid-cols-2 gap-y-4 lg:grid-cols-4">
                     {[
                       {
                         get label() {
                           return uiText("Active jobs");
                         },
                         value: dashboard?.active_jobs ?? 0,
-                        icon: Play,
-                        tone: "text-primary",
                       },
                       {
                         get label() {
                           return uiText("Printing");
                         },
                         value: statusCounts.printing ?? 0,
-                        icon: PrinterIcon,
-                        tone: "text-primary",
                       },
                       {
                         get label() {
                           return uiText("Needs attention");
                         },
                         value: attentionCount,
-                        icon: CircleAlert,
-                        tone: attentionCount ? "text-destructive" : "text-muted-foreground",
                       },
                       {
                         get label() {
                           return uiText("Ready");
                         },
                         value: statusCounts.ready ?? 0,
-                        icon: Check,
-                        tone: "text-success",
                       },
-                    ].map((item) => {
-                      const Icon = item.icon;
-                      return (
-                        <div
-                          key={item.label}
-                          className="rounded-lg border border-border bg-card p-4 shadow-sm"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-xs font-medium text-muted-foreground">
-                              {item.label}
-                            </span>
-                            <Icon className={`h-4 w-4 ${item.tone}`} />
-                          </div>
-                          <p className="mt-2 font-mono text-2xl font-semibold tabular-nums text-foreground">
-                            {item.value}
-                          </p>
-                        </div>
-                      );
-                    })}
+                    ].map((item) => (
+                      <div
+                        key={item.label}
+                        className="min-w-0 border-l border-border px-4 py-1 first:border-l-0 first:pl-0"
+                      >
+                        <p className="text-xs text-muted-foreground">{item.label}</p>
+                        <p className="mt-1 font-mono text-2xl font-semibold tabular-nums text-foreground">
+                          {item.value}
+                        </p>
+                      </div>
+                    ))}
                   </div>
                   {printerGroups.length > 1 && (
                     <div
@@ -291,7 +274,11 @@ export function PrintersPage() {
                     >
                       <Button
                         type="button"
-                        variant={selectedGroup === null ? "secondary" : "outline"}
+                        variant={selectedGroup === null ? "ghost" : "outline"}
+                        aria-pressed={selectedGroup === null}
+                        className={
+                          selectedGroup === null ? "bg-accent text-accent-foreground" : undefined
+                        }
                         size="xs"
                         onClick={() => setSelectedGroup(null)}
                       >
@@ -301,7 +288,13 @@ export function PrintersPage() {
                         <Button
                           key={group.name}
                           type="button"
-                          variant={selectedGroup === group.name ? "secondary" : "outline"}
+                          variant={selectedGroup === group.name ? "ghost" : "outline"}
+                          aria-pressed={selectedGroup === group.name}
+                          className={
+                            selectedGroup === group.name
+                              ? "bg-accent text-accent-foreground"
+                              : undefined
+                          }
                           size="xs"
                           onClick={() => setSelectedGroup(group.name)}
                         >
@@ -344,13 +337,21 @@ export function PrintersPage() {
                   {visiblePrinters.map((p) => (
                     <article
                       key={p.id}
-                      className="animate-card-in flex min-h-72 flex-col overflow-hidden rounded-lg border border-border bg-card shadow-sm"
+                      className="animate-card-in flex min-h-72 flex-col overflow-hidden rounded-lg border border-border bg-card"
                     >
                       {showCardImages && (
                         <PrinterCardArtwork
                           key={`${p.id}:${p.model_name || p.detected_model || "unknown"}`}
                           printer={p}
                         />
+                      )}
+                      {!showCardImages && (
+                        <div
+                          aria-hidden
+                          className="flex h-28 items-center justify-center border-b border-border bg-muted/30 text-muted-foreground"
+                        >
+                          <PrinterIcon className="h-12 w-12" strokeWidth={1.2} />
+                        </div>
                       )}
                       <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
                         <div className="min-w-0">

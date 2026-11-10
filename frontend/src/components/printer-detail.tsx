@@ -38,12 +38,13 @@ import {
   usePrinterFileMutation,
 } from "@/features/printers/queries";
 import { getSessionVersion } from "@/lib/session-transport";
-import { userMessage } from "@/lib/errors";
+import { ApiError, userMessage } from "@/lib/errors";
 import { isLoggedIn, onAuthChange } from "@/lib/auth-store";
 import { toast } from "@/lib/toast";
 import { useRequireAuth } from "@/lib/use-require-auth";
 import { formatBytes, formatDuration } from "@/lib/format";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { PageFailure } from "@/components/page-failure";
 import { Input } from "@/components/ui/input";
 import { TabBar } from "@/components/ui/tabs";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
@@ -493,10 +494,22 @@ function PrinterDetailView({
   if (!printer) {
     if (resources.error)
       return (
-        <div role="alert">
-          {userMessage(resources.error)}
-          <Button onClick={() => void resources.refreshAll()}>{uiText("Retry")}</Button>
-        </div>
+        <PageFailure
+          kind={
+            resources.error instanceof ApiError && resources.error.status === 401
+              ? "authentication"
+              : resources.error instanceof ApiError && resources.error.status === 403
+                ? "forbidden"
+                : resources.error instanceof ApiError && resources.error.status === 404
+                  ? "not-found"
+                  : resources.error instanceof ApiError &&
+                      resources.error.code === "network_unreachable"
+                    ? "offline"
+                    : "unavailable"
+          }
+          description={userMessage(resources.error)}
+          onRetry={() => void resources.refreshAll()}
+        />
       );
     return (
       <div className="w-full space-y-4">
@@ -613,20 +626,6 @@ function PrinterDetailView({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatusMetric label="Klipper" value={webhook.state || printer.status} />
-            <StatusMetric label={uiText("File")} value={ps.filename || "Idle"} truncate />
-            <StatusMetric
-              label={uiText("Progress")}
-              value={
-                progress != null
-                  ? `${formatNumber(progress, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%`
-                  : "—"
-              }
-            />
-            <StatusMetric label={uiText("Homed")} value={toolhead.homed_axes || "—"} />
-          </div>
-
           <div className="border-b border-border">
             <TabBar
               tabs={[
@@ -700,256 +699,284 @@ function PrinterDetailView({
                 setActiveTab(k);
               }}
               className="gap-1 overflow-x-auto -mb-px"
-              tabClassName="px-3 py-2 font-mono text-xs uppercase tracking-wider transition-colors text-muted-foreground hover:text-foreground"
-              activeTabClassName="text-primary"
+              tabClassName="px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              activeTabClassName="bg-accent text-accent-foreground"
+              showIndicator={false}
             />
           </div>
 
-          {activeTab === "status" && (
-            <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-3 animate-panel-in">
-              {/* Current print */}
-              <section className={`${SECTION_CLASS} lg:col-span-2`}>
-                <div className={SECTION_HEADER_CLASS}>
-                  <h2 className="text-sm font-semibold text-foreground">
-                    {uiText("Current print")}
-                  </h2>
-                </div>
-                {hasCurrentPrint ? (
-                  <div className="space-y-5 p-6">
-                    <Row label={uiText("FILE")} value={ps.filename || "—"} truncate />
-                    <Row label={uiText("STATE")} value={ps.state || "—"} capitalize />
+          <div
+            className={activeTab === "status" ? "overflow-hidden border border-border bg-card" : ""}
+          >
+            <div
+              className={cn(
+                "grid grid-cols-2 gap-y-4 md:grid-cols-4",
+                activeTab === "status" && "border-b border-border p-5",
+              )}
+            >
+              <StatusMetric label="Klipper" value={webhook.state || printer.status} />
+              <StatusMetric label={uiText("File")} value={ps.filename || "Idle"} truncate />
+              <StatusMetric
+                label={uiText("Progress")}
+                value={
+                  progress != null
+                    ? `${formatNumber(progress, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%`
+                    : "—"
+                }
+              />
+              <StatusMetric label={uiText("Homed")} value={toolhead.homed_axes || "—"} />
+            </div>
 
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                          {uiText("Progress")}
-                        </span>
-                        <span className="font-mono text-xs text-foreground font-semibold">
-                          {progress != null
-                            ? `${formatNumber(progress, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%`
-                            : "—"}
-                        </span>
-                      </div>
-                      <div className="h-2 w-full overflow-hidden rounded bg-muted">
-                        <div
-                          className="h-full w-full origin-left bg-primary transition-transform duration-slow ease-linear"
-                          style={{ transform: `scaleX(${Math.min(100, progress ?? 0) / 100})` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-4">
-                      <Row
-                        label={uiText("ELAPSED")}
-                        value={formatDuration(ps.print_duration)}
-                        stack
-                      />
-                      <Row
-                        label={uiText("TOTAL")}
-                        value={formatDuration(ps.total_duration)}
-                        stack
-                      />
-                    </div>
-
-                    <div className="border-t border-border pt-4 space-y-3">
-                      <div className="flex flex-wrap gap-2">
-                        <ControlButton
-                          onClick={() => control("pause", () => pausePrinter(printerId))}
-                          disabled={
-                            !printer.access.can_control ||
-                            !printer.capabilities.can_pause ||
-                            ps.state !== "printing" ||
-                            busy !== null
-                          }
-                          busy={busy === "pause"}
-                          icon={Pause}
-                          label={printer.access.can_control ? uiText("Pause") : uiText("No access")}
-                        />
-                        <ControlButton
-                          onClick={() => control("resume", () => resumePrinter(printerId))}
-                          disabled={
-                            !printer.access.can_control ||
-                            !printer.capabilities.can_resume ||
-                            ps.state !== "paused" ||
-                            busy !== null
-                          }
-                          busy={busy === "resume"}
-                          icon={Play}
-                          label={
-                            printer.access.can_control ? uiText("Resume") : uiText("No access")
-                          }
-                        />
-                        <ControlButton
-                          onClick={() => control("cancel", () => cancelPrinter(printerId))}
-                          disabled={
-                            !printer.access.can_control ||
-                            !printer.capabilities.can_cancel ||
-                            (ps.state !== "printing" && ps.state !== "paused") ||
-                            busy !== null
-                          }
-                          busy={busy === "cancel"}
-                          icon={Square}
-                          label={
-                            printer.access.can_control ? uiText("Cancel") : uiText("No access")
-                          }
-                          destructive
-                        />
-                      </div>
-                      <p className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                        {printer.access.can_control
-                          ? uiText("Controls permitted by your printer role.")
-                          : uiText("Control role required.")}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex min-h-64 flex-col items-center justify-center px-6 py-10 text-center">
-                    <span className="mb-4 inline-flex rounded-full bg-muted p-3 text-muted-foreground">
-                      <FileText className="h-5 w-5" />
-                    </span>
-                    <h3 className="text-sm font-semibold text-foreground">
-                      {uiText("No active print")}
-                    </h3>
-                    <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
-                      {printer.status === "offline"
-                        ? uiText(
-                            "Printer is offline. Print details will appear after it reconnects.",
-                          )
-                        : uiText(
-                            "Start a file from the Files tab to see live progress and controls here.",
-                          )}
-                    </p>
-                    {printer.status !== "offline" && printer.capabilities.can_list_files && (
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab("files")}
-                        className={cn(BTN_SECONDARY, "mt-5")}
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                        {uiText("Browse files")}
-                      </button>
-                    )}
-                  </div>
-                )}
-              </section>
-
-              {/* Temperatures */}
-              <section className={SECTION_CLASS}>
-                <div className={SECTION_HEADER_CLASS}>
-                  <div className="flex items-center gap-2">
-                    <Thermometer className="h-4 w-4 text-muted-foreground" />
+            {activeTab === "status" && (
+              <div className="divide-y divide-border animate-panel-in">
+                {/* Current print */}
+                <section className="overflow-hidden bg-card">
+                  <div className={SECTION_HEADER_CLASS}>
                     <h2 className="text-sm font-semibold text-foreground">
-                      {uiText("Temperatures")}
+                      {uiText("Current print")}
                     </h2>
                   </div>
-                </div>
-                <div className="space-y-5 p-5">
-                  <div className="grid grid-cols-2 gap-3">
-                    <TempRow label={uiText("Hotend")} cur={ext.temperature} tgt={ext.target} />
-                    <TempRow label={uiText("Bed")} cur={bed.temperature} tgt={bed.target} />
-                  </div>
+                  {hasCurrentPrint ? (
+                    <div className="space-y-5 p-6">
+                      <Row label={uiText("FILE")} value={ps.filename || "—"} truncate />
+                      <Row label={uiText("STATE")} value={ps.state || "—"} capitalize />
 
-                  {printer.capabilities.can_send_gcode && (
-                    <div className="border-t border-border pt-4 space-y-4">
-                      {printer.status === "offline" && (
-                        <p className="text-sm text-muted-foreground">
-                          {uiText(
-                            "Printer is offline. Check its address and connection before sending commands.",
-                          )}
-                        </p>
-                      )}
-                      <div className="space-y-2">
-                        <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                          {uiText("Preheat")}
-                        </span>
-                        <div className="flex flex-wrap gap-2">
-                          {PREHEAT_PRESETS.map((p) => (
-                            <button
-                              key={p.name}
-                              onClick={() => preheat(p)}
-                              disabled={!printer.access.can_control || machineBusy !== null}
-                              title={uiText("Hotend {value1}°C · Bed {value2}°C", {
-                                value1: String(p.hotend),
-                                value2: String(p.bed),
-                              })}
-                              className={BTN_SECONDARY}
-                            >
-                              {machineBusy === `preheat-${p.name}` && (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              )}
-                              {p.name}
-                            </button>
-                          ))}
-                          <button
-                            onClick={cooldown}
-                            disabled={!printer.access.can_control || machineBusy !== null}
-                            className={BTN_SECONDARY}
-                          >
-                            {machineBusy === "cooldown" && (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            )}
-                            {uiText("Cooldown")}
-                          </button>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                            {uiText("Progress")}
+                          </span>
+                          <span className="font-mono text-xs text-foreground font-semibold">
+                            {progress != null
+                              ? `${formatNumber(progress, { maximumFractionDigits: 1, minimumFractionDigits: 1 })}%`
+                              : "—"}
+                          </span>
+                        </div>
+                        <div className="h-2 w-full overflow-hidden rounded bg-muted">
+                          <div
+                            className="h-full w-full origin-left bg-primary transition-transform duration-slow ease-linear"
+                            style={{ transform: `scaleX(${Math.min(100, progress ?? 0) / 100})` }}
+                          />
                         </div>
                       </div>
 
-                      <SetTempInput
-                        label={uiText("Hotend target")}
-                        value={hotendTarget}
-                        onChange={setHotendTarget}
-                        onApply={() =>
-                          applyTemp("extruder", hotendTarget, () => setHotendTarget(""))
-                        }
-                        busy={machineBusy === "set-extruder"}
-                        disabled={!printer.access.can_control || machineBusy !== null}
-                      />
-                      <SetTempInput
-                        label={uiText("Bed target")}
-                        value={bedTarget}
-                        onChange={setBedTarget}
-                        onApply={() => applyTemp("bed", bedTarget, () => setBedTarget(""))}
-                        busy={machineBusy === "set-bed"}
-                        disabled={!printer.access.can_control || machineBusy !== null}
-                      />
+                      <div className="grid grid-cols-2 gap-4">
+                        <Row
+                          label={uiText("ELAPSED")}
+                          value={formatDuration(ps.print_duration)}
+                          stack
+                        />
+                        <Row
+                          label={uiText("TOTAL")}
+                          value={formatDuration(ps.total_duration)}
+                          stack
+                        />
+                      </div>
 
-                      <div className="border-t border-border pt-4 flex flex-wrap gap-2">
-                        <button
-                          onClick={() =>
-                            void machineAction(
-                              "home",
-                              () => homePrinter(printerId),
-                              uiMessage("printer.homeSuccess"),
-                            )
-                          }
-                          disabled={!printer.access.can_control || machineBusy !== null}
-                          className={BTN_SECONDARY}
-                        >
-                          {machineBusy === "home" ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Home className="h-3.5 w-3.5" />
-                          )}
-                          {uiText("Home all")}
-                        </button>
-                        <button
-                          onClick={emergencyStop}
-                          disabled={!printer.access.can_control || machineBusy !== null}
-                          className={BTN_DANGER}
-                        >
-                          {machineBusy === "estop" ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          ) : (
-                            <Power className="h-3.5 w-3.5" />
-                          )}
-                          {uiText("E-stop")}
-                        </button>
+                      <div className="border-t border-border pt-4 space-y-3">
+                        <div className="flex flex-wrap gap-2">
+                          <ControlButton
+                            onClick={() => control("pause", () => pausePrinter(printerId))}
+                            disabled={
+                              !printer.access.can_control ||
+                              !printer.capabilities.can_pause ||
+                              ps.state !== "printing" ||
+                              busy !== null
+                            }
+                            busy={busy === "pause"}
+                            icon={Pause}
+                            label={
+                              printer.access.can_control ? uiText("Pause") : uiText("No access")
+                            }
+                          />
+                          <ControlButton
+                            onClick={() => control("resume", () => resumePrinter(printerId))}
+                            disabled={
+                              !printer.access.can_control ||
+                              !printer.capabilities.can_resume ||
+                              ps.state !== "paused" ||
+                              busy !== null
+                            }
+                            busy={busy === "resume"}
+                            icon={Play}
+                            label={
+                              printer.access.can_control ? uiText("Resume") : uiText("No access")
+                            }
+                          />
+                          <ControlButton
+                            onClick={() => control("cancel", () => cancelPrinter(printerId))}
+                            disabled={
+                              !printer.access.can_control ||
+                              !printer.capabilities.can_cancel ||
+                              (ps.state !== "printing" && ps.state !== "paused") ||
+                              busy !== null
+                            }
+                            busy={busy === "cancel"}
+                            icon={Square}
+                            label={
+                              printer.access.can_control ? uiText("Cancel") : uiText("No access")
+                            }
+                            destructive
+                          />
+                        </div>
+                        <p className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                          {printer.access.can_control
+                            ? uiText("Controls permitted by your printer role.")
+                            : uiText("Control role required.")}
+                        </p>
                       </div>
                     </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-4 px-5 py-5">
+                      <span className="inline-flex rounded-full bg-muted p-3 text-muted-foreground">
+                        <FileText className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-sm font-semibold text-foreground">
+                          {uiText("No active print")}
+                        </h3>
+                        <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+                          {printer.status === "offline"
+                            ? uiText(
+                                "Printer is offline. Print details will appear after it reconnects.",
+                              )
+                            : uiText(
+                                "Start a file from the Files tab to see live progress and controls here.",
+                              )}
+                        </p>
+                      </div>
+                      {printer.status !== "offline" && printer.capabilities.can_list_files && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab("files")}
+                          className={BTN_SECONDARY}
+                        >
+                          <FileText className="h-3.5 w-3.5" />
+                          {uiText("Browse files")}
+                        </button>
+                      )}
+                    </div>
                   )}
-                </div>
-              </section>
-            </div>
-          )}
+                </section>
+
+                {/* Temperatures */}
+                <section className="overflow-hidden bg-card">
+                  <div className={SECTION_HEADER_CLASS}>
+                    <div className="flex items-center gap-2">
+                      <Thermometer className="h-4 w-4 text-muted-foreground" />
+                      <h2 className="text-sm font-semibold text-foreground">
+                        {uiText("Temperatures")}
+                      </h2>
+                    </div>
+                  </div>
+                  <div className="space-y-5 p-5">
+                    <div className="grid grid-cols-2 gap-3">
+                      <TempRow label={uiText("Hotend")} cur={ext.temperature} tgt={ext.target} />
+                      <TempRow label={uiText("Bed")} cur={bed.temperature} tgt={bed.target} />
+                    </div>
+
+                    {printer.capabilities.can_send_gcode && (
+                      <div className="border-t border-border pt-4 space-y-4">
+                        {printer.status === "offline" && (
+                          <p className="text-sm text-muted-foreground">
+                            {uiText(
+                              "Printer is offline. Check its address and connection before sending commands.",
+                            )}
+                          </p>
+                        )}
+                        <div className="space-y-2">
+                          <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                            {uiText("Preheat")}
+                          </span>
+                          <div className="flex flex-wrap gap-2">
+                            {PREHEAT_PRESETS.map((p) => (
+                              <button
+                                key={p.name}
+                                onClick={() => preheat(p)}
+                                disabled={!printer.access.can_control || machineBusy !== null}
+                                title={uiText("Hotend {value1}°C · Bed {value2}°C", {
+                                  value1: String(p.hotend),
+                                  value2: String(p.bed),
+                                })}
+                                className={BTN_SECONDARY}
+                              >
+                                {machineBusy === `preheat-${p.name}` && (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                )}
+                                {p.name}
+                              </button>
+                            ))}
+                            <button
+                              onClick={cooldown}
+                              disabled={!printer.access.can_control || machineBusy !== null}
+                              className={BTN_SECONDARY}
+                            >
+                              {machineBusy === "cooldown" && (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              )}
+                              {uiText("Cooldown")}
+                            </button>
+                          </div>
+                        </div>
+
+                        <SetTempInput
+                          label={uiText("Hotend target")}
+                          value={hotendTarget}
+                          onChange={setHotendTarget}
+                          onApply={() =>
+                            applyTemp("extruder", hotendTarget, () => setHotendTarget(""))
+                          }
+                          busy={machineBusy === "set-extruder"}
+                          disabled={!printer.access.can_control || machineBusy !== null}
+                        />
+                        <SetTempInput
+                          label={uiText("Bed target")}
+                          value={bedTarget}
+                          onChange={setBedTarget}
+                          onApply={() => applyTemp("bed", bedTarget, () => setBedTarget(""))}
+                          busy={machineBusy === "set-bed"}
+                          disabled={!printer.access.can_control || machineBusy !== null}
+                        />
+
+                        <div className="border-t border-border pt-4 flex flex-wrap gap-2">
+                          <button
+                            onClick={() =>
+                              void machineAction(
+                                "home",
+                                () => homePrinter(printerId),
+                                uiMessage("printer.homeSuccess"),
+                              )
+                            }
+                            disabled={!printer.access.can_control || machineBusy !== null}
+                            className={BTN_SECONDARY}
+                          >
+                            {machineBusy === "home" ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Home className="h-3.5 w-3.5" />
+                            )}
+                            {uiText("Home all")}
+                          </button>
+                          <button
+                            onClick={emergencyStop}
+                            disabled={!printer.access.can_control || machineBusy !== null}
+                            className={BTN_DANGER}
+                          >
+                            {machineBusy === "estop" ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Power className="h-3.5 w-3.5" />
+                            )}
+                            {uiText("E-stop")}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </div>
+            )}
+          </div>
 
           {activeTab === "files" && (
             <section className={`${SECTION_CLASS} animate-panel-in`}>
@@ -1822,12 +1849,10 @@ function StatusMetric({
 }) {
   useUiLocale();
   return (
-    <div className="rounded border border-border bg-background p-3">
-      <div className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
+    <div className="min-w-0 border-l border-border px-4 first:border-l-0 first:pl-0">
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div
-        className={`mt-1 font-mono text-sm font-semibold text-foreground ${truncate ? "truncate" : ""}`}
+        className={`mt-1 font-mono text-base font-semibold text-foreground ${truncate ? "break-words" : ""}`}
         title={value}
       >
         {value}

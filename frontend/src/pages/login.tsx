@@ -7,7 +7,7 @@ import { useUiLocale } from "@/lib/i18n";
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { loginProvidersOptions } from "@/features/auth/entry";
-import { Navigate } from "react-router-dom";
+import { Navigate } from "@tanstack/react-router";
 import { useRouter } from "@/lib/navigation";
 import { AlertCircle, Clock3, ShieldCheck } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
@@ -109,21 +109,19 @@ export default function LoginPage() {
 
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-12">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/5 blur-3xl"
-      />
-
       <div className="absolute right-5 top-5 flex items-center gap-1">
         <LocaleToggle />
         <ThemeToggle />
       </div>
 
       <div className="relative mx-auto w-full max-w-md">
-        <Card className="border-outline-variant bg-surface-container-low shadow-lg">
-          <CardHeader className="items-center px-6 pb-5 pt-8 text-center sm:px-8">
-            <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
-              <BrandMark className="h-9 w-9" />
+        <Card className="border-outline-variant bg-card">
+          <CardHeader className="items-start px-6 pb-5 pt-8 text-left sm:px-8">
+            <div className="mb-5 flex items-center gap-3">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <BrandMark className="h-6 w-6" />
+              </span>
+              <span className="text-sm font-semibold text-foreground">PrintStash</span>
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-on-surface">
               {t("auth.welcome")}
@@ -148,7 +146,7 @@ export default function LoginPage() {
               <div className="space-y-2">
                 <label
                   htmlFor="username"
-                  className="block text-xs font-mono uppercase tracking-wider text-on-surface-variant"
+                  className="block text-sm font-medium text-on-surface-variant"
                 >
                   {t("auth.username")}
                 </label>
@@ -169,7 +167,7 @@ export default function LoginPage() {
               <div className="space-y-2">
                 <label
                   htmlFor="password"
-                  className="block text-xs font-mono uppercase tracking-wider text-on-surface-variant"
+                  className="block text-sm font-medium text-on-surface-variant"
                 >
                   {t("auth.password")}
                 </label>

@@ -4,6 +4,7 @@ import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   filamentProfilesOptions,
@@ -264,6 +265,9 @@ function ProfileRow({
   editor,
   onBlur,
   onClose,
+  onSelect,
+  selected,
+  detailsHost,
   children,
 }: {
   name: string;
@@ -273,50 +277,91 @@ function ProfileRow({
   editor: React.ReactNode;
   onBlur: React.FocusEventHandler<HTMLDivElement>;
   onClose: () => void;
+  onSelect: () => void;
+  selected: boolean;
+  detailsHost: HTMLDivElement | null;
   children: React.ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(selected);
   const [editing, setEditing] = useState(false);
+  const detailsRef = useRef<HTMLDivElement>(null);
+  function toggleDetails() {
+    if (expanded) onClose();
+    else onSelect();
+    setExpanded(!expanded);
+  }
+  const details = expanded ? (
+    <div ref={detailsRef} className="min-w-0 space-y-4 border-t border-border px-4 py-4 sm:px-5">
+      <div className="flex justify-end">
+        <Button
+          variant="ghost"
+          size="xs"
+          aria-label={uiText(editing ? "profiles.closeEditor" : "profiles.editProfile", { name })}
+          aria-expanded={editing}
+          onClick={() => {
+            if (editing) onClose();
+            setEditing(!editing);
+          }}
+        >
+          {editing ? (
+            <X className="h-3.5 w-3.5" aria-hidden />
+          ) : (
+            <Pencil className="h-3.5 w-3.5" aria-hidden />
+          )}
+          {uiText(editing ? "profiles.closeEditorLabel" : "Edit")}
+        </Button>
+      </div>
+      {editing ? (
+        <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+          <p className="col-span-full text-xs text-muted-foreground">
+            {uiText("Changes save automatically when leaving a row.")}
+          </p>
+          {editor}
+        </div>
+      ) : notes && !selected ? (
+        <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-baseline sm:gap-3">
+          <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            {uiText("Notes")}
+          </span>
+          <p className="min-w-0 whitespace-pre-wrap break-words text-sm">{notes}</p>
+        </div>
+      ) : null}
+      {children}
+    </div>
+  ) : null;
   return (
     <div
       className="group min-w-0"
-      onBlur={onBlur}
+      onBlur={(event) => {
+        if (
+          event.relatedTarget instanceof Node &&
+          detailsRef.current?.contains(event.relatedTarget)
+        )
+          return;
+        onBlur(event);
+      }}
       role="region"
       aria-label={uiText("profiles.profileRow", { name })}
     >
-      <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+      <div
+        className={`flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5 ${selected ? "bg-muted" : ""}`}
+      >
         <span
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
           aria-hidden
         >
           {icon}
         </span>
-        <div className="min-w-0 flex-1">
+        <button
+          type="button"
+          onClick={toggleDetails}
+          aria-expanded={expanded}
+          className="min-w-0 flex-1 text-left"
+        >
           <h3 className="break-words text-sm font-semibold">{name}</h3>
           {summary && <p className="mt-1 break-words text-xs text-muted-foreground">{summary}</p>}
-        </div>
+        </button>
         <div className="flex shrink-0 items-center gap-2 max-sm:w-full max-sm:justify-end">
-          {expanded && (
-            <Button
-              variant="ghost"
-              size="xs"
-              aria-label={uiText(editing ? "profiles.closeEditor" : "profiles.editProfile", {
-                name,
-              })}
-              aria-expanded={editing}
-              onClick={() => {
-                if (editing) onClose();
-                setEditing(!editing);
-              }}
-            >
-              {editing ? (
-                <X className="h-3.5 w-3.5" aria-hidden />
-              ) : (
-                <Pencil className="h-3.5 w-3.5" aria-hidden />
-              )}
-              {uiText(editing ? "profiles.closeEditorLabel" : "Edit")}
-            </Button>
-          )}
           <Button
             variant="outline"
             size="xs"
@@ -324,10 +369,7 @@ function ProfileRow({
               name,
             })}
             aria-expanded={expanded}
-            onClick={() => {
-              if (expanded) onClose();
-              setExpanded(!expanded);
-            }}
+            onClick={toggleDetails}
           >
             {uiText("profiles.details")}
             <ChevronDown
@@ -337,26 +379,25 @@ function ProfileRow({
           </Button>
         </div>
       </div>
-      {expanded && (
-        <div className="min-w-0 space-y-4 border-t bg-muted/10 px-4 py-4 sm:px-5">
-          {editing ? (
-            <div className="grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-6">
-              <p className="col-span-full text-xs text-muted-foreground">
-                {uiText("Changes save automatically when leaving a row.")}
-              </p>
-              {editor}
-            </div>
-          ) : notes ? (
-            <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-baseline sm:gap-3">
-              <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                {uiText("Notes")}
-              </span>
-              <p className="min-w-0 whitespace-pre-wrap break-words text-sm">{notes}</p>
-            </div>
-          ) : null}
-          {children}
-        </div>
-      )}
+      {details && detailsHost && createPortal(details, detailsHost)}
+    </div>
+  );
+}
+
+function ProfileSummary({ name, facts }: { name: string; facts: [string, string | null][] }) {
+  return (
+    <div className="space-y-4 p-4 sm:p-5">
+      <strong className="block break-words text-base">{name}</strong>
+      <dl className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2 xl:grid-cols-4">
+        {facts.map(([label, value]) => (
+          <div key={label} className="min-w-0">
+            <dt className="text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {label}
+            </dt>
+            <dd className="mt-1 whitespace-pre-wrap break-words text-sm">{value || "—"}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
@@ -375,6 +416,13 @@ export function FilamentProfilesCard() {
     printerQuery.error instanceof ApiError && [401, 403, 404].includes(printerQuery.error.status);
   const filaments = filamentDenied ? [] : (filamentQuery.data ?? []);
   const printers = printerDenied ? [] : (printerQuery.data ?? []);
+  const [detailsHost, setDetailsHost] = useState<HTMLDivElement | null>(null);
+  const [selectedFilamentId, setSelectedFilamentId] = useState<number | null>(null);
+  const [selectedPrinterId, setSelectedPrinterId] = useState<number | null>(null);
+  const selectedFilament =
+    filaments.find((profile) => profile.id === selectedFilamentId) ?? filaments[0];
+  const selectedPrinter =
+    printers.find((profile) => profile.id === selectedPrinterId) ?? printers[0];
   const activeDenied = activeTab === "filaments" ? filamentDenied : printerDenied;
   const activeQuery = activeTab === "filaments" ? filamentQuery : printerQuery;
   const loading = activeQuery.isPending;
@@ -882,80 +930,89 @@ export function FilamentProfilesCard() {
           </div>
         )}
 
-        <Card className="overflow-hidden">
-          <div className="flex flex-col gap-3 border-b bg-muted/30 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <TabBar
-              tabs={[
-                {
-                  key: "filaments",
-                  label: (
-                    <>
-                      <Layers className="h-4 w-4" aria-hidden />
-                      {translateUiText(locale, "Filaments")}{" "}
-                      <Badge variant="secondary">{filaments.length}</Badge>
-                    </>
-                  ),
-                },
-                {
-                  key: "printers",
-                  label: (
-                    <>
-                      <Printer className="h-4 w-4" aria-hidden />
-                      {translateUiText(locale, "Printers")}{" "}
-                      <Badge variant="secondary">{printers.length}</Badge>
-                    </>
-                  ),
-                },
-              ]}
-              active={activeTab}
-              onChange={setActiveTab}
-              showIndicator={false}
-              className="max-w-full flex-wrap gap-1 rounded-lg bg-background p-1 shadow-sm ring-1 ring-border"
-              tabClassName={tabClass}
-              activeTabClassName="bg-accent text-accent-foreground"
-            />
+        <div className="flex flex-col gap-3 border-b border-border pb-3 sm:flex-row sm:items-center sm:justify-between">
+          <TabBar
+            tabs={[
+              {
+                key: "filaments",
+                label: (
+                  <>
+                    <Layers className="h-4 w-4" aria-hidden />
+                    {translateUiText(locale, "Filaments")}{" "}
+                    <Badge
+                      variant="secondary"
+                      className="border-0 bg-transparent px-0 text-muted-foreground"
+                    >
+                      {filaments.length}
+                    </Badge>
+                  </>
+                ),
+              },
+              {
+                key: "printers",
+                label: (
+                  <>
+                    <Printer className="h-4 w-4" aria-hidden />
+                    {translateUiText(locale, "Printers")}{" "}
+                    <Badge
+                      variant="secondary"
+                      className="border-0 bg-transparent px-0 text-muted-foreground"
+                    >
+                      {printers.length}
+                    </Badge>
+                  </>
+                ),
+              },
+            ]}
+            active={activeTab}
+            onChange={setActiveTab}
+            showIndicator={false}
+            className="max-w-full flex-wrap gap-1"
+            tabClassName={tabClass}
+            activeTabClassName="bg-accent text-accent-foreground"
+          />
 
-            <div className="flex items-center justify-end gap-2">
-              {activeTab === "filaments" && spoolmanEnabled && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="xs"
-                  onClick={handleSyncSpoolman}
-                  loading={syncing}
-                  disabled={!auth.isAuthenticated || activeDenied}
-                >
-                  {!syncing && <RefreshCw className="h-3.5 w-3.5" />}
-                  {translateUiText(locale, "Sync Spoolman")}
-                </Button>
-              )}
+          <div className="flex items-center justify-end gap-2">
+            {activeTab === "filaments" && spoolmanEnabled && (
               <Button
-                ref={newPresetButton}
                 type="button"
+                variant="outline"
                 size="xs"
+                onClick={handleSyncSpoolman}
+                loading={syncing}
                 disabled={!auth.isAuthenticated || activeDenied}
-                aria-expanded={activeTab === "filaments" ? showAddFilament : showAddPrinter}
-                onClick={() => {
-                  if (!auth.isAuthenticated) {
-                    auth.showAuthRequiredToast();
-                    return;
-                  }
-                  if (activeTab === "filaments") setShowAddFilament((value) => !value);
-                  else setShowAddPrinter((value) => !value);
-                }}
               >
-                <Plus className="h-3.5 w-3.5" />
-                {translateUiText(
-                  locale,
-                  activeTab === "filaments" ? uiText("New filament") : uiText("New printer"),
-                )}
-                <ChevronDown
-                  className={`h-3.5 w-3.5 transition-transform duration-press ${(activeTab === "filaments" ? showAddFilament : showAddPrinter) ? "rotate-180" : ""}`}
-                />
+                {!syncing && <RefreshCw className="h-3.5 w-3.5" />}
+                {translateUiText(locale, "Sync Spoolman")}
               </Button>
-            </div>
+            )}
+            <Button
+              ref={newPresetButton}
+              type="button"
+              size="xs"
+              disabled={!auth.isAuthenticated || activeDenied}
+              aria-expanded={activeTab === "filaments" ? showAddFilament : showAddPrinter}
+              onClick={() => {
+                if (!auth.isAuthenticated) {
+                  auth.showAuthRequiredToast();
+                  return;
+                }
+                if (activeTab === "filaments") setShowAddFilament((value) => !value);
+                else setShowAddPrinter((value) => !value);
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              {translateUiText(
+                locale,
+                activeTab === "filaments" ? uiText("New filament") : uiText("New printer"),
+              )}
+              <ChevronDown
+                className={`h-3.5 w-3.5 transition-transform duration-press ${(activeTab === "filaments" ? showAddFilament : showAddPrinter) ? "rotate-180" : ""}`}
+              />
+            </Button>
           </div>
-
+        </div>
+        <Card className="overflow-hidden">
           {activeDenied ? null : activeTab === "filaments" ? (
             <section aria-labelledby="filament-presets-heading">
               <div className="flex items-center justify-between border-b px-5 py-3">
@@ -1066,8 +1123,8 @@ export function FilamentProfilesCard() {
                   className="py-12"
                 />
               ) : (
-                <div>
-                  <div className="divide-y">
+                <div className="grid min-w-0 md:grid-cols-[minmax(220px,27%)_minmax(0,1fr)]">
+                  <div className="divide-y divide-border border-b border-border md:border-b-0 md:border-r">
                     {filaments.map((profile) => {
                       const review = filamentReviews[profile.id];
                       const edit = filamentEdits[profile.id] ?? filamentEdit(profile);
@@ -1086,12 +1143,17 @@ export function FilamentProfilesCard() {
                               : uiText("profiles.costSummary", {
                                   cost: formatCost(profile.cost_per_kg),
                                 }),
-                            uiText("counts.usedByFiles", { count: profile.usage_count }),
+                            Number.isFinite(profile.usage_count)
+                              ? uiText("counts.usedByFiles", { count: profile.usage_count })
+                              : null,
                           ]
                             .filter(Boolean)
                             .join(" · ")}
                           onBlur={(e) => handleRowBlur(e, () => autoSaveFilament(profile))}
                           onClose={() => void autoSaveFilament(profile)}
+                          onSelect={() => setSelectedFilamentId(profile.id)}
+                          selected={profile.id === selectedFilament?.id}
+                          detailsHost={detailsHost}
                           notes={profile.notes}
                           icon={<Layers className="h-4 w-4" />}
                           editor={
@@ -1254,6 +1316,25 @@ export function FilamentProfilesCard() {
                       );
                     })}
                   </div>
+                  <aside className="min-w-0">
+                    {selectedFilament && (
+                      <ProfileSummary
+                        name={selectedFilament.name}
+                        facts={[
+                          [uiText("Material"), selectedFilament.material_type],
+                          [uiText("Brand"), selectedFilament.material_brand],
+                          [
+                            uiText("Cost per kg"),
+                            selectedFilament.cost_per_kg === null
+                              ? null
+                              : formatCost(selectedFilament.cost_per_kg),
+                          ],
+                          [uiText("Notes"), selectedFilament.notes],
+                        ]}
+                      />
+                    )}
+                    <div ref={setDetailsHost} />
+                  </aside>
                 </div>
               )}
             </section>
@@ -1356,8 +1437,8 @@ export function FilamentProfilesCard() {
                   className="py-12"
                 />
               ) : (
-                <div>
-                  <div className="divide-y">
+                <div className="grid min-w-0 md:grid-cols-[minmax(220px,27%)_minmax(0,1fr)]">
+                  <div className="divide-y divide-border border-b border-border md:border-b-0 md:border-r">
                     {printers.map((profile) => {
                       const review = printerReviews[profile.id];
                       const edit = printerEdits[profile.id] ?? printerEdit(profile);
@@ -1372,12 +1453,17 @@ export function FilamentProfilesCard() {
                               : uiText("profiles.nozzleSummary", {
                                   nozzle: formatNozzle(profile.nozzle_diameter_mm),
                                 }),
-                            uiText("counts.usedByFiles", { count: profile.usage_count }),
+                            Number.isFinite(profile.usage_count)
+                              ? uiText("counts.usedByFiles", { count: profile.usage_count })
+                              : null,
                           ]
                             .filter(Boolean)
                             .join(" · ")}
                           onBlur={(e) => handleRowBlur(e, () => autoSavePrinter(profile))}
                           onClose={() => void autoSavePrinter(profile)}
+                          onSelect={() => setSelectedPrinterId(profile.id)}
+                          selected={profile.id === selectedPrinter?.id}
+                          detailsHost={detailsHost}
                           notes={profile.notes}
                           icon={<Printer className="h-4 w-4" />}
                           editor={
@@ -1513,6 +1599,24 @@ export function FilamentProfilesCard() {
                       );
                     })}
                   </div>
+                  <aside className="min-w-0">
+                    {selectedPrinter && (
+                      <ProfileSummary
+                        name={selectedPrinter.name}
+                        facts={[
+                          [uiText("Printer model"), selectedPrinter.printer_model],
+                          [
+                            uiText("Nozzle"),
+                            selectedPrinter.nozzle_diameter_mm === null
+                              ? null
+                              : `${formatNozzle(selectedPrinter.nozzle_diameter_mm)} mm`,
+                          ],
+                          [uiText("Notes"), selectedPrinter.notes],
+                        ]}
+                      />
+                    )}
+                    <div ref={setDetailsHost} />
+                  </aside>
                 </div>
               )}
             </section>

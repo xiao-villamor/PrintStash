@@ -1,7 +1,8 @@
 /** Review states and filters stay discoverable, accurate and restorable across comparison navigation. */
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
+import { useRouter } from "@/lib/navigation";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { aCollection } from "@/test-support/factories";
@@ -12,16 +13,18 @@ import { json, renderApp, type RenderAppOptions } from "@/test-support/render";
 
 function QueueNavigation() {
   const location = useLocation();
-  const navigate = useNavigate();
+  const navigation = useRouter();
   return (
     <>
-      <output aria-label="Current queue location">{location.pathname + location.search}</output>
+      <output aria-label="Current queue location">{location.pathname + location.searchStr}</output>
       <button
-        onClick={() => navigate("/library/similar?review=rejected&confidence=80&collection=9")}
+        onClick={() =>
+          navigation.push("/library/similar?review=rejected&confidence=80&collection=9")
+        }
       >
         Open another queue
       </button>
-      <button onClick={() => navigate(-1)}>Previous queue</button>
+      <button onClick={() => navigation.back()}>Previous queue</button>
     </>
   );
 }

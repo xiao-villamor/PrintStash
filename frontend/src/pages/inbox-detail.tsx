@@ -4,7 +4,7 @@ import { uiText } from "@/lib/locale";
 import { getErrorMessage, userMessage } from "@/lib/errors";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, ExternalLink, FileBox, FolderPlus, Link2, Tags, Trash2 } from "lucide-react";
-import { useParams } from "react-router-dom";
+import { useParams } from "@tanstack/react-router";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -136,7 +136,7 @@ function statusVariant(item: InboxItem): "destructive" | "secondary" | "success"
 
 export default function InboxDetailPage({ api = defaultInboxDetailApi }: { api?: InboxDetailApi }) {
   const { locale, t } = useI18n();
-  const { id } = useParams();
+  const { id } = useParams({ strict: false });
   const inboxId = Number(id);
   const routeRef = useRef(inboxId);
   useLayoutEffect(() => {

@@ -1,5 +1,5 @@
 /** Search pages preserve authorization evidence, bounded pagination and query privacy. */
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { aModelListItem } from "@/test-support/factories";
@@ -36,13 +36,29 @@ afterEach(() => vi.unstubAllGlobals());
 describe("Search results", () => {
   it("shows an idle state for an empty search", async () => {
     const app = results({ at: "/search?parse=1" });
-    expect(screen.getAllByText("Search your library from the top bar").at(-1)).toBeVisible();
+    expect(screen.getAllByText("Search your library").at(-1)).toBeVisible();
     expect(screen.queryByText("Searching…")).toBeNull();
     await waitFor(() =>
       expect(app.requests().some((request) => request.url.includes("/status"))).toBe(true),
     );
     expect(app.requests().some((request) => request.url.startsWith("/api/v1/search?"))).toBe(false);
     expect(app.requestsWithMethod("POST")).toHaveLength(0);
+  });
+  it("submits search text from the results page", async () => {
+    const user = userEvent.setup();
+    const app = results({ at: "/search?q=bracket&mode=lexical&type=model" });
+    await screen.findByRole("link", { name: "Desk bracket" });
+    const query = screen.getByRole("textbox", { name: "Search text" });
+
+    await user.clear(query);
+    await user.type(query, "mount");
+    await user.click(screen.getByRole("button", { name: /^Search$/ }));
+
+    await waitFor(() =>
+      expect(
+        app.requests().some(({ url }) => url.includes("q=mount") && url.includes("mode=lexical")),
+      ).toBe(true),
+    );
   });
   it("runs a filter-only search", async () => {
     const app = results({ at: "/search?favorites=true" });
@@ -123,6 +139,55 @@ describe("Search results", () => {
     });
     expect(await screen.findByAltText("")).toHaveAttribute("src", "blob:search-preview");
     expect(screen.getByText("1 result shown")).toBeVisible();
+  });
+  it("returns to all result types from a narrowed search", async () => {
+    const user = userEvent.setup();
+    const app = results({ at: "/search?q=bracket&type=model" });
+    await screen.findByRole("link", { name: "Desk bracket" });
+    await user.click(screen.getByRole("button", { name: "Show all results" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Show all results" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      ),
+    );
+    expect(app.requests().some(({ url }) => url.includes("types%5B%5D=model"))).toBe(true);
+    await waitFor(() =>
+      expect(
+        app.requests().filter(({ url }) => url.startsWith("/api/v1/search?")).length,
+      ).toBeGreaterThan(1),
+    );
+  });
+  it("shows available revision and print facts on a model result", async () => {
+    results({
+      routes: {
+        "GET /api/v1/search?": json(
+          searchResponse({
+            items: [
+              aSearchResult({
+                model: aModelListItem({
+                  recommended_revision_label: "PETG revision",
+                  recommended_revision_status: "known_good",
+                  print_summary: {
+                    estimated_time_s: 3600,
+                    filament_weight_g: 45,
+                    layer_height_mm: 0.2,
+                    material_type: "PETG",
+                    slicer_name: null,
+                  },
+                }),
+              }),
+            ],
+            outcome: "results",
+          }),
+        ),
+      },
+    });
+    const card = await screen.findByRole("link", { name: "Desk bracket" });
+    expect(within(card).getByText("PETG revision")).toBeVisible();
+    expect(within(card).getByText("Known good")).toBeVisible();
+    expect(card).toHaveTextContent("45 g");
+    expect(card).toHaveTextContent("PETG");
   });
   it("preserves the selected search mode when changing sort", async () => {
     const user = userEvent.setup();

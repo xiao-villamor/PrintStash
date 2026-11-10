@@ -26,7 +26,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import LoginPage from "@/pages/login";
-import { Link, Route, Routes } from "react-router-dom";
+import { Outlet } from "@tanstack/react-router";
+import { Link } from "@/lib/link";
 import { adminSession, json, renderApp, type RenderAppOptions } from "@/test-support/render";
 import type { AuthState } from "@/lib/auth-context";
 import type { AuthProvidersRead } from "@/types";
@@ -49,7 +50,7 @@ function renderLogin(options: RenderAppOptions & { providers?: AuthProvidersRead
 }
 
 /**
- * The OIDC outcome is read from `window.location.search`, not from the router:
+ * The OIDC outcome is read from `window.location.searchStr`, not from the router:
  * the identity provider redirects the whole browser back here, so the query
  * string is the only thing carrying the result.
  */
@@ -352,15 +353,16 @@ describe("Login entry lifetime", () => {
     const user = userEvent.setup();
     renderApp(
       <>
-        <Link to="/leave">Leave entry</Link>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/leave" element={<p>Another entry</p>} />
-          <Route path="/" element={<p>Private destination</p>} />
-        </Routes>
+        <Link href="/leave">Leave entry</Link>
+        <Outlet />
       </>,
       {
         at: "/login",
+        routerRoutes: [
+          { path: "/login", element: <LoginPage /> },
+          { path: "/leave", element: <p>Another entry</p> },
+          { path: "/", element: <p>Private destination</p> },
+        ],
         auth: signedOut({ refresh: () => refresh.promise }),
         routes: { "GET /api/v1/auth/providers": json(NO_SSO) },
       },
@@ -379,15 +381,16 @@ describe("Login entry lifetime", () => {
     const user = userEvent.setup();
     renderApp(
       <>
-        <Link to="/leave">Leave entry</Link>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/leave" element={<p>Another entry</p>} />
-          <Route path="/" element={<p>Private destination</p>} />
-        </Routes>
+        <Link href="/leave">Leave entry</Link>
+        <Outlet />
       </>,
       {
         at: "/login",
+        routerRoutes: [
+          { path: "/login", element: <LoginPage /> },
+          { path: "/leave", element: <p>Another entry</p> },
+          { path: "/", element: <p>Private destination</p> },
+        ],
         auth: signedOut({
           login: (_username, _password, _remember, caller) => {
             signal = caller;

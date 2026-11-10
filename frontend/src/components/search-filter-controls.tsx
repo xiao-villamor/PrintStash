@@ -91,11 +91,7 @@ export function SearchFilterControls({
             onChange={(event) => setQuery(event.target.value)}
           />
         )}
-        {showQuery && (
-          <Button type="submit" variant="outline">
-            {t("aiSearch.applySearch")}
-          </Button>
-        )}
+        {showQuery && <Button type="submit">{t("aiSearch.applySearch")}</Button>}
         <Button
           type="button"
           variant="ghost"

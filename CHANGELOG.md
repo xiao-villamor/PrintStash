@@ -2,7 +2,14 @@
 
 ## Unreleased
 
+### Changed
+
+- The frontend adopts the OpenDesign workbench: a compact navigation rail, neutral surfaces, square controls, technical library cards, and a wider model inspector. Model facts remain beside the preview while tabs change; inspecting another G-code revision changes the displayed settings and send selection without changing the stored recommendation. Source hashes are available in Files.
+- Client navigation uses TanStack Router with the existing URLs, authentication, and Query cache. Larger loaded library grids use TanStack Virtual to limit mounted cards while retaining cursor pagination, selection, and return-position restoration.
+
 ### Added
+
+- Custom recovery pages distinguish missing content, restricted access and connection failures, with retry and return actions that match the workbench.
 
 - CTB (v2–5) and GOO (V3.0) resin slices can be uploaded as source files with embedded previews and available layer height/count, exposure, estimated print time, resin volume, printer and slicer metadata. Original printer bytes remain downloadable. Resin printing and layer/toolpath simulation are not included.
 - Collection Documents accepts spreadsheets, Word files and arbitrary binary attachments, including other resin formats, with original-byte downloads.

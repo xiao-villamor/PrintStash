@@ -5,7 +5,7 @@ import type { EditingBase } from "@/types/editing";
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Check, HardDrive, Server, ArrowRight } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link } from "@/lib/link";
 import { Button } from "@/components/ui/button";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
 import {
@@ -378,7 +378,7 @@ export function AiSearchSetup({
               <SearchIndexHealth generation={active} />
               <div className="flex flex-wrap gap-3">
                 <Button asChild>
-                  <Link to="/search?q=a%20holder%20for%20my%20tools">
+                  <Link href="/search?q=a%20holder%20for%20my%20tools">
                     {t("Try AI Search")}
                     <ArrowRight className="ml-2 h-4 w-4" aria-hidden />
                   </Link>

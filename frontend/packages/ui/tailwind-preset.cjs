@@ -56,8 +56,8 @@ module.exports = {
       borderRadius: {
         DEFAULT: "var(--radius)",
         lg: "var(--radius)",
-        md: "calc(var(--radius) - 2px)",
-        sm: "calc(var(--radius) - 0.125rem)",
+        md: "var(--radius)",
+        sm: "var(--radius)",
       },
       fontSize: {
         "2xs": "0.6875rem",

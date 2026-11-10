@@ -11,21 +11,22 @@
 
 import type { ReactNode } from "react";
 import { act, renderHook } from "@testing-library/react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
+import { TestRouter } from "@/test-support/router";
 import { describe, expect, it } from "vitest";
 
 import { useRouter } from "@/lib/navigation";
 
 function wrapper({ children }: { children: ReactNode }) {
-  return <MemoryRouter>{children}</MemoryRouter>;
+  return <TestRouter>{children}</TestRouter>;
 }
 
 function renderNavigation(initialEntries: string[], initialIndex = initialEntries.length - 1) {
   return renderHook(() => ({ router: useRouter(), location: useLocation() }), {
     wrapper: ({ children }) => (
-      <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
+      <TestRouter initialEntries={initialEntries} initialIndex={initialIndex}>
         {children}
-      </MemoryRouter>
+      </TestRouter>
     ),
   });
 }
@@ -38,8 +39,8 @@ describe("useRouter", () => {
 
     expect(result.current.location).toMatchObject({
       pathname: "/models/7",
-      search: "?tab=files",
-      hash: "#preview",
+      searchStr: "?tab=files",
+      hash: "preview",
     });
     act(() => result.current.router.back());
     expect(result.current.location.pathname).toBe("/library");
@@ -50,7 +51,7 @@ describe("useRouter", () => {
 
     act(() => result.current.router.replace("/search?q=bracket"));
 
-    expect(result.current.location).toMatchObject({ pathname: "/search", search: "?q=bracket" });
+    expect(result.current.location).toMatchObject({ pathname: "/search", searchStr: "?q=bracket" });
     act(() => result.current.router.back());
     expect(result.current.location.pathname).toBe("/earlier");
   });

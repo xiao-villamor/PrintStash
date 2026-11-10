@@ -11,7 +11,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useLocation } from "react-router-dom";
+import { useLocation } from "@tanstack/react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ModelCard } from "@/components/model-card";
@@ -369,5 +369,17 @@ describe("similarity badge", () => {
   it("omits an empty candidate badge", () => {
     renderCard({ similarity: { open_candidates: 0, confirmed: 2 } });
     expect(screen.queryByText(/similar to review/)).not.toBeInTheDocument();
+  });
+});
+
+describe("OpenDesign Model card facts", () => {
+  it("labels an absent revision status without claiming G-code is absent", () => {
+    renderCard({ recommended_revision_status: null, recommended_revision_label: null });
+    expect(screen.getByText("No revision status")).toBeVisible();
+  });
+  it("keeps a long tag accessible on its card", () => {
+    const tag = "An intentionally long library tag that exceeds a narrow card";
+    renderCard({ tags: [tag] });
+    expect(screen.getByText(tag)).toBeInTheDocument();
   });
 });

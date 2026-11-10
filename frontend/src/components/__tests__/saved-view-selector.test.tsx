@@ -19,6 +19,8 @@ import userEvent from "@testing-library/user-event";
 import { SavedViewSelector } from "@/components/saved-view-selector";
 import type { ComponentProps } from "react";
 import type { SavedViewRead } from "@/types";
+import { useNavigationShell } from "@/lib/navigation-shell";
+import { NavigationShellProvider } from "@/lib/navigation-shell-provider";
 
 type SelectorProps = ComponentProps<typeof SavedViewSelector>;
 
@@ -44,7 +46,32 @@ function handlerSpies() {
   };
 }
 
+function RailRequest() {
+  const { requestSavedViews } = useNavigationShell();
+  return <button onClick={requestSavedViews}>Open saved views from rail</button>;
+}
+
 describe("SavedViewSelector", () => {
+  it("opens the existing selector when the rail requests saved views", async () => {
+    const user = userEvent.setup();
+    render(
+      <NavigationShellProvider>
+        <RailRequest />
+        <SavedViewSelector
+          railTrigger
+          views={[view(1, "Workshop")]}
+          activeId={null}
+          {...handlerSpies()}
+        />
+      </NavigationShellProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open saved views from rail" }));
+
+    expect(await screen.findByRole("dialog", { name: "Saved views" })).toBeVisible();
+    expect(screen.getByText("Workshop")).toBeVisible();
+  });
+
   it("names its dialog independently of the active view", async () => {
     const user = userEvent.setup();
     render(<SavedViewSelector views={[view(1, "Workshop")]} activeId={1} {...handlerSpies()} />);
