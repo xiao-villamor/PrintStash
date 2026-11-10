@@ -203,7 +203,7 @@ describe("CollectionReadme", () => {
   });
 
   describe("writing one", () => {
-    it("focuses the compact editor and saves with Control+Enter", async () => {
+    it("saves a compact description with Control+Enter", async () => {
       const user = userEvent.setup();
       const app = renderApp(
         <CollectionReadme collectionId={5} canEdit hasReadme={false} compact />,

@@ -107,7 +107,7 @@ export function CollectionTitleEditor({
           hidden={open}
           className="shrink-0 text-muted-foreground"
           aria-label={uiText("Rename {value1}", { value1: title })}
-          title={`${uiText("Rename")} (F2)`}
+          title={uiText("Rename (F2)")}
           onClick={onOpen}
         >
           <Pencil className="h-4 w-4" aria-hidden />

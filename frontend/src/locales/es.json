@@ -5119,5 +5119,6 @@
   "library.header.itemsHere": {
     "one": "{count} elemento aquí",
     "other": "{count} elementos aquí"
-  }
+  },
+  "Rename (F2)": "Renombrar (F2)"
 }

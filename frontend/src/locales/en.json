@@ -5119,5 +5119,6 @@
   "library.header.itemsHere": {
     "one": "{count} item here",
     "other": "{count} items here"
-  }
+  },
+  "Rename (F2)": "Rename (F2)"
 }
