@@ -23,3 +23,4 @@ only-include = []
 [tool.hatch.build.targets.wheel.force-include]
 "../../scripts/printstash_orca_plugin.py" = "printstash_orca_plugin.py"
 "../../scripts/printstash_orca_push.py" = "printstash_orca_push.py"
+"../../LICENSE" = "printstash_orca_plugin.LICENSE"

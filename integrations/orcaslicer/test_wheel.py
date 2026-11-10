@@ -43,6 +43,10 @@ class TestWheel(unittest.TestCase):
             metadata = archive.read(records[0].replace("RECORD", "METADATA")).decode()
             self.assertNotIn("Requires-Dist:", metadata)
             self.assertIn("Name: printstash-orca-plugin", metadata)
+            self.assertIn(
+                b"GNU AFFERO GENERAL PUBLIC LICENSE",
+                archive.read("printstash_orca_plugin.LICENSE"),
+            )
 
     def test_imports_entry_from_wheel(self):
         host = ModuleType("orca")
