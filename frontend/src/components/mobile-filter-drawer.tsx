@@ -55,21 +55,29 @@ export function MobileFilterDrawer({ open, onClose, ...filterProps }: MobileFilt
       open={open}
       onClose={onClose}
       side="left"
-      ariaLabel={uiText("Filters")}
+      ariaLabel={uiText("Collections")}
       containerClassName="md:hidden"
-      className="w-[280px] max-w-[85vw] bg-background shadow-xl"
+      className="bottom-[calc(64px+env(safe-area-inset-bottom))] flex w-64 max-w-[calc(100vw-32px)] flex-col border-r border-border bg-sidebar"
     >
-      <div className="flex items-center justify-between p-4 border-b border-border">
-        <h3 className="text-[18px] font-semibold text-foreground">{uiText("Filters")}</h3>
+      <div className="flex h-12 shrink-0 items-center justify-between pl-4 pr-2">
+        <h3 className="font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
+          {uiText("Collections")}
+        </h3>
         <button
           onClick={onClose}
-          className="text-muted-foreground hover:text-foreground p-1 rounded-full hover:bg-muted transition-colors"
+          aria-label={uiText("Close")}
+          className="flex h-7 w-7 items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <X className="h-5 w-5" />
         </button>
       </div>
-      <div className="overflow-y-auto" style={{ height: "calc(100dvh - 60px)" }}>
-        <FilterSidebarContent {...filterProps} readinessEnabled={open} />
+      <div id="mobile-collections-pane" className="min-h-0 flex-1 overflow-y-auto">
+        <FilterSidebarContent
+          {...filterProps}
+          collectionsOnly
+          filtersOpen={false}
+          readinessEnabled={open}
+        />
       </div>
     </Drawer>
   );

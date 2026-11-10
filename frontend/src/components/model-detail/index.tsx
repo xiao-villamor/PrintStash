@@ -89,8 +89,8 @@ const STLViewer = lazy(() =>
   import("@/components/stl-viewer").then((m) => ({ default: m.STLViewer })),
 );
 
-const GcodeViewer = lazy(() =>
-  import("@/components/gcode-viewer").then((m) => ({ default: m.GcodeViewer })),
+const GcodePreview = lazy(() =>
+  import("./gcode-preview").then((m) => ({ default: m.GcodePreview })),
 );
 
 const ViewerFallback = <Loader2 className="h-8 w-8 animate-spin text-on-surface-variant" />;
@@ -291,6 +291,11 @@ function ModelDetailPresentation({
   const [historyDraft, setHistoryDraft] = useState<{
     fileId: number;
     state: "completed" | "failed";
+  } | null>(null);
+  const [toolpathSource, setToolpathSource] = useState<{
+    modelId: number;
+    revisionId: number | null;
+    fileId: number;
   } | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -639,6 +644,25 @@ function ModelDetailPresentation({
       f.file_type === "step",
   );
   const hasGcode = gcodeFiles.length > 0;
+  const hasToolpathPreview = hasGcode || sourceFiles.some((file) => file.file_type === "3mf");
+  const previewSourceId =
+    toolpathSource?.modelId === model.id &&
+    toolpathSource.revisionId === (inspectedGcode?.id ?? null)
+      ? toolpathSource.fileId
+      : inspectedGcode?.id;
+  const previewSource =
+    sortedFiles.find((file) => file.id === previewSourceId) ??
+    inspectedGcode ??
+    sourceFiles.find((file) => file.file_type === "3mf");
+  function selectToolpathSource(fileId: number) {
+    const file = sortedFiles.find((source) => source.id === fileId);
+    if (file?.file_type === "gcode") {
+      setRevisionSelection({ modelId: model.id, fileId });
+      setToolpathSource(null);
+    } else if (file?.file_type === "3mf") {
+      setToolpathSource({ modelId: model.id, revisionId: inspectedGcode?.id ?? null, fileId });
+    }
+  }
   const filePlates = useFilePlates(model.id, meshFile?.file_type === "3mf" ? meshFile.id : null);
   // A single plate is the whole build; only a multi-plate project offers a choice.
   const plates = filePlates !== null && filePlates.plates.length > 1 ? filePlates.plates : [];
@@ -1121,15 +1145,19 @@ function ModelDetailPresentation({
               className={`model-detail-preview relative min-h-80 overflow-hidden border border-outline-variant bg-surface-container-low ${pickerShown ? "pb-20" : ""}`}
             >
               <div className="detail-preview-canvas relative flex min-h-80 w-full items-center justify-center md:min-h-0">
-                {viewerMode === "gcode" && inspectedGcode ? (
+                {viewerMode === "gcode" && hasToolpathPreview ? (
                   <Suspense fallback={ViewerFallback}>
-                    <GcodeViewer
-                      url={`/api/v1/files/${inspectedGcode.id}/toolpath`}
-                      printerBedMm={getBedSize(meta?.printer_model)}
-                      screenshotName={model.slug || model.name}
-                      showGrid={showGrid}
-                      showDimensions={showDimensions}
-                      onControlsReady={connectToolpathControls}
+                    <GcodePreview
+                      files={sortedFiles}
+                      bedSizeFor={(file) => getBedSize(file.metadata?.printer_model)}
+                      selectedFileId={previewSource?.id}
+                      onSelectFile={selectToolpathSource}
+                      viewerProps={{
+                        screenshotName: model.slug || model.name,
+                        showGrid,
+                        showDimensions,
+                        onControlsReady: connectToolpathControls,
+                      }}
                     />
                   </Suspense>
                 ) : meshFile ? (
@@ -1202,7 +1230,7 @@ function ModelDetailPresentation({
                   }
                 />
               )}
-              {(meshFile || hasGcode) && (
+              {(meshFile || hasToolpathPreview) && (
                 <div className="contents">
                   <ViewerToolbar
                     displayMode={displayMode}
@@ -1212,11 +1240,11 @@ function ModelDetailPresentation({
                     controls={viewerMode === "gcode" ? toolpathControls : viewerControls}
                     viewerMode={viewerMode}
                     setViewerMode={setViewerMode}
-                    hasGcode={hasGcode}
+                    hasGcode={hasToolpathPreview}
                     viewerReady={viewerMode === "gcode" ? toolpathReady : viewerReady}
                     filename={
                       viewerMode === "gcode"
-                        ? inspectedGcode?.original_filename
+                        ? previewSource?.original_filename
                         : shownPlate && meshFile
                           ? `${meshFile.original_filename} · ${uiText("Plate {value1}", { value1: plateLabel(shownPlate) })}`
                           : meshFile?.original_filename
@@ -1499,7 +1527,7 @@ function ModelDetailPresentation({
                     <div className="flex items-center gap-1.5 px-2 py-1 bg-surface-container-lowest border border-outline-variant rounded">
                       <Wifi className="h-3 w-3 text-on-surface-variant" />
                       <span className="font-mono text-xs text-on-surface-variant">
-                        {uiText("No G-code file")}
+                        {uiText("No G-code revision")}
                       </span>
                     </div>
                   </div>

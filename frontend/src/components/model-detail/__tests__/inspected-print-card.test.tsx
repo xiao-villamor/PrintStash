@@ -76,4 +76,12 @@ describe("InspectedPrintCard", () => {
     expect(screen.queryByRole("button", { name: "Send to printer" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Successful" })).not.toBeInTheDocument();
   });
+  it("explains that a separate G-code revision is missing", () => {
+    show({ file: null, revisionCount: 0, canEdit: false });
+    expect(
+      screen.getByText(
+        "No G-code revision yet. Add a revision to capture the settings that worked.",
+      ),
+    ).toBeVisible();
+  });
 });

@@ -352,7 +352,9 @@ test.describe("settings route", () => {
   test("background work cancels a queue only after confirmation", async ({ page }) => {
     await page.goto("/settings?section=work");
 
-    await expect(page.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
     await expect(
       page.getByText("Preview or metadata failures across the library: 1", { exact: false }),
     ).toBeVisible();
@@ -380,7 +382,9 @@ test.describe("settings route", () => {
   test("background work leads a new user to a model's preview status", async ({ page }) => {
     await page.goto("/settings?section=work", { waitUntil: "networkidle" });
 
-    await expect(page.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
     await expect(page.getByRole("heading", { name: "In progress" })).toBeVisible();
     await expect(page.getByText("Preview of skadis kitchen roll screw")).toBeVisible();
     await expect(
@@ -428,7 +432,9 @@ test.describe("settings route", () => {
     const selected = page.getByRole("tab", { name: "Background work" });
     await expect(selected).toHaveAttribute("aria-selected", "true");
     await expect(selected).toBeInViewport();
-    await expect(page.getByRole("heading", { name: "What's happening now" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Preview and metadata processing" }),
+    ).toBeVisible();
     await expect(page).toHaveURL(/\/settings\?section=work$/);
   });
 });

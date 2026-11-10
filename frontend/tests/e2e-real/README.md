@@ -99,6 +99,11 @@ Requires the backend dev venv (`backend/.venv`); falls back to `uv run`.
 
 ## Coverage
 
+`library-inspector.spec.ts` uploads a real G-code Model, selects a loopback printer
+emulator, records a failed outcome through the inline inspector's revision shortcut
+and Mod+Enter note action, verifies the exact persisted record, then reloads the
+Library and checks its history. The flow removes its Model and printer afterward.
+
 Dropdown placement covers Statistics customization at phone width, an open-menu
 resize, a short viewport, and member Model actions. Checkbox choices survive a
 reload; Escape returns focus to the Model action trigger.
@@ -231,3 +236,5 @@ sends no further setup probe.
 
 - `resin.spec.ts`: CTB/GOO source upload, persisted print metadata, rendered embedded preview, original-byte download.
 - `documents.spec.ts`: collection spreadsheets and binary resin attachments remain downloadable with their original filenames and bytes.
+
+- `gcode-plates.spec.ts`: upload sliced 3MF exports with or without meshes, then switch between distinct plate toolpaths in the real viewer.

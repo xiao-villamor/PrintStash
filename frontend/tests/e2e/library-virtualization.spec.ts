@@ -469,9 +469,12 @@ test.describe("Loaded Library surfaces", () => {
     await page
       .getByRole("button", { name: "Edit tags for Persistent multipart", exact: true })
       .click();
-    const dialog = page.getByRole("dialog", { name: "Tags · Persistent multipart", exact: true });
-    await dialog.getByLabel("Tags to add", { exact: true }).fill("Resize draft");
-    await dialog.getByLabel("Tags to add", { exact: true }).press("Enter");
+    const dialog = page.getByRole("dialog", {
+      name: "Edit tags — Persistent multipart",
+      exact: true,
+    });
+    await dialog.getByLabel("Find or create tag", { exact: true }).fill("Resize draft");
+    await dialog.getByLabel("Find or create tag", { exact: true }).press("Enter");
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Resize draft", exact: true })).toBeVisible();

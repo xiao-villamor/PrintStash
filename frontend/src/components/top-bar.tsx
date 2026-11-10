@@ -26,6 +26,7 @@ import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { useMediaQuery } from "@/lib/use-media-query";
+import { useMobileFilterDrawer } from "@/lib/mobile-filter-context";
 import {
   clearCompletedTasks,
   listTasks,
@@ -74,6 +75,7 @@ export function TopBar() {
       ? "settings.trash"
       : pageTitle(pathname);
   const desktop = useMediaQuery("(min-width: 768px)");
+  const mobileCollections = useMobileFilterDrawer();
   const router = useRouter();
   const { user } = useAuth();
   const startup = useLibraryStartup();
@@ -223,10 +225,16 @@ export function TopBar() {
           type="button"
           aria-label={uiText("Toggle sidebar")}
           title={uiText("Toggle sidebar")}
-          aria-controls="collections-pane"
-          aria-expanded={pane.open}
-          onClick={pane.toggle}
-          className={`hidden h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:flex ${pane.open ? "bg-muted text-foreground" : ""}`}
+          aria-controls={desktop ? "collections-pane" : "mobile-collections-pane"}
+          aria-expanded={desktop ? pane.open : mobileCollections.open}
+          onClick={
+            desktop
+              ? pane.toggle
+              : mobileCollections.open
+                ? mobileCollections.closeDrawer
+                : mobileCollections.openDrawer
+          }
+          className={`${pathname === "/" ? "flex" : "hidden md:flex"} h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${(desktop ? pane.open : mobileCollections.open) ? "bg-muted text-foreground" : ""}`}
         >
           <PanelLeft className="h-4 w-4" aria-hidden />
         </button>

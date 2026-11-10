@@ -55,7 +55,7 @@ export function InspectedPrintCard({
       <section className="detail-overview">
         <h2>{uiText("No G-code revision yet")}</h2>
         <p className="my-4 text-sm text-muted-foreground">
-          {uiText("No sliced G-code yet. Add a revision to capture the settings that worked.")}
+          {uiText("No G-code revision yet. Add a revision to capture the settings that worked.")}
         </p>
         {canEdit && <Button onClick={onAddRevision}>{uiText("Add revision")}</Button>}
       </section>

@@ -843,7 +843,7 @@ describe("ModelBrowser", () => {
       expect(screen.getAllByText("1 selected").length).toBeGreaterThan(0);
 
       await user.click(
-        within(screen.getByRole("complementary")).getByRole("button", {
+        within(screen.getByRole("complementary")).getByRole("treeitem", {
           name: "Parts",
         }),
       );
@@ -980,7 +980,8 @@ describe("ModelBrowser", () => {
       expect(whole).toEqual([]);
     });
 
-    it("labels a model card with its folder's names", async () => {
+    it("shows server-provided folder identity in the list", async () => {
+      localStorage.setItem("ps-vault-view", "list");
       renderVault({
         models: [
           aModelListItem({
@@ -992,8 +993,8 @@ describe("ModelBrowser", () => {
         ],
       });
 
-      // The chip shows the folder's own name and carries its full path.
-      expect(await screen.findByTitle("Parts/Brackets")).toHaveTextContent("Brackets");
+      const row = await within(screen.getByRole("main")).findByRole("link", { name: /Benchy/ });
+      expect(within(row).getByText("Parts/Brackets")).toBeVisible();
     });
   });
 
@@ -1036,7 +1037,7 @@ describe("ModelBrowser", () => {
         collections: PARTS_TREE,
         routes: { "GET /api/v1/models/facets": () => pending.promise },
       });
-      const folder = await screen.findByRole("button", { name: /^Parts$/ });
+      const folder = await screen.findByRole("treeitem", { name: /^Parts$/ });
       expect(app.requests().some((request) => request.url.includes("/models/facets"))).toBe(true);
 
       await act(async () => pending.resolve(json(EMPTY_FACETS)));
@@ -1651,16 +1652,16 @@ describe("ModelBrowser", () => {
       renderVault({ at: "/?v=multipart", multipartModels: [aMultipartSet()] });
 
       expect(await screen.findByRole("heading", { name: "All Models" })).toBeInTheDocument();
-      expect(screen.getByRole("tab", { name: "Models" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("group", { name: "Library tools" })).toBeVisible();
       expect(screen.getAllByRole("button", { name: "Multipart sets only" })[0]).toHaveAttribute(
         "aria-pressed",
         "true",
       );
-      await openFilters();
-      expect(screen.getByText("Printer")).toBeInTheDocument();
       expect(screen.getAllByRole("button", { name: "Upload" })).not.toHaveLength(0);
       await waitForLibraryActions();
       expect(screen.getAllByRole("button", { name: "New multipart set" })).not.toHaveLength(0);
+      await openFilters();
+      expect(screen.getByText("Printer")).toBeInTheDocument();
     });
   });
 
@@ -3540,10 +3541,14 @@ describe("ModelBrowser", () => {
       await user.click(
         screen.getByRole("button", { name: "Remove Favorite bracket from favorites" }),
       );
-      expect(screen.getByText("Favorite bracket")).toBeVisible();
+      expect(within(screen.getByRole("main")).getByText("Favorite bracket")).toBeVisible();
       pending.resolve(json({ model_id: 1, starred: false }));
 
-      await waitFor(() => expect(screen.queryByText("Favorite bracket")).not.toBeInTheDocument());
+      await waitFor(() =>
+        expect(
+          within(screen.getByRole("main")).queryByText("Favorite bracket"),
+        ).not.toBeInTheDocument(),
+      );
     });
 
     it("offers more when the page reports a cursor", async () => {

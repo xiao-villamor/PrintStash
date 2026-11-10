@@ -24,6 +24,7 @@ from app.core.native_settings import settings
 from app.modules.storage.storage_backend.contracts import StorageBackend
 
 _PLATE_PATH = re.compile(r"^Metadata/plate_[0-9]+\.gcode$")
+MAX_GCODE_PLATES = 64
 _ZIP_EOCD = b"PK\x05\x06"
 _ZIP64_EOCD_LOCATOR = b"PK\x06\x07"
 _ZIP64_EOCD = b"PK\x06\x06"
@@ -166,16 +167,20 @@ def _safe_member_name(name: str) -> bool:
     )
 
 
-def _select_member(
-    infos: list[zipfile.ZipInfo], plate_index: int | None
-) -> zipfile.ZipInfo:
-    safe_infos = [
+def _plate_members(infos: list[zipfile.ZipInfo]) -> list[zipfile.ZipInfo]:
+    return [
         info
         for info in infos
         if not info.is_dir()
         and _safe_member_name(info.filename)
         and _PLATE_PATH.fullmatch(info.filename)
     ]
+
+
+def _select_member(
+    infos: list[zipfile.ZipInfo], plate_index: int | None
+) -> zipfile.ZipInfo:
+    safe_infos = _plate_members(infos)
     if plate_index is not None:
         wanted = f"Metadata/plate_{plate_index}.gcode"
         matches = [info for info in safe_infos if info.filename == wanted]
@@ -186,6 +191,75 @@ def _select_member(
     if len(matches) != 1:
         raise EmbeddedGcodeError("embedded_gcode_ambiguous")
     return matches[0]
+
+
+@contextmanager
+def _open_archive(
+    archive_path: Path, *, archive_cap: int, entry_cap: int, central_cap: int
+) -> Iterator[zipfile.ZipFile]:
+    """Validate ZIP metadata before listing or reading a member."""
+    if min(archive_cap, entry_cap, central_cap) <= 0:
+        raise ValueError("embedded_gcode_limits_invalid")
+    try:
+        archive_size = archive_path.stat().st_size
+        if archive_size > archive_cap:
+            raise EmbeddedGcodeError("embedded_gcode_archive_too_large")
+        _zip_footer_limits(
+            archive_path,
+            archive_size,
+            max_entries=entry_cap,
+            max_central_directory_bytes=central_cap,
+        )
+        with zipfile.ZipFile(archive_path, "r") as archive:
+            if getattr(archive, "size_cd", 0) > central_cap:
+                raise EmbeddedGcodeError("embedded_gcode_central_directory_too_large")
+            if len(archive.infolist()) > entry_cap:
+                raise EmbeddedGcodeError("embedded_gcode_too_many_entries")
+            yield archive
+    except EmbeddedGcodeError, FileNotFoundError:
+        raise
+    except (
+        EOFError,
+        OSError,
+        RuntimeError,
+        NotImplementedError,
+        ValueError,
+        zlib.error,
+        zipfile.BadZipFile,
+    ) as exc:
+        raise EmbeddedGcodeError("embedded_gcode_malformed") from exc
+
+
+def list_embedded_gcode_plates(archive_path: Path) -> tuple[int, ...]:
+    """List actual sliced plates without decompressing toolpaths or requiring meshes.
+
+    Gaps are valid (only some plates were sliced). Duplicate names are ambiguous;
+    noncanonical numbers cannot be addressed by the plate_index API and are ignored.
+    """
+    with (
+        preview_capacity(),
+        _open_archive(
+            archive_path,
+            archive_cap=settings.three_mf_preview_max_archive_mb * 1024 * 1024,
+            entry_cap=settings.three_mf_preview_max_entries,
+            central_cap=settings.three_mf_preview_max_central_directory_mb
+            * 1024
+            * 1024,
+        ) as archive,
+    ):
+        numbers: set[int] = set()
+        for member in _plate_members(archive.infolist()):
+            number = int(
+                member.filename.removeprefix("Metadata/plate_").removesuffix(".gcode")
+            )
+            if member.filename != f"Metadata/plate_{number}.gcode":
+                continue
+            if number in numbers:
+                raise EmbeddedGcodeError("embedded_gcode_ambiguous")
+            numbers.add(number)
+            if len(numbers) > MAX_GCODE_PLATES:
+                raise EmbeddedGcodeError("embedded_gcode_too_many_plates")
+        return tuple(sorted(numbers))
 
 
 def extract_embedded_gcode(
@@ -242,63 +316,38 @@ def extract_embedded_gcode(
     ):
         raise ValueError("embedded_gcode_limits_invalid")
 
-    try:
-        archive_size = archive_path.stat().st_size
-        if archive_size > archive_cap:
-            raise EmbeddedGcodeError("embedded_gcode_archive_too_large")
-        _zip_footer_limits(
-            archive_path,
-            archive_size,
-            max_entries=entry_cap,
-            max_central_directory_bytes=central_cap,
+    with _open_archive(
+        archive_path,
+        archive_cap=archive_cap,
+        entry_cap=entry_cap,
+        central_cap=central_cap,
+    ) as archive:
+        member = _select_member(archive.infolist(), plate_index)
+        if member.file_size > cap:
+            raise EmbeddedGcodeError("embedded_gcode_too_large")
+        if member.file_size and (
+            member.compress_size == 0
+            or member.file_size / member.compress_size > ratio_limit
+        ):
+            raise EmbeddedGcodeError("embedded_gcode_bomb")
+        try:
+            with archive.open(member, "r") as source:
+                content = source.read(cap + 1)
+        except (
+            EOFError,
+            OSError,
+            RuntimeError,
+            NotImplementedError,
+            ValueError,
+            zlib.error,
+            zipfile.BadZipFile,
+        ) as exc:
+            raise EmbeddedGcodeError("embedded_gcode_malformed") from exc
+        if len(content) > cap:
+            raise EmbeddedGcodeError("embedded_gcode_too_large")
+        return EmbeddedGcode(
+            filename=member.filename.rsplit("/", 1)[-1], content=content
         )
-        with zipfile.ZipFile(archive_path, "r") as archive:
-            if getattr(archive, "size_cd", 0) > central_cap:
-                raise EmbeddedGcodeError("embedded_gcode_central_directory_too_large")
-            infos = archive.infolist()
-            if len(infos) > entry_cap:
-                raise EmbeddedGcodeError("embedded_gcode_too_many_entries")
-            member = _select_member(infos, plate_index)
-            if member.file_size > cap:
-                raise EmbeddedGcodeError("embedded_gcode_too_large")
-            if member.file_size and (
-                member.compress_size == 0
-                or member.file_size / member.compress_size > ratio_limit
-            ):
-                raise EmbeddedGcodeError("embedded_gcode_bomb")
-            try:
-                with archive.open(member, "r") as source:
-                    content = source.read(cap + 1)
-            except (
-                EOFError,
-                OSError,
-                RuntimeError,
-                NotImplementedError,
-                ValueError,
-                zlib.error,
-                zipfile.BadZipFile,
-            ) as exc:
-                raise EmbeddedGcodeError("embedded_gcode_malformed") from exc
-            if len(content) > cap:
-                raise EmbeddedGcodeError("embedded_gcode_too_large")
-            return EmbeddedGcode(
-                filename=member.filename.rsplit("/", 1)[-1], content=content
-            )
-    except EmbeddedGcodeError:
-        raise
-    except FileNotFoundError:
-        # Preserve the storage seam's missing-blob signal for the API's 410.
-        raise
-    except (
-        EOFError,
-        OSError,
-        RuntimeError,
-        NotImplementedError,
-        ValueError,
-        zlib.error,
-        zipfile.BadZipFile,
-    ) as exc:
-        raise EmbeddedGcodeError("embedded_gcode_malformed") from exc
 
 
 def read_embedded_gcode(

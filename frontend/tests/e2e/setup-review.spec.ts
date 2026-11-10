@@ -78,7 +78,7 @@ test.describe("first-run setup review", () => {
       await page.goto("/setup");
       await page.getByLabel("Username").fill("studio");
       await page.getByLabel("Password", { exact: true }).fill("example-password-123");
-      await page.getByLabel("Confirm password").fill("example-password-123");
+      await page.getByLabel("Confirm password", { exact: true }).fill("example-password-123");
       await page.getByRole("button", { name: "Continue" }).click();
       await page.getByRole("button", { name: "Check storage" }).click();
       await expect(page.getByText("Storage ready")).toBeVisible();

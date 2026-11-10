@@ -6443,6 +6443,23 @@
         "title": "GcApprovalRequest",
         "type": "object"
       },
+      "GcodePlatesRead": {
+        "description": "Numbers of the sliced plates actually present in a 3MF archive.",
+        "properties": {
+          "plates": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Plates",
+            "type": "array"
+          }
+        },
+        "required": [
+          "plates"
+        ],
+        "title": "GcodePlatesRead",
+        "type": "object"
+      },
       "GenerationAction": {
         "additionalProperties": false,
         "properties": {
@@ -28880,6 +28897,54 @@
           }
         ],
         "summary": "Serve a Bambu 3MF's embedded G-code preview",
+        "tags": [
+          "files"
+        ]
+      }
+    },
+    "/api/v1/files/{file_id}/gcode-plates": {
+      "get": {
+        "description": "Lists up to 64 actual Metadata/plate_<N>.gcode members in numeric order. No mesh or slicer layout metadata is required; an unsliced project returns an empty list. Archive metadata and transfer limits apply.",
+        "operationId": "gcode_plates_api_v1_files__file_id__gcode_plates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "file_id",
+            "required": true,
+            "schema": {
+              "title": "File Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GcodePlatesRead"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "List sliced plates in a 3MF archive",
         "tags": [
           "files"
         ]
