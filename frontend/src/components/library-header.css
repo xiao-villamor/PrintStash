@@ -63,6 +63,7 @@
   font-weight: 500;
 }
 .collection-header-tag-input {
+  box-sizing: content-box;
   height: 26px;
   display: inline-flex;
   gap: 4px;
@@ -254,4 +255,37 @@
   .library-collection-title > button:focus-visible {
     opacity: 1;
   }
+}
+
+.collection-header-tag-input:focus-within {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+.collection-header-tag-input > input,
+.collection-header-tag-input > input:focus-visible {
+  height: auto;
+  outline: none;
+  box-shadow: none;
+  line-height: 1.4;
+}
+.collection-tag-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.collection-description-empty {
+  display: block;
+  border: 0;
+  background: transparent;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  font-weight: 400;
+  color: var(--secondary);
+}
+
+.library-meta-part + .library-meta-part::before {
+  content: "·";
+  margin-right: 8px;
 }

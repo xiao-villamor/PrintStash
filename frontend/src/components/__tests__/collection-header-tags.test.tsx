@@ -14,7 +14,8 @@ function mount(tags = ["functional"], canEdit = true) {
   return save;
 }
 async function draft(value: string) {
-  await userEvent.click(screen.getByRole("button", { name: "+ Add tag" }));
+  const opener = screen.queryByRole("button", { name: "+ Add tag" });
+  if (opener) await userEvent.click(opener);
   await userEvent.type(screen.getByRole("textbox", { name: "New tag" }), value);
 }
 
@@ -31,7 +32,10 @@ describe("CollectionHeaderTags", () => {
     await draft(" FUNCTIONAL ");
     await userEvent.keyboard("{Enter}");
     expect(save).not.toHaveBeenCalled();
-    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.getByRole("textbox")).toHaveValue(" FUNCTIONAL ");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "#functional is already on this collection.",
+    );
   });
   it("cancels an inline draft with Escape", async () => {
     const save = mount();
@@ -91,5 +95,78 @@ describe("CollectionHeaderTags", () => {
     await draft("garden");
     await userEvent.keyboard("{Enter}");
     expect(save).toHaveBeenLastCalledWith(["functional", "outdoor", "garden"]);
+  });
+  it("normalizes a tag submitted with comma", async () => {
+    const save = mount();
+    await draft("#Diseño 3D,");
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(""));
+    expect(save).toHaveBeenCalledWith(["functional", "diseño-3d"]);
+    expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+  it("keeps an empty submission available for correction", async () => {
+    const save = mount();
+    await userEvent.click(screen.getByRole("button", { name: "+ Add tag" }));
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getByRole("alert")).toHaveTextContent("Type a tag name first.");
+    expect(save).not.toHaveBeenCalled();
+  });
+  it("retains an unsaved tag when focus leaves", async () => {
+    const save = mount();
+    await draft("outdoor");
+    await userEvent.tab();
+    expect(screen.getByRole("textbox")).toHaveValue("outdoor");
+    expect(screen.getByRole("textbox")).not.toHaveFocus();
+    expect(save).not.toHaveBeenCalled();
+  });
+  it("closes an empty field without stealing the next control's focus", async () => {
+    mount();
+    await userEvent.click(screen.getByRole("button", { name: "+ Add tag" }));
+    const next = document.createElement("button");
+    document.body.append(next);
+    try {
+      await userEvent.click(next);
+      expect(screen.queryByRole("textbox")).toBeNull();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      expect(next).toHaveFocus();
+    } finally {
+      next.remove();
+    }
+  });
+  it("removes the last tag with Backspace on an empty field", async () => {
+    const save = mount(["functional", "outdoor"]);
+    await userEvent.click(screen.getByRole("button", { name: "+ Add tag" }));
+    await userEvent.keyboard("{Backspace}");
+    expect(save).toHaveBeenCalledWith(["functional"]);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Remove tag outdoor" })).toBeNull(),
+    );
+    expect(screen.getByRole("textbox")).toHaveFocus();
+  });
+  it("keeps composition Enter out of tag submission", async () => {
+    const save = mount();
+    await draft("庭");
+    const input = screen.getByRole("textbox");
+    fireEvent.compositionStart(input);
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.submit(input.closest("form")!);
+    expect(save).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(input);
+    await userEvent.keyboard("{Enter}");
+    expect(save).toHaveBeenCalledWith(["functional", "庭"]);
+  });
+  it("bounds the tag draft to the prototype's 32 characters", async () => {
+    mount();
+    await draft("a".repeat(33));
+    expect(screen.getByRole("textbox")).toHaveValue("a".repeat(32));
+  });
+  it("closes an empty validation error on blur", async () => {
+    const save = mount();
+    await userEvent.click(screen.getByRole("button", { name: "+ Add tag" }));
+    await userEvent.keyboard("{Enter}");
+    expect(screen.getByRole("alert")).toBeVisible();
+    await userEvent.tab();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(save).not.toHaveBeenCalled();
   });
 });

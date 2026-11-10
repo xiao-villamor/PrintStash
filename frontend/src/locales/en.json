@@ -5120,5 +5120,9 @@
     "one": "{count} item here",
     "other": "{count} items here"
   },
-  "Rename (F2)": "Rename (F2)"
+  "Rename (F2)": "Rename (F2)",
+  "Type a tag name first.": "Type a tag name first.",
+  "#{value1} is already on this collection.": "#{value1} is already on this collection.",
+  "tag name": "tag name",
+  "Enter to add · Esc to cancel · Backspace on empty removes the last tag": "Enter to add · Esc to cancel · Backspace on empty removes the last tag"
 }

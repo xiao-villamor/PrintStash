@@ -3083,14 +3083,13 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 )}
                 <div className="library-collection-meta flex flex-wrap items-center">
                   {displayedCollection && displayedCollection.child_count > 0 && (
-                    <span>
+                    <span className="library-meta-part">
                       {uiText("library.header.collections", {
                         count: displayedCollection.child_count,
-                      })}{" "}
-                      ·
+                      })}
                     </span>
                   )}
-                  <p className="text-sm text-muted-foreground">
+                  <p className="library-meta-part text-sm text-muted-foreground">
                     {unavailableCollection
                       ? uiText("library.collectionUnavailableHelp")
                       : favoritesOnly
@@ -3114,8 +3113,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     )}
                   </p>
                   {displayedCollection && (
-                    <span>
-                      · {uiText("{count} in total", { count: displayedCollection.model_count })}
+                    <span className="library-meta-part">
+                      {uiText("{count} in total", { count: displayedCollection.model_count })}
                     </span>
                   )}
                   {displayedCollection && (

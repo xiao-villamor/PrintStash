@@ -257,9 +257,13 @@ export function CollectionReadme({
           size="xs"
           onClick={startEdit}
           disabled={disabled}
-          className="h-auto min-h-8 max-w-full justify-start whitespace-normal text-left text-muted-foreground"
+          className={
+            compact
+              ? "collection-description-empty max-w-full justify-start whitespace-normal text-left"
+              : "h-auto min-h-8 max-w-full justify-start whitespace-normal text-left text-muted-foreground"
+          }
         >
-          <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {!compact && <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />}
           {uiText(" Add a description for this collection")}
         </Button>
       )}

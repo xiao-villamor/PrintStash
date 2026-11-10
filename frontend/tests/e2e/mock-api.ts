@@ -12,6 +12,7 @@ import type { ModelProvenanceRead, ModelSourceCoverRead } from "../../src/types/
 import type { ManualPrintJobCreate, MetadataRead, ModelPrintJobRead } from "../../src/types/models";
 
 const now = "2026-06-04T00:24:22.000000";
+const collectionEdits = new Map<number, { tags: string[]; readme: string | null }>();
 
 function mockCollection(id: number, name: string, path: string, modelCount: number) {
   return {
@@ -22,8 +23,8 @@ function mockCollection(id: number, name: string, path: string, modelCount: numb
     parent_id: null,
     model_count: modelCount,
     effective_role: "admin",
-    tags: [],
-    has_readme: false,
+    tags: collectionEdits.get(id)?.tags ?? [],
+    has_readme: Boolean(collectionEdits.get(id)?.readme),
   };
 }
 
@@ -470,6 +471,7 @@ function artifactUploadStatus(uploadState: "created" | "uploading" | "ingesting"
 }
 
 export function resetMockApiState(): void {
+  collectionEdits.clear();
   printer = { ...initialPrinter };
   configuration = aVaultConfig({ storage_tier: "unguarded" });
   state.externalLibrariesEnabled = false;
@@ -1150,6 +1152,40 @@ function handle(req: IncomingMessage, res: ServerResponse): void {
         page([...leaves, ...folders].filter((row) => row.name.toLowerCase().includes(q))),
       );
     }
+    return;
+  }
+  const collectionEdit = url.pathname.match(/^\/api\/v1\/collections\/(\d+)\/(tags|readme)$/);
+  if (collectionEdit) {
+    const id = Number(collectionEdit[1]);
+    const row = mockCollections().find((collection) => collection.id === id);
+    if (!row) {
+      sendJson(res, { detail: "collection_not_found" }, 404);
+      return;
+    }
+    const current = collectionEdits.get(id) ?? { tags: [], readme: null };
+    if (req.method === "GET" && collectionEdit[2] === "readme") {
+      sendJson(res, { readme: current.readme });
+      return;
+    }
+    if (req.method !== "PUT") {
+      sendJson(res, { detail: "method_not_allowed" }, 405);
+      return;
+    }
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk.toString();
+    });
+    req.on("end", () => {
+      if (collectionEdit[2] === "tags") {
+        const update: { tags: string[] } = JSON.parse(body);
+        collectionEdits.set(id, { ...current, tags: update.tags });
+        sendJson(res, { ...row, tags: update.tags });
+      } else {
+        const update: { readme: string | null } = JSON.parse(body);
+        collectionEdits.set(id, { ...current, readme: update.readme });
+        sendJson(res, { readme: update.readme });
+      }
+    });
     return;
   }
   if (url.pathname === "/api/v1/collections/children") {
