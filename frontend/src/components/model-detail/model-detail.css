@@ -333,7 +333,6 @@
   border: 1px solid var(--border);
   background: var(--card);
   font-size: 0.8125rem;
-  cursor: pointer;
 }
 .detail-visible-choices > label[data-selected="true"] {
   background: var(--accent);
@@ -356,7 +355,6 @@
 }
 .detail-visible-choices label:has(input:disabled) {
   opacity: 0.5;
-  cursor: default;
 }
 .detail-delivery-layout {
   display: grid;

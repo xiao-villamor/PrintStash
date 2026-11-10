@@ -412,7 +412,7 @@ describe("UploadModal ingestion", () => {
           "GET /api/v1/libraries": json([safe]),
         },
       });
-      const vaultOption = await screen.findByRole("option", { name: "Vault storage" });
+      const vaultOption = await screen.findByRole("option", { name: "Safe NAS (library source)" });
       const destination = vaultOption.closest("select");
       if (!destination) throw new Error("destination select missing");
       await userEvent.selectOptions(destination, "4");
@@ -947,7 +947,7 @@ describe("pending upload tags", () => {
           new File(["x"], mode === "From archive" ? "parts.zip" : "cube.stl"),
         );
       const submit = screen.getByRole("button", {
-        name: /^(Upload to vault|Upload \d+ models?|Review URL|Prepare archive)$/,
+        name: /^(Upload to vault|Upload \d+ models?|Capture for review|Prepare archive)$/,
       });
       await waitFor(() => expect(submit).toBeEnabled());
       try {

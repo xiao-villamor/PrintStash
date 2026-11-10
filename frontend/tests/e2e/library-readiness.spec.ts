@@ -63,6 +63,7 @@ test.describe("Library readiness", () => {
       .locator("header")
       .getByRole("button", { name: "Toggle sidebar", exact: true });
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect((await toggle.boundingBox())!.x).toBe(8);
     await toggle.click();
     const tree = page.getByRole("dialog", { name: "Collections", exact: true });
     await expect(tree.getByRole("treeitem", { name: "maraio", exact: true })).toBeVisible();
@@ -85,6 +86,29 @@ test.describe("Library readiness", () => {
     expect(await page.evaluate(openAvailableLibraryTree)).toBe(true);
     await expect(page.locator("#visible-filter")).toHaveAttribute("data-clicked", "yes");
     await expect(page.locator("button").first()).not.toHaveAttribute("data-clicked", "yes");
+  });
+
+  test("does not substitute model filters for an unavailable collection toggle", async ({
+    page,
+  }) => {
+    await page.setContent(
+      `<header><button aria-label="Toggle sidebar" disabled onclick="this.dataset.clicked='yes'">Collections</button></header><main><button onclick="this.dataset.clicked='yes'">Filters</button></main>`,
+    );
+    expect(await page.evaluate(openAvailableLibraryTree)).toBe(false);
+    await expect(page.getByRole("button", { name: "Filters", exact: true })).not.toHaveAttribute(
+      "data-clicked",
+      "yes",
+    );
+    await page
+      .getByRole("button", { name: "Toggle sidebar", exact: true })
+      .evaluate((button: HTMLButtonElement) => {
+        button.disabled = false;
+      });
+    expect(await page.evaluate(openAvailableLibraryTree)).toBe(true);
+    await expect(page.getByRole("button", { name: "Toggle sidebar", exact: true })).toHaveAttribute(
+      "data-clicked",
+      "yes",
+    );
   });
 
   test("selects committed navigation instead of preparation order", async ({ page }) => {
@@ -133,6 +157,8 @@ test.describe("Library readiness", () => {
     await page.locator("header").getByRole("searchbox", { name: "Search library" }).fill("skadis");
     await expect(page).toHaveURL(/q=skadis/);
     await page.keyboard.press("Escape");
+    // The compact search owns the full header while focused, as in the reference.
+    await page.getByRole("main").getByRole("heading", { name: "maraio", exact: true }).click();
     await page
       .locator("header")
       .getByRole("button", { name: "Toggle sidebar", exact: true })

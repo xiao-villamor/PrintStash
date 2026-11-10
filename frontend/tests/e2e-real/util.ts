@@ -292,9 +292,7 @@ export async function uploadModel(page: Page, name: string, opts: UploadOpts = {
     const modelId = href!.match(/^\/models\/(\d+)/)![1];
     const detail = await page.request.get(`/api/v1/models/${modelId}`);
     expect(detail.ok()).toBe(true);
-    expect((await detail.json()).tags).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: tag })]),
-    );
+    expect((await detail.json()).tags).toEqual(expect.arrayContaining([tag]));
   }
 }
 

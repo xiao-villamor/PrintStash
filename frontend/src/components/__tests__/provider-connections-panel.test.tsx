@@ -265,9 +265,11 @@ describe("ProviderConnectionsPanel", () => {
     const pending = Promise.withResolvers<Awaited<ReturnType<typeof api.connectCults>>>();
     vi.mocked(api.connectCults).mockReturnValue(pending.promise);
     renderPanel();
-    await userEvent.type(await screen.findByLabelText("Cults username"), "retired-user");
-    await userEvent.type(screen.getByLabelText("Cults password"), "retired-password");
-    await userEvent.click(screen.getByRole("button", { name: "Connect Cults" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Connect Cults" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connect Cults" });
+    await userEvent.type(within(dialog).getByLabelText("Cults username"), "retired-user");
+    await userEvent.type(within(dialog).getByLabelText("Cults password"), "retired-password");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Connect Cults" }));
     await waitFor(() => expect(api.connectCults).toHaveBeenCalledTimes(1));
     await act(async () => {
       clearLogin();
@@ -275,9 +277,12 @@ describe("ProviderConnectionsPanel", () => {
       await pending.promise;
     });
     expect(client.getQueryData(["provider-accounts", "connections"])).toEqual([]);
-    expect(screen.getByLabelText("Cults username")).toHaveValue("");
-    expect(screen.getByLabelText("Cults password")).toHaveValue("");
     expect(client.getMutationCache().getAll()).toEqual([]);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "Connect Cults" }));
+    const reopened = await screen.findByRole("dialog", { name: "Connect Cults" });
+    expect(within(reopened).getByLabelText("Cults username")).toHaveValue("");
+    expect(within(reopened).getByLabelText("Cults password")).toHaveValue("");
   });
 
   it("refuses a retired OAuth navigation", async () => {
@@ -373,14 +378,16 @@ describe("ProviderConnectionsPanel", () => {
       updated_at: "2026-08-24T01:00:00Z",
     });
     renderPanel();
-    await userEvent.type(await screen.findByLabelText("Cults username"), "test-user");
-    await userEvent.type(screen.getByLabelText("Cults password"), "test-password");
+    await userEvent.click(await screen.findByRole("button", { name: "Connect Cults" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connect Cults" });
+    await userEvent.type(within(dialog).getByLabelText("Cults username"), "test-user");
+    await userEvent.type(within(dialog).getByLabelText("Cults password"), "test-password");
     const stale = Promise.withResolvers<Awaited<ReturnType<typeof api.listProviderConnections>>>();
     vi.mocked(api.listProviderConnections).mockReturnValue(stale.promise);
     await act(async () => {
       void client.refetchQueries({ queryKey: ["provider-accounts", "connections"] });
     });
-    await userEvent.click(screen.getByRole("button", { name: "Connect Cults" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: "Connect Cults" }));
     await screen.findByText("Connected", { exact: true });
     await act(async () => {
       stale.resolve([]);
@@ -488,11 +495,11 @@ describe("ProviderConnectionsPanel", () => {
       updated_at: "2026-08-24T01:00:00Z",
     });
     renderPanel();
-    await screen.findByText("Cults");
-
-    await userEvent.type(screen.getByLabelText("Cults username"), "private-user");
-    await userEvent.type(screen.getByLabelText("Cults password"), "private-password");
-    await userEvent.click(screen.getByRole("button", { name: "Connect Cults" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Connect Cults" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connect Cults" });
+    await userEvent.type(within(dialog).getByLabelText("Cults username"), "private-user");
+    await userEvent.type(within(dialog).getByLabelText("Cults password"), "private-password");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Connect Cults" }));
 
     await waitFor(() =>
       expect(api.connectCults).toHaveBeenCalledWith(
@@ -503,8 +510,10 @@ describe("ProviderConnectionsPanel", () => {
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       ),
     );
-    expect(screen.queryByLabelText("Cults username")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Cults password")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Cults username")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Cults password")).not.toBeInTheDocument();
+    });
     expect(
       JSON.stringify(
         client

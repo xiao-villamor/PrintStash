@@ -130,19 +130,16 @@ describe("GcodeViewer", () => {
     expect(slider).toHaveAttribute("max", "0");
     expect(screen.getByText(/Layer 1 \/ 1/)).toBeInTheDocument();
 
-    const travel = screen.getByRole("button", { name: "Show travel moves" });
-    const bed = screen.getByRole("button", { name: "Hide build plate" });
+    const travel = screen.getByRole("button", { name: "Travel" });
+    const bed = screen.getByRole("button", { name: "Bed 220×220" });
     expect(travel).toHaveAttribute("aria-pressed", "false");
     expect(bed).toHaveAttribute("aria-pressed", "true");
 
     await user.click(travel);
     await user.click(bed);
 
-    expect(screen.getByRole("button", { name: "Hide travel moves" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "Show build plate" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Travel" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Bed 220×220" })).toHaveAttribute(
       "aria-pressed",
       "false",
     );

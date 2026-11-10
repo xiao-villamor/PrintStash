@@ -1358,15 +1358,15 @@ describe("NotificationsPanel", () => {
       expect(await screen.findByText("×4")).toBeInTheDocument();
     });
 
-    it("shows nothing when nothing has been delivered", async () => {
+    it("shows the empty delivery history", async () => {
       renderPanel({
         listNotificationDeliveries: vi
           .fn<(limit?: number) => Promise<NotificationDelivery[]>>()
           .mockResolvedValue([]),
       });
 
-      await screen.findByText("Workshop webhook");
-      expect(screen.queryByText("Recent deliveries")).toBeNull();
+      expect(await screen.findByText("No notification deliveries yet.")).toBeVisible();
+      expect(screen.getByRole("heading", { name: "Recent deliveries" })).toBeVisible();
     });
 
     it("still renders the panel when the delivery log cannot be read", async () => {

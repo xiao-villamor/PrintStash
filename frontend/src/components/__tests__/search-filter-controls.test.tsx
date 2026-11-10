@@ -171,8 +171,6 @@ describe("Natural-language search filters", () => {
     setup({ locale: "es" });
     await waitForParsedSearch();
     expect(await screen.findByRole("button", { name: "Quitar Impresión correcta" })).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Filtros del historial de impresión" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Historial de impresión" })).toBeVisible();
   });
 });

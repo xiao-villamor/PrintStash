@@ -275,9 +275,11 @@ describe("Explicit Library refresh", () => {
 function FavoriteRemoval({
   confirmed,
   displayed,
+  duplicateLink = false,
 }: {
   confirmed: Promise<void>;
   displayed: Promise<void>;
+  duplicateLink?: boolean;
 }) {
   const entry = useLibraryEntry("/?favorites=true", true);
   const main = useRef<HTMLElement>(null);
@@ -310,6 +312,11 @@ function FavoriteRemoval({
           <a href="/models/2" data-library-entry="/models/2">
             Removed
           </a>
+          {duplicateLink && (
+            <a href="/models/2" data-library-entry="/models/2">
+              Open removed
+            </a>
+          )}
           <button onClick={() => void remove()}>Unstar</button>
         </article>
       )}
@@ -325,15 +332,34 @@ function FavoriteRemoval({
 describe("Confirmed favorite reading position", () => {
   afterEach(() => vi.restoreAllMocks());
   it.each([
-    { label: "active", retire: false, queuedScroll: false, expected: 0 },
-    { label: "active with queued scroll", retire: false, queuedScroll: true, expected: 0 },
-    { label: "retired", retire: true, queuedScroll: false, expected: 100 },
+    { label: "active", retire: false, queuedScroll: false, duplicateLink: false, expected: 0 },
+    {
+      label: "card with a second Open link",
+      retire: false,
+      queuedScroll: false,
+      duplicateLink: true,
+      expected: 0,
+    },
+    {
+      label: "active with queued scroll",
+      retire: false,
+      queuedScroll: true,
+      duplicateLink: false,
+      expected: 0,
+    },
+    { label: "retired", retire: true, queuedScroll: false, duplicateLink: false, expected: 100 },
   ])(
     "applies the promoted anchor only for the $label session after DOM removal",
-    async ({ retire, queuedScroll, expected }) => {
+    async ({ retire, queuedScroll, duplicateLink, expected }) => {
       const confirmed = Promise.withResolvers<void>();
       const displayed = Promise.withResolvers<void>();
-      renderApp(<FavoriteRemoval confirmed={confirmed.promise} displayed={displayed.promise} />);
+      renderApp(
+        <FavoriteRemoval
+          confirmed={confirmed.promise}
+          displayed={displayed.promise}
+          duplicateLink={duplicateLink}
+        />,
+      );
       const main = screen.getByRole("main");
       const earlier = screen.getByRole("link", { name: "Earlier" });
       const removed = screen.getByRole("link", { name: "Removed" });
@@ -368,9 +394,13 @@ describe("Confirmed favorite reading position", () => {
 function HistoryLibrary({
   layout,
   anchorVisible,
+  externalOpening = false,
+  onPrepared,
 }: {
   layout: LibraryLayout;
   anchorVisible: boolean;
+  externalOpening?: boolean;
+  onPrepared?: () => void;
 }) {
   const entry = useLibraryEntry("/?type=all", true);
   const main = useRef<HTMLElement>(null);
@@ -380,22 +410,47 @@ function HistoryLibrary({
     models: { count: 1, more: false, pending: false, failed: false, next: () => {} },
     folders: { count: 1, more: false, pending: false, failed: false, next: () => {} },
   });
+  const neighbor = (
+    <Link href="/detail" data-library-entry="/models/2">
+      Neighbor
+    </Link>
+  );
   return (
-    <main ref={main} aria-label="Library">
-      <output aria-label="Reading status">{reading.status}</output>
-      {anchorVisible && (
-        <Link href="/detail" data-library-entry="/models/1">
-          Reading anchor
+    <>
+      {externalOpening && (
+        <Link
+          href="/detail"
+          onClick={() => {
+            reading.rememberAnchor("/models/1");
+            onPrepared?.();
+          }}
+        >
+          Open selected Model
         </Link>
       )}
-      <Link href="/detail" data-library-entry="/models/2">
-        Neighbor
-      </Link>
-    </main>
+      <main ref={main} aria-label="Library">
+        <output aria-label="Reading status">{reading.status}</output>
+        {externalOpening && neighbor}
+        {anchorVisible && (
+          <Link href="/detail" data-library-entry="/models/1">
+            Reading anchor
+          </Link>
+        )}
+        {!externalOpening && neighbor}
+      </main>
+    </>
   );
 }
 
-function HistoryBrowser({ layout }: { layout: LibraryLayout }) {
+function HistoryBrowser({
+  layout,
+  externalOpening = false,
+  onPrepared,
+}: {
+  layout: LibraryLayout;
+  externalOpening?: boolean;
+  onPrepared?: () => void;
+}) {
   const location = useLocation();
   const navigate = useRouter();
   const [anchorVisible, setAnchorVisible] = useState(true);
@@ -407,7 +462,12 @@ function HistoryBrowser({ layout }: { layout: LibraryLayout }) {
       {location.pathname === "/detail" ? (
         <p>Model detail</p>
       ) : (
-        <HistoryLibrary layout={layout} anchorVisible={anchorVisible} />
+        <HistoryLibrary
+          layout={layout}
+          anchorVisible={anchorVisible}
+          externalOpening={externalOpening}
+          onPrepared={onPrepared}
+        />
       )}
     </>
   );
@@ -457,6 +517,58 @@ describe("History departure reading anchor", () => {
       );
     },
   );
+
+  it("preserves the prepared offset when the departing layout changes", () => {
+    const header = { height: 0 };
+    installReadingGeometry(header);
+    renderApp(
+      <HistoryBrowser
+        layout="grid"
+        externalOpening
+        onPrepared={() => {
+          header.height = 84;
+        }}
+      />,
+    );
+    screen.getByRole("main").scrollTop = 200;
+    fireEvent.scroll(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("link", { name: "Open selected Model" }));
+    header.height = 0;
+    fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+    expect(screen.getByRole("link", { name: "Reading anchor" }).getBoundingClientRect().top).toBe(
+      100,
+    );
+  });
+
+  it("retains the restored anchor through its queued scroll notification", () => {
+    const header = { height: 0 };
+    installReadingGeometry(header);
+    renderApp(<HistoryBrowser layout="grid" externalOpening />);
+    screen.getByRole("main").scrollTop = 200;
+    fireEvent.scroll(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("link", { name: "Open selected Model" }));
+    header.height = 160;
+    fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+    expect(screen.getByRole("main").scrollTop).toBe(360);
+    fireEvent.scroll(screen.getByRole("main"));
+    fireEvent.click(screen.getByRole("button", { name: "History Forward" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove anchor" }));
+    fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+    expect(screen.getByLabelText("Reading status")).toHaveTextContent("reset");
+  });
+
+  it("retains the selected anchor when opening outside the reading surface", () => {
+    installReadingGeometry({ height: 0 });
+    renderApp(<HistoryBrowser layout="grid" externalOpening />);
+    const main = screen.getByRole("main");
+    main.scrollTop = 200;
+    fireEvent.scroll(main);
+    fireEvent.click(screen.getByRole("link", { name: "Open selected Model" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove anchor" }));
+    fireEvent.click(screen.getByRole("button", { name: "History Back" }));
+    expect(screen.getByLabelText("Reading status")).toHaveTextContent("reset");
+    expect(screen.getByRole("main").scrollTop).toBe(0);
+  });
 
   it("resets when the selected history anchor is missing", () => {
     installReadingGeometry({ height: 0 });

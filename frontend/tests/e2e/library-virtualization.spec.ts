@@ -381,6 +381,7 @@ test.describe("Loaded Library surfaces", () => {
       await page.getByRole("link", { name: "Back", exact: true }).click();
       if (recovery === "available") {
         await expect(anchor).toBeVisible();
+
         await expect
           .poll(() => anchor.evaluate((node) => node.getBoundingClientRect().top))
           .toBeCloseTo(before, 0);

@@ -246,9 +246,7 @@ describe("Getting started", () => {
       "GET /api/v1/libraries": json([]),
       "GET /api/v1/storage-connections": json([]),
     });
-    await userEvent.click(
-      await screen.findByRole("button", { name: /^Connect an existing folder/ }),
-    );
+    await userEvent.click(await screen.findByRole("button", { name: "Connect folder" }));
     await userEvent.click(await screen.findByRole("button", { name: "/libraries/models" }));
     expect(screen.getByLabelText("Folder path on the server")).toHaveValue("/libraries/models");
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
@@ -256,7 +254,7 @@ describe("Getting started", () => {
   it("prioritizes the first Model while keeping optional setup links available", async () => {
     renderGuide();
     expect(await screen.findByRole("button", { name: "Upload my first files" })).toBeVisible();
-    expect(screen.getByRole("button", { name: /^Connect an existing folder/ })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connect folder" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Configure a backup" })).toHaveAttribute(
       "href",
       "/settings?section=backup",
@@ -268,14 +266,12 @@ describe("Getting started", () => {
   });
   it("returns from folder connection with its draft", async () => {
     const guide = renderGuide();
-    await userEvent.click(
-      await screen.findByRole("button", { name: /^Connect an existing folder/ }),
-    );
+    await userEvent.click(await screen.findByRole("button", { name: "Connect folder" }));
     await userEvent.type(screen.getByLabelText("Folder name"), "Workshop");
     await userEvent.type(screen.getByLabelText("Folder path on the server"), "/mounted/models");
     await userEvent.click(screen.getByRole("button", { name: "Back to your first model" }));
     expect(screen.getByRole("heading", { name: "Have a model on your computer?" })).toHaveFocus();
-    await userEvent.click(screen.getByRole("button", { name: /^Connect an existing folder/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Connect folder" }));
     expect(screen.getByLabelText("Folder name")).toHaveValue("Workshop");
     expect(screen.getByLabelText("Folder path on the server")).toHaveValue("/mounted/models");
     expect(
@@ -372,9 +368,7 @@ describe("Getting started", () => {
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ job_id: "guide-folder-connect", state: "queued" }),
     });
-    await userEvent.click(
-      await screen.findByRole("button", { name: /^Connect an existing folder/ }),
-    );
+    await userEvent.click(await screen.findByRole("button", { name: "Connect folder" }));
     expect(screen.getByRole("button", { name: "Connect and find models" })).toBeDisabled();
     await userEvent.type(screen.getByLabelText("Folder name"), "My models");
     await userEvent.type(screen.getByLabelText("Folder path on the server"), "/libraries/models");
@@ -406,9 +400,7 @@ describe("Getting started", () => {
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ detail: "unavailable" }, 503),
     });
-    await userEvent.click(
-      await screen.findByRole("button", { name: /^Connect an existing folder/ }),
-    );
+    await userEvent.click(await screen.findByRole("button", { name: "Connect folder" }));
     await userEvent.type(screen.getByLabelText("Folder name"), "My models");
     await userEvent.type(screen.getByLabelText("Folder path on the server"), "/libraries/models");
     await userEvent.click(screen.getByRole("button", { name: "Connect and find models" }));
@@ -429,9 +421,7 @@ describe("Getting started", () => {
       "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: true })),
       "POST /api/v1/libraries": json({ detail: "library_path_not_directory" }, 400),
     });
-    await userEvent.click(
-      await screen.findByRole("button", { name: /^Connect an existing folder/ }),
-    );
+    await userEvent.click(await screen.findByRole("button", { name: "Connect folder" }));
     await userEvent.type(screen.getByLabelText("Folder name"), "My models");
     await userEvent.type(screen.getByLabelText("Folder path on the server"), "/missing");
     await userEvent.click(screen.getByRole("button", { name: "Connect and find models" }));
@@ -448,9 +438,7 @@ describe("Getting started", () => {
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ job_id: "guide-empty-scan", state: "queued" }),
     });
-    await userEvent.click(
-      await screen.findByRole("button", { name: /^Connect an existing folder/ }),
-    );
+    await userEvent.click(await screen.findByRole("button", { name: "Connect folder" }));
     await userEvent.type(screen.getByLabelText("Folder name"), "My models");
     await userEvent.type(screen.getByLabelText("Folder path on the server"), "/libraries/models");
     await userEvent.click(screen.getByRole("button", { name: "Connect and find models" }));
@@ -469,9 +457,7 @@ describe("Getting started", () => {
       "POST /api/v1/libraries": json(anExternalLibrary()),
       "POST /api/v1/libraries/1/scan": json({ job_id: "guide-partial-scan", state: "queued" }),
     });
-    await userEvent.click(
-      await screen.findByRole("button", { name: /^Connect an existing folder/ }),
-    );
+    await userEvent.click(await screen.findByRole("button", { name: "Connect folder" }));
     await userEvent.type(screen.getByLabelText("Folder name"), "My models");
     await userEvent.type(screen.getByLabelText("Folder path on the server"), "/libraries/models");
     guide.route({
@@ -489,9 +475,7 @@ describe("Getting started", () => {
       "GET /api/v1/config": json(aVaultConfig({ external_libraries_enabled: false })),
       "PUT /api/v1/config": json({ detail: "unavailable" }, 503),
     });
-    await userEvent.click(
-      await screen.findByRole("button", { name: /^Connect an existing folder/ }),
-    );
+    await userEvent.click(await screen.findByRole("button", { name: "Connect folder" }));
     await userEvent.type(screen.getByLabelText("Folder name"), "My models");
     await userEvent.type(screen.getByLabelText("Folder path on the server"), "/libraries/models");
     await userEvent.click(screen.getByRole("button", { name: "Connect and find models" }));

@@ -1659,7 +1659,9 @@ describe("ModelBrowser", () => {
       );
       expect(screen.getAllByRole("button", { name: "Upload" })).not.toHaveLength(0);
       await waitForLibraryActions();
-      expect(screen.getAllByRole("button", { name: "New multipart set" })).not.toHaveLength(0);
+      await userEvent.click(screen.getByRole("button", { name: "More" }));
+      expect(screen.getByRole("menuitem", { name: "New multipart set" })).toBeEnabled();
+      await userEvent.keyboard("{Escape}");
       await openFilters();
       expect(screen.getByText("Printer")).toBeInTheDocument();
     });
@@ -3134,7 +3136,10 @@ describe("ModelBrowser", () => {
       });
       await within(screen.getByRole("main")).findByText("Benchy");
       await user.click(screen.getByRole("tab", { name: "Saved views" }));
-      await user.click(await screen.findByRole("button", { name: /Save current view/ }));
+      const savedViews = await screen.findByRole("region", { name: "Saved views" });
+      await user.click(
+        await within(savedViews).findByRole("button", { name: "Save current view" }),
+      );
       const dialog = await screen.findByRole("dialog");
       await user.type(within(dialog).getByRole("textbox"), "PETG");
 

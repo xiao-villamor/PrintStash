@@ -9,6 +9,18 @@ import { describe, expect, it } from "vitest";
 import { arrivingKeys, entryKeys } from "../library-arrivals";
 
 describe("entryKeys", () => {
+  it("counts repeated entries as one arrival identity", () => {
+    expect(
+      entryKeys(
+        [{ id: 3 }, { id: 3 }],
+        [
+          { kind: "model", value: { id: 3 } },
+          { kind: "model", value: { id: 3 } },
+          { kind: "multipart", value: { id: 3 } },
+        ],
+      ),
+    ).toEqual(["c:3", "m:3", "p:3"]);
+  });
   it("names folders, Models, multipart sets apart", () => {
     expect(
       entryKeys(

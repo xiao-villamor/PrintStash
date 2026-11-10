@@ -161,7 +161,11 @@ function StartupReadout() {
 
 /** The row a folder's name sits in: its expand, delete and badge controls live there. */
 async function folderRow(name: string): Promise<HTMLElement> {
-  const row = (await screen.findByRole("button", { name })).parentElement;
+  const control =
+    name === "All Models"
+      ? await screen.findByRole("button", { name })
+      : await screen.findByRole("treeitem", { name });
+  const row = control.parentElement;
   if (row === null) throw new Error(`no row for ${name}`);
   return row;
 }
@@ -230,7 +234,7 @@ describe("FilterSidebar", () => {
 
   it("translates an already mounted Multipart Model leaf", async () => {
     renderSidebar({ multipartModels: [multipartSet()] });
-    const leaf = await screen.findByRole("button", { name: "Dragon figure" }, { timeout: 5000 });
+    const leaf = await screen.findByRole("treeitem", { name: "Dragon figure" }, { timeout: 5000 });
     expect(leaf).toHaveAttribute("title", "Dragon figure · Multipart set");
     act(() => setLocale("es"));
     expect(leaf).toHaveAttribute("title", "Dragon figure · Conjunto multiparte");
@@ -241,7 +245,7 @@ describe("FilterSidebar", () => {
     const models = [aOutlinerModel({ id: 1, name: "Original model", edit_version: 7 })];
     const view = renderSidebar({ models });
     await openFolder(user, "Parts");
-    const source = await screen.findByRole("button", { name: "Original model" });
+    const source = await screen.findByRole("treeitem", { name: "Original model" });
     const destination = await folderRow("Toys");
     // jsdom has no geometry. Give the actual mouse sensor two separated hit regions.
     const sourceRect = vi
@@ -256,7 +260,7 @@ describe("FilterSidebar", () => {
       await waitFor(() => expect(source).toHaveAttribute("aria-pressed", "true"));
       models[0] = aOutlinerModel({ id: 1, name: "Changed model", edit_version: 8 });
       await act(async () => view.client.invalidateQueries({ queryKey: queryKeys.outliner }));
-      await screen.findByRole("button", { name: "Changed model" });
+      await screen.findByRole("treeitem", { name: "Changed model" });
       fireEvent.mouseMove(document, { buttons: 1, clientX: 20, clientY: 110 });
       fireEvent.mouseUp(document, { button: 0, clientX: 20, clientY: 110 });
       expect(view.onMoveModel).toHaveBeenCalledWith(
@@ -284,8 +288,8 @@ describe("FilterSidebar", () => {
       if (models.length > 0) await screen.findByText("Root model");
       const root = within(await folderRow("All Models"));
       await user.click(root.getByRole("button", { name: "Collapse" }));
-      expect(screen.queryByRole("button", { name: "Parts" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "Toys" })).toBeNull();
+      expect(screen.queryByRole("treeitem", { name: "Parts" })).toBeNull();
+      expect(screen.queryByRole("treeitem", { name: "Toys" })).toBeNull();
       expect(screen.queryByText("Root model")).toBeNull();
       expect(root.getByRole("button", { name: "Expand" })).toHaveAttribute(
         "aria-expanded",
@@ -313,7 +317,7 @@ describe("FilterSidebar", () => {
       const view = renderSidebar();
       const root = within(await folderRow("All Models"));
       expect(await root.findByRole("button", { name: "Expand" })).toBeVisible();
-      expect(screen.queryByRole("button", { name: "Parts" })).toBeNull();
+      expect(screen.queryByRole("treeitem", { name: "Parts" })).toBeNull();
       expect(view.requestsWithMethod("POST")).toHaveLength(0);
     });
 
@@ -366,7 +370,7 @@ describe("FilterSidebar", () => {
       expect(await screen.findByText("Brackets")).toBeVisible();
       await user.clear(search);
       expect(await screen.findByRole("button", { name: "All Models" })).toBeVisible();
-      expect(screen.queryByRole("button", { name: "Parts" })).toBeNull();
+      expect(screen.queryByRole("treeitem", { name: "Parts" })).toBeNull();
       expect(screen.queryByText("Brackets")).toBeNull();
     });
     it("lists the root folders", async () => {
@@ -395,7 +399,7 @@ describe("FilterSidebar", () => {
       const user = userEvent.setup();
       renderSidebar();
 
-      await user.dblClick(await screen.findByRole("button", { name: "Parts" }));
+      await user.dblClick(await screen.findByRole("treeitem", { name: "Parts" }));
 
       expect(screen.getByRole("status", { name: "Selected collection" })).toHaveTextContent(
         "parts",
@@ -406,7 +410,7 @@ describe("FilterSidebar", () => {
       const user = userEvent.setup();
       renderSidebar({ selectedCollection: "parts" });
 
-      await user.click(await screen.findByRole("button", { name: "Parts" }));
+      await user.click(await screen.findByRole("treeitem", { name: "Parts" }));
 
       expect(screen.getByRole("status", { name: "Selected collection" })).toHaveTextContent(
         "parts",
@@ -889,22 +893,22 @@ describe("FilterSidebar", () => {
         },
       });
       try {
-        await screen.findByRole("button", { name: "Restored bracket" });
+        await screen.findByRole("treeitem", { name: "Restored bracket" });
         await openFolder(user, "Toys");
         await started.promise;
-        expect(await screen.findByRole("button", { name: "Restored bracket" })).toBeVisible();
-        expect(screen.queryByRole("button", { name: "Pending toy" })).not.toBeInTheDocument();
+        expect(await screen.findByRole("treeitem", { name: "Restored bracket" })).toBeVisible();
+        expect(screen.queryByRole("treeitem", { name: "Pending toy" })).not.toBeInTheDocument();
 
-        await user.click(screen.getByRole("button", { name: "Parts" }));
+        await user.click(screen.getByRole("treeitem", { name: "Parts" }));
 
         expect(screen.getByLabelText("Selected collection")).toHaveTextContent("parts");
-        expect(await screen.findByRole("button", { name: "Restored bracket" })).toBeVisible();
+        expect(await screen.findByRole("treeitem", { name: "Restored bracket" })).toBeVisible();
       } finally {
         await act(async () =>
           slow.resolve(json({ items: [{ ...slowModel, kind: "model" }], next_cursor: null })),
         );
       }
-      expect(await screen.findByRole("button", { name: "Pending toy" })).toBeVisible();
+      expect(await screen.findByRole("treeitem", { name: "Pending toy" })).toBeVisible();
     });
 
     it("starts a first visit at the top level", async () => {
@@ -1134,9 +1138,9 @@ describe("outliner pages", () => {
     const user = userEvent.setup();
     const app = renderSidebar({ models });
     await openFolder(user, "Parts");
-    const parent = await screen.findByRole("button", { name: "Parts" });
-    const child = await screen.findByRole("button", { name: "Brackets" });
-    const leaf = await screen.findByRole("button", { name: "Part 000" });
+    const parent = await screen.findByRole("treeitem", { name: "Parts" });
+    const child = await screen.findByRole("treeitem", { name: "Brackets" });
+    const leaf = await screen.findByRole("treeitem", { name: "Part 000" });
 
     await user.click(child);
     await waitFor(() => expect(app.client.isFetching()).toBe(0));
@@ -1158,8 +1162,8 @@ describe("outliner pages", () => {
     );
     const app = renderSidebar({ collections });
     await user.click(await screen.findByRole("button", { name: "Show more folders" }));
-    const last = await screen.findByRole("button", { name: "Folder 050" });
-    const first = screen.getByRole("button", { name: "Folder 000" });
+    const last = await screen.findByRole("treeitem", { name: "Folder 050" });
+    const first = screen.getByRole("treeitem", { name: "Folder 000" });
 
     await user.click(last);
     await waitFor(() => expect(app.client.isFetching()).toBe(0));
@@ -1223,13 +1227,13 @@ describe("outliner pages", () => {
         },
       },
     });
-    const folder = await screen.findByRole("button", { name: "Parts" });
+    const folder = await screen.findByRole("treeitem", { name: "Parts" });
     await waitFor(() =>
       expect(app.requests().some((request) => request.url.includes("reveal_id=3"))).toBe(true),
     );
 
     expect(folder).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Toys" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("treeitem", { name: "Toys" })).not.toBeInTheDocument();
     await act(async () =>
       pending.resolve(
         json({
@@ -1245,7 +1249,7 @@ describe("outliner pages", () => {
         }),
       ),
     );
-    await screen.findByRole("button", { name: "Toys" });
+    await screen.findByRole("treeitem", { name: "Toys" });
     expect(folder).toBeInTheDocument();
   });
 
@@ -1272,14 +1276,14 @@ describe("outliner pages", () => {
         },
       },
     });
-    const folder = await screen.findByRole("button", { name: "Parts" });
+    const folder = await screen.findByRole("treeitem", { name: "Parts" });
     await screen.findByText("Could not load this list.");
     expect(folder).toBeInTheDocument();
     app.route(outlinerRoutes(TREE));
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
-    await screen.findByRole("button", { name: "Toys" });
+    await screen.findByRole("treeitem", { name: "Toys" });
     expect(folder).toBeInTheDocument();
     expect(screen.queryByText("Could not load this list.")).not.toBeInTheDocument();
   });
@@ -1316,7 +1320,9 @@ describe("outliner pages", () => {
     await screen.findByText("Part 000");
     const search = screen.getByPlaceholderText("Filter outliner...");
     await user.type(search, "Part 050");
-    await screen.findByRole("button", { name: "Part 050" });
+    await within(await screen.findByLabelText("Search results")).findByRole("button", {
+      name: "Part 050",
+    });
     expect(screen.queryByText("Part 000")).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
     await screen.findByText("Part 000");

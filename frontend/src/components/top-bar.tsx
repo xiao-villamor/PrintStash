@@ -234,7 +234,7 @@ export function TopBar() {
                 ? mobileCollections.closeDrawer
                 : mobileCollections.openDrawer
           }
-          className={`${pathname === "/" ? "flex" : "hidden md:flex"} h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${(desktop ? pane.open : mobileCollections.open) ? "bg-muted text-foreground" : ""}`}
+          className={`${pathname === "/" ? "flex" : "hidden md:flex"} order-first h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:order-none ${(desktop ? pane.open : mobileCollections.open) ? "bg-muted text-foreground" : ""}`}
         >
           <PanelLeft className="h-4 w-4" aria-hidden />
         </button>

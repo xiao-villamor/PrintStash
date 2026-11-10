@@ -95,7 +95,11 @@ test.describe("Library inline inspector", () => {
     expect((await receipt).ok()).toBe(true);
     await expect(note).toBeHidden();
     await drawer.getByRole("tab", { name: /History/ }).click();
-    await expect(drawer.getByText("Corner lifted at layer 112", { exact: true })).toBeVisible();
+    await expect(
+      drawer
+        .getByRole("tabpanel", { name: /History/ })
+        .getByText("Corner lifted at layer 112", { exact: true }),
+    ).toBeVisible();
     expect(await records(page)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

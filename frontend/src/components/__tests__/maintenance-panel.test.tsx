@@ -187,8 +187,10 @@ describe("MaintenancePanel", () => {
   it("groups the maintenance heading with its check controls", async () => {
     renderPanel({ audit: null });
 
-    const section = screen.getByRole("region", { name: "Maintenance" });
-    expect(within(section).getByText("Keep your library and backups ready to use.")).toBeVisible();
+    const section = screen.getByRole("region", { name: "Check your files now" });
+    expect(
+      within(section).getByText("Find missing or damaged files before they interrupt a print."),
+    ).toBeVisible();
     expect(await within(section).findByRole("button", { name: "Run quick check" })).toBeVisible();
   });
 

@@ -47,7 +47,6 @@
     width: 40px;
     padding: 0;
     color: transparent;
-    cursor: pointer;
   }
   .shell-topbar .shell-search input::placeholder {
     color: transparent;

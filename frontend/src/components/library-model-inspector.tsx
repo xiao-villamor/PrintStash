@@ -51,12 +51,14 @@ export function LibraryModelInspector({
   origin,
   canWrite,
   onClose,
+  onOpenPage,
 }: {
   id: number;
   open: boolean;
   origin?: LibraryEntry;
   canWrite: boolean;
   onClose: () => void;
+  onOpenPage?: () => void;
 }) {
   useUiLocale();
   const detail = useModelDetail(id);
@@ -79,6 +81,17 @@ export function LibraryModelInspector({
           origin={origin}
           href={`/models/${id}`}
           className="library-inspector-open-page"
+          onClick={(event) => {
+            if (
+              !event.defaultPrevented &&
+              event.button === 0 &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !event.altKey &&
+              !event.shiftKey
+            )
+              onOpenPage?.();
+          }}
           title={uiText("Open the full model page")}
         >
           {uiText("Open page")}

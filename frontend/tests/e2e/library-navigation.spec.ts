@@ -162,6 +162,7 @@ test.describe("Library navigation", () => {
         page.getByRole("heading", { name: "skadis_kitchen-roll_screw", exact: true }),
       ).toBeVisible();
       await page.goBack();
+      await expect(link).toBeVisible();
       await expect
         .poll(async () => link.evaluate((element) => element.getBoundingClientRect().top))
         .toBeCloseTo(before.top, 0);

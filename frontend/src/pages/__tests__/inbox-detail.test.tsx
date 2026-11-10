@@ -431,7 +431,7 @@ describe("InboxDetailPage", () => {
       source_url: "HTTPS://EXAMPLE.TEST/model",
     });
     renderPage();
-    expect(await screen.findByRole("link", { name: /example\.test/i })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Open source" })).toHaveAttribute(
       "href",
       "https://example.test/model",
     );
@@ -444,14 +444,17 @@ describe("InboxDetailPage", () => {
     renderPage();
 
     expect(await screen.findByText("Calibration cube")).toBeInTheDocument();
-    expect(screen.getByText("Fuente")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Abrir origen" })).toHaveAttribute(
+      "href",
+      reviewItem.source_url,
+    );
     expect(screen.getByText("Archivos para importar")).toBeInTheDocument();
     expect(screen.getByLabelText("Seleccionar cube.stl")).toBeChecked();
     expect(screen.getByText("Destino")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("separadas por comas")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Importar seleccionados" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Eliminar importación" })).toBeInTheDocument();
-    expect(screen.getByText("example.test")).toBeInTheDocument();
+    expect(screen.getByText(/Example · example\.test/)).toBeInTheDocument();
     expect(screen.getByText("cube.stl")).toBeInTheDocument();
   });
 
@@ -517,7 +520,7 @@ describe("InboxDetailPage", () => {
 
       renderPage();
 
-      expect(await screen.findByText(label)).toBeInTheDocument();
+      expect(await screen.findByText(new RegExp(`^${label} ·`))).toBeInTheDocument();
     });
 
     it("capitalises a host it has no brand name for", async () => {
@@ -528,7 +531,7 @@ describe("InboxDetailPage", () => {
 
       renderPage();
 
-      expect(await screen.findByText("Example")).toBeInTheDocument();
+      expect(await screen.findByText(/^Example ·/)).toBeInTheDocument();
     });
 
     it("says the web when there is no host at all", async () => {
@@ -540,7 +543,7 @@ describe("InboxDetailPage", () => {
 
       renderPage();
 
-      expect(await screen.findByText("Web")).toBeInTheDocument();
+      expect(await screen.findByText(/^Web ·/)).toBeInTheDocument();
     });
   });
   it("preserves an Inbox review draft during polling", async () => {

@@ -1294,7 +1294,10 @@ describe("SettingsPanel", () => {
     it("keeps backup controls out of the storage section", async () => {
       renderSettings({ at: "/settings?section=storage" });
 
-      expect(await screen.findByRole("button", { name: "Plan migration" })).toBeVisible();
+      const migration = await screen.findByRole("button", { name: "Plan migration" });
+      expect(migration).toBeVisible();
+      await userEvent.click(migration);
+      expect(await screen.findByRole("region", { name: "Move Vault storage" })).toBeVisible();
       expect(screen.queryByRole("button", { name: /Backup now/ })).toBeNull();
       await userEvent.click(screen.getByRole("tab", { name: "Usage" }));
       expect(screen.getByRole("heading", { name: "Storage insights" })).toBeVisible();

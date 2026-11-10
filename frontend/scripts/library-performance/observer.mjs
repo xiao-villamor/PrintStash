@@ -59,7 +59,9 @@ export function installObserver({ user, locale, target }) {
         [...document.querySelectorAll('[role="dialog"]')].find(
           (element) =>
             visible(element) &&
-            element.getAttribute("aria-label") === (locale === "en" ? "Filters" : "Filtros"),
+            /^(Collections|Colecciones|Filters|Filtros)$/.test(
+              element.getAttribute("aria-label") ?? "",
+            ),
         );
       const branchNames = tree
         ? [...tree.querySelectorAll("button")].map(
@@ -67,7 +69,9 @@ export function installObserver({ user, locale, target }) {
           )
         : [];
       const leafNames = tree
-        ? [...tree.querySelectorAll('[role="button"][title]')].map((e) => e.title)
+        ? [...tree.querySelectorAll('[role="button"][title], [role="treeitem"][title]')].map(
+            (e) => e.title,
+          )
         : [];
       const buttons = [...(tree?.querySelectorAll("button") ?? [])];
       // Old-image baselines have no identity attributes. Candidate acceptance
@@ -125,11 +129,17 @@ export function installObserver({ user, locale, target }) {
           (button.getAttribute("aria-label") ?? button.textContent?.trim()) ===
             (locale === "en" ? "Filters" : "Filtros"),
       );
+      const treeToggles = [...document.querySelectorAll("header button")].filter((button) =>
+        /^(Toggle sidebar|Alternar barra lateral)$/.test(button.getAttribute("aria-label") ?? ""),
+      );
+      // Current mobile Collections has its own header command. The Filters
+      // fallback exists only for old-image baselines with no such command.
+      const mobileTreeControl = treeToggles.length ? treeToggles.find(visible) : filters;
       const controlsReady =
         visible(search) &&
         !search.disabled &&
         !search.readOnly &&
-        (innerWidth >= 768 || (visible(filters) && !filters.disabled));
+        (innerWidth >= 768 || (visible(mobileTreeControl) && !mobileTreeControl.disabled));
       const delta = () => performance.now() - started;
       if (content && state.content === null) state.content = delta();
       if (treeReady && state.tree === null) state.tree = delta();
@@ -236,15 +246,19 @@ export function currentNavigationStart() {
 /** A zero-reaction-time mobile gesture; readiness is still observed independently. */
 export function openAvailableLibraryTree() {
   const drawer = [...document.querySelectorAll('[role="dialog"]')].find((node) =>
-    /^(Filters|Filtros)$/.test(node.getAttribute("aria-label") ?? ""),
+    /^(Collections|Colecciones|Filters|Filtros)$/.test(node.getAttribute("aria-label") ?? ""),
   );
   if (drawer) return drawer.getAttribute("data-state") === "open";
-  const button = [...document.querySelectorAll("main button")].find((node) => {
-    if (
-      !/^(Filters|Filtros)$/.test((node.getAttribute("aria-label") ?? node.textContent).trim()) ||
-      node.disabled
-    )
-      return false;
+  const treeToggles = [...document.querySelectorAll("header button")].filter((node) =>
+    /^(Toggle sidebar|Alternar barra lateral)$/.test(node.getAttribute("aria-label") ?? ""),
+  );
+  const candidates = treeToggles.length
+    ? treeToggles
+    : [...document.querySelectorAll("main button")].filter((node) =>
+        /^(Filters|Filtros)$/.test((node.getAttribute("aria-label") ?? node.textContent).trim()),
+      );
+  const button = candidates.find((node) => {
+    if (node.disabled) return false;
     const bounds = node.getBoundingClientRect();
     if (bounds.width <= 0 || bounds.height <= 0) return false;
     const hit = document.elementFromPoint(

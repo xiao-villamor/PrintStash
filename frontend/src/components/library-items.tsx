@@ -53,6 +53,7 @@ export function LibraryItems<T>({
   const [revealed, setRevealed] = useState<string | null>(null);
   const focusRestore = useRef<{ key: string; index: number } | null>(null);
   const restore = useRef<{ key: string; offset: number } | null>(null);
+  const readyGeometry = useRef<typeof geometry | null>(null);
   const gap = layout === "list" ? 0 : compact ? 8 : 14;
   const minWidth = compact ? 200 : 260;
   // Production-card measurements favor native rows for short loaded snapshots.
@@ -204,6 +205,10 @@ export function LibraryItems<T>({
         const index = keys.indexOf(key);
         if (index < 0) return "missing";
         if (geometry.width === 0) return "pending";
+        if (readyGeometry.current !== geometry) {
+          readyGeometry.current = geometry;
+          return "pending";
+        }
         if (root.current?.querySelector(libraryReadingSelector(key))) {
           let measuring = false;
           if (virtual)
@@ -230,7 +235,7 @@ export function LibraryItems<T>({
     return () => {
       registry.delete(readingId);
     };
-  }, [readingRenderers, readingId, keys, columns, virtual, virtualizer, geometry.width]);
+  }, [readingRenderers, readingId, keys, columns, virtual, virtualizer, geometry]);
 
   const child = (item: T) => (
     <div key={itemKey(item)} data-library-key={itemKey(item)} className="min-w-0">

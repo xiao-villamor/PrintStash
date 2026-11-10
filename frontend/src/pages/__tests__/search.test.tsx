@@ -144,9 +144,9 @@ describe("Search results", () => {
     const user = userEvent.setup();
     const app = results({ at: "/search?q=bracket&type=model" });
     await screen.findByRole("link", { name: "Desk bracket" });
-    await user.click(screen.getByRole("button", { name: "Show all results" }));
+    await user.click(screen.getByRole("button", { name: "All results" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Show all results" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "All results" })).toHaveAttribute(
         "aria-pressed",
         "true",
       ),
@@ -493,7 +493,7 @@ describe("Search results", () => {
     );
     app.route({ "GET /api/v1/search/status": json(searchStatus({ legs: ["thumbnail"] })) });
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByRole("button", { name: "Search by image" })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Image search" })).toBeVisible();
     expect(screen.getByRole("link", { name: "Desk bracket" })).toBeVisible();
   });
   it("retries unavailable personal preferences without claiming parser consent", async () => {

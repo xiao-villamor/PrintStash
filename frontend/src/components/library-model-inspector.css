@@ -345,7 +345,6 @@
 }
 .library-inspector-section summary {
   list-style: none;
-  cursor: pointer;
 }
 .library-inspector-section summary::-webkit-details-marker {
   display: none;

@@ -3251,7 +3251,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                 </select>
               </label>
               <details>
-                <summary className="cursor-pointer text-xs text-muted-foreground">
+                <summary className="text-xs text-muted-foreground">
                   {t("similarity.moreFilters")}
                 </summary>
                 <div className="mt-3">
@@ -3811,7 +3811,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     }
                   />
                   <LoadMore
-                    paused={reading.status === "restoring"}
+                    paused={reading.status === "restoring" || !browseReady}
+                    layoutKey={`${viewMode}:${inspectorOpen}:${pane?.open ?? true}`}
                     hasMore={snapshot?.moreFolders ?? false}
                     loading={fetchingFolders || currentRefresh !== null}
                     failed={folderPages.isFetchNextPageError}
@@ -3821,7 +3822,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     folders
                   />
                   <LoadMore
-                    paused={reading.status === "restoring"}
+                    paused={reading.status === "restoring" || !browseReady}
+                    layoutKey={`${viewMode}:${inspectorOpen}:${pane?.open ?? true}`}
                     hasMore={hasMore && !refreshRequired}
                     loading={loadingMore}
                     failed={modelQuery.isFetchNextPageError}
@@ -3869,7 +3871,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                       estimateSize={65}
                     />
                     <LoadMore
-                      paused={reading.status === "restoring"}
+                      paused={reading.status === "restoring" || !browseReady}
+                      layoutKey={`${viewMode}:${inspectorOpen}:${pane?.open ?? true}`}
                       hasMore={snapshot?.moreFolders ?? false}
                       loading={fetchingFolders || currentRefresh !== null}
                       failed={folderPages.isFetchNextPageError}
@@ -3921,7 +3924,8 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                     />
                   </div>
                   <LoadMore
-                    paused={reading.status === "restoring"}
+                    paused={reading.status === "restoring" || !browseReady}
+                    layoutKey={`${viewMode}:${inspectorOpen}:${pane?.open ?? true}`}
                     hasMore={hasMore && !refreshRequired}
                     loading={loadingMore}
                     failed={modelQuery.isFetchNextPageError}
@@ -3939,6 +3943,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
             open={inspectorOpen}
             origin={snapshot?.entry}
             canWrite={auth.isAuthenticated && !authority.authorizationChanged && inspectorOpen}
+            onOpenPage={() => reading.rememberAnchor(`/models/${inspectorIntent.id}`)}
             onClose={closeInspector}
           />
         )}
@@ -4423,11 +4428,13 @@ function LoadMore({
   loading,
   failed = false,
   paused = false,
+  layoutKey,
   onClick,
   folders = false,
 }: {
   hasMore: boolean;
   paused?: boolean;
+  layoutKey: string;
   loading: boolean;
   failed?: boolean;
   onClick: () => void;
@@ -4440,6 +4447,11 @@ function LoadMore({
     load.current = onClick;
   });
   const [awaitScroll, setAwaitScroll] = useState(paused);
+  const [readingLayout, setReadingLayout] = useState(layoutKey);
+  if (readingLayout !== layoutKey) {
+    setReadingLayout(layoutKey);
+    setAwaitScroll(true);
+  }
   if (paused && !awaitScroll) setAwaitScroll(true);
   // Reconstruct only the saved pages. Resume anticipation after the reader moves,
   // so a restored near-end sentinel cannot fetch an unvisited cursor on its own.
@@ -4462,13 +4474,17 @@ function LoadMore({
     };
   }, [awaitScroll, paused]);
   const automatic = "IntersectionObserver" in globalThis && !failed && !paused && !awaitScroll;
+  const mayLoad = useRef(false);
+  useLayoutEffect(() => {
+    mayLoad.current = automatic && hasMore && !loading;
+  });
   useEffect(() => {
     const element = sentinel.current;
     if (!automatic || !hasMore || loading || element === null) return;
     // Observing reports the current state at once, so a list shorter than the
     // reach keeps loading until it fills it.
     const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) load.current();
+      if (mayLoad.current && entries.some((entry) => entry.isIntersecting)) load.current();
     });
     observer.observe(element);
     return () => observer.disconnect();

@@ -92,7 +92,9 @@ describe("InboxPage", () => {
       "/?upload=1",
     );
     expect(
-      screen.getByText("Open the import dialog, then choose From URL to add a model link."),
+      screen.getByText(
+        "Captures stay in the Inbox until you choose their destination. Removing a capture does not delete Models already imported into your Library.",
+      ),
     ).toBeVisible();
   });
 
@@ -112,7 +114,7 @@ describe("InboxPage", () => {
     expect(
       await screen.findByRole("heading", { name: "Importaciones pendientes" }),
     ).toBeInTheDocument();
-    expect(await screen.findByText("Necesita revisión")).toBeInTheDocument();
+    expect(await screen.findByText(/· Necesita revisión$/)).toBeInTheDocument();
     expect(screen.getByText("printables.com")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Revisar" })).toHaveAttribute("href", "/inbox/1");
   });
@@ -141,7 +143,7 @@ describe("InboxPage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("Partial")).toBeInTheDocument();
+    expect(await screen.findByText(/· Partial$/)).toBeInTheDocument();
     const retry = screen.getByRole("button", { name: "Retry" });
     await userEvent.setup().click(retry);
     await waitFor(() => expect(retryPendingImport).toHaveBeenCalledWith(2));
@@ -187,7 +189,7 @@ describe("InboxPage", () => {
       </QueryClientProvider>,
     );
 
-    const queue = await screen.findByRole("list", { name: "Import queue" });
+    const queue = await screen.findByRole("list", { name: "Captures" });
     expect(queue).toHaveTextContent("Clean model");
     expect(queue).toHaveTextContent("Printables");
     expect(queue).toHaveTextContent("Files: 2");
@@ -212,7 +214,7 @@ describe("InboxPage", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("Resolving")).toBeInTheDocument();
+    expect(await screen.findByText(/· Resolving$/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Delete import" })).not.toBeInTheDocument();
   });
 
@@ -316,7 +318,7 @@ describe("InboxPage", () => {
       await vi.advanceTimersByTimeAsync(1_501);
     });
     expect(listPendingImports).toHaveBeenCalledTimes(2);
-    expect(screen.getByText("Needs review")).toBeInTheDocument();
+    expect(screen.getByText(/· Needs review$/)).toBeInTheDocument();
   });
 
   it("restarts polling when clearing completed imports fails while work is active", async () => {
