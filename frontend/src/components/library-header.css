@@ -63,14 +63,14 @@
   font-weight: 500;
 }
 .collection-header-tag-input {
-  box-sizing: content-box;
+  box-sizing: border-box;
   height: 26px;
   display: inline-flex;
   gap: 4px;
   align-items: center;
   padding: 0 8px 0 10px;
-  border: 1px solid var(--border-strong);
-  background: var(--card);
+  border: 1px dashed var(--border-strong);
+  background: transparent;
   color: var(--muted-foreground);
 }
 .collection-header-tag-input > input {
@@ -258,7 +258,7 @@
 }
 
 .collection-header-tag-input:focus-within {
-  box-shadow: 0 0 0 2px var(--ring);
+  border-color: var(--ring);
 }
 .collection-header-tag-input > input,
 .collection-header-tag-input > input:focus-visible {

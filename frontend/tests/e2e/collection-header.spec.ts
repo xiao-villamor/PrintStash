@@ -7,10 +7,17 @@ useMockApi();
 test.describe("Collection header preview", () => {
   test("persists consecutive inline tags through the preview API", async ({ page }) => {
     await page.goto("/?c=maraio");
-    await page.getByRole("button", { name: "+ Add tag", exact: true }).click();
+    const opener = page.getByRole("button", { name: "+ Add tag", exact: true });
+    await expect(opener).toBeVisible();
+    const idleHeight = (await opener.boundingBox())!.height;
+    await opener.click();
     const input = page.getByRole("textbox", { name: "New tag" });
+    const field = input.locator("..");
     await expect(input).toHaveCSS("box-shadow", "none");
-    await expect(input.locator("..")).not.toHaveCSS("box-shadow", "none");
+    await expect(field).toHaveCSS("box-shadow", "none");
+    await expect(field).toHaveCSS("border-style", "dashed");
+    await expect(field).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    expect((await field.boundingBox())!.height).toBe(idleHeight);
     await input.fill("#Outdoor Parts");
     const first = page.waitForResponse(
       (r) => r.url().endsWith("/collections/1/tags") && r.request().method() === "PUT",
