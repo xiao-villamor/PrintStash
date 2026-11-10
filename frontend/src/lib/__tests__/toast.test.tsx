@@ -17,7 +17,7 @@
  */
 
 import "@testing-library/jest-dom/vitest";
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/errors";
@@ -36,10 +36,14 @@ function raise(cause: unknown) {
 const NETWORK_COPY = /Check that PrintStash is running/;
 
 beforeEach(() => {
+  // Own Sonner's delayed exit callbacks so they cannot outlive jsdom.
+  vi.useFakeTimers({ shouldAdvanceTime: true });
   window.localStorage.clear();
 });
 
 afterEach(() => {
+  cleanup();
+  vi.clearAllTimers();
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
