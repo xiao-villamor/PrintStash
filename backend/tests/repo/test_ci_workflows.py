@@ -70,6 +70,26 @@ def _api_run(
     }
 
 
+class TestBrowserRunners:
+    @pytest.mark.parametrize(
+        ("workflow", "job_name"),
+        [
+            ("ci.yml", "browser-smoke"),
+            ("deep-ci.yml", "browser-mock"),
+            ("deep-ci.yml", "browser-real"),
+            ("deep-ci.yml", "browser-extension"),
+            ("deep-ci.yml", "library-startup"),
+        ],
+    )
+    def test_uses_a_playwright_supported_runner(
+        self, workflow: str, job_name: str
+    ) -> None:
+        job = _workflow(workflow)["jobs"][job_name]
+
+        # Playwright 1.60 cannot provision Chromium on Ubuntu 26.04.
+        assert job["runs-on"] == "ubuntu-24.04"
+
+
 class TestQuickGate:
     def test_qualifies_orca_settings_in_browser_gate(self) -> None:
         steps = _workflow("ci.yml")["jobs"]["browser-smoke"]["steps"]

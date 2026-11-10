@@ -34,6 +34,7 @@ from tests.factories.three_mf_pilot import load_case, opc_package
 from tests.fixtures.three_mf_projects import (
     build_3d_builder_component_project,
     build_multi_plate_project,
+    build_sliced_project,
 )
 from tests.paths import FIXTURES_DIR
 
@@ -944,6 +945,47 @@ class TestThreeMFPlates:
         ] == [12, 12]
         image = await api.get(plates.json()["plates"][1]["image_url"], headers=headers)
         assert (image.status_code, image.headers["content-type"]) == (200, "image/png")
+
+
+class TestSlicedPlates:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "filename", ["sliced.gcode.3mf", "sliced.3mf"], ids=["gcode-3mf", "3mf"]
+    )
+    async def test_previews_each_uploaded_plate(self, api, tmp_path, filename):
+        headers = await _setup_and_login(api, tmp_path)
+        content = build_sliced_project(plate_numbers=(2, 10))
+        upload = await api.post(
+            "/api/v1/ingest/model",
+            files={"file": (filename, content, "model/3mf")},
+            data={"model_name": "Sliced project"},
+            headers=headers,
+        )
+        assert upload.status_code == 202, upload.text
+        job = await _await_job(api, headers, upload.json()["job_id"])
+        assert job["state"] == "completed", job
+        model = await api.get(f"/api/v1/models/{job['model_id']}", headers=headers)
+        file_id = model.json()["files"][0]["id"]
+
+        listing = await api.get(
+            f"/api/v1/files/{file_id}/gcode-plates", headers=headers
+        )
+        first = await api.get(
+            f"/api/v1/files/{file_id}/embedded-gcode?plate_index=2", headers=headers
+        )
+        second = await api.get(
+            f"/api/v1/files/{file_id}/embedded-gcode?plate_index=10", headers=headers
+        )
+        original = await api.get(f"/api/v1/files/{file_id}/download", headers=headers)
+
+        assert listing.status_code == 200, listing.text
+        assert listing.json() == {"plates": [2, 10]}
+        assert first.status_code == 200, first.text
+        assert second.status_code == 200, second.text
+        assert "plate 2\n" in first.text
+        assert "plate 10\n" in second.text
+        assert first.content != second.content
+        assert original.content == content
 
 
 class TestHardlinklessStaging:

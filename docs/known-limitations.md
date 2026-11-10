@@ -167,6 +167,13 @@ available builds. Anything marked beta here remains beta.
 
 ## Data And Metadata
 
+- In Unreleased, sliced Bambu Studio and OrcaSlicer 3MF exports can be browsed one G-code plate
+  at a time in Model detail. Discovery is limited to 64 canonical
+  `Metadata/plate_<N>.gcode` members and the configured 3MF preview limits.
+  It does not require source meshes or a saved plate layout. Unsliced projects
+  have no toolpath to preview. This plate choice controls the preview only;
+  it does not select a plate for printer dispatch.
+
 - Libraries of up to 25,000 collections and 100,000 Models are supported and
   tested nightly at that size. Larger libraries work, but the collection
   sidebar still loads the whole tree at once; beyond this size it slows
