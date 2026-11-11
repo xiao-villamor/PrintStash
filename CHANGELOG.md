@@ -19,6 +19,7 @@
 
 ### Fixed
 
+- Library preview updates no longer flash a refresh banner or hide the details-panel toggle. The displayed list and open inspector stay in place during background refreshes; explicit refreshes and failures keep their feedback.
 - ZIP and model selection searches keep the search icon inside the field. Selected entries use neutral highlighting, and the ZIP destination picker and import actions stay visible in the dialog footer on narrow screens.
 - API key and OrcaSlicer command copy buttons work on HTTP installations without the secure Clipboard API, with a visible error if the browser refuses copying.
 - Confirmed Trash purges reclaim owned files, thumbnails and multipart covers on guarded local/FUSE storage using hash-checked quarantine. Previously blocked guarded cleanup intents are retried; changed objects and external originals remain protected.

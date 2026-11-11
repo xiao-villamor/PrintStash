@@ -3680,6 +3680,42 @@ describe("ModelBrowser", () => {
       },
     );
 
+    it("keeps automatic refresh quiet while its next page is pending", async () => {
+      const pending = Promise.withResolvers<Response>();
+      const app = renderVault({
+        models: [aModelListItem({ name: "Original model" })],
+        routes: { "GET /api/v1/models/browse/revision": changedRevision },
+      });
+      await changeNoticed(app);
+      app.route({ "GET /api/v1/models/browse": () => pending.promise });
+
+      await refreshStarted(app);
+
+      expect(mainHas("Original model")).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Refresh library" })).not.toBeInTheDocument();
+      pending.resolve(modelPage("Current model"));
+      expect(await within(screen.getByRole("main")).findByText("Current model")).toBeVisible();
+    });
+
+    it("shows progress for an explicit refresh", async () => {
+      const user = userEvent.setup();
+      const pending = Promise.withResolvers<Response>();
+      const app = renderVault({
+        routes: {
+          "GET /api/v1/models/browse": () => json({ detail: "browse_refresh_required" }, 409),
+          "GET /api/v1/models/browse/revision": changedRevision,
+        },
+      });
+      const refresh = await screen.findByRole("button", { name: "Refresh library" });
+      app.route({ "GET /api/v1/models/browse": () => pending.promise });
+
+      await user.click(refresh);
+
+      expect(screen.getByRole("button", { name: "Refresh library" })).toBeDisabled();
+      pending.resolve(modelPage("Current model"));
+      expect(await within(screen.getByRole("main")).findByText("Current model")).toBeVisible();
+    });
+
     it("waits for refreshed folders before replacing models", async () => {
       const pending = Promise.withResolvers<Response>();
       const app = renderVault({

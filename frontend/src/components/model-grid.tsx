@@ -485,7 +485,7 @@ function canWriteCollection(collection: CollectionRead | null | undefined): bool
 }
 
 type LibraryRefreshState = { entry: LibraryEntry } & (
-  | { status: "pending" }
+  | { status: "pending"; feedback: "visible" | "silent" }
   | { status: "failed" | "denied"; error: string }
 );
 
@@ -1286,6 +1286,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     !selectMode &&
     (snapshot?.modelPages ?? 0) <= 1 &&
     (snapshot?.folderPages ?? 0) <= 1;
+  const showRefreshNotice =
+    refreshRequired &&
+    !settlesByItself &&
+    !(currentRefresh?.status === "pending" && currentRefresh.feedback === "silent");
   const lastSettled = useRef(0);
   // The timer must survive re-renders, so it reads the latest refresh through a
   // ref instead of depending on an object that is new on every render.
@@ -1293,7 +1297,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
   useLayoutEffect(() => {
     settleNow.current = () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.outliner });
-      void authority.refresh();
+      void reading.refresh(() => refresh("silent"));
     };
   });
   useEffect(() => {
@@ -1355,7 +1359,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     if (hasMore && !loadingMore && !refreshRequired && !authority.authorizationChanged)
       void modelQuery.loadMore();
   }
-  async function refresh() {
+  async function refresh(feedback: "visible" | "silent" = "visible") {
     const session = getSessionVersion();
     if (
       entry.session !== session ||
@@ -1372,7 +1376,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     for (const queryKey of [queryKeys.models, queryKeys.collections])
       void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
     void queryClient.invalidateQueries({ queryKey: queryKeys.vaultStats });
-    setRefreshState({ entry, status: "pending" });
+    setRefreshState({ entry, status: "pending", feedback });
     let lookupPending = selectedCollection !== null;
     try {
       const previousFolders =
@@ -1938,8 +1942,10 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
     inspectorState?.scope === inspectorScope
       ? inspectorState.intent
       : libraryInspectorIntents.get(inspectorScope);
+  // A background read retains this entry's displayed snapshot and controls.
+  // Navigation and authorization changes still retire the previous inspector.
   const inspectorAvailable =
-    browseReady &&
+    snapshot?.entry === entry &&
     docView === "models" &&
     !favoritesOnly &&
     !authority.authorizationChanged &&
@@ -3483,7 +3489,7 @@ export function ModelBrowser({ initial }: { initial?: BrowserInitialData }) {
                   {uiText("library.readingPositionReset")}
                 </p>
               )}
-              {refreshRequired && !settlesByItself && (
+              {showRefreshNotice && (
                 <div
                   role="status"
                   className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-md border border-border bg-muted p-3 text-sm"
