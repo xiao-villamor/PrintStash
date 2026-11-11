@@ -1,67 +1,62 @@
 import type { ReactNode } from "react";
 import { Check } from "lucide-react";
-import { BrandMark } from "@/components/brand-mark";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { LocaleToggle } from "@/components/locale-toggle";
-import { Card } from "@/components/ui/card";
+import { AuthFrame } from "@/components/auth-frame";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
+const STEPS = ["stepAccount", "stepStorage", "stepReview"] as const;
+
+/**
+ * First-run setup inside the shared sign-in shell. The welcome heading greets the
+ * visitor once, on the first step; later steps keep it for assistive technology
+ * only, so each step's own title is the first thing a sighted visitor reads.
+ */
 export function SetupFrame({ step, children }: { step: 1 | 2 | 3; children: ReactNode }) {
   const { t } = useI18n();
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-background px-4 py-6 sm:py-10">
-      <div className="w-full max-w-[560px]">
-        <Card
-          role="region"
-          aria-label={t("setup.welcome")}
-          className="w-full max-w-[560px] overflow-hidden border-border bg-card"
-        >
-          <header className="flex items-center justify-between gap-4 px-5 pt-6 sm:px-8 sm:pt-8">
-            <div className="flex items-center gap-3">
-              <div className="flex h-7 w-7 items-center justify-center rounded-brand bg-primary text-primary-foreground">
-                <BrandMark className="h-5 w-5" />
-              </div>
-              <span className="text-[15px] font-semibold tracking-tight">PrintStash</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <LocaleToggle />
-              <ThemeToggle />
-            </div>
-          </header>
-          <h1 className="mt-6 px-5 text-[22px] font-semibold tracking-tight sm:px-8">
-            {t("setup.welcome")}
-          </h1>
-          <ol aria-label={t("setup.progress")} className="mt-5 grid grid-cols-3 gap-2 px-5 sm:px-8">
-            {(["stepAccount", "stepStorage", "stepReview"] as const).map((key, index) => (
-              <li
-                key={key}
-                aria-current={step === index + 1 ? "step" : undefined}
+    <AuthFrame wide label={t("setup.welcome")}>
+      <h1
+        className={
+          step === 1 ? "text-[22px] font-semibold tracking-tight text-foreground" : "sr-only"
+        }
+      >
+        {t("setup.welcome")}
+      </h1>
+      <ol
+        aria-label={t("setup.progress")}
+        className={cn("grid grid-cols-3 gap-2", step === 1 ? "mt-5" : "mt-0")}
+      >
+        {STEPS.map((key, index) => {
+          const position = index + 1;
+          const current = step === position;
+          const done = step > position;
+          return (
+            <li
+              key={key}
+              aria-current={current ? "step" : undefined}
+              className={cn(
+                "flex items-center gap-2 border-t-2 pt-2.5 text-[13px]",
+                current && "border-primary font-medium text-foreground",
+                done && "border-primary text-on-surface-variant",
+                !current && !done && "border-border text-muted-foreground",
+              )}
+            >
+              <span
                 className={cn(
-                  "flex items-center gap-2 border-t-2 pt-2.5 text-xs",
-                  step >= index + 1
-                    ? "border-primary font-medium text-foreground"
-                    : "border-border text-muted-foreground",
+                  "flex h-5 w-5 shrink-0 items-center justify-center font-mono text-2xs",
+                  current && "bg-primary text-primary-foreground",
+                  done && "bg-primary/10 text-primary",
+                  !current && !done && "bg-muted text-muted-foreground",
                 )}
               >
-                <span
-                  className={cn(
-                    "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-2xs",
-                    step === index + 1
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {step > index + 1 ? <Check className="h-3 w-3" aria-hidden /> : index + 1}
-                </span>
-                {t(`setup.${key}`)}
-              </li>
-            ))}
-          </ol>
-          <div className="min-w-0 px-5 pb-6 pt-6 sm:px-8 sm:pb-8">{children}</div>
-        </Card>
-        <p className="mt-5 text-center text-xs text-muted-foreground">{t("auth.tagline")}</p>
-      </div>
-    </main>
+                {done ? <Check className="h-3 w-3" aria-hidden /> : position}
+              </span>
+              {t(`setup.${key}`)}
+            </li>
+          );
+        })}
+      </ol>
+      <div className="pt-6">{children}</div>
+    </AuthFrame>
   );
 }

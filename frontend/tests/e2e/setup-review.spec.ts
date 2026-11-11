@@ -57,8 +57,9 @@ test.describe("first-run setup review", () => {
     ["desktop", 1366, 900],
     ["phone", 390, 844],
   ] as const) {
-    test(`reviews checked storage before account creation on ${label}`, async ({ page }) => {
+    test(`checks storage when continuing to review on ${label}`, async ({ page }) => {
       let completionRequests = 0;
+      let storageChecks = 0;
       await page.setViewportSize({ width, height });
       await page.addInitScript(() => localStorage.clear());
       await page.route("**/api/v1/setup/status", (route) => route.fulfill({ json: status }));
@@ -68,9 +69,10 @@ test.describe("first-run setup review", () => {
       await page.route("**/api/v1/storage/providers", (route) =>
         route.fulfill({ json: providers }),
       );
-      await page.route("**/api/v1/setup/check-storage", (route) =>
-        route.fulfill({ json: { ready: true, storage_provider: "local", checks: [] } }),
-      );
+      await page.route("**/api/v1/setup/check-storage", (route) => {
+        storageChecks += 1;
+        return route.fulfill({ json: { ready: true, storage_provider: "local", checks: [] } });
+      });
       await page.route("**/api/v1/setup", (route) => {
         if (route.request().method() === "POST") completionRequests += 1;
         return route.fulfill({ status: 500, json: { detail: "not_expected" } });
@@ -80,8 +82,7 @@ test.describe("first-run setup review", () => {
       await page.getByLabel("Password", { exact: true }).fill("example-password-123");
       await page.getByLabel("Confirm password", { exact: true }).fill("example-password-123");
       await page.getByRole("button", { name: "Continue" }).click();
-      await page.getByRole("button", { name: "Check storage" }).click();
-      await expect(page.getByText("Storage ready")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Your files" })).toBeVisible();
       await page.getByRole("button", { name: "Continue" }).click();
       await expect(
         page.getByRole("heading", { name: "Review before creating your account" }),
@@ -91,9 +92,18 @@ test.describe("first-run setup review", () => {
       await expect(page.locator('input[type="password"]')).toHaveCount(0);
       await expect(page.getByText("example-password-123", { exact: true })).toHaveCount(0);
       expect(completionRequests).toBe(0);
-      await page.getByRole("button", { name: "Edit" }).nth(2).click();
+      expect(storageChecks).toBe(1);
+      await page.getByRole("button", { name: "Edit storage" }).click();
       await page.getByLabel("Data directory").fill("/data/new-files");
-      await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
+      await page.getByRole("button", { name: "Continue" }).click();
+      await expect(
+        page.getByRole("heading", { name: "Review before creating your account" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("definition").filter({ hasText: "/data/new-files" }),
+      ).toBeVisible();
+      expect(storageChecks).toBe(2);
+      expect(completionRequests).toBe(0);
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true);

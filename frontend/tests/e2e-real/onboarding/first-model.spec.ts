@@ -140,7 +140,7 @@ test.describe("Browser onboarding", () => {
           });
         });
       }
-      await page.getByRole("button", { name: "Create my account and continue" }).press("Enter");
+      await page.getByRole("button", { name: "Create account" }).press("Enter");
       if (loseResponse) {
         await page.getByRole("button", { name: "Sign in", exact: true }).press("Enter");
         await page.getByLabel("Username").fill("first-owner");

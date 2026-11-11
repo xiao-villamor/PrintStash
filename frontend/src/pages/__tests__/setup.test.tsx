@@ -15,7 +15,7 @@
  * thread.
  */
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/lib/query-client";
@@ -279,6 +279,42 @@ describe("SetupPage", () => {
     expect(deps.completeSetup).not.toHaveBeenCalled();
   });
 
+  it("explains the administrator account before asking for it", async () => {
+    renderSetup();
+    await screen.findByLabelText("Username");
+    expect(screen.getByText(/You will be the administrator/)).toBeVisible();
+  });
+  it("reports every invalid account field at once", async () => {
+    const user = userEvent.setup();
+    renderSetup();
+    await user.type(await screen.findByLabelText("Email (optional)"), "alex@");
+    await user.type(screen.getByLabelText("Password"), "short");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    for (const field of ["Username", "Email (optional)", "Password", "Confirm password"]) {
+      expect(screen.getByLabelText(field)).toHaveAttribute("aria-invalid", "true");
+    }
+    expect(screen.getByText("Enter a valid email or leave this empty.")).toBeVisible();
+    expect(screen.getByLabelText("Username")).toHaveFocus();
+  });
+  it("clears a field's error once it is edited", async () => {
+    const user = userEvent.setup();
+    renderSetup();
+    await screen.findByLabelText("Username");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.type(screen.getByLabelText("Username"), "admin");
+    expect(screen.getByLabelText("Username")).toHaveAttribute("aria-invalid", "false");
+    expect(screen.getByLabelText("Password")).toHaveAttribute("aria-invalid", "true");
+  });
+  it("greets with the welcome heading only on the account step", async () => {
+    await reachStorage();
+    expect(screen.getByRole("heading", { name: "Welcome to PrintStash" })).toHaveClass("sr-only");
+    expect(screen.getByRole("heading", { name: "Your files" })).toHaveFocus();
+  });
+  it("says an existing folder is connected after setup", async () => {
+    await reachStorage();
+    expect(screen.getByText(/You can connect it after setup/)).toBeVisible();
+    expect(screen.queryByText(/in the next step/)).not.toBeInTheDocument();
+  });
   it("focuses the first invalid account field", async () => {
     renderSetup();
     await screen.findByLabelText("Username");
@@ -299,9 +335,29 @@ describe("SetupPage", () => {
       screen.getByRole("heading", { name: "Create your administrator account" }),
     ).toHaveFocus();
   });
-  it("requires a successful check before creating an account", async () => {
-    await reachStorage();
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  it("checks storage when continuing without a check", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(
+      await screen.findByRole("heading", { name: "Review before creating your account" }),
+    ).toBeVisible();
+    expect(deps.checkSetupStorage).toHaveBeenCalledTimes(1);
+  });
+  it("does not recheck storage that already passed", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Storage ready");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", { name: "Review before creating your account" });
+    expect(deps.checkSetupStorage).toHaveBeenCalledTimes(1);
+  });
+  it("stays on storage when the check started by Continue fails", async () => {
+    vi.mocked(deps.checkSetupStorage).mockRejectedValueOnce(new Error("data_dir_not_writable"));
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Check the locations above");
+    expect(screen.getByRole("heading", { name: "Your files" })).toBeVisible();
+    expect(deps.completeSetup).not.toHaveBeenCalled();
   });
   it("reviews the checked choices before creating an account", async () => {
     const user = await reachStorage();
@@ -315,16 +371,31 @@ describe("SetupPage", () => {
     expect(screen.getByText(/\/data\/files/)).toBeVisible();
     expect(screen.queryByDisplayValue("Password123")).not.toBeInTheDocument();
     expect(deps.completeSetup).not.toHaveBeenCalled();
-    await user.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    await user.click(screen.getByRole("button", { name: "Edit account" }));
     expect(screen.getByLabelText("Username")).toHaveValue("admin");
     expect(screen.getByLabelText("Password")).toHaveValue("Password123");
+  });
+  it("reviews each storage folder with plain labels", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    const summary = await screen.findByLabelText("Review before creating your account");
+    expect(within(summary).getByText("Email")).toBeVisible();
+    expect(within(summary).queryByText("Email (optional)")).not.toBeInTheDocument();
+    expect(within(summary).getByText("Previews")).toBeVisible();
+    expect(within(summary).getByText("/data/thumbs")).toBeVisible();
+  });
+  it("returns to storage from the review", async () => {
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Edit storage" }));
+    expect(screen.getByLabelText("Data directory")).toHaveValue("/data/files");
   });
   it("continues the guide with the authenticated administrator", async () => {
     const user = await reachStorage();
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
     await waitFor(() => expect(currentPath()).toBe("/getting-started"));
     expect(deps.storeLogin).toHaveBeenCalledWith(
       "token",
@@ -338,7 +409,7 @@ describe("SetupPage", () => {
     await screen.findByText("Storage ready");
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
 
     await waitFor(() => expect(currentPath()).toBe("/getting-started"));
     expect(listTasks()).toHaveLength(0);
@@ -351,7 +422,7 @@ describe("SetupPage", () => {
     await screen.findByText("Storage ready");
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
 
     await screen.findByRole("alert");
     expect(listTasks().map((task) => task.id)).toContain(taskId);
@@ -362,7 +433,7 @@ describe("SetupPage", () => {
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
     await screen.findByRole("alert");
     await user.click(screen.getByRole("button", { name: "Back" }));
     await user.click(screen.getByRole("button", { name: "Back" }));
@@ -375,7 +446,7 @@ describe("SetupPage", () => {
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeVisible();
     expect(deps.completeSetup).toHaveBeenCalledTimes(1);
   });
@@ -388,7 +459,7 @@ describe("SetupPage", () => {
     await screen.findByText("Storage ready");
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(await screen.findByRole("button", { name: "Sign in" })).toBeVisible();
     expect(listTasks()).toHaveLength(0);
@@ -400,7 +471,7 @@ describe("SetupPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Library source");
   });
   it("does not call unchecked remote storage ready", async () => {
-    vi.mocked(deps.checkSetupStorage).mockResolvedValueOnce({
+    vi.mocked(deps.checkSetupStorage).mockResolvedValue({
       ready: false,
       storage_provider: "s3",
       checks: [{ code: "remote_connection_not_checked", free_bytes: null }],
@@ -408,7 +479,9 @@ describe("SetupPage", () => {
     const user = await reachStorage();
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     expect(await screen.findByText("Needs attention")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(deps.checkSetupStorage).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("heading", { name: "Your files" })).toBeVisible();
   });
   it("shows disabled registration without account inputs", async () => {
     vi.mocked(deps.getSetupStatus).mockResolvedValue({
@@ -494,9 +567,7 @@ describe("Storage form recovery", () => {
   it("explains the required storage check", async () => {
     await reachStorage();
     expect(
-      screen.getByText(
-        "Check that PrintStash can read and write here before creating your account.",
-      ),
+      screen.getByText("Continue checks that PrintStash can read and write here."),
     ).toBeVisible();
   });
 
@@ -586,7 +657,16 @@ describe("Storage form recovery", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Check storage" })).toBeEnabled(),
     );
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    expect(screen.queryByText("Storage ready")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await screen.findByRole("heading", { name: "Review before creating your account" });
+    expect(deps.checkSetupStorage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        storage_provider_config: expect.objectContaining({ data_dir: "/different/files" }),
+      }),
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it("identifies measured capacity as available space", async () => {
@@ -597,7 +677,10 @@ describe("Storage form recovery", () => {
     });
     const user = await reachStorage();
     await user.click(screen.getByRole("button", { name: "Check storage" }));
-    expect(await screen.findByText(/Your files:.*available/)).toBeVisible();
+    const status = await screen.findByRole("status");
+    await within(status).findByText("Storage ready");
+    expect(within(status).getByText("Your files")).toBeVisible();
+    expect(within(status).getByText(/available$/)).toBeVisible();
   });
 
   it("announces account creation while the request is pending", async () => {
@@ -606,10 +689,10 @@ describe("Storage form recovery", () => {
     await user.click(screen.getByRole("button", { name: "Check storage" }));
     await screen.findByText("Storage ready");
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
     expect(await screen.findByText("Creating your account…")).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Edit" })).toHaveLength(3);
-    for (const edit of screen.getAllByRole("button", { name: "Edit" })) expect(edit).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit account" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Edit storage" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Back" })).toBeDisabled();
   });
 });
@@ -646,7 +729,7 @@ describe("setup entry lifetime", () => {
     const session = Promise.withResolvers<Awaited<ReturnType<SetupPageDeps["beginSetup"]>>>();
     vi.mocked(deps.beginSetup).mockReturnValueOnce(session.promise);
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
 
     cleanup();
     await act(async () => session.resolve({ csrf: "late", expires_in: 3600 }));
@@ -662,7 +745,7 @@ describe("setup entry lifetime", () => {
     vi.mocked(deps.completeSetup).mockReturnValueOnce(completed.promise);
     const task = createTask({ title: "Earlier upload", jobId: "old-install-job" });
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
 
     cleanup();
     await act(async () => completed.resolve(setupResponse));
@@ -678,7 +761,7 @@ describe("setup entry lifetime", () => {
     const completed = Promise.withResolvers<SetupResponse>();
     vi.mocked(deps.completeSetup).mockReturnValueOnce(completed.promise);
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
 
     cleanup();
     await act(async () => completed.reject(new Error("late failure")));
@@ -695,7 +778,7 @@ describe("setup entry lifetime", () => {
     vi.mocked(deps.completeSetup).mockRejectedValueOnce(new Error("lost response"));
     const task = createTask({ title: "Earlier upload", jobId: "old-install-job" });
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
     await waitFor(() => expect(deps.getSetupStatus).toHaveBeenCalledTimes(2));
 
     cleanup();
@@ -762,7 +845,7 @@ describe("setup source ownership", () => {
     await screen.findByText("Storage ready");
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Create my account and continue" }));
+    await user.click(screen.getByRole("button", { name: "Create account" }));
     await waitFor(() => expect(currentPath()).toBe("/getting-started"));
 
     const cached = JSON.stringify(

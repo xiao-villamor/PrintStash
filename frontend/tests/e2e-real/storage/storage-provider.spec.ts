@@ -100,7 +100,7 @@ test.describe("storage provider setup", () => {
     await page.getByLabel("Password").fill("webdav-password");
     await page.getByLabel("Root").fill("vault-data");
     await page.getByRole("button", { name: "Check storage" }).click();
-    await page.getByRole("button", { name: "Create my account and continue" }).click();
+    await page.getByRole("button", { name: "Create account" }).click();
     await expect(page).toHaveURL(/\/getting-started$/);
     await page.getByRole("button", { name: "I'll do this later" }).click();
 

@@ -97,6 +97,16 @@ describe("LoginPage", () => {
       expect(screen.getByLabelText("Remember me")).toBeInTheDocument();
     });
 
+    it("points a forgotten password to administrator recovery", () => {
+      renderLogin({ auth: signedOut() });
+
+      expect(screen.getByText(/Another administrator can reset it/)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "How recovery works" })).toHaveAttribute(
+        "href",
+        expect.stringContaining("first-run.md#forgotten-password"),
+      );
+    });
+
     it("says credentials never leave the server", () => {
       // The reassurance is the product's whole pitch; losing it is a
       // self-hosting promise quietly dropped.
@@ -187,7 +197,7 @@ describe("LoginPage", () => {
       );
     });
 
-    it("marks the fields as the thing that failed", async () => {
+    it("describes a refusal on both fields", async () => {
       // Screen-reader users get the error announced against the input, not as
       // loose text somewhere on the page.
       const user = userEvent.setup();
@@ -202,8 +212,31 @@ describe("LoginPage", () => {
       await user.click(screen.getByRole("button", { name: "Sign in" }));
 
       await waitFor(() =>
-        expect(screen.getByLabelText("Username")).toHaveAttribute("aria-invalid", "true"),
+        expect(screen.getByLabelText("Username")).toHaveAttribute(
+          "aria-describedby",
+          "login-error",
+        ),
       );
+      expect(screen.getByLabelText("Password")).toHaveAttribute("aria-describedby", "login-error");
+    });
+
+    it("does not blame one field for a refusal that names neither", async () => {
+      // A 401 cannot say whether the username or the password was wrong, so
+      // neither field is marked invalid; the banner carries the message.
+      const user = userEvent.setup();
+      renderLogin({
+        auth: signedOut({
+          login: vi.fn<AuthState["login"]>().mockRejectedValue(new Error("HTTP 401: nope")),
+        }),
+      });
+      await user.type(screen.getByLabelText("Username"), "maker");
+      await user.type(screen.getByLabelText("Password"), "wrong");
+
+      await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+      await screen.findByRole("alert");
+      expect(screen.getByLabelText("Username")).not.toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByLabelText("Password")).not.toHaveAttribute("aria-invalid", "true");
     });
   });
 

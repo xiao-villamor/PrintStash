@@ -9,7 +9,7 @@ import {
   type SetupEntryApi,
 } from "@/features/setup/entry";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
-import { Eye, EyeOff } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Eye, EyeOff } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import {
   beginSetup,
@@ -25,6 +25,12 @@ import {
 } from "@/components/storage-provider-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  authFieldError,
+  authFieldHelp,
+  authFieldInput,
+  authFieldLabel,
+} from "@/components/auth-field-classes";
 import { storeLogin } from "@/lib/auth";
 import { resetTasksForNewSetup } from "@/lib/task-center";
 import { useI18n } from "@/lib/i18n";
@@ -48,6 +54,18 @@ const LIVE_DEPS: SetupPageDeps = {
   storeLogin,
 };
 type AccountField = "username" | "password" | "confirm" | "email";
+const ACCOUNT_FIELDS = ["username", "email", "password", "confirm"] as const;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Every account rule that fails, in form order, so all of them are reported at once. */
+function invalidAccountFields(account: Record<AccountField, string>): AccountField[] {
+  return ACCOUNT_FIELDS.filter((field) => {
+    if (field === "username") return account.username.trim().length < 3;
+    if (field === "password") return account.password.length < 8;
+    if (field === "confirm") return account.password !== account.confirm;
+    return account.email !== "" && !EMAIL_PATTERN.test(account.email);
+  });
+}
 
 export default function SetupPage({ deps = LIVE_DEPS }: { deps?: SetupPageDeps }) {
   const [port, setPort] = useState({ deps, generation: 0 });
@@ -93,7 +111,9 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
   const [operation, setOperation] = useState<"check" | "create" | null>(null);
   const busy = operation !== null;
   const [error, setError] = useState("");
-  const [fieldError, setFieldError] = useState<AccountField | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<readonly AccountField[]>([]);
+  // Continue on the storage step runs the check and advances once it reports ready.
+  const [advanceWhenChecked, setAdvanceWhenChecked] = useState(false);
   const view = useRef<AbortController | null>(null);
   const command = useRef(false);
   const form = useRef<HTMLFormElement>(null);
@@ -112,27 +132,15 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
     return () => controller.abort(new DOMException("setup_entry_disposed", "AbortError"));
   }, []);
 
-  useEffect(() => {
-    if (fieldError) form.current?.querySelector<HTMLInputElement>(`#setup-${fieldError}`)?.focus();
-  }, [fieldError]);
-
   function next() {
-    const invalid: AccountField | null =
-      account.username.trim().length < 3
-        ? "username"
-        : account.password.length < 8
-          ? "password"
-          : account.password !== account.confirm
-            ? "confirm"
-            : account.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(account.email)
-              ? "email"
-              : null;
-    setFieldError(invalid);
-    if (invalid) form.current?.querySelector<HTMLInputElement>(`#setup-${invalid}`)?.focus();
-    if (!invalid) {
-      setStep(2);
-      setError("");
+    const invalid = invalidAccountFields(account);
+    setFieldErrors(invalid);
+    if (invalid.length > 0) {
+      form.current?.querySelector<HTMLInputElement>(`#setup-${invalid[0]}`)?.focus();
+      return;
     }
+    setStep(2);
+    setError("");
   }
   function storageBody() {
     return setupStorageBody(providerId, values);
@@ -222,6 +230,14 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
     }
   }
   const currentCheck = checkedDraft === JSON.stringify(storageBody()) ? check : null;
+  // The check started by Continue has settled: advance only on a ready result for
+  // the values still on screen; anything else leaves its message in place.
+  if (advanceWhenChecked && operation === null) {
+    setAdvanceWhenChecked(false);
+    if (currentCheck?.ready) setStep(3);
+  }
+  const selectedProvider = providers.find((provider) => provider.id === providerId);
+  const filesFree = currentCheck?.checks.find((item) => item.code === "data_writable")?.free_bytes;
   const errors = {
     username: t("setup.badUsername"),
     password: t("setup.badPassword"),
@@ -257,156 +273,155 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
           onSubmit={(event) => {
             event.preventDefault();
             if (step === 1) next();
-            else if (step === 2 && currentCheck?.ready) setStep(3);
-            else if (step === 3) void submit();
+            else if (step === 2) {
+              if (currentCheck?.ready) setStep(3);
+              else {
+                setAdvanceWhenChecked(true);
+                void checkStorage();
+              }
+            } else if (step === 3) void submit();
           }}
         >
           <div>
-            <h2 ref={heading} tabIndex={-1} className="text-base font-semibold tracking-tight">
+            <h2
+              ref={heading}
+              tabIndex={-1}
+              className="text-base font-semibold tracking-tight text-foreground focus-visible:outline-none"
+            >
               {t(
                 step === 1 ? "setup.accountHeading" : step === 2 ? "setup.files" : "setup.summary",
               )}
             </h2>
-            <p className={step === 1 ? "sr-only" : "mt-2 text-sm text-muted-foreground"}>
-              {step === 1
-                ? t("setup.accountHelp")
-                : step === 2
-                  ? `${t("setup.defaultHelp")} ${t("setup.existingHelp")}`
-                  : null}
-            </p>
+            {step !== 3 && (
+              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">
+                {step === 1
+                  ? t("setup.accountHelp")
+                  : `${t("setup.defaultHelp")} ${t("setup.existingHelp")}`}
+              </p>
+            )}
           </div>
           {step === 1 ? (
             <div className="grid gap-4">
-              {(["username", "email", "password", "confirm"] as const).map((field) => (
-                <div key={field} className="space-y-2">
-                  <label
-                    htmlFor={`setup-${field}`}
-                    className="block text-xs font-medium text-on-surface-variant"
-                  >
-                    {t(`setup.${field}`)}
-                  </label>
-                  <div className="relative">
-                    <Input
-                      id={`setup-${field}`}
-                      value={account[field]}
-                      autoFocus={field === "username"}
-                      required={field !== "email"}
-                      maxLength={field === "username" ? 128 : 256}
-                      type={
-                        field === "password" || field === "confirm"
-                          ? visiblePasswords[field]
-                            ? "text"
-                            : "password"
-                          : field === "email"
-                            ? "email"
-                            : "text"
-                      }
-                      autoComplete={
-                        field === "password" || field === "confirm" ? "new-password" : field
-                      }
-                      aria-invalid={fieldError === field}
-                      aria-describedby={`setup-${field}-help`}
-                      className={
-                        field === "password" || field === "confirm"
-                          ? "h-9 bg-surface-container-lowest pr-10"
-                          : "h-9 bg-surface-container-lowest"
-                      }
-                      onChange={(event) => {
-                        setAccount((current) => ({ ...current, [field]: event.target.value }));
-                        if (fieldError === field) setFieldError(null);
-                      }}
-                    />
-                    {(field === "password" || field === "confirm") && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="absolute inset-y-0 right-0 h-full w-10 text-muted-foreground"
-                        aria-label={t(
-                          visiblePasswords[field] ? "setup.hideField" : "setup.showField",
-                          { field: t(`setup.${field}`) },
-                        )}
-                        aria-controls={`setup-${field}`}
-                        aria-pressed={visiblePasswords[field]}
-                        onClick={() =>
-                          setVisiblePasswords((current) => ({
-                            ...current,
-                            [field]: !current[field],
-                          }))
+              {ACCOUNT_FIELDS.map((field) => {
+                const invalid = fieldErrors.includes(field);
+                const secret = field === "password" || field === "confirm";
+                const help =
+                  field === "password"
+                    ? t("setup.passwordHelp")
+                    : field === "email"
+                      ? t("setup.emailHelp")
+                      : null;
+                const described = invalid || help !== null;
+                return (
+                  <div key={field} className="grid gap-1.5">
+                    <label htmlFor={`setup-${field}`} className={authFieldLabel}>
+                      {t(`setup.${field}`)}
+                    </label>
+                    <div className="relative">
+                      <Input
+                        id={`setup-${field}`}
+                        value={account[field]}
+                        autoFocus={field === "username"}
+                        required={field !== "email"}
+                        maxLength={field === "username" ? 128 : 256}
+                        type={
+                          secret
+                            ? visiblePasswords[field]
+                              ? "text"
+                              : "password"
+                            : field === "email"
+                              ? "email"
+                              : "text"
                         }
+                        autoComplete={secret ? "new-password" : field}
+                        aria-invalid={invalid}
+                        aria-describedby={described ? `setup-${field}-help` : undefined}
+                        className={secret ? `${authFieldInput} pr-10` : authFieldInput}
+                        onChange={(event) => {
+                          setAccount((current) => ({ ...current, [field]: event.target.value }));
+                          if (invalid)
+                            setFieldErrors((current) => current.filter((item) => item !== field));
+                        }}
+                      />
+                      {secret && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="absolute inset-y-0 right-0 h-full w-10 text-muted-foreground"
+                          aria-label={t(
+                            visiblePasswords[field] ? "setup.hideField" : "setup.showField",
+                            { field: t(`setup.${field}`) },
+                          )}
+                          aria-controls={`setup-${field}`}
+                          aria-pressed={visiblePasswords[field]}
+                          onClick={() =>
+                            setVisiblePasswords((current) => ({
+                              ...current,
+                              [field]: !current[field],
+                            }))
+                          }
+                        >
+                          {visiblePasswords[field] ? (
+                            <EyeOff className="h-4 w-4" aria-hidden />
+                          ) : (
+                            <Eye className="h-4 w-4" aria-hidden />
+                          )}
+                        </Button>
+                      )}
+                    </div>
+                    {described && (
+                      <p
+                        id={`setup-${field}-help`}
+                        role={invalid ? "alert" : undefined}
+                        className={invalid ? authFieldError : authFieldHelp}
                       >
-                        {visiblePasswords[field] ? (
-                          <EyeOff className="h-4 w-4" aria-hidden />
-                        ) : (
-                          <Eye className="h-4 w-4" aria-hidden />
-                        )}
-                      </Button>
+                        {invalid ? errors[field] : help}
+                      </p>
                     )}
                   </div>
-                  <p
-                    id={`setup-${field}-help`}
-                    role={fieldError === field ? "alert" : undefined}
-                    className={
-                      fieldError === field
-                        ? "text-sm text-destructive"
-                        : "text-xs text-muted-foreground"
-                    }
-                  >
-                    {fieldError === field
-                      ? errors[field]
-                      : field === "password"
-                        ? t("setup.passwordHelp")
-                        : field === "email"
-                          ? t("setup.emailHelp")
-                          : ""}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : step === 2 ? (
             <>
-              <div className="space-y-4">
-                <StorageProviderPicker
-                  onboarding
-                  disabled={operation === "create"}
-                  providers={providers}
-                  providerId={providerId}
-                  values={values}
-                  onProviderChange={(provider) => {
-                    const defaults = defaultProviderValues(provider);
-                    if (provider.id === "local") {
-                      defaults.data_dir = status.current_data_dir ?? status.default_data_dir ?? "";
-                      defaults.thumb_dir =
-                        status.current_thumb_dir ?? status.default_thumb_dir ?? "";
-                    }
-                    setStorageDraft({ providerId: provider.id, values: defaults });
-                    setCheck(null);
-                    setError("");
-                  }}
-                  onValueChange={(name, value) => {
-                    setStorageDraft((current) => ({
-                      providerId,
-                      values: { ...(current?.values ?? values), [name]: value },
-                    }));
-                    setCheck(null);
-                    setError("");
-                  }}
-                />
-              </div>
-              {error && (
-                <p role="alert" className="text-sm text-destructive">
-                  {error}
-                </p>
-              )}
-              <div className="space-y-3 border border-border bg-muted/30 p-3.5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-5">
+              <StorageProviderPicker
+                onboarding
+                disabled={operation === "create"}
+                providers={providers}
+                providerId={providerId}
+                values={values}
+                onProviderChange={(provider) => {
+                  const defaults = defaultProviderValues(provider);
+                  if (provider.id === "local") {
+                    defaults.data_dir = status.current_data_dir ?? status.default_data_dir ?? "";
+                    defaults.thumb_dir = status.current_thumb_dir ?? status.default_thumb_dir ?? "";
+                  }
+                  setStorageDraft({ providerId: provider.id, values: defaults });
+                  setCheck(null);
+                  setError("");
+                }}
+                onValueChange={(name, value) => {
+                  setStorageDraft((current) => ({
+                    providerId,
+                    values: { ...(current?.values ?? values), [name]: value },
+                  }));
+                  setCheck(null);
+                  setError("");
+                }}
+              />
+              <div className="space-y-3 border-t border-border pt-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
                   <div>
-                    <p className="text-sm font-medium leading-relaxed">{t("setup.checkFirst")}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{t("setup.checkHelp")}</p>
+                    <p className="text-[13px] font-medium text-foreground">
+                      {t("setup.checkFirst")}
+                    </p>
+                    <p className={`mt-1 ${authFieldHelp}`}>{t("setup.checkHelp")}</p>
                   </div>
                   <Button
                     type="button"
                     variant="outline"
+                    size="sm"
                     loading={operation === "check"}
                     disabled={operation === "create"}
                     className="shrink-0"
@@ -415,22 +430,54 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                     {t("setup.check")}
                   </Button>
                 </div>
-                <div role="status" aria-live="polite">
+                {error && (
+                  <p role="alert" className="text-sm text-destructive">
+                    {error}
+                  </p>
+                )}
+                <div role="status" aria-live="polite" className="text-[13px]">
                   {busy ? (
-                    t(operation === "check" ? "setup.checking" : "setup.creating")
+                    <p className="text-muted-foreground">
+                      {t(operation === "check" ? "setup.checking" : "setup.creating")}
+                    </p>
                   ) : currentCheck ? (
-                    <>
-                      <p>{t(currentCheck.ready ? "setup.ready" : "setup.attention")}</p>
-                      {!currentCheck.ready && <p>{t("setup.remoteCheck")}</p>}
-                      {currentCheck.checks.map((item) =>
-                        item.free_bytes === null ? null : (
-                          <p className="text-xs text-muted-foreground" key={item.code}>
-                            {item.code === "data_writable" ? t("setup.files") : t("setup.previews")}
-                            : {formatBytes(item.free_bytes)} {t("setup.availableSpace")}
-                          </p>
-                        ),
+                    <div className="space-y-1.5">
+                      <p
+                        className={
+                          currentCheck.ready
+                            ? "flex items-center gap-1.5 font-medium text-success"
+                            : "flex items-center gap-1.5 font-medium text-warning"
+                        }
+                      >
+                        {currentCheck.ready ? (
+                          <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+                        ) : (
+                          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+                        )}
+                        {t(currentCheck.ready ? "setup.ready" : "setup.attention")}
+                      </p>
+                      {!currentCheck.ready && (
+                        <p className="text-muted-foreground">{t("setup.remoteCheck")}</p>
                       )}
-                    </>
+                      {currentCheck.checks.some((item) => item.free_bytes !== null) && (
+                        <dl className="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3 gap-y-1">
+                          {currentCheck.checks.map((item) =>
+                            item.free_bytes === null ? null : (
+                              <div key={item.code} className="contents">
+                                <dt className="text-muted-foreground">
+                                  {item.code === "data_writable"
+                                    ? t("setup.files")
+                                    : t("setup.previews")}
+                                </dt>
+                                <dd className="font-mono text-xs leading-5 text-foreground">
+                                  {formatBytes(item.free_bytes)} {t("setup.availableSpace")}
+                                </dd>
+                              </div>
+                            ),
+                          )}
+                        </dl>
+                      )}
+                    </div>
                   ) : null}
                 </div>
               </div>
@@ -440,56 +487,70 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
               aria-label={t("setup.summary")}
               className="divide-y divide-border border-y border-border text-sm"
             >
-              <div className="grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-3 py-3">
-                <dt className="text-muted-foreground">{t("setup.username")}</dt>
-                <dd className="min-w-0 break-all">{account.username.trim()}</dd>
-                <dd>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => setStep(1)}
-                  >
-                    {t("setup.edit")}
-                  </Button>
-                </dd>
-              </div>
-              <div className="grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-3 py-3">
-                <dt className="text-muted-foreground">{t("setup.email")}</dt>
-                <dd className="min-w-0 break-all">{account.email.trim() || "—"}</dd>
-                <dd>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => setStep(1)}
-                  >
-                    {t("setup.edit")}
-                  </Button>
-                </dd>
-              </div>
-              <div className="grid grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-3 py-3">
-                <dt className="text-muted-foreground">{t("setup.files")}</dt>
-                <dd className="min-w-0 break-words">
-                  {knownUiText(
-                    providers.find((provider) => provider.id === providerId)?.label ?? providerId,
-                  )}
-                  {values.data_dir ? ` · ${String(values.data_dir)}` : ""}
-                </dd>
-                <dd>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => setStep(2)}
-                  >
-                    {t("setup.edit")}
-                  </Button>
-                </dd>
-              </div>
+              {(
+                [
+                  {
+                    key: "username",
+                    label: t("setup.username"),
+                    value: account.username.trim(),
+                    edit: { step: 1, label: t("setup.editAccount") },
+                  },
+                  {
+                    key: "email",
+                    label: t("setup.reviewEmail"),
+                    value: account.email.trim() || "—",
+                  },
+                  {
+                    key: "files",
+                    label: t("setup.files"),
+                    value: [
+                      knownUiText(selectedProvider?.label ?? providerId),
+                      values.data_dir ? String(values.data_dir) : null,
+                      filesFree != null
+                        ? `${formatBytes(filesFree)} ${t("setup.availableSpace")}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · "),
+                    edit: { step: 2, label: t("setup.editStorage") },
+                  },
+                  ...(values.thumb_dir
+                    ? [
+                        {
+                          key: "previews",
+                          label: t("setup.previews"),
+                          value: String(values.thumb_dir),
+                        },
+                      ]
+                    : []),
+                ] as const satisfies readonly {
+                  key: string;
+                  label: string;
+                  value: string;
+                  edit?: { step: 1 | 2; label: string };
+                }[]
+              ).map((row) => (
+                <div
+                  key={row.key}
+                  className="grid min-h-12 grid-cols-[8rem_minmax(0,1fr)_auto] items-center gap-3 py-2"
+                >
+                  <dt className="text-muted-foreground">{row.label}</dt>
+                  <dd className="min-w-0 break-words">{row.value}</dd>
+                  <dd>
+                    {"edit" in row && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => setStep(row.edit.step)}
+                      >
+                        {row.edit.label}
+                      </Button>
+                    )}
+                  </dd>
+                </div>
+              ))}
             </dl>
           )}
           {error && step !== 2 && (
@@ -498,7 +559,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
             </p>
           )}
           {step === 3 && busy && (
-            <p role="status" aria-live="polite">
+            <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
               {t("setup.creating")}
             </p>
           )}
@@ -507,7 +568,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
               <Button
                 type="button"
                 variant="outline"
-                className="h-11"
+                className="h-10"
                 disabled={busy}
                 onClick={() => setStep(step === 3 ? 2 : 1)}
               >
@@ -516,9 +577,8 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
             ) : null}
             <Button
               type="submit"
-              className="ml-auto h-auto min-h-9 whitespace-normal py-2"
+              className="ml-auto h-auto min-h-10 whitespace-normal py-2"
               loading={busy}
-              disabled={step === 2 && !currentCheck?.ready}
             >
               {t(step === 3 ? "setup.create" : "setup.next")}
             </Button>

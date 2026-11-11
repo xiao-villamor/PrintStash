@@ -6,6 +6,7 @@
 
 - The frontend adopts the OpenDesign workbench: a compact navigation rail, neutral surfaces, square controls, technical library cards, and a wider model inspector. Model facts remain beside the preview while tabs change; inspecting another G-code revision changes the displayed settings and send selection without changing the stored recommendation. Source hashes are available in Files.
 - Client navigation uses TanStack Router with the existing URLs, authentication, and Query cache. Larger loaded library grids use TanStack Virtual to limit mounted cards while retaining cursor pagination, selection, and return-position restoration.
+- Sign-in and first-run setup share one frame and one field style. On the Storage step, Continue runs the storage check itself and moves on when it passes; Check storage remains for checking without leaving the step. The Account step reports every invalid field at once, Review labels Email plainly, lists the previews folder and offers Edit account and Edit storage, and the final button reads Create account. A refused sign-in no longer marks both fields invalid, and the sign-in page explains that another administrator resets a forgotten password in Settings → Users.
 
 ### Added
 
