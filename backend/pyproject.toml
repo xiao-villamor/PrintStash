@@ -74,11 +74,11 @@ full = [
     "asyncssh>=2.21,<3",
     "cascadio>=0.1.1,<0.2",
     "cadquery-ocp-novtk==7.9.3.1.1",
-    "opendal==0.47.10",
+    "opendal==0.47.12",
 ]
 storage-opendal = [
     "asyncssh>=2.21,<3",
-    "opendal==0.47.10",
+    "opendal==0.47.12",
 ]
 dev = [
     # Builds tiny licensed ONNX contract fixtures; never downloads model weights.
@@ -128,7 +128,7 @@ gpu = [
     "tokenizers>=0.23,<0.24",
     "wgpu>=0.32,<0.33",
     "onnxruntime>=1.30,<2",
-    "onnxruntime-ep-webgpu>=0.4,<0.5",
+    "onnxruntime-ep-webgpu>=0.4,<0.6",
 ]
 webgpu-pilot = [
     "wgpu==0.32.0",
