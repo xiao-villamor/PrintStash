@@ -9,10 +9,10 @@ import { useQuery } from "@tanstack/react-query";
 import { loginProvidersOptions } from "@/features/auth/entry";
 import { Navigate } from "@tanstack/react-router";
 import { useRouter } from "@/lib/navigation";
-import { AlertCircle, Clock3, ShieldCheck } from "lucide-react";
+import { AlertCircle, Info, ShieldCheck } from "lucide-react";
 import { BrandMark } from "@/components/brand-mark";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/auth-context";
@@ -108,147 +108,147 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-12">
-      <div className="absolute right-5 top-5 flex items-center gap-1">
-        <LocaleToggle />
-        <ThemeToggle />
-      </div>
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-5 bg-background px-4 py-10">
+      <Card className="w-full max-w-[400px] border-border bg-card">
+        <header className="flex items-center justify-between gap-4 px-6 pt-8 sm:px-8">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-7 w-7 items-center justify-center rounded-brand bg-primary text-primary-foreground">
+              <BrandMark className="h-5 w-5" />
+            </span>
+            <span className="text-[15px] font-semibold tracking-tight text-foreground">
+              PrintStash
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <LocaleToggle />
+            <ThemeToggle />
+          </div>
+        </header>
 
-      <div className="relative mx-auto w-full max-w-md">
-        <Card className="border-outline-variant bg-card">
-          <CardHeader className="items-start px-6 pb-5 pt-8 text-left sm:px-8">
-            <div className="mb-5 flex items-center gap-3">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <BrandMark className="h-6 w-6" />
-              </span>
-              <span className="text-sm font-semibold text-foreground">PrintStash</span>
+        <div className="px-6 pb-8 pt-6 sm:px-8">
+          <h1 className="text-[22px] font-semibold tracking-tight text-foreground">
+            {t("auth.welcome")}
+          </h1>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            {t("auth.description")}
+          </p>
+
+          <form onSubmit={handleSubmit} className="mt-5 grid gap-4">
+            {sessionExpired && (
+              <div
+                role="status"
+                className="flex items-start gap-2.5 border border-border bg-muted/50 px-3 py-2.5 text-[13px] font-medium text-foreground"
+              >
+                <Info className="mt-px h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+                <p>{t("auth.expired")}</p>
+              </div>
+            )}
+
+            {error && (
+              <div
+                id="login-error"
+                role="alert"
+                className="flex items-start gap-2.5 border border-destructive/25 bg-destructive/10 px-3 py-2.5 text-[13px] font-medium text-foreground"
+              >
+                <AlertCircle className="mt-px h-4 w-4 shrink-0 text-destructive" aria-hidden />
+                <p>{error}</p>
+              </div>
+            )}
+
+            <div className="grid gap-1.5">
+              <label htmlFor="username" className="text-[13px] font-medium text-on-surface-variant">
+                {t("auth.username")}
+              </label>
+              <Input
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                aria-invalid={!!error}
+                aria-describedby={error ? "login-error" : undefined}
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoFocus
+                required
+                className="h-10 bg-surface-container-lowest text-on-surface"
+              />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-on-surface">
-              {t("auth.welcome")}
-            </h1>
-            <CardDescription className="text-on-surface-variant">
-              {t("auth.description")}
-            </CardDescription>
-          </CardHeader>
 
-          <CardContent className="px-6 pb-8 sm:px-8">
-            <form onSubmit={handleSubmit} className="space-y-5">
-              {sessionExpired && (
-                <div
-                  role="status"
-                  className="flex gap-2.5 rounded-md border border-warning/30 bg-warning/10 px-3 py-2.5 text-sm text-on-surface"
-                >
-                  <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
-                  <p>{t("auth.expired")}</p>
-                </div>
-              )}
+            <div className="grid gap-1.5">
+              <label htmlFor="password" className="text-[13px] font-medium text-on-surface-variant">
+                {t("auth.password")}
+              </label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                aria-invalid={!!error}
+                aria-describedby={error ? "login-error" : undefined}
+                autoComplete="current-password"
+                required
+                className="h-10 bg-surface-container-lowest text-on-surface"
+              />
+            </div>
 
-              <div className="space-y-2">
-                <label
-                  htmlFor="username"
-                  className="block text-sm font-medium text-on-surface-variant"
-                >
-                  {t("auth.username")}
-                </label>
-                <Input
-                  id="username"
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  aria-invalid={!!error}
-                  aria-describedby={error ? "login-error" : undefined}
-                  autoComplete="username"
-                  autoFocus
-                  required
-                  className="bg-surface-container-lowest font-mono text-on-surface"
-                />
-              </div>
+            {/* The whole row toggles the box, as a native checkbox label would. */}
+            <label className="flex min-h-6 w-fit cursor-pointer items-center gap-2.5 text-[13px] text-on-surface-variant">
+              <Checkbox
+                checked={remember_me}
+                onChange={setremember_me}
+                ariaLabel={uiText("Remember me")}
+              />
+              <span>{t("auth.remember")}</span>
+            </label>
 
-              <div className="space-y-2">
-                <label
-                  htmlFor="password"
-                  className="block text-sm font-medium text-on-surface-variant"
-                >
-                  {t("auth.password")}
-                </label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  aria-invalid={!!error}
-                  aria-describedby={error ? "login-error" : undefined}
-                  autoComplete="current-password"
-                  required
-                  className="bg-surface-container-lowest font-mono text-on-surface"
-                />
-              </div>
+            <Button type="submit" loading={busy} className="mt-1 h-10 w-full">
+              {t("auth.signIn")}
+            </Button>
+          </form>
 
-              <div className="flex items-center gap-2.5">
-                <Checkbox
-                  checked={remember_me}
-                  onChange={setremember_me}
-                  ariaLabel={uiText("Remember me")}
-                />
-                <span className="text-sm text-on-surface-variant">{t("auth.remember")}</span>
-              </div>
-
-              {error && (
-                <div
-                  id="login-error"
-                  role="alert"
-                  className="flex gap-2.5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
-                >
-                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
-                  <p>{error}</p>
-                </div>
-              )}
-
-              <Button type="submit" loading={busy} className="w-full">
-                {t("auth.signIn")}
+          {providerRead.error && (
+            <div className="mt-5 space-y-3">
+              <p role="alert" className="text-sm text-destructive">
+                {userMessage(providerRead.error)}
+              </p>
+              <Button type="button" variant="outline" onClick={() => void providerRead.refetch()}>
+                {uiText("Retry")}
               </Button>
-            </form>
-
-            {providerRead.error && (
-              <div className="mt-5 space-y-3">
-                <p role="alert" className="text-sm text-destructive">
-                  {userMessage(providerRead.error)}
-                </p>
-                <Button type="button" variant="outline" onClick={() => void providerRead.refetch()}>
-                  {uiText("Retry")}
-                </Button>
-              </div>
-            )}
-            {providers?.oidc_enabled && (
-              <div className="mt-5 space-y-4">
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <span className="h-px flex-1 bg-border" />
-                  <span>{t("auth.or")}</span>
-                  <span className="h-px flex-1 bg-border" />
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  disabled={busy}
-                  onClick={() => window.location.assign(oidcLoginUrl())}
-                >
-                  {t("auth.signInWith", { provider: providers.oidc_display_name })}
-                </Button>
-              </div>
-            )}
-
-            <div className="mt-6 flex items-center justify-center gap-2 border-t border-outline-variant pt-5 text-xs text-on-surface-variant">
-              <ShieldCheck className="h-4 w-4 text-primary" aria-hidden />
-              <span>{t("auth.local")}</span>
             </div>
-          </CardContent>
-        </Card>
+          )}
+          {providers?.oidc_enabled && (
+            <>
+              <div
+                role="separator"
+                className="my-5 flex items-center gap-3 text-xs text-muted-foreground"
+              >
+                <span className="h-px flex-1 bg-border" />
+                <span>{t("auth.or")}</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 w-full"
+                disabled={busy}
+                onClick={() => window.location.assign(oidcLoginUrl())}
+              >
+                {t("auth.signInWith", { provider: providers.oidc_display_name })}
+              </Button>
+            </>
+          )}
 
-        <p className="mt-5 text-center font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-          PrintStash · {t("auth.tagline")}
-        </p>
-      </div>
+          <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+            <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+            {t("auth.local")}
+          </p>
+        </div>
+      </Card>
+
+      <p className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
+        {t("auth.tagline")}
+      </p>
     </main>
   );
 }

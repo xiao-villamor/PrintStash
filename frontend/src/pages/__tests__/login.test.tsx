@@ -140,6 +140,19 @@ describe("LoginPage", () => {
       );
     });
 
+    it("toggles remember-me from its visible text", async () => {
+      // The text is the larger target; a dead label makes people miss the box.
+      const user = userEvent.setup();
+      renderLogin();
+      const box = screen.getByRole("checkbox", { name: "Remember me" });
+
+      await user.click(screen.getByText("Remember me on this device"));
+      expect(box).toHaveAttribute("aria-checked", "true");
+
+      await user.click(box);
+      expect(box).toHaveAttribute("aria-checked", "false");
+    });
+
     it("says the credentials were wrong for a 401", async () => {
       const user = userEvent.setup();
       renderLogin({
