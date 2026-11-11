@@ -37,7 +37,7 @@ export function SetupFrame({ step, children }: { step: 1 | 2 | 3; children: Reac
               className={cn(
                 "flex items-center gap-2 border-t-2 pt-2.5 text-[13px]",
                 current && "border-primary font-medium text-foreground",
-                done && "border-primary text-on-surface-variant",
+                done && "border-primary text-foreground",
                 !current && !done && "border-border text-muted-foreground",
               )}
             >
@@ -45,7 +45,7 @@ export function SetupFrame({ step, children }: { step: 1 | 2 | 3; children: Reac
                 className={cn(
                   "flex h-5 w-5 shrink-0 items-center justify-center font-mono text-2xs",
                   current && "bg-primary text-primary-foreground",
-                  done && "bg-primary/10 text-primary",
+                  done && "bg-primary text-primary-foreground",
                   !current && !done && "bg-muted text-muted-foreground",
                 )}
               >

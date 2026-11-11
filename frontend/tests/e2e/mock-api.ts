@@ -745,16 +745,16 @@ function storageProviders() {
       fields: [
         {
           name: "data_dir",
-          label: "Models directory",
-          help: "Directory for model files",
+          label: "Your files",
+          help: "Where uploaded models are saved. With Docker, enter the path inside the container.",
           input_type: "path",
           required: true,
           secret: false,
         },
         {
           name: "thumb_dir",
-          label: "Thumbnail directory",
-          help: "Directory for generated images",
+          label: "Previews",
+          help: "Where generated thumbnails and previews are saved.",
           input_type: "path",
           required: true,
           secret: false,

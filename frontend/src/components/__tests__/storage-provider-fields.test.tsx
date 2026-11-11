@@ -58,4 +58,18 @@ describe("StorageProviderFields", () => {
     );
     expect(screen.getByLabelText(/Root/)).toHaveValue("vault-data");
   });
+
+  it("marks the fields a failed check named", () => {
+    render(
+      <StorageProviderFields
+        provider={provider}
+        values={{}}
+        invalidFields={["data_dir"]}
+        onChange={vi.fn<(name: string, value: string | number) => void>()}
+      />,
+    );
+
+    expect(screen.getByLabelText("Data directory")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText(/^Root/)).toHaveAttribute("aria-invalid", "false");
+  });
 });

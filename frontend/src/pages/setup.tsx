@@ -21,6 +21,7 @@ import {
 import {
   defaultProviderValues,
   StorageProviderPicker,
+  storageChoiceLabel,
   type ProviderValues,
 } from "@/components/storage-provider-picker";
 import { Button } from "@/components/ui/button";
@@ -36,10 +37,9 @@ import { resetTasksForNewSetup } from "@/lib/task-center";
 import { useI18n } from "@/lib/i18n";
 import { SetupFrame } from "@/components/setup-frame";
 import { SetupUnavailable } from "@/components/setup-unavailable";
-import { setupErrorMessage, setupStorageBody } from "@/lib/setup-storage";
+import { setupErrorFields, setupErrorMessage, setupStorageBody } from "@/lib/setup-storage";
 import { providerFormError } from "@/lib/storage-provider-form";
 import { formatBytes } from "@/lib/format";
-import { knownUiText } from "@/lib/locale";
 import type { SetupStorageCheck } from "@/types";
 
 export interface SetupPageDeps extends SetupEntryApi {
@@ -111,6 +111,8 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
   const [operation, setOperation] = useState<"check" | "create" | null>(null);
   const busy = operation !== null;
   const [error, setError] = useState("");
+  // Folder fields the last failed storage check named; cleared with its message.
+  const [failedFields, setFailedFields] = useState<readonly string[]>([]);
   const [fieldErrors, setFieldErrors] = useState<readonly AccountField[]>([]);
   // Continue on the storage step runs the check and advances once it reports ready.
   const [advanceWhenChecked, setAdvanceWhenChecked] = useState(false);
@@ -163,6 +165,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
     command.current = true;
     setOperation("check");
     setError("");
+    setFailedFields([]);
     setCheck(null);
     try {
       const draft = storageBody();
@@ -171,8 +174,11 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
       requireSessionVersion(version);
       if (!controller.signal.aborted) setCheck(checked);
     } catch (error) {
-      if (!controller.signal.aborted && version === getSessionVersion())
-        setError(describeError(error instanceof Error ? error : new Error()));
+      if (!controller.signal.aborted && version === getSessionVersion()) {
+        const failure = error instanceof Error ? error : new Error();
+        setError(describeError(failure));
+        setFailedFields(setupErrorFields(failure));
+      }
     } finally {
       command.current = false;
       if (!controller.signal.aborted) setOperation(null);
@@ -391,6 +397,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                 providers={providers}
                 providerId={providerId}
                 values={values}
+                invalidFields={failedFields}
                 onProviderChange={(provider) => {
                   const defaults = defaultProviderValues(provider);
                   if (provider.id === "local") {
@@ -400,6 +407,7 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                   setStorageDraft({ providerId: provider.id, values: defaults });
                   setCheck(null);
                   setError("");
+                  setFailedFields([]);
                 }}
                 onValueChange={(name, value) => {
                   setStorageDraft((current) => ({
@@ -408,16 +416,12 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                   }));
                   setCheck(null);
                   setError("");
+                  setFailedFields((current) => current.filter((field) => field !== name));
                 }}
               />
               <div className="space-y-3 border-t border-border pt-4">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-5">
-                  <div>
-                    <p className="text-[13px] font-medium text-foreground">
-                      {t("setup.checkFirst")}
-                    </p>
-                    <p className={`mt-1 ${authFieldHelp}`}>{t("setup.checkHelp")}</p>
-                  </div>
+                  <p className="text-[13px] text-on-surface-variant">{t("setup.checkFirst")}</p>
                   <Button
                     type="button"
                     variant="outline"
@@ -430,16 +434,21 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                     {t("setup.check")}
                   </Button>
                 </div>
-                {error && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {error}
-                  </p>
-                )}
                 <div role="status" aria-live="polite" className="text-[13px]">
                   {busy ? (
                     <p className="text-muted-foreground">
                       {t(operation === "check" ? "setup.checking" : "setup.creating")}
                     </p>
+                  ) : error ? (
+                    <div className="space-y-1.5">
+                      <p className="flex items-center gap-1.5 font-medium text-warning">
+                        <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+                        {t("setup.attention")}
+                      </p>
+                      <p role="alert" className="text-xs leading-relaxed text-foreground">
+                        {error}
+                      </p>
+                    </div>
                   ) : currentCheck ? (
                     <div className="space-y-1.5">
                       <p
@@ -504,10 +513,14 @@ function SetupEntry({ deps }: { deps: SetupPageDeps }) {
                     key: "files",
                     label: t("setup.files"),
                     value: [
-                      knownUiText(selectedProvider?.label ?? providerId),
+                      selectedProvider ? storageChoiceLabel(selectedProvider) : providerId,
                       values.data_dir ? String(values.data_dir) : null,
                       filesFree != null
-                        ? `${formatBytes(filesFree)} ${t("setup.availableSpace")}`
+                        ? // Kept as one unit so the size never splits from its unit.
+                          `${formatBytes(filesFree)} ${t("setup.availableSpace")}`.replace(
+                            / /g,
+                            "\u00a0",
+                          )
                         : null,
                     ]
                       .filter(Boolean)

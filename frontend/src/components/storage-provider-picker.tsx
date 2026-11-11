@@ -90,12 +90,15 @@ export function defaultProviderValues(provider: StorageProvider): ProviderValues
   return providerDefaults(provider);
 }
 
-function tierLabel(tier: string): string {
-  return knownUiText(tier);
-}
-
-function supportLabel(level: string | undefined): string {
-  return knownUiText(level ?? "stable");
+/**
+ * How a chosen provider is named back to the person who chose it. A local
+ * provider is named by the choice they picked ("Local folder") rather than the
+ * catalogue's provider label, so setup's review repeats what they clicked.
+ */
+export function storageChoiceLabel(provider: StorageProvider): string {
+  return provider.category === "this_machine"
+    ? ONBOARDING_CATEGORIES.this_machine.title
+    : knownUiText(provider.label);
 }
 
 function providerConsequences(
@@ -112,15 +115,12 @@ function providerConsequences(
   );
 }
 
-export function StorageProviderSummary({
-  provider,
-  activeTier,
-  context = "selection",
-}: {
-  provider: StorageProvider;
-  activeTier?: string;
-  context?: "current" | "selection";
-}) {
+/**
+ * What choosing this storage means, in plain words. Tier names and support
+ * levels are operator detail shown elsewhere in Settings; here the visitor
+ * only needs the consequence for their files.
+ */
+export function StorageProviderSummary({ provider }: { provider: StorageProvider }) {
   useUiLocale();
   const i18n = useOptionalI18n();
   const consequences = providerConsequences(
@@ -128,62 +128,15 @@ export function StorageProviderSummary({
     i18n?.t("storage.guardedCatalog") ?? uiText("storage.guardedCatalog"),
     i18n?.t("storage.guardedRetention") ?? uiText("storage.guardedRetention"),
   );
-
-  if (context === "current") {
-    if (provider.expected_tier !== "guarded") return null;
-    return (
-      <div className="mt-3 space-y-2 text-xs">
-        <p className="text-foreground">{knownUiText(provider.expected_tier_note)}</p>
-        <p className="font-medium text-foreground">{uiText("Guarded storage consequences")}</p>
-        {consequences.length > 0 && (
-          <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-            {consequences.map((consequence) => (
-              <li key={consequence}>{knownUiText(consequence)}</li>
-            ))}
-          </ul>
-        )}
-      </div>
-    );
-  }
-
+  const beta = provider.support_level === "beta";
+  if (consequences.length === 0 && !beta) return null;
   return (
-    <div className="space-y-3">
-      <div className="grid gap-2 border-y border-border py-3 text-xs sm:grid-cols-3 sm:gap-4">
-        <p className="text-on-surface-variant">
-          {i18n?.t("settings.storageSupport", {
-            level: supportLabel(provider.support_level),
-          }) ??
-            uiText("Support: {value1}", {
-              value1: String(supportLabel(provider.support_level)),
-            })}
-        </p>
-        <p className="text-on-surface-variant">
-          {uiText("Expected: {value1}", {
-            value1: String(tierLabel(provider.expected_tier) ?? ""),
-          })}
-        </p>
-        {activeTier && (
-          <p className="font-medium text-on-surface">
-            {uiText("Active: {value1}", {
-              value1: String(tierLabel(activeTier) ?? ""),
-            })}
-          </p>
-        )}
-      </div>
-      <p className="text-sm text-on-surface">{knownUiText(provider.expected_tier_note)}</p>
-      {provider.expected_tier === "guarded" && (
-        <p className="text-xs font-medium text-on-surface">
-          {uiText("Guarded storage consequences")}
-        </p>
-      )}
-      {consequences.length > 0 && (
-        <ul className="list-disc space-y-1 pl-5 text-xs text-on-surface-variant">
-          {consequences.map((consequence) => (
-            <li key={consequence}>{knownUiText(consequence)}</li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <p className="text-xs leading-relaxed text-on-surface-variant">
+      {[
+        ...(beta ? [i18n?.t("storage.betaNote") ?? uiText("storage.betaNote")] : []),
+        ...consequences.map((consequence) => knownUiText(consequence)),
+      ].join(" ")}
+    </p>
   );
 }
 
@@ -194,8 +147,9 @@ export function StorageProviderPicker(props: {
   onProviderChange: (provider: StorageProvider) => void;
   onValueChange: (name: string, value: string | number) => void;
   disabled?: boolean;
-  activeTier?: string;
   onboarding?: boolean;
+  /** Fields the last storage check named as the problem. */
+  invalidFields?: readonly string[];
 }) {
   useUiLocale();
   const i18n = useOptionalI18n();
@@ -390,7 +344,7 @@ export function StorageProviderPicker(props: {
           className={
             props.onboarding && selected.id === "local"
               ? "space-y-3"
-              : "space-y-4 rounded-lg border border-outline-variant bg-surface-container-low p-4"
+              : "space-y-4 border-t border-border pt-4"
           }
         >
           {props.onboarding && selected.id === "local" ? (
@@ -398,7 +352,7 @@ export function StorageProviderPicker(props: {
               {uiText("setup.serverPaths")}
             </p>
           ) : (
-            <StorageProviderSummary provider={selected} activeTier={props.activeTier} />
+            <StorageProviderSummary provider={selected} />
           )}
 
           <StorageProviderFields
@@ -408,6 +362,7 @@ export function StorageProviderPicker(props: {
             disabled={props.disabled}
             storedSecrets={[...secretFieldsSet]}
             omitFields={props.onboarding && selected.id === "local" ? ["root"] : undefined}
+            invalidFields={props.invalidFields}
           />
         </section>
       )}

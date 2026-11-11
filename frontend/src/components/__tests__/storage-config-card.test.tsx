@@ -656,10 +656,10 @@ describe("Configured Vault migration entry", () => {
   });
   it("keeps guarded deletion consequences visible when location changes require migration", async () => {
     renderCard({ migrationManaged: true, config: anS3Config() });
-    expect(await screen.findByText("Guarded storage consequences")).toBeVisible();
-    expect(screen.getByText("Object versions guard destructive operations.")).toBeVisible();
-    expect(screen.getByText("Confirmed catalog removal retains stored bytes.")).toBeVisible();
-    expect(screen.getByText("Automatic physical deletion is unavailable.")).toBeVisible();
+    expect(
+      await screen.findByText(/Removing a model from the library keeps its stored files here\./),
+    ).toBeVisible();
+    expect(screen.getByText(/PrintStash does not delete files here automatically\./)).toBeVisible();
   });
   it("keeps managed location changes out of the direct configuration form", async () => {
     renderCard({ migrationManaged: true });

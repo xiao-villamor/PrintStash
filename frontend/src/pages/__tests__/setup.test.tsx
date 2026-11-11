@@ -561,13 +561,15 @@ describe("Storage form recovery", () => {
     await user.click(screen.getByRole("button", { name: "S3-compatible" }));
     expect(screen.getByLabelText("Bucket")).toBeVisible();
     expect(screen.queryByLabelText("Data directory")).not.toBeInTheDocument();
-    expect(screen.getByText("Guarded storage consequences")).toBeVisible();
+    expect(screen.getByText(/PrintStash does not delete files here automatically\./)).toBeVisible();
   });
 
   it("explains the required storage check", async () => {
     await reachStorage();
     expect(
-      screen.getByText("Continue checks that PrintStash can read and write here."),
+      screen.getByText(
+        "Continue checks that PrintStash can read and write here. This is not a backup.",
+      ),
     ).toBeVisible();
   });
 
@@ -619,6 +621,49 @@ describe("Storage form recovery", () => {
     expect(
       screen.getByText(/Amazon S3.*This connection requires the full API image/),
     ).toBeVisible();
+  });
+
+  it("reports a failed check as needing attention", async () => {
+    vi.mocked(deps.checkSetupStorage).mockRejectedValueOnce(new Error("data_dir_not_writable"));
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    const status = await screen.findByRole("status");
+    expect(await within(status).findByText("Needs attention")).toBeVisible();
+    expect(within(status).getByRole("alert")).toHaveTextContent("Check the locations above");
+  });
+
+  it("marks the folder a failed check names", async () => {
+    vi.mocked(deps.checkSetupStorage).mockRejectedValueOnce(new Error("data_dir_not_writable"));
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Needs attention");
+    expect(screen.getByLabelText("Data directory")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Thumbnail directory")).toHaveAttribute("aria-invalid", "false");
+  });
+
+  it("clears a folder's mark once it is edited", async () => {
+    vi.mocked(deps.checkSetupStorage).mockRejectedValueOnce(new Error("data_dir_not_writable"));
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Check storage" }));
+    await screen.findByText("Needs attention");
+    await user.type(screen.getByLabelText("Data directory"), "x");
+    expect(screen.getByLabelText("Data directory")).toHaveAttribute("aria-invalid", "false");
+  });
+
+  it("names the local choice the way it was picked", async () => {
+    vi.mocked(deps.checkSetupStorage).mockResolvedValueOnce({
+      ready: true,
+      storage_provider: "local",
+      checks: [{ code: "data_writable", free_bytes: 412_000_000_000 }],
+    });
+    const user = await reachStorage();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    const summary = await screen.findByLabelText("Review before creating your account");
+    const files = within(summary).getByText(/^Local folder · \/data\/files · /);
+    expect(files).toBeVisible();
+    expect(within(summary).queryByText(/Local disk/)).not.toBeInTheDocument();
+    // The size and its unit are joined by no-break spaces so they never split.
+    expect(files.textContent).toMatch(/GB\u00a0available$/);
   });
 
   it("recovers a failed storage check", async () => {

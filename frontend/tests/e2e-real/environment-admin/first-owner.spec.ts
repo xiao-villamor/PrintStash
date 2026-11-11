@@ -21,7 +21,7 @@ test.describe("Environment-provisioned owner", () => {
     // ── The gate sends the owner to the storage step ──
     await expect(page).toHaveURL(/\/getting-started$/);
     await expect(page.getByRole("heading", { name: "Your files", exact: true })).toBeVisible();
-    await expect(page.getByLabel("Models directory", { exact: true })).not.toHaveValue("");
+    await expect(page.getByLabel("Your files", { exact: true })).not.toHaveValue("");
     await page.screenshot({ path: testInfo.outputPath("choose-storage.png"), fullPage: true });
 
     // ── Any other page still leads back there until storage is chosen ──

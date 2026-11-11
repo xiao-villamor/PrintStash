@@ -542,11 +542,7 @@ export function StorageConfigCard({
                     ))}
                   </dl>
                   {currentProvider.expected_tier === "guarded" && (
-                    <StorageProviderSummary
-                      provider={currentProvider}
-                      activeTier={cfg?.storage_tier}
-                      context="current"
-                    />
+                    <StorageProviderSummary provider={currentProvider} />
                   )}
                 </>
               )}
@@ -574,7 +570,6 @@ export function StorageConfigCard({
                 providers={providers}
                 providerId={providerId}
                 values={providerValues}
-                activeTier={cfg?.storage_tier}
                 disabled={!canEdit}
                 onProviderChange={(provider) => {
                   if (cfg)

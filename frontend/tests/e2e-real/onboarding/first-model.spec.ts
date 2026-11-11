@@ -117,8 +117,8 @@ test.describe("Browser onboarding", () => {
       await expect(
         page.getByRole("button", { name: "On this server (recommended)" }),
       ).toBeFocused();
-      await expect(page.getByLabel("Models directory", { exact: true })).toBeVisible();
-      await expect(page.getByLabel("Thumbnail directory", { exact: true })).toBeVisible();
+      await expect(page.getByLabel("Your files", { exact: true })).toBeVisible();
+      await expect(page.getByLabel("Previews", { exact: true })).toBeVisible();
       await expect(page.getByLabel("Root", { exact: true })).toHaveCount(0);
       await page.screenshot({ path: testInfo.outputPath("storage-mobile.png"), fullPage: true });
       await page.setViewportSize({ width: 1280, height: 900 });

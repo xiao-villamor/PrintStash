@@ -186,17 +186,6 @@ export default function LoginPage() {
         <Button type="submit" loading={busy} className="mt-1 h-10 w-full">
           {t("auth.signIn")}
         </Button>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          {t("auth.forgot")}{" "}
-          <a
-            href={PASSWORD_RECOVERY_DOCS}
-            target="_blank"
-            rel="noreferrer"
-            className="font-medium text-foreground underline underline-offset-2 hover:text-primary"
-          >
-            {t("auth.forgotLink")}
-          </a>
-        </p>
       </form>
 
       {providerRead.error && (
@@ -231,7 +220,18 @@ export default function LoginPage() {
         </>
       )}
 
-      <p className="mt-6 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+      <p className="mt-5 text-xs leading-relaxed text-muted-foreground">
+        {t("auth.forgot")}{" "}
+        <a
+          href={PASSWORD_RECOVERY_DOCS}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-foreground underline underline-offset-2 hover:text-primary"
+        >
+          {t("auth.forgotLink")}
+        </a>
+      </p>
+      <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
         <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
         {t("auth.local")}
       </p>
