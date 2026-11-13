@@ -73,8 +73,10 @@ test.describe("collection access", () => {
         .selectOption({ label: "Admin" });
       await card.getByRole("button", { name: "Grant" }).click();
       await expect(card.getByText("admin", { exact: true })).toBeVisible();
-      await card.getByTitle("Remove collection access", { exact: true }).click();
-      await expect(card.getByTitle("Remove collection access", { exact: true })).toHaveCount(0);
+      await card.getByRole("button", { name: "Remove collection access", exact: true }).click();
+      await expect(
+        card.getByRole("button", { name: "Remove collection access", exact: true }),
+      ).toHaveCount(0);
       const remaining = await (
         await page.request.get(`/api/v1/collections/${childId}/permissions`)
       ).json();

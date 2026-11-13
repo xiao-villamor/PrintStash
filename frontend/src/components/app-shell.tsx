@@ -149,13 +149,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       <TopBar />
                       <PreviewActivityTracker enabled={!!user?.is_superuser} />
                       <div className="shell-route-viewport flex min-h-0 flex-1 overflow-hidden">
-                        {isVault ? (
-                          children
-                        ) : (
-                          <main className="min-w-0 flex-1 overflow-hidden bg-background">
-                            {children}
-                          </main>
-                        )}
+                        <div
+                          role={isVault ? undefined : "main"}
+                          className="min-w-0 flex-1 overflow-hidden bg-background"
+                        >
+                          {children}
+                        </div>
                       </div>
                       <BottomNavBar />
                     </div>

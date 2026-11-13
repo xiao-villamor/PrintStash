@@ -10,15 +10,15 @@ import { Button } from "@/components/ui/button";
 import { InferenceEndpointForm } from "@/components/inference-endpoint-form";
 import {
   SearchIndexHealth,
-  SearchPreparationStages,
+  SearchPreparationProgress,
+  SearchProgressBar,
 } from "@/components/search-preparation-progress";
 import { estimateSearchGeneration } from "@/lib/api/search";
 import { searchStatusOptions, useSearchCommands, type AiSearchCatalog } from "@/lib/queries/search";
 import { getSessionVersion, requireSessionVersion } from "@/lib/session-transport";
 import { useAuth } from "@/lib/auth-context";
-import { formatBytes, formatDuration } from "@/lib/format";
+import { formatBytes } from "@/lib/format";
 import { useI18n } from "@/lib/i18n";
-import { isMessageKey } from "@/lib/locale";
 import type { GenerationProposal, SearchGeneration, SearchSettingsRead } from "@/types/search";
 
 /** The first-run path prepares text search; specialist search types stay in advanced controls. */
@@ -259,6 +259,7 @@ export function AiSearchSetup({
       <div className="space-y-3 p-5">
         <p role="alert">{t("AI setup could not be loaded.")}</p>
         <Button
+          size="sm"
           variant="outline"
           onClick={() => {
             void models.refetch();
@@ -274,12 +275,6 @@ export function AiSearchSetup({
   const ready =
     settings.settings.enabled && active && availability.data?.semantic_ready && !changing;
   const step = ready ? 3 : enabled && path ? 2 : 1;
-  const phaseLabel = (() => {
-    if (!building) return null;
-    const key = `aiSearch.phase.${building.phase}`;
-    if (!isMessageKey(key)) throw new Error("search_generation_phase_invalid");
-    return t(key);
-  })();
   if (changing && !settingsReview) {
     return (
       <fieldset disabled={busy} aria-busy={busy} className="min-w-0">
@@ -413,16 +408,15 @@ export function AiSearchSetup({
           {downloading && (
             <section className="space-y-3 border-t border-border pt-4">
               <h3 className="text-sm font-semibold">{t("Downloading an AI model")}</h3>
-              <progress
-                className="h-2 w-full accent-primary"
-                aria-label={t("AI model download progress")}
+              <SearchProgressBar
+                label={t("AI model download progress")}
                 max={100}
                 value={downloading.progress ?? 0}
               />
               <p role="status" className="text-sm">
                 {formatBytes(downloading.processed)} / {formatBytes(downloading.total)}
               </p>
-              <Button type="button" variant="outline" onClick={() => dispatch("cancel")}>
+              <Button size="sm" type="button" variant="outline" onClick={() => dispatch("cancel")}>
                 {t("Cancel download")}
               </Button>
             </section>
@@ -438,36 +432,7 @@ export function AiSearchSetup({
                       : "Preparing your library",
                 )}
               </h3>
-              <p role="status" className="text-sm font-medium">
-                {phaseLabel}
-              </p>
-              <SearchPreparationStages generation={building} />
-              {building.phase === "backfill" && (
-                <>
-                  <progress
-                    className="h-2 w-full accent-primary"
-                    aria-label={t("Library preparation progress")}
-                    max={Math.max(1, building.eligible)}
-                    value={building.indexed}
-                  />
-                  <p className="text-sm tabular-nums">
-                    {t("{done} of {total} searchable entries prepared", {
-                      done: building.indexed,
-                      total: building.eligible,
-                    })}
-                  </p>
-                  {building.eta_seconds !== null && (
-                    <p className="text-sm text-muted-foreground">
-                      {t("aiSearch.eta", { time: formatDuration(building.eta_seconds) })}
-                    </p>
-                  )}
-                  {building.quarantined > 0 && (
-                    <p className="text-sm text-warning">
-                      {t("aiSearch.quarantined", { count: building.quarantined })}
-                    </p>
-                  )}
-                </>
-              )}
+              <SearchPreparationProgress generation={building} />
               {building.phase === "ready" && <SearchIndexHealth generation={building} />}
               {building.error_code && (
                 <p role="alert" className="text-sm text-warning">
@@ -479,16 +444,21 @@ export function AiSearchSetup({
               {building.version_token && (
                 <div className="flex flex-wrap gap-2">
                   {building.phase === "verify_failed" && (
-                    <Button type="button" onClick={() => dispatch("retry")}>
+                    <Button size="sm" type="button" onClick={() => dispatch("retry")}>
                       {t("Retry preparation")}
                     </Button>
                   )}
                   {building.phase === "ready" && (
-                    <Button type="button" onClick={() => dispatch("activate")}>
+                    <Button size="sm" type="button" onClick={() => dispatch("activate")}>
                       {t("Use prepared search")}
                     </Button>
                   )}
-                  <Button type="button" variant="outline" onClick={() => dispatch("cancel")}>
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    onClick={() => dispatch("cancel")}
+                  >
                     {t("Cancel preparation")}
                   </Button>
                 </div>
@@ -497,7 +467,7 @@ export function AiSearchSetup({
           )}
         </div>
         <div className="flex flex-wrap justify-end gap-2 border-t border-border bg-plate px-6 py-4">
-          <Button type="button" variant="outline" onClick={() => setChanging(false)}>
+          <Button size="sm" type="button" variant="outline" onClick={() => setChanging(false)}>
             {t("Cancel")}
           </Button>
           {!building &&
@@ -506,15 +476,15 @@ export function AiSearchSetup({
             (path === "local" ? local : remote) &&
             !connecting &&
             (!enabled ? (
-              <Button type="button" onClick={() => dispatch("enable")}>
+              <Button size="sm" type="button" onClick={() => dispatch("enable")}>
                 {t(path === "local" ? "Enable local AI Search" : "Enable server AI Search")}
               </Button>
             ) : path === "local" && !local?.installed ? (
-              <Button type="button" onClick={() => dispatch("download")}>
+              <Button size="sm" type="button" onClick={() => dispatch("download")}>
                 {t("Allow download and continue")}
               </Button>
             ) : (
-              <Button type="button" onClick={() => dispatch("prepare")}>
+              <Button size="sm" type="button" onClick={() => dispatch("prepare")}>
                 {t("Prepare my library")}
               </Button>
             ))}
@@ -531,6 +501,7 @@ export function AiSearchSetup({
         >
           <p role="alert">{t("library.saveUnconfirmed")}</p>
           <Button
+            size="sm"
             type="button"
             variant="outline"
             loading={settingsReview.phase === "loading"}
@@ -553,6 +524,7 @@ export function AiSearchSetup({
             <>
               <SearchSettingsSnapshot snapshot={settingsReview.snapshot} catalog={catalog} />
               <Button
+                size="sm"
                 type="button"
                 variant="outline"
                 onClick={() => {
@@ -589,7 +561,7 @@ export function AiSearchSetup({
             )}
           </ol>
         )}
-        <div className={ready ? "" : "space-y-5 p-4 sm:p-6"}>
+        <div className={ready ? "" : "space-y-4 p-4 sm:p-5"}>
           {message && (
             <p role="alert" className="text-sm text-destructive">
               {message}
@@ -651,7 +623,7 @@ export function AiSearchSetup({
             </>
           ) : building ? (
             <>
-              <h3 className="text-xl font-semibold">
+              <h3 className="text-base font-semibold">
                 {t(
                   building.phase === "ready"
                     ? "Your search is prepared"
@@ -669,36 +641,7 @@ export function AiSearchSetup({
                       : "You can leave this page. Keyword search keeps working while preparation finishes.",
                 )}
               </p>
-              <p role="status" className="text-sm font-medium">
-                {phaseLabel}
-              </p>
-              <SearchPreparationStages generation={building} />
-              {building.phase === "backfill" && (
-                <>
-                  <progress
-                    className="h-2 w-full accent-primary"
-                    aria-label={t("Library preparation progress")}
-                    max={Math.max(1, building.eligible)}
-                    value={building.indexed}
-                  />
-                  <p className="text-sm tabular-nums">
-                    {t("{done} of {total} searchable entries prepared", {
-                      done: building.indexed,
-                      total: building.eligible,
-                    })}
-                  </p>
-                  {building.eta_seconds !== null && (
-                    <p className="text-sm text-muted-foreground">
-                      {t("aiSearch.eta", { time: formatDuration(building.eta_seconds) })}
-                    </p>
-                  )}
-                  {building.quarantined > 0 && (
-                    <p className="text-sm text-warning">
-                      {t("aiSearch.quarantined", { count: building.quarantined })}
-                    </p>
-                  )}
-                </>
-              )}
+              <SearchPreparationProgress generation={building} />
               {building.phase === "ready" && <SearchIndexHealth generation={building} />}
               {building.error_code && (
                 <p role="alert" className="text-sm text-warning">
@@ -710,16 +653,21 @@ export function AiSearchSetup({
               {building.version_token && (
                 <div className="flex flex-wrap gap-2">
                   {building.phase === "verify_failed" && (
-                    <Button loading={busy} onClick={() => dispatch("retry")}>
+                    <Button size="sm" loading={busy} onClick={() => dispatch("retry")}>
                       {t("Retry preparation")}
                     </Button>
                   )}
                   {building.phase === "ready" && (
-                    <Button loading={busy} onClick={() => dispatch("activate")}>
+                    <Button size="sm" loading={busy} onClick={() => dispatch("activate")}>
                       {t("Use prepared search")}
                     </Button>
                   )}
-                  <Button variant="outline" disabled={busy} onClick={() => dispatch("cancel")}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => dispatch("cancel")}
+                  >
                     {t("Cancel preparation")}
                   </Button>
                 </div>
@@ -770,6 +718,7 @@ export function AiSearchSetup({
                         <p className="mt-1 text-sm text-muted-foreground">{option.help}</p>
                       </div>
                       <Button
+                        size="sm"
                         variant="outline"
                         className="min-h-11"
                         onClick={() => {
@@ -789,6 +738,7 @@ export function AiSearchSetup({
                       {t(path === "local" ? "On this machine" : "Another server")}
                     </p>
                     <Button
+                      size="sm"
                       variant="ghost"
                       disabled={busy || !!downloading}
                       onClick={() => {
@@ -809,7 +759,7 @@ export function AiSearchSetup({
                           "This installation needs a compatible local AI runtime and model. You can connect another server instead, or ask your administrator to install local AI support.",
                         )}
                       </p>
-                      <Button variant="outline" onClick={() => setPath("server")}>
+                      <Button size="sm" variant="outline" onClick={() => setPath("server")}>
                         {t("Use another server")}
                       </Button>
                     </div>
@@ -910,7 +860,7 @@ export function AiSearchSetup({
                                 ))}
                           </div>
                           {path === "server" && (
-                            <Button variant="ghost" onClick={() => setConnecting(true)}>
+                            <Button size="sm" variant="ghost" onClick={() => setConnecting(true)}>
                               {t("Connect a new server")}
                             </Button>
                           )}
@@ -926,6 +876,7 @@ export function AiSearchSetup({
                             )}
                           </p>
                           <Button
+                            size="sm"
                             loading={busy}
                             className="min-h-11"
                             onClick={() => dispatch("enable")}
@@ -940,9 +891,8 @@ export function AiSearchSetup({
                       ) : downloading ? (
                         <>
                           <h4 className="font-medium">{t("Downloading an AI model")}</h4>
-                          <progress
-                            className="h-2 w-full accent-primary"
-                            aria-label={t("AI model download progress")}
+                          <SearchProgressBar
+                            label={t("AI model download progress")}
                             max={100}
                             value={downloading.progress ?? 0}
                           />
@@ -950,6 +900,7 @@ export function AiSearchSetup({
                             {formatBytes(downloading.processed)} / {formatBytes(downloading.total)}
                           </p>
                           <Button
+                            size="sm"
                             variant="outline"
                             disabled={busy}
                             onClick={() => dispatch("cancel")}
@@ -970,6 +921,7 @@ export function AiSearchSetup({
                             )}
                           </p>
                           <Button
+                            size="sm"
                             loading={busy}
                             className="min-h-11"
                             onClick={() => dispatch("download")}
@@ -985,6 +937,7 @@ export function AiSearchSetup({
                             )}
                           </p>
                           <Button
+                            size="sm"
                             loading={busy}
                             className="min-h-11"
                             onClick={() => dispatch("prepare")}

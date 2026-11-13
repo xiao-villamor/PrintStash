@@ -1,11 +1,13 @@
 "use client";
 
+import { SETTINGS_BUTTON, SETTINGS_BUTTON_PRIMARY } from "@/components/settings-controls";
+import { SettingsGroupHead } from "@/components/settings-card";
 import { knownUiText, uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
 import { providerFormError } from "@/lib/storage-provider-form";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { AlertTriangle, Folder, Save } from "lucide-react";
+import { AlertTriangle, Folder } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { vaultConfigOptions, useVaultConfigCommand } from "@/lib/queries/settings-config";
 import { storageProvidersOptions, storageReadDenied } from "@/lib/queries/settings-storage";
@@ -322,25 +324,20 @@ export function StorageConfigCard({
   return (
     <Localized>
       <div className="overflow-hidden rounded-lg border border-border bg-card shadow-sm">
-        <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-muted-foreground">
-            <Folder className="h-4 w-4" aria-hidden />
-          </span>
-          <div>
-            <h3 className="text-sm font-semibold text-foreground">
-              {t("settings.currentStorage")}
-            </h3>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t("Where PrintStash keeps your Vault files.")}
-            </p>
-          </div>
-        </div>
+        <SettingsGroupHead
+          icon={Folder}
+          level={3}
+          title={t("settings.currentStorage")}
+          description={t("Where PrintStash keeps your Vault files.")}
+          className="settings-card-head--flush"
+        />
 
         <div className="space-y-5 px-4 pb-4 sm:pl-16 sm:pr-5">
           {readError && enabled && (
             <div role="alert" className="space-y-2 text-sm text-destructive">
               <p>{t("settings.storageReadFailed")}</p>
               <Button
+                size="sm"
                 variant="outline"
                 onClick={() => {
                   void configuration.refetch();
@@ -361,6 +358,7 @@ export function StorageConfigCard({
                 )}
               </p>
               <Button
+                size="sm"
                 variant="outline"
                 disabled={configCommand.isPending || review.phase === "loading"}
                 onClick={() => void reviewStorage()}
@@ -397,6 +395,7 @@ export function StorageConfigCard({
                   </dl>
                   <div className="flex flex-wrap gap-2">
                     <Button
+                      size="sm"
                       variant="outline"
                       disabled={!canEdit || configCommand.isPending}
                       onClick={() => {
@@ -409,6 +408,7 @@ export function StorageConfigCard({
                       {uiText("library.useLatest")}
                     </Button>
                     <Button
+                      size="sm"
                       disabled={!canEdit || configCommand.isPending}
                       onClick={() => void save(review.snapshot)}
                     >
@@ -431,6 +431,7 @@ export function StorageConfigCard({
               <div className="space-y-2 text-sm">
                 <p>{t("settings.storageReviewChanged")}</p>
                 <Button
+                  size="sm"
                   variant="outline"
                   onClick={() => {
                     setDraft(null);
@@ -444,10 +445,7 @@ export function StorageConfigCard({
             )}
 
           {storageHealth && !storageHealth.ok && (
-            <div
-              role="alert"
-              className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3"
-            >
+            <div role="alert" className="flex items-start gap-3 border border-border bg-card p-3">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
               <div>
                 <p className="text-sm font-semibold text-foreground">
@@ -461,10 +459,7 @@ export function StorageConfigCard({
           )}
           <ImportCopyWarning storageHealth={storageHealth} />
           {invalidRoots.length > 0 && (
-            <div
-              role="alert"
-              className="space-y-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3"
-            >
+            <div role="alert" className="space-y-2 border border-border bg-card p-3">
               <p className="text-sm font-semibold text-foreground">
                 {t("settings.storageRootIdentityTitle")}
               </p>
@@ -483,7 +478,7 @@ export function StorageConfigCard({
             </div>
           )}
           {enrollableRoots.length > 0 && (
-            <div className="space-y-3 rounded-lg border border-warning/30 bg-warning/10 p-3">
+            <div className="space-y-3 border border-border bg-card p-3">
               <div>
                 <p className="text-sm font-semibold text-foreground">
                   {t("settings.storageEnrollTitle")}
@@ -496,7 +491,7 @@ export function StorageConfigCard({
                 {enrollableRoots.map(([role, path]) => (
                   <div
                     key={role}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded border border-border bg-background/50 px-3 py-2"
+                    className="flex flex-wrap items-center justify-between gap-2 border border-border px-3 py-2"
                   >
                     <span className="font-mono text-xs text-foreground">
                       {t("settings.storageRootPath", {
@@ -506,7 +501,7 @@ export function StorageConfigCard({
                     </span>
                     <button
                       type="button"
-                      className="rounded border border-warning/40 px-3 py-1.5 text-xs font-medium text-warning hover:bg-warning/10"
+                      className={SETTINGS_BUTTON}
                       onClick={() => {
                         if (path) setEnrollment({ role, path });
                       }}
@@ -525,13 +520,25 @@ export function StorageConfigCard({
                 <>
                   <dl className="settings-storage-summary">
                     <div>
-                      <dt>{t("Provider")}</dt>
-                      <dd>{knownUiText(currentProvider.label)}</dd>
+                      <dt>
+                        {t("Provider")}
+                        <span className="settings-row-hint">
+                          {knownUiText(currentProvider.description)}
+                        </span>
+                      </dt>
+                      <dd className="is-text">{knownUiText(currentProvider.label)}</dd>
                     </div>
                     {cfg?.storage_tier && (
                       <div>
-                        <dt>{t("Storage safety")}</dt>
-                        <dd>{knownUiText(cfg.storage_tier)}</dd>
+                        <dt>
+                          {t("Storage safety")}
+                          {currentProvider.expected_tier !== "guarded" && (
+                            <span className="settings-row-hint">
+                              {knownUiText(currentProvider.expected_tier_note)}
+                            </span>
+                          )}
+                        </dt>
+                        <dd className="is-text">{knownUiText(cfg.storage_tier)}</dd>
                       </div>
                     )}
                     {locationFields.map((field) => (
@@ -599,17 +606,12 @@ export function StorageConfigCard({
                 type="button"
                 onClick={() => void save()}
                 disabled={configCommand.isPending || review.phase !== "idle"}
-                className="flex items-center gap-1.5 px-4 py-2 rounded bg-primary text-primary-foreground font-mono text-xs uppercase tracking-wider hover:opacity-90 disabled:opacity-50 disabled:cursor-disabled transition-opacity"
+                className={SETTINGS_BUTTON_PRIMARY}
               >
-                <Save className="h-3.5 w-3.5" />
                 {saveState === "saving" ? uiText("Saving...") : uiText("Save configuration")}
               </button>
 
-              {saveState === "saved" && (
-                <span className="text-xs text-green-600 dark:text-green-400">
-                  {uiText("Saved")}
-                </span>
-              )}
+              {saveState === "saved" && <span className="settings-status">{uiText("Saved")}</span>}
             </div>
           )}
 

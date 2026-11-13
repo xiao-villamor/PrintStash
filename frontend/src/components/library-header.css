@@ -13,7 +13,7 @@
   letter-spacing: -0.015em;
   line-height: 1.2;
 }
-.library-collection-identity h1 + button {
+.library-collection-title > button {
   width: 30px;
   height: 30px;
 }
@@ -56,11 +56,25 @@
 .collection-header-tags .collection-add-tag {
   height: 26px;
   padding: 0 10px;
-  border: 1px dashed var(--border-strong);
+  border: 1px solid var(--border);
   background: transparent;
   color: var(--secondary);
   font-size: 12px;
   font-weight: 500;
+}
+.collection-header-tags .collection-add-tag:hover {
+  border-color: var(--primary);
+  color: var(--foreground);
+  background: var(--muted);
+}
+.collection-header-tags .collection-add-tag:hover > svg {
+  color: var(--primary);
+}
+.collection-header-tags .collection-add-tag:focus-visible {
+  border-color: var(--primary);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 .collection-header-tag-input {
   box-sizing: border-box;
@@ -96,12 +110,30 @@
   padding-top: 18px;
   padding-bottom: 0;
 }
+.collection-overview-toolbar-wrap {
+  padding-top: 28px;
+  padding-bottom: 4px;
+}
+.library-subcollections.library-subcollections-overview {
+  margin-top: 12px;
+  margin-bottom: 24px;
+}
+.collection-overview-actions > [role="group"] {
+  display: contents;
+  flex-basis: auto;
+  order: initial;
+}
+.collection-overview-actions > [role="group"] > button,
+.collection-overview-actions > [role="group"] > a {
+  height: 36px;
+}
 .library-model-toolbar > h2 {
   letter-spacing: -0.005em;
 }
 .library-status-filters {
   gap: 2px;
-  padding: 3px;
+  padding: 2px;
+  border: 1px solid var(--border);
   background: var(--muted);
 }
 .library-status-filters > button {
@@ -113,8 +145,9 @@
   color: var(--secondary);
 }
 .library-status-filters > button[aria-checked="true"] {
-  background: var(--accent);
+  background: var(--card);
   color: var(--foreground);
+  box-shadow: 0 1px 2px var(--dialog-shadow);
 }
 .library-status-filters > button:disabled {
   opacity: 1;
@@ -199,27 +232,35 @@
   appearance: none;
 }
 
-.library-collection-title > button[hidden] {
-  display: none;
+.library-collection-title {
+  position: relative;
+  min-height: 30px;
 }
 .library-collection-title .library-collection-name {
   box-sizing: content-box;
   line-height: 1.4;
-  flex: 1;
+  position: absolute;
+  left: -9px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: calc(100% - 9px);
   min-width: 0;
   max-width: 720px;
   height: 38px;
-  margin: -3px 0 -3px -9px;
+  margin: 0;
   padding: 0 8px;
-  border: 1px solid var(--ring);
+  border: 1px dashed var(--border-strong);
   border-radius: 0;
-  background: var(--card);
+  background: transparent;
   color: var(--foreground);
   font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.015em;
   outline: none;
-  box-shadow: 0 0 0 3px var(--accent);
+  box-shadow: none;
+}
+.library-collection-title .library-collection-name:focus {
+  border-color: var(--ring);
 }
 
 .collection-description-editor {
@@ -288,4 +329,12 @@
 .library-meta-part + .library-meta-part::before {
   content: "·";
   margin-right: 8px;
+}
+
+@container library (min-width: 768px) and (max-width: 1279px) {
+  .library-model-toolbar > .library-display-controls {
+    flex-basis: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+  }
 }

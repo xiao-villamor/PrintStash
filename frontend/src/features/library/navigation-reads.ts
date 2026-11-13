@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
 import { hashKey, useQueryClient, type QueryKey } from "@tanstack/react-query";
-import { collectionLookupOptions } from "@/lib/queries";
+import { collectionLookupByIdOptions, collectionLookupOptions } from "@/lib/queries";
 import type { LibraryBrowseParams } from "@/types/library-browse";
 import { libraryBrowseOptions } from "./browse";
 
@@ -23,9 +23,16 @@ export function useLibraryNavigationReads() {
   );
   useEffect(() => cancel, [cancel]);
   return useCallback(
-    (path: string | null, params: LibraryBrowseParams) => {
+    (path: string | null, params: LibraryBrowseParams, id: number | null = null) => {
       const browse = libraryBrowseOptions(params);
-      const lookup = path === null ? null : collectionLookupOptions(path, client);
+      // The destination reads its folder by id when the URL carries one, so warm
+      // that entry rather than a path lookup nothing will read.
+      const lookup =
+        path === null
+          ? null
+          : id === null
+            ? collectionLookupOptions(path, client)
+            : collectionLookupByIdOptions(id, client);
       const keys = [browse.queryKey, ...(lookup ? [lookup.queryKey] : [])];
       cancel(new Set(keys.map(hashKey)));
       pending.current = keys;

@@ -5,9 +5,6 @@
   bottom: 10px;
   transform-origin: bottom left !important;
 }
-.shell-topbar .shell-search input {
-  padding-left: 34px;
-}
 .collections-sidebar .collection-tree-row {
   height: 30px;
   padding-top: 0;
@@ -36,44 +33,6 @@
     gap: 8px;
     padding: 0 8px;
   }
-  .shell-topbar .shell-search {
-    flex: 0 0 40px;
-    width: 40px;
-  }
-  .shell-topbar .shell-search form {
-    height: 36px;
-  }
-  .shell-topbar .shell-search input {
-    width: 40px;
-    padding: 0;
-    color: transparent;
-  }
-  .shell-topbar .shell-search input::placeholder {
-    color: transparent;
-  }
-  .shell-topbar .shell-search form > div {
-    display: none;
-  }
-  .shell-topbar .shell-search:focus-within {
-    position: absolute;
-    z-index: 5;
-    left: 8px;
-    right: 8px;
-    width: auto;
-  }
-  .shell-topbar .shell-search:focus-within input {
-    width: 100%;
-    padding-left: 34px;
-    font-size: 16px;
-    color: var(--foreground);
-    cursor: text;
-  }
-  .shell-topbar .shell-search:focus-within input::placeholder {
-    color: var(--muted-foreground);
-  }
-  .shell-topbar .shell-search:focus-within form > div {
-    display: flex;
-  }
   .workspace-menu {
     width: 100%;
     max-width: none;
@@ -101,4 +60,44 @@
   .shell-route-viewport {
     padding-bottom: 0;
   }
+}
+
+/* The dock relinquishes space continuously; the outliner itself never squeezes. */
+.collections-pane-shell {
+  position: relative;
+  min-width: 0;
+  overflow: clip;
+  background: var(--sidebar-bg);
+}
+.collections-pane-shell::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+.collections-pane-content {
+  width: var(--workbench-sidebar-width);
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+}
+.collections-pane-shell[data-open="false"] {
+  pointer-events: none;
+}
+
+.workbench-section-content,
+.workbench-main-content {
+  transform-origin: center top;
+}
+/* The motion wrapper must keep handing its height to the page, so a page's own
+   `flex-1 overflow-y-auto` region stays the scroll container. */
+.workbench-main-content {
+  display: flex;
+  flex-direction: column;
+}
+.workbench-main-content > * {
+  min-height: 0;
 }

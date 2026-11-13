@@ -227,4 +227,71 @@ describe("Library model inspector", () => {
     expect(text).toHaveValue("Current saved description");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
+
+  describe("panel motion", () => {
+    const other = aModel({ id: 2, name: "Hinge", files: [] });
+    const routes = {
+      "GET /api/v1/models/2": json(other),
+      "GET /api/v1/models/2/print-jobs": json([]),
+    };
+    // The panel leaves the accessibility tree once hidden, so find it by its id.
+    const panel = () => {
+      const element = document.getElementById("model-drawer");
+      if (!element) throw new Error("the inspector panel is not mounted");
+      return element;
+    };
+
+    it("settles into its open state after mounting", async () => {
+      setup();
+      expect(panel()).toHaveAttribute("data-state", "closed");
+      await waitFor(() => expect(panel()).toHaveAttribute("data-state", "open"));
+    });
+
+    it("stays on screen while it leaves", async () => {
+      const app = setup();
+      await ready();
+      app.rerender(
+        <LibraryModelInspector id={1} open={false} canWrite onClose={vi.fn<() => void>()} />,
+      );
+      expect(panel()).toHaveAttribute("data-state", "closed");
+      expect(panel()).not.toHaveAttribute("hidden");
+    });
+
+    it("hides once it has left", async () => {
+      const app = setup();
+      await ready();
+      app.rerender(
+        <LibraryModelInspector id={1} open={false} canWrite onClose={vi.fn<() => void>()} />,
+      );
+      await waitFor(() => expect(panel()).toHaveAttribute("hidden"));
+    });
+
+    it("takes no input while it leaves", async () => {
+      const app = setup();
+      await ready();
+      app.rerender(
+        <LibraryModelInspector id={1} open={false} canWrite onClose={vi.fn<() => void>()} />,
+      );
+      expect(panel()).toHaveAttribute("inert");
+    });
+
+    it("keeps the same panel when pointed at another model", async () => {
+      const app = setup(routes);
+      await ready();
+      const before = panel();
+      app.rerender(<LibraryModelInspector id={2} open canWrite onClose={vi.fn<() => void>()} />);
+      await screen.findByRole("heading", { name: "Hinge" });
+      expect(panel()).toBe(before);
+      expect(panel()).toHaveAttribute("data-state", "open");
+    });
+
+    it("starts another model's details from the top", async () => {
+      const app = setup(routes);
+      await ready();
+      panel().scrollTop = 240;
+      app.rerender(<LibraryModelInspector id={2} open canWrite onClose={vi.fn<() => void>()} />);
+      await screen.findByRole("heading", { name: "Hinge" });
+      expect(panel().scrollTop).toBe(0);
+    });
+  });
 });

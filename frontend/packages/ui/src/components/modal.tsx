@@ -52,7 +52,7 @@ export function ModalShell({
         data-state={state}
         className={cn(
           "relative outline-none transition-[opacity,transform] duration-fast ease-out",
-          "data-[state=closed]:scale-[0.97] data-[state=closed]:opacity-0 motion-reduce:data-[state=closed]:scale-100",
+          "data-[state=closed]:scale-content-enter data-[state=closed]:opacity-0 motion-reduce:data-[state=closed]:scale-100",
           className,
         )}
       >

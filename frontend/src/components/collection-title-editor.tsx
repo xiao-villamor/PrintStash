@@ -62,7 +62,7 @@ export function CollectionTitleEditor({
   return (
     <div className="library-collection-title flex min-w-0 items-center gap-1.5">
       <h1
-        className={open ? "sr-only" : "min-w-0 break-words text-foreground"}
+        className={`${open ? "invisible" : ""} min-w-0 break-words text-foreground`}
         onDoubleClick={onOpen}
       >
         {title}
@@ -104,8 +104,9 @@ export function CollectionTitleEditor({
           type="button"
           variant="ghost"
           size="icon-sm"
-          hidden={open}
-          className="shrink-0 text-muted-foreground"
+          aria-hidden={open || undefined}
+          tabIndex={open ? -1 : undefined}
+          className={`${open ? "invisible" : ""} shrink-0 text-muted-foreground`}
           aria-label={uiText("Rename {value1}", { value1: title })}
           title={uiText("Rename (F2)")}
           onClick={onOpen}

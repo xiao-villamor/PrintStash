@@ -6,23 +6,23 @@
  * separate views below. It refreshes when the events socket reports a Job
  * change, and on a slow interval as a fallback, because a notice can be dropped.
  */
+import type * as React from "react";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   Activity,
   AlertTriangle,
-  Bell,
   ChevronDown,
   Cpu,
   Images,
+  Info,
   Layers,
-  RefreshCw,
   Server,
   SlidersHorizontal,
 } from "lucide-react";
 import { Link } from "@/lib/link";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Input } from "@/components/ui/input";
@@ -104,20 +104,25 @@ function SectionHeader({
   icon: Icon,
   title,
   description,
+  action,
 }: {
   icon: typeof Activity;
   title: string;
   description: string;
+  action?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted">
-        <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />
+    <div className="flex items-start gap-3 border-t border-border px-4 pb-3 pt-4 first:border-t-0 sm:px-5">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-foreground">
+        <Icon className="h-4 w-4" aria-hidden />
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <h3 className="text-sm font-semibold">{title}</h3>
-        <p className="text-xs text-muted-foreground">{description}</p>
+        <p className="mt-0.5 max-w-[72ch] text-xs leading-normal text-muted-foreground">
+          {description}
+        </p>
       </div>
+      {action && <div className="shrink-0">{action}</div>}
     </div>
   );
 }
@@ -315,23 +320,18 @@ function BackgroundWorkView({
   }
 
   return (
-    <Card className="overflow-hidden animate-panel-in">
-      <div className="flex justify-end px-4 pt-4 sm:px-5">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => void refresh()}
-          aria-label={uiText("Refresh")}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" aria-hidden />
-          {uiText("Refresh")}
-        </Button>
-      </div>
-
+    <Card className="overflow-hidden">
       {error && (
-        <div role="alert" className="flex items-center gap-2 border-b px-4 py-3 text-sm sm:px-5">
-          <AlertTriangle className="h-4 w-4 text-warning" aria-hidden />
-          {error}
+        <div className="flex items-center justify-between gap-3 border-b px-4 py-3 text-sm sm:px-5">
+          <div role="alert" className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-warning" aria-hidden />
+            {error}
+          </div>
+          {!overview && (
+            <Button size="sm" variant="outline" onClick={() => void refresh()}>
+              {uiText("Refresh")}
+            </Button>
+          )}
         </div>
       )}
 
@@ -349,7 +349,7 @@ function BackgroundWorkView({
         </div>
       ) : overview ? (
         <>
-          <div className="grid grid-cols-1 gap-3 border-b border-border px-4 pb-5 pt-3 sm:grid-cols-3 sm:px-5">
+          <div className="grid grid-cols-1 gap-3 border-b border-border px-4 py-4 sm:grid-cols-3 sm:px-5">
             {[
               { label: uiText("Running now"), value: running, icon: Activity },
               { label: uiText("Waiting to start"), value: waiting, icon: Layers },
@@ -359,7 +359,10 @@ function BackgroundWorkView({
                 icon: AlertTriangle,
               },
             ].map(({ label, value, icon: Icon }) => (
-              <div key={label} className="px-4 py-2 sm:border-l sm:border-border sm:first:border-0">
+              <div
+                key={label}
+                className="py-2 sm:border-l sm:border-border sm:px-4 sm:first:border-0 sm:first:pl-0"
+              >
                 <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   <span>{label}</span>
                   <Icon className="h-4 w-4" aria-hidden />
@@ -370,22 +373,24 @@ function BackgroundWorkView({
           </div>
           <SectionHeader
             icon={Images}
+            action={
+              <Button size="sm" variant="outline" onClick={() => void refresh()}>
+                {uiText("Refresh")}
+              </Button>
+            }
             title={uiText("Preview and metadata processing")}
             description={uiText(
               "Disabling keeps existing previews and lets current processing finish. Re-enabling may start a backfill.",
             )}
           />
-          <ul className="divide-y divide-border border-b px-4 pb-2 sm:pl-16 sm:pr-5">
+          <ul className="settings-section-body">
             {overview.definitions
               .filter((definition) => definition.name in POLICY_SETTINGS)
               .map((definition) => (
-                <li
-                  key={definition.name}
-                  className="flex flex-wrap items-center justify-between gap-3 py-3"
-                >
-                  <div className="min-w-0 text-sm">
-                    <span className="font-medium">{policyPurpose(definition.name)}</span>
-                    <span className="block text-xs text-muted-foreground">
+                <li key={definition.name} className="settings-list-row">
+                  <div className="min-w-0">
+                    <span className="settings-list-title">{policyPurpose(definition.name)}</span>
+                    <span className="settings-list-meta block">
                       {definition.enabled ? uiText("Enabled") : uiText("Processing disabled")}
                       {" · "}
                       {uiText("Deployment default: {value}", {
@@ -393,8 +398,8 @@ function BackgroundWorkView({
                       })}
                     </span>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-muted-foreground">
+                  <div>
+                    <span className="settings-status">
                       {uiText(definition.enabled ? "On" : "Off")}
                     </span>
                     <Button
@@ -421,26 +426,24 @@ function BackgroundWorkView({
               ))}
           </ul>
           <SectionHeader
-            icon={Images}
+            icon={Info}
             title={uiText("Checking a model's preview?")}
             description={uiText("This page shows totals for the whole vault.")}
+            action={
+              <Link href="/" className={buttonVariants({ variant: "outline", size: "sm" })}>
+                {uiText("Browse models")}
+              </Link>
+            }
           />
-          <div className="space-y-3 border-b px-4 py-4 text-sm sm:px-5">
+          <div className="settings-section-body max-w-[80ch] space-y-2 text-sm">
             <p>
               {uiText(
                 "Open the model and look in Files. Preparing or failed previews appear beside the file, with a retry option when available.",
               )}
             </p>
-            <p className="flex items-start gap-2 text-xs text-muted-foreground">
-              <Bell className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+            <p className="text-xs text-muted-foreground">
               {uiText("Uploads and imports also appear in the Tasks menu.")}
             </p>
-            <Link
-              href="/"
-              className="inline-flex rounded text-sm font-medium text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              {uiText("Browse models")}
-            </Link>
           </div>
 
           <ActiveWorkJobs
@@ -742,7 +745,7 @@ function ActiveWorkJobs({
       />
       {jobsState.status !== "ready" && (
         <p
-          className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-5"
+          className="settings-section-body text-sm text-muted-foreground"
           aria-busy={jobsState.status === "loading"}
         >
           {jobsState.status === "loading"
@@ -751,20 +754,12 @@ function ActiveWorkJobs({
         </p>
       )}
       {jobsState.status === "ready" && jobsState.jobs.length > 0 && (
-        <ul className="divide-y divide-border border-b">
+        <ul className="settings-section-body">
           {jobsState.jobs.map((job) => (
-            <li
-              key={job.job_id}
-              className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-start sm:px-5"
-            >
+            <li key={job.job_id} className="settings-list-row">
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium">{job.label ?? job.kind}</span>
-                  <Badge variant={job.state === "running" ? "secondary" : "outline"}>
-                    {job.state === "running" ? uiText("Running now") : uiText("Waiting to start")}
-                  </Badge>
-                </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="settings-list-title">{job.label ?? job.kind}</p>
+                <p className="settings-list-meta">
                   {job.kind === "backups.create" || job.kind === "backups.automatic" ? (
                     <>
                       {job.stage ? uiText(job.stage) : uiText("Waiting for a worker")}
@@ -784,19 +779,11 @@ function ActiveWorkJobs({
                   )}
                   {job.progress !== null ? ` · ${Math.round(job.progress)}%` : ""}
                 </p>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="settings-list-meta">
                   {job.started_at
                     ? uiText("Started {when}", { when: formatDateTime(job.started_at) })
                     : uiText("Queued {when}", { when: formatDateTime(job.created_at) })}
                 </p>
-                {job.model_id !== null && (
-                  <Link
-                    href={`/models/${job.model_id}`}
-                    className="mt-1 inline-block text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    {uiText("Open model")}
-                  </Link>
-                )}
                 {job.progress !== null && (
                   <div
                     role="progressbar"
@@ -804,21 +791,34 @@ function ActiveWorkJobs({
                     aria-valuenow={job.progress}
                     aria-valuemin={0}
                     aria-valuemax={100}
-                    className="mt-2 h-1.5 overflow-hidden rounded bg-muted"
+                    className="mt-2 h-0.5 max-w-md overflow-hidden bg-muted"
                   >
                     <div className="h-full bg-primary" style={{ width: `${job.progress}%` }} />
                   </div>
                 )}
               </div>
-              <Button size="sm" variant="outline" onClick={() => onCancel(job)}>
-                {uiText("Cancel job")}
-              </Button>
+              <div>
+                <span className="settings-status">
+                  {job.state === "running" ? uiText("Running now") : uiText("Waiting to start")}
+                </span>
+                {job.model_id !== null && (
+                  <Link
+                    href={`/models/${job.model_id}`}
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    {uiText("Open model")}
+                  </Link>
+                )}
+                <Button size="sm" variant="outline" onClick={() => onCancel(job)}>
+                  {uiText("Cancel job")}
+                </Button>
+              </div>
             </li>
           ))}
         </ul>
       )}
       {jobsState.status === "ready" && jobsState.jobs.length === 0 && (
-        <p className="border-b px-4 py-4 text-sm text-muted-foreground sm:px-5">
+        <p className="settings-section-body text-sm text-muted-foreground">
           {uiText("Nothing is running or waiting right now.")}
         </p>
       )}

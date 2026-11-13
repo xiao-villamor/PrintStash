@@ -1,13 +1,13 @@
 "use client";
 
+import { SettingsGroupHead } from "@/components/settings-card";
 import { currentLocale } from "@/lib/locale";
 
 import { useEffect, useRef, useState } from "react";
-import { CloudUpload, ExternalLink, KeyRound, Link, Pencil, Plus, Trash2 } from "lucide-react";
+import { CloudUpload, ExternalLink } from "lucide-react";
 
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -213,6 +213,7 @@ export function ProviderConnectionsPanel({
     <div className="space-y-3">
       <p role="alert">{t("settings.providerConnections.loadFailed")}</p>
       <Button
+        size="sm"
         onClick={() => {
           void connectionsQuery.refetch();
           void devicesQuery.refetch();
@@ -238,35 +239,27 @@ export function ProviderConnectionsPanel({
           aria-labelledby="provider-connections-title"
           className="overflow-hidden rounded border border-border bg-card"
         >
-          <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-muted-foreground">
-              <CloudUpload className="h-4 w-4" aria-hidden />
-            </span>
-            <div>
-              <h2 id="provider-connections-title" className="text-sm font-semibold text-foreground">
-                {t("settings.providerConnections.title")}
-              </h2>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {t("settings.providerConnections.description")}
-              </p>
-            </div>
-          </div>
+          <SettingsGroupHead
+            icon={CloudUpload}
+            level={2}
+            id="provider-connections-title"
+            title={t("settings.providerConnections.title")}
+            description={t("settings.providerConnections.description")}
+            className="settings-card-head--flush"
+          />
           <div className="space-y-0 px-4 pb-4 sm:pl-16 sm:pr-5">
             {error && (
               <p role="alert" className="text-sm text-destructive">
                 {error}
               </p>
             )}
-            <div className="border-b border-border py-3">
+            <div className="settings-list-row">
               <ConnectionHeader
                 label={t("settings.providerConnections.mmf")}
-                connected={mmf.connected}
-                t={t}
+                description={t("settings.providerConnections.mmfDescription")}
               />
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                {t("settings.providerConnections.mmfDescription")}
-              </p>
-              <div className="mt-3">
+              <div>
+                <ConnectionStatus connected={mmf.connected} t={t} />
                 {mmf.connected ? (
                   <Button
                     variant="outline"
@@ -280,26 +273,23 @@ export function ProviderConnectionsPanel({
                   </Button>
                 ) : (
                   <Button
+                    variant="outline"
                     size="sm"
                     onClick={() => void startMyMiniFactory()}
                     loading={busy === "myminifactory"}
                   >
-                    <Link className="h-3.5 w-3.5" />
                     {t("settings.providerConnections.connectMmf")}
                   </Button>
                 )}
               </div>
             </div>
-            <div className="py-3">
+            <div className="settings-list-row">
               <ConnectionHeader
                 label={t("settings.providerConnections.cults")}
-                connected={cults.connected}
-                t={t}
+                description={t("settings.providerConnections.cultsDescription")}
               />
-              <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                {t("settings.providerConnections.cultsDescription")}
-              </p>
-              <div className="mt-3">
+              <div>
+                <ConnectionStatus connected={cults.connected} t={t} />
                 {cults.connected ? (
                   <Button
                     variant="outline"
@@ -312,8 +302,12 @@ export function ProviderConnectionsPanel({
                     {t("settings.providerConnections.disconnect")}
                   </Button>
                 ) : (
-                  <Button type="button" size="sm" onClick={() => setCultsOpen(true)}>
-                    <Link className="h-3.5 w-3.5" />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCultsOpen(true)}
+                  >
                     {t("settings.providerConnections.connectCults")}
                   </Button>
                 )}
@@ -367,32 +361,31 @@ export function ProviderConnectionsPanel({
           aria-labelledby="paired-browsers-title"
           className="overflow-hidden rounded border border-border bg-card"
         >
-          <div className="flex items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-5">
-            <div className="flex items-start gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-muted-foreground">
-                <ExternalLink className="h-4 w-4" aria-hidden />
-              </span>
-              <div>
-                <h2 id="paired-browsers-title" className="text-sm font-semibold text-foreground">
-                  {t("settings.pairedBrowsers.title")}
-                </h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {t("settings.pairedBrowsers.description")}
-                </p>
-              </div>
-            </div>
-            <Button size="sm" onClick={() => void createPairing()} loading={busy === "pairing"}>
-              <Plus className="h-3.5 w-3.5" />
-              {t("settings.pairedBrowsers.createCode")}
-            </Button>
-          </div>
+          <SettingsGroupHead
+            icon={ExternalLink}
+            level={2}
+            id="paired-browsers-title"
+            title={t("settings.pairedBrowsers.title")}
+            description={t("settings.pairedBrowsers.description")}
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void createPairing()}
+                loading={busy === "pairing"}
+              >
+                {t("settings.pairedBrowsers.createCode")}
+              </Button>
+            }
+            className="settings-card-head--flush"
+          />
           <div className="space-y-4 px-4 pb-4 sm:pl-16 sm:pr-5">
             {pairing && (
-              <div className="rounded border border-primary/40 bg-primary-soft p-3" role="status">
+              <div className="border border-border bg-card p-3" role="status">
                 <p className="text-xs text-muted-foreground">
                   {t("settings.pairedBrowsers.codeHelp")}
                 </p>
-                <code className="mt-2 block select-all break-all rounded bg-background px-3 py-2 font-mono text-sm text-foreground">
+                <code className="mt-2 block select-all break-all border border-border bg-background px-3 py-2 font-mono text-sm text-foreground">
                   {pairing.code}
                 </code>
                 <p className="mt-2 text-xs text-muted-foreground">
@@ -405,7 +398,7 @@ export function ProviderConnectionsPanel({
             {devices.length === 0 ? (
               <p className="text-sm text-muted-foreground">{t("settings.pairedBrowsers.empty")}</p>
             ) : (
-              <div className="space-y-2">
+              <div>
                 {devices.map((device) => (
                   <BrowserDeviceRow
                     key={device.id}
@@ -419,6 +412,7 @@ export function ProviderConnectionsPanel({
                     }}
                     labels={{
                       name: t("settings.pairedBrowsers.name", { name: device.name }),
+                      rename: t("settings.pairedBrowsers.rename", { name: device.name }),
                       save: t("settings.pairedBrowsers.saveName"),
                       revoke: t("settings.pairedBrowsers.revoke", { name: device.name }),
                       revoked: t("settings.pairedBrowsers.revoked"),
@@ -457,27 +451,28 @@ export function ProviderConnectionsPanel({
   );
 }
 
-function ConnectionHeader({
-  label,
+function ConnectionHeader({ label, description }: { label: string; description: string }) {
+  return (
+    <div>
+      <p className="settings-list-title">{label}</p>
+      <p className="settings-list-meta">{description}</p>
+    </div>
+  );
+}
+
+function ConnectionStatus({
   connected,
   t,
 }: {
-  label: string;
   connected: boolean;
   t: ReturnType<typeof useI18n>["t"];
 }) {
   return (
-    <div className="flex items-center justify-between gap-3">
-      <p className="text-sm font-medium text-foreground">{label}</p>
-      <Badge
-        variant={connected ? "success" : "secondary"}
-        className="font-mono text-3xs uppercase tracking-wider"
-      >
-        {connected
-          ? t("settings.providerConnections.connected")
-          : t("settings.providerConnections.notConnected")}
-      </Badge>
-    </div>
+    <span className="settings-status">
+      {connected
+        ? t("settings.providerConnections.connected")
+        : t("settings.providerConnections.notConnected")}
+    </span>
   );
 }
 
@@ -500,17 +495,19 @@ function BrowserDeviceRow({
   onSave: (device: BrowserDeviceRead, name: string) => Promise<BrowserDeviceRead>;
   onReview: (id: number) => Promise<BrowserDeviceRead>;
   onRevoke: (device: BrowserDeviceRead) => void;
-  labels: { name: string; save: string; revoke: string; revoked: string };
+  labels: { name: string; rename: string; save: string; revoke: string; revoked: string };
 }) {
   const { t } = useI18n();
   // No copied server list: this snapshot exists only after a deliberate edit/adoption.
   const [draft, setDraft] = useState<{ base: BrowserDeviceRead; name: string } | null>(null);
   const [review, setReview] = useState<BrowserReview>({ phase: "idle" });
   const [error, setError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const live = useRef(true);
   useEffect(() => {
     live.current = true;
     const release = onAuthChange(() => {
+      setRenaming(false);
       setDraft(null);
       setReview({ phase: "idle" });
       setError(null);
@@ -543,6 +540,7 @@ function BrowserDeviceRow({
     try {
       await onSave(revised && snapshot ? snapshot : draft.base, name.trim());
       if (current(session)) {
+        setRenaming(false);
         setDraft(null);
         setReview({ phase: "idle" });
       }
@@ -562,56 +560,101 @@ function BrowserDeviceRow({
     }
   }
   if (review.phase === "denied") return <p role="alert">{error}</p>;
+  const editing = !revoked && (renaming || draft !== null || review.phase !== "idle");
   return (
-    <div className="space-y-3 rounded border border-border p-3">
-      <form
-        className="flex flex-col gap-2 sm:flex-row sm:items-center"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void save(false);
-        }}
-      >
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
-            <Input
-              aria-label={labels.name}
-              value={name}
-              onChange={(event) =>
-                setDraft({ base: draft?.base ?? device, name: event.target.value })
-              }
-              disabled={revoked || busy !== null}
-              maxLength={128}
-              required
-              pattern={".*\\S.*"}
-            />
-          </div>
-          {revoked && <p className="mt-1 text-xs text-muted-foreground">{labels.revoked}</p>}
-        </div>
-        {!revoked && (
-          <div className="flex gap-2">
+    <div className="settings-list-item space-y-3">
+      {editing ? (
+        <form
+          className="settings-list-row"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void save(false);
+          }}
+        >
+          <Input
+            aria-label={labels.name}
+            value={name}
+            onChange={(event) =>
+              setDraft({ base: draft?.base ?? device, name: event.target.value })
+            }
+            disabled={busy !== null}
+            maxLength={128}
+            required
+            pattern={".*\\S.*"}
+            autoFocus
+            className="max-w-sm"
+          />
+          <div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy !== null}
+              onClick={() => {
+                setRenaming(false);
+                setDraft(null);
+                setReview({ phase: "idle" });
+                setError(null);
+              }}
+            >
+              {t("Cancel")}
+            </Button>
             <Button
               type="submit"
-              variant="outline"
               size="sm"
               disabled={!edited || review.phase !== "idle" || busy !== null}
               loading={busy === `rename-${device.id}`}
               aria-label={labels.save}
             >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={() => onRevoke(device)}
-              aria-label={labels.revoke}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
+              {t("Save")}
             </Button>
           </div>
-        )}
-      </form>
+        </form>
+      ) : (
+        <div className="settings-list-row">
+          <div>
+            <p className="settings-list-title">{device.name}</p>
+            <p className="settings-list-meta">
+              {[
+                t("settings.pairedBrowsers.pairedOn", { date: formatDate(device.created_at) }),
+                device.last_used_at
+                  ? t("settings.pairedBrowsers.lastUsed", {
+                      date: formatDate(device.last_used_at),
+                    })
+                  : t("settings.pairedBrowsers.neverUsed"),
+              ].join(" · ")}
+            </p>
+          </div>
+          <div>
+            {revoked ? (
+              <span className="settings-status">{labels.revoked}</span>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={busy !== null}
+                  onClick={() => setRenaming(true)}
+                  aria-label={labels.rename}
+                >
+                  {t("Rename")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-destructive"
+                  onClick={() => onRevoke(device)}
+                  aria-label={labels.revoke}
+                >
+                  {t("settings.pairedBrowsers.revokeAction")}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
           {error}

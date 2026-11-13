@@ -11,6 +11,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { useMockApi } from "./_setup";
+import { animationStarts, forgetAnimationStarts, recordAnimationStarts } from "./_animations";
 import { aCollectionNode, aModelListItem, aMultipartModel } from "../../src/test-support/factories";
 
 useMockApi();
@@ -57,7 +58,18 @@ async function folderWithDescription(page: Page) {
   });
 }
 
+/** The animations folder entrances started on the rows of a container class. */
+async function entrancesUnder(page: Page, container: string) {
+  return (await animationStarts(page))
+    .filter((start) => start.container.split(" ").includes(container))
+    .map((start) => start.name);
+}
+
 test.describe("motion and layering", () => {
+  test.beforeEach(async ({ page }) => {
+    await recordAnimationStarts(page);
+  });
+
   for (const scenario of [
     { width: 1920, reducedMotion: "no-preference" },
     { width: 390, reducedMotion: "no-preference" },
@@ -236,11 +248,7 @@ test.describe("motion and layering", () => {
         .click();
       await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
 
-      const entrance = page.locator(".folder-cards-forward > *").first();
-      await expect(entrance).toBeVisible();
-      expect(await entrance.evaluate((node) => getComputedStyle(node).animationName)).toBe(
-        animation,
-      );
+      await expect.poll(() => entrancesUnder(page, "folder-cards-forward")).toContain(animation);
     });
   }
 
@@ -251,23 +259,25 @@ test.describe("motion and layering", () => {
       .getByRole("main")
       .getByRole("button", { name: /maraio/ })
       .click();
-    const card = page.locator(".folder-cards-forward > *").first();
-    await expect(card).toBeVisible();
+    await expect
+      .poll(() => entrancesUnder(page, "folder-cards-forward"))
+      .toContain("folder-in-forward");
 
-    const entrance = await card.evaluate((node) => {
-      const keyframes = Array.from(document.styleSheets)
+    const [start] = (await animationStarts(page)).filter(
+      (entry) => entry.name === "folder-in-forward",
+    );
+    const keyframes = await page.evaluate(() =>
+      Array.from(document.styleSheets)
         .flatMap((sheet) => Array.from(sheet.cssRules))
         .filter(
           (rule): rule is CSSKeyframesRule =>
             rule instanceof CSSKeyframesRule && rule.name === "folder-in-forward",
-        );
-      return {
-        duration: getComputedStyle(node).animationDuration,
-        keyframes: keyframes.map((rule) => rule.cssText).join(" "),
-      };
-    });
-    expect(entrance.duration).toBe("0.3s");
-    expect(entrance.keyframes).toContain("translateX(24px)");
+        )
+        .map((rule) => rule.cssText)
+        .join(" "),
+    );
+    expect(start.duration).toBe("0.3s");
+    expect(keyframes).toContain("translateX(24px)");
   });
 
   test("a folder whose cards are already cached still animates them in on a revisit", async ({
@@ -280,15 +290,14 @@ test.describe("motion and layering", () => {
     await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
     await page.getByRole("main").getByRole("button", { name: "All Models" }).first().click();
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
+    await forgetAnimationStarts(page);
 
     await folder.click();
     await expect(page.getByRole("heading", { name: "Folder model", exact: true })).toBeVisible();
 
-    const card = page.locator(".folder-cards-forward > *").first();
-    await expect(card).toBeVisible();
-    expect(await card.evaluate((node) => getComputedStyle(node).animationName)).toBe(
-      "folder-in-forward",
-    );
+    await expect
+      .poll(() => entrancesUnder(page, "folder-cards-forward"))
+      .toContain("folder-in-forward");
   });
 
   test("opening a folder by its URL does not animate its content", async ({ page }) => {
@@ -298,6 +307,9 @@ test.describe("motion and layering", () => {
     await expect(
       page.locator(".folder-cards-forward, .folder-cards-back, .folder-cards-jump"),
     ).toHaveCount(0);
+    expect(
+      (await animationStarts(page)).filter((start) => start.container.includes("folder-cards")),
+    ).toEqual([]);
   });
 
   test("climbing back out of a folder settles its parent in from the left", async ({ page }) => {
@@ -312,11 +324,7 @@ test.describe("motion and layering", () => {
     await page.getByRole("main").getByRole("button", { name: "All Models" }).first().click();
     await expect(page.getByRole("heading", { name: "Root model", exact: true })).toBeVisible();
 
-    const entrance = page.locator(".folder-cards-back > *").first();
-    await expect(entrance).toBeVisible();
-    expect(await entrance.evaluate((node) => getComputedStyle(node).animationName)).toBe(
-      "folder-in-back",
-    );
+    await expect.poll(() => entrancesUnder(page, "folder-cards-back")).toContain("folder-in-back");
   });
 
   test("folder content waits for its description before replacing the current view", async ({
@@ -481,6 +489,126 @@ test.describe("motion and layering", () => {
     expect(Math.min(...opacities)).toBeGreaterThanOrEqual(0.9);
     expect(downloads).toHaveLength(1);
   });
+
+  test("a reflow after a folder entrance does not play the entrance again", async ({ page }) => {
+    await folderWithDescription(page);
+    await page.goto("/");
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: /maraio/ })
+      .click();
+    await expect
+      .poll(() => entrancesUnder(page, "folder-cards-forward"))
+      .toContain("folder-in-forward");
+    await expect(page.locator(".folder-cards-forward")).toHaveCount(0);
+    await forgetAnimationStarts(page);
+
+    await page
+      .locator("header")
+      .getByRole("button", { name: "Toggle sidebar", exact: true })
+      .click();
+
+    await expect
+      .poll(async () => (await animationStarts(page)).map((start) => start.name))
+      .toContain("results-settle");
+    expect(
+      (await animationStarts(page)).filter((start) => start.name.startsWith("folder-in")),
+    ).toEqual([]);
+  });
+
+  test("filtering the open folder settles its results in place", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
+    await forgetAnimationStarts(page);
+
+    await page
+      .getByRole("radiogroup", { name: "Filter models by status" })
+      .getByRole("radio", { name: /Needs test/ })
+      .click();
+
+    await expect
+      .poll(async () =>
+        (await animationStarts(page))
+          .filter((start) => start.target.split(" ").includes("library-items"))
+          .map((start) => start.name),
+      )
+      .toEqual(["results-settle"]);
+  });
+
+  test("switching to the list settles it in place", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("heading", { name: "All Models" })).toBeVisible();
+    await forgetAnimationStarts(page);
+
+    await page.getByRole("button", { name: "List View", exact: true }).click();
+
+    await expect
+      .poll(async () =>
+        (await animationStarts(page))
+          .filter((start) => start.target.split(" ").includes("results-settle"))
+          .map((start) => start.name),
+      )
+      .toEqual(["results-settle"]);
+  });
+
+  for (const [reducedMotion, animation] of [
+    ["no-preference", "pane-in"],
+    ["reduce", "fade-in"],
+  ] as const) {
+    test(`opening the collections pane eases it in with ${reducedMotion}`, async ({ page }) => {
+      await page.emulateMedia({ reducedMotion });
+      await page.goto("/");
+      const toggle = page
+        .locator("header")
+        .getByRole("button", { name: "Toggle sidebar", exact: true });
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await forgetAnimationStarts(page);
+
+      await toggle.click();
+
+      await expect
+        .poll(async () =>
+          (await animationStarts(page))
+            .filter((start) => start.target.split(" ").includes("pane-in"))
+            .map((start) => start.name),
+        )
+        .toEqual([animation]);
+    });
+  }
+
+  test("a page that loads with the collections pane open shows it in place", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("tree", { name: "Collections" })).toBeVisible();
+    await expect(page.locator("#collections-pane")).not.toHaveClass(/pane-in/);
+    expect(
+      (await animationStarts(page)).filter((start) => start.target.includes("pane-in")),
+    ).toEqual([]);
+  });
+
+  for (const [reducedMotion, moves] of [
+    ["no-preference", true],
+    ["reduce", false],
+  ] as const) {
+    test(`the details panel leaves toward its edge only with ${reducedMotion}`, async ({
+      page,
+    }) => {
+      await page.emulateMedia({ reducedMotion });
+      await page.goto("/?c=maraio&type=all");
+      await page
+        .getByRole("main")
+        .getByRole("link", { name: "skadis_kitchen-roll_screw", exact: true })
+        .click();
+      const drawer = page.locator("#model-drawer");
+      await expect(drawer).toHaveAttribute("data-state", "open");
+
+      await drawer.getByRole("button", { name: "Close details", exact: true }).click();
+
+      await expect(drawer).toBeHidden();
+      const transform = await drawer.evaluate((node) => getComputedStyle(node).transform);
+      expect(transform !== "none").toBe(moves);
+    });
+  }
 
   test("header and recent-folder menus stay above adjacent vault surfaces", async ({ page }) => {
     await page.addInitScript(() =>

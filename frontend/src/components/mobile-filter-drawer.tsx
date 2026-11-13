@@ -25,7 +25,7 @@ interface MobileFilterDrawerProps {
   selectedTags: string[];
   selectedPrinterId: number | null;
   selectedPrinterPresence: "any" | "none" | null;
-  onCollectionChange: (path: string | null) => void;
+  onCollectionChange: (path: string | null, id?: number | null) => void;
   onTagsChange: (tags: string[]) => void;
   onPrinterChange: (printerId: number | null) => void;
   onPrinterPresenceChange: (presence: "any" | "none" | null) => void;

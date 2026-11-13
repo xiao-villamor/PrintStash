@@ -2,21 +2,14 @@ import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Database,
-  HardDrive,
-  RefreshCw,
-  ShieldCheck,
-  Wrench,
-} from "lucide-react";
+import { AlertTriangle, CheckCircle2, Database, HardDrive, ShieldCheck } from "lucide-react";
 
 import { AuditSchedulePanel } from "@/components/audit-schedule-panel";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SettingsCard, SettingsGroupHead } from "@/components/settings-card";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -171,21 +164,16 @@ export function MaintenancePanel() {
 
   if (commands.retired) return null;
   return (
-    <div className="settings-maintenance animate-panel-in">
+    <div className="settings-grouped settings-maintenance">
       <Card role="region" aria-labelledby="maintenance-heading" className="overflow-hidden">
-        <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-muted-foreground">
-            <ShieldCheck className="h-4 w-4" aria-hidden />
-          </span>
-          <div>
-            <h2 id="maintenance-heading" className="text-sm font-semibold">
-              {t("maintenance.checkNow")}
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t("maintenance.checkNowDescription")}
-            </p>
-          </div>
-        </div>
+        <SettingsGroupHead
+          icon={ShieldCheck}
+          level={2}
+          id="maintenance-heading"
+          title={t("maintenance.checkNow")}
+          description={t("maintenance.checkNowDescription")}
+          className="settings-card-head--flush"
+        />
         <CardContent className="space-y-4 px-4 pb-4 pt-0 sm:pl-16 sm:pr-5">
           <div className="divide-y divide-border">
             <div className="flex flex-col items-stretch gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
@@ -196,6 +184,7 @@ export function MaintenancePanel() {
                 </p>
               </div>
               <Button
+                size="sm"
                 className="w-full sm:w-auto"
                 onClick={() => void start("quick")}
                 loading={busy}
@@ -212,6 +201,7 @@ export function MaintenancePanel() {
                 </p>
               </div>
               <Button
+                size="sm"
                 className="w-full sm:w-auto"
                 variant="outline"
                 onClick={() => void start("full")}
@@ -226,6 +216,7 @@ export function MaintenancePanel() {
             <div role="alert">
               <p>{t("auditSchedule.historyLoadFailed")}</p>
               <Button
+                size="sm"
                 onClick={() => void history.refetch()}
                 aria-label={t("maintenance.retryHistory")}
               >
@@ -267,7 +258,7 @@ export function MaintenancePanel() {
                   <span className="ml-auto text-xs tabular-nums">{Math.round(run.progress)}%</span>
                 )}
                 {isActive(run) && (
-                  <Button size="xs" variant="outline" disabled={busy} onClick={() => void cancel()}>
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void cancel()}>
                     {uiText("Cancel")}
                   </Button>
                 )}
@@ -290,7 +281,7 @@ export function MaintenancePanel() {
                   {(["all", "critical", "warning", "info"] as const).map((value) => (
                     <Button
                       key={value}
-                      size="xs"
+                      size="sm"
                       variant={severity === value ? "secondary" : "ghost"}
                       onClick={() => setSeverity(value)}
                     >
@@ -408,16 +399,15 @@ export function MaintenancePanel() {
                             <div className="flex gap-2">
                               {finding.repair_action && (
                                 <Button
-                                  size="xs"
+                                  size="sm"
                                   disabled={busy || history.isError}
                                   onClick={() => setRepairTarget(finding)}
                                 >
-                                  <Wrench className="h-3.5 w-3.5" />
                                   {uiText(" Repair")}
                                 </Button>
                               )}
                               <Button
-                                size="xs"
+                                size="sm"
                                 variant="ghost"
                                 disabled={busy || history.isError}
                                 onClick={() => void act(finding, "ignore")}
@@ -426,7 +416,7 @@ export function MaintenancePanel() {
                               </Button>
                             </div>
                           ) : finding.state === "ignored" ? (
-                            <Badge variant="secondary">{t("settings.auditReviewed")}</Badge>
+                            <span className="settings-status">{t("settings.auditReviewed")}</span>
                           ) : null}
                         </div>
                       );
@@ -440,19 +430,18 @@ export function MaintenancePanel() {
       </Card>
       <AuditSchedulePanel />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Database className="h-4 w-4" />
-            {t("maintenance.backupTitle")}
-          </CardTitle>
-          <CardDescription>{t("maintenance.backupDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
+      <SettingsCard
+        icon={Database}
+        title={t("maintenance.backupTitle")}
+        description={t("maintenance.backupDescription")}
+      >
+        <div className="settings-section-body">
           {catalog.isError ? (
             <div role="alert">
               <p>{t("maintenance.backupLoadFailed")}</p>
-              <Button onClick={() => void catalog.refetch()}>{t("auditSchedule.retry")}</Button>
+              <Button size="sm" onClick={() => void catalog.refetch()}>
+                {t("auditSchedule.retry")}
+              </Button>
             </div>
           ) : catalog.isPending ? (
             <p role="status">{t("auditSchedule.loading")}</p>
@@ -463,18 +452,10 @@ export function MaintenancePanel() {
               const sourceRef = sourceKey(item);
               const result = verifications[sourceRef];
               return (
-                <div
-                  key={sourceRef}
-                  className="flex min-w-0 flex-col items-stretch gap-3 rounded-md border border-border p-3 sm:flex-row sm:items-center"
-                >
-                  <div className="flex min-w-0 items-start gap-3 sm:flex-1">
-                    {result?.valid ? (
-                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-success" />
-                    ) : (
-                      <Database className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">{formatAuditDate(item.created_at)}</p>
+                <div key={sourceRef} className="settings-list-row">
+                  <div className="min-w-0">
+                    <div className="min-w-0">
+                      <p className="settings-list-title">{formatAuditDate(item.created_at)}</p>
                       <p className="text-xs text-muted-foreground">
                         {formatBytes(item.size_bytes)} ·{" "}
                         {t("maintenance.backupFiles", { count: item.file_count })}
@@ -520,24 +501,32 @@ export function MaintenancePanel() {
                       </details>
                     </div>
                   </div>
-                  <Button
-                    className="w-full sm:w-auto"
-                    size="xs"
-                    variant="outline"
-                    loading={verifying === sourceRef}
-                    disabled={busy || !item.source_ref}
-                    title={!item.source_ref ? t("settings.backupSourceUnavailable") : undefined}
-                    onClick={() => void checkBackup(item)}
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" />
-                    {uiText(" Verify")}
-                  </Button>
+                  <div>
+                    {result && (
+                      <span
+                        className="settings-status"
+                        data-tone={result.valid ? undefined : "danger"}
+                      >
+                        {result.valid ? uiText("Verified") : uiText("Failed")}
+                      </span>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      loading={verifying === sourceRef}
+                      disabled={busy || !item.source_ref}
+                      title={!item.source_ref ? t("settings.backupSourceUnavailable") : undefined}
+                      onClick={() => void checkBackup(item)}
+                    >
+                      {uiText(" Verify")}
+                    </Button>
+                  </div>
                 </div>
               );
             })
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </SettingsCard>
       <ConfirmModal
         open={repairTarget !== null}
         onClose={() => setRepairTarget(null)}

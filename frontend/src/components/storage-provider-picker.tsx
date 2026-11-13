@@ -167,11 +167,7 @@ export function StorageProviderPicker(props: {
     <div className="space-y-5">
       <fieldset className="space-y-2">
         <legend
-          className={
-            props.onboarding
-              ? "sr-only"
-              : "text-xs font-mono uppercase tracking-wider text-on-surface-variant"
-          }
+          className={props.onboarding ? "sr-only" : "text-[13px] font-medium text-foreground"}
         >
           {props.onboarding ? uiText("setup.storageChoice") : uiText("Storage category")}
         </legend>
@@ -185,6 +181,7 @@ export function StorageProviderPicker(props: {
             const active = selectedCategory === category.id;
             return (
               <Button
+                size="sm"
                 key={category.id}
                 type="button"
                 variant="outline"
@@ -256,7 +253,7 @@ export function StorageProviderPicker(props: {
       ) &&
         (props.onboarding ? (
           <div className="space-y-2">
-            <label className="block space-y-2 text-xs font-mono uppercase tracking-wider text-on-surface-variant">
+            <label className="block space-y-2 text-[13px] font-medium text-foreground">
               {uiText("Provider")}
               <select
                 className={cn(
@@ -295,12 +292,13 @@ export function StorageProviderPicker(props: {
           </div>
         ) : (
           <fieldset className="space-y-2">
-            <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
+            <legend className="text-[13px] font-medium text-foreground">
               {uiText("Provider")}
             </legend>
             <div className="grid gap-2 sm:grid-cols-2">
               {categoryProviders.map((provider) => (
                 <Button
+                  size="sm"
                   key={provider.id}
                   type="button"
                   variant="outline"

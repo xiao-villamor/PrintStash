@@ -87,18 +87,6 @@ export function LibraryStatusFilters({
           <span className="font-mono text-3xs text-muted-foreground">{item.count}</span>
         </Button>
       ))}
-      <Button
-        type="button"
-        variant="ghost"
-        size="xs"
-        role="radio"
-        aria-checked={false}
-        disabled
-        title={uiText("This filter is not available yet.")}
-      >
-        <span aria-hidden className="library-status-none h-1.5 w-1.5 rounded-full" />
-        {uiText("No G-code")}
-      </Button>
     </div>
   );
 }

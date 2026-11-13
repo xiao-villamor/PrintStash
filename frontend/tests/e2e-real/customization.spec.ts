@@ -30,21 +30,16 @@ test.describe("appearance customization", () => {
   test("model card metric slot selection persists, and reset restores defaults", async ({
     page,
   }) => {
-    await page.goto("/settings");
-    await page.getByRole("button", { name: "Design" }).click();
+    await page.goto("/settings?section=design");
 
-    // Option buttons are named "<label> <abbr>" (e.g. "Material MAT"); the first in
-    // DOM is slot 1. Once selected there, only slot 1 keeps that label.
-    const mat = () => page.getByRole("button", { name: "Material MAT", exact: true }).first();
-    await mat().click();
-    await expect(mat()).toHaveAttribute("aria-pressed", "true");
+    const first = () => page.getByRole("combobox", { name: "Metric 1", exact: true });
+    await first().selectOption("material");
+    await expect(first()).toHaveValue("material");
 
     await page.reload();
-    await page.getByRole("button", { name: "Design" }).click();
-    await expect(mat()).toHaveAttribute("aria-pressed", "true");
+    await expect(first()).toHaveValue("material");
 
-    // The card-metrics Reset (first Reset on the page) clears the selection.
-    await page.getByRole("button", { name: "Reset" }).first().click();
-    await expect(mat()).toHaveAttribute("aria-pressed", "false");
+    await page.getByRole("button", { name: "Reset metrics", exact: true }).click();
+    await expect(first()).not.toHaveValue("material");
   });
 });

@@ -76,10 +76,16 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+/** Opens the inline rename field of a paired browser and returns its input. */
+async function openRename(name: string) {
+  await userEvent.click(await screen.findByRole("button", { name: `Rename ${name}` }));
+  return screen.getByLabelText(`Browser name for ${name}`);
+}
+
 describe("ProviderConnectionsPanel", () => {
   it("retains the original browser base during refresh", async () => {
     renderPanel();
-    const input = await screen.findByLabelText("Browser name for Workshop Firefox");
+    const input = await openRename("Workshop Firefox");
     await userEvent.clear(input);
     await userEvent.type(input, "My draft");
     const rows = await api.listBrowserDevices();
@@ -108,7 +114,7 @@ describe("ProviderConnectionsPanel", () => {
       new ApiError(412, "edit_conflict", "edit_conflict"),
     );
     renderPanel();
-    const input = await screen.findByLabelText("Browser name for Workshop Firefox");
+    const input = await openRename("Workshop Firefox");
     await userEvent.clear(input);
     await userEvent.type(input, "My draft");
     await userEvent.click(screen.getByRole("button", { name: "Save browser name" }));
@@ -131,7 +137,7 @@ describe("ProviderConnectionsPanel", () => {
         edit_version: base.edit_version + 1,
       }));
     renderPanel();
-    const input = await screen.findByLabelText("Browser name for Workshop Firefox");
+    const input = await openRename("Workshop Firefox");
     await userEvent.clear(input);
     await userEvent.type(input, "My draft");
     await userEvent.click(screen.getByRole("button", { name: "Save browser name" }));
@@ -167,7 +173,7 @@ describe("ProviderConnectionsPanel", () => {
       new ApiError(412, "edit_conflict", "edit_conflict"),
     );
     renderPanel();
-    const input = await screen.findByLabelText("Browser name for Workshop Firefox");
+    const input = await openRename("Workshop Firefox");
     await userEvent.clear(input);
     await userEvent.type(input, "Old draft");
     await userEvent.click(screen.getByRole("button", { name: "Save browser name" }));
@@ -188,7 +194,7 @@ describe("ProviderConnectionsPanel", () => {
       new ApiError(412, "edit_conflict", "edit_conflict"),
     );
     renderPanel();
-    const input = await screen.findByLabelText("Browser name for Workshop Firefox");
+    const input = await openRename("Workshop Firefox");
     await userEvent.clear(input);
     await userEvent.type(input, "Private draft");
     await userEvent.click(screen.getByRole("button", { name: "Save browser name" }));
@@ -210,7 +216,7 @@ describe("ProviderConnectionsPanel", () => {
     const pending = Promise.withResolvers<Awaited<ReturnType<typeof api.renameBrowserDevice>>>();
     vi.mocked(api.renameBrowserDevice).mockReturnValue(pending.promise);
     renderPanel();
-    const input = await screen.findByLabelText("Browser name for Workshop Firefox");
+    const input = await openRename("Workshop Firefox");
     await userEvent.clear(input);
     await userEvent.type(input, "Retired name");
     await userEvent.click(screen.getByRole("button", { name: "Save browser name" }));
@@ -227,7 +233,7 @@ describe("ProviderConnectionsPanel", () => {
   it("keeps review failure recoverable", async () => {
     vi.mocked(api.renameBrowserDevice).mockRejectedValue(new TypeError("Failed to fetch"));
     renderPanel();
-    const input = await screen.findByLabelText("Browser name for Workshop Firefox");
+    const input = await openRename("Workshop Firefox");
     await userEvent.clear(input);
     await userEvent.type(input, "Uncertain draft");
     await userEvent.click(screen.getByRole("button", { name: "Save browser name" }));
@@ -367,7 +373,7 @@ describe("ProviderConnectionsPanel", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "Revoke browser" }));
     expect(await within(dialog).findByText(/failed/)).toBeVisible();
     expect(dialog).toBeVisible();
-    expect(screen.getByLabelText("Browser name for Workshop Firefox")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Rename Workshop Firefox" })).toBeEnabled();
   });
 
   it("preserves a confirmed connection against an older read", async () => {
@@ -419,7 +425,7 @@ describe("ProviderConnectionsPanel", () => {
 
   it("retires unauthorized private rows", async () => {
     renderPanel();
-    await screen.findByLabelText("Browser name for Workshop Firefox");
+    await screen.findByRole("button", { name: "Rename Workshop Firefox" });
     vi.mocked(api.listBrowserDevices).mockRejectedValue(
       new ApiError(403, "forbidden", "forbidden"),
     );
@@ -427,7 +433,9 @@ describe("ProviderConnectionsPanel", () => {
       await client.refetchQueries({ queryKey: ["provider-accounts", "devices"] });
     });
     expect(await screen.findByRole("alert")).toBeVisible();
-    expect(screen.queryByLabelText("Browser name for Workshop Firefox")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Rename Workshop Firefox" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create pairing code" })).not.toBeInTheDocument();
   });
 
@@ -448,7 +456,7 @@ describe("ProviderConnectionsPanel", () => {
 
   it("retains browser-name input after a transient read failure", async () => {
     renderPanel();
-    const name = await screen.findByLabelText("Browser name for Workshop Firefox");
+    const name = await openRename("Workshop Firefox");
     await userEvent.clear(name);
     await userEvent.type(name, "Unsaved browser name");
     vi.mocked(api.listBrowserDevices).mockRejectedValueOnce(
@@ -558,7 +566,7 @@ describe("ProviderConnectionsPanel", () => {
       revoked_at: null,
     }));
     renderPanel();
-    const name = await screen.findByLabelText("Browser name for Workshop Firefox");
+    const name = await openRename("Workshop Firefox");
     await userEvent.clear(name);
     await userEvent.type(name, "Office Firefox");
     await userEvent.click(screen.getByRole("button", { name: "Save browser name" }));

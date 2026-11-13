@@ -1,136 +1,138 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Camera, Search, Sparkles, XCircle } from "lucide-react";
+import { Camera, History, Search, Sparkles, XCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { DropdownMenu } from "@/components/ui/dropdown-menu";
-import { searchStatusOptions, searchSuggestionsOptions } from "@/lib/queries/search";
+import { Input } from "@/components/ui/input";
+import { searchStatusOptions } from "@/lib/queries/search";
 import { useAuth } from "@/lib/auth-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useI18n } from "@/lib/i18n";
 import { Link } from "@/lib/link";
 import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
-import {
-  CLOSE_SEARCH_SUGGESTIONS,
-  isTypingTarget,
-  keyboardOverlayOpen,
-} from "@/lib/keyboard-commands";
+import { useMediaQuery } from "@/lib/use-media-query";
 
-export function LibrarySearch() {
+type SearchMode = "lexical" | "hybrid";
+
+function searchHref(query: string, mode: SearchMode, base: string, parse = false) {
+  const params = new URLSearchParams(base);
+  if (query.trim()) params.set("q", query.trim());
+  else params.delete("q");
+  params.delete("image");
+  params.delete("model");
+  params.delete("parse_error");
+  params.set("mode", mode);
+  // Semantic matching updates live. Optional language parsing runs on submission.
+  if (parse && mode === "hybrid" && query.trim()) params.set("parse", "1");
+  else params.delete("parse");
+  return `/search?${params}`;
+}
+
+export function LibrarySearch({
+  placement = "header",
+  recent = [],
+  onSearchCommit,
+}: {
+  placement?: "header" | "sidebar";
+  recent?: readonly string[];
+  onSearchCommit?: (query: string) => void;
+}) {
   const { t } = useI18n();
   const { user } = useAuth();
   const startup = useLibraryStartup();
-  const statusEnabled = startup.canLoad("search");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const params = searchParams.toString();
   const q = pathname === "/" || pathname === "/search" ? (searchParams.get("q") ?? "") : "";
+  const sidebar = placement === "sidebar";
+  const desktop = useMediaQuery("(min-width: 768px)");
+  const routeMode: SearchMode =
+    pathname === "/search" && searchParams.get("mode") !== "lexical" ? "hybrid" : "lexical";
+  const [mode, setMode] = useState<SearchMode>(routeMode);
+  const [syncedMode, setSyncedMode] = useState(routeMode);
+  if (syncedMode !== routeMode) {
+    setSyncedMode(routeMode);
+    setMode(routeMode);
+  }
   const [engaged, setEngaged] = useState(false);
   const [value, setValue] = useState(q);
   const [synced, setSynced] = useState(q);
   const [published, setPublished] = useState(q);
-  const [debounced, setDebounced] = useState(q);
-  const [open, setOpen] = useState(false);
+  const [composing, setComposing] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const wrapper = useRef<HTMLDivElement>(null);
   const publishTimer = useRef<number | undefined>(undefined);
-  const visible = true;
-  useEffect(() => {
-    const closeSuggestions = () => setOpen(false);
-    window.addEventListener(CLOSE_SEARCH_SUGGESTIONS, closeSuggestions);
-    return () => window.removeEventListener(CLOSE_SEARCH_SUGGESTIONS, closeSuggestions);
-  }, []);
   if (synced !== q) {
     setSynced(q);
-    // An earlier debounced browse update can land after a new keystroke.
-    // Only navigation from outside this input replaces the current draft.
+    // A receipt for our previous draft must not replace newer typing.
     if (q !== published) setValue(q);
   }
   const status = useQuery(
     searchStatusOptions(
       user?.id,
-      visible && statusEnabled && (pathname === "/" || pathname === "/search" || engaged),
+      startup.canLoad("search") &&
+        (sidebar || pathname === "/" || pathname === "/search" || engaged),
     ),
   );
-  const suggestions = useQuery(
-    searchSuggestionsOptions(
-      user?.id,
-      debounced,
-      visible && open && !!debounced && debounced === value.trim(),
-    ),
+  const capability = status.isError ? undefined : status.data;
+  const visualReady = capability?.legs.some(
+    (leg) => leg === "thumbnail" || leg === "multiview" || leg === "point_cloud",
   );
+  const aiEnabled = capability?.enabled === true;
+  const aiReady = aiEnabled && capability?.semantic_ready === true;
+  const effectiveMode = aiReady ? mode : "lexical";
+  const aiActive = effectiveMode === "hybrid";
+  const showAi = sidebar || aiEnabled;
+  const showCamera = !sidebar && visualReady;
+
   useEffect(() => {
-    function focus(event: KeyboardEvent) {
-      if (
-        event.defaultPrevented ||
-        event.isComposing ||
-        event.repeat ||
-        event.key !== "/" ||
-        event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        isTypingTarget(event.target) ||
-        keyboardOverlayOpen()
-      )
-        return;
-      event.preventDefault();
-      input.current?.focus();
-    }
-    window.addEventListener("keydown", focus);
-    return () => window.removeEventListener("keydown", focus);
-  }, []);
-  const params = searchParams.toString();
-  useEffect(() => {
-    if (!visible) return;
+    const next = value.trim();
+    if (composing || next === q || (!sidebar && pathname !== "/" && pathname !== "/search")) return;
     publishTimer.current = window.setTimeout(() => {
       publishTimer.current = undefined;
-      const next = value.trim();
-      setDebounced(next);
-      if (pathname !== "/" || next === q) return;
-      const updated = new URLSearchParams(params);
-      if (next) updated.set("q", next);
-      else updated.delete("q");
       setPublished(next);
-      router.replace(updated.size ? `/?${updated}` : "/");
+      if (sidebar || pathname === "/search" || aiActive) {
+        const href = searchHref(next, effectiveMode, pathname === "/search" ? params : "");
+        if (pathname === "/search") router.replace(href);
+        else router.push(href);
+      } else {
+        const updated = new URLSearchParams(params);
+        if (next) updated.set("q", next);
+        else updated.delete("q");
+        router.replace(updated.size ? `/?${updated}` : "/");
+      }
     }, 250);
     return () => {
       if (publishTimer.current !== undefined) window.clearTimeout(publishTimer.current);
       publishTimer.current = undefined;
     };
-  }, [pathname, params, q, router, value, visible]);
-  function openResults() {
-    if (!value.trim()) return;
+  }, [value, q, composing, sidebar, pathname, params, aiActive, effectiveMode, router]);
+
+  function cancelPublication() {
     if (publishTimer.current !== undefined) window.clearTimeout(publishTimer.current);
     publishTimer.current = undefined;
-    setOpen(false);
-    router.push(`/search?${new URLSearchParams({ q: value.trim(), parse: "1" })}`);
+  }
+  function searchFor(query: string, nextMode: SearchMode) {
+    if (!query.trim()) return;
+    cancelPublication();
+    setPublished(query.trim());
+    router.push(searchHref(query, nextMode, pathname === "/search" ? params : "", true));
   }
   function toggleAi() {
-    if (!value.trim()) return;
-    if (!aiActive) {
-      openResults();
-      return;
-    }
-    setOpen(false);
-    const updated = new URLSearchParams(params);
-    updated.delete("parse");
-    updated.set("mode", "lexical");
-    router.push(`/search?${updated}`);
+    const nextMode = aiActive ? "lexical" : "hybrid";
+    cancelPublication();
+    setMode(nextMode);
+    if (value.trim()) searchFor(value, nextMode);
+    input.current?.focus();
   }
   function submit() {
-    setOpen(false);
-    if (pathname !== "/" && pathname !== "/search") {
-      openResults();
+    if (composing) return;
+    onSearchCommit?.(value.trim());
+    if (sidebar || pathname !== "/" || aiActive) {
+      searchFor(value, effectiveMode);
       return;
     }
-    if (pathname === "/search") {
-      if (searchParams.get("mode") === "lexical" && value.trim()) {
-        router.push(`/search?${new URLSearchParams({ q: value.trim(), mode: "lexical" })}`);
-        return;
-      }
-      openResults();
-      return;
-    }
+    cancelPublication();
     const next = value.trim();
     const updated = new URLSearchParams(params);
     if (next) updated.set("q", next);
@@ -140,50 +142,25 @@ export function LibrarySearch() {
   }
   function changeValue(next: string) {
     setValue(next);
-    setOpen(!!next.trim());
     if (next.trim()) return;
-    setDebounced("");
+    cancelPublication();
     setPublished("");
-    if (pathname === "/search") {
-      router.replace("/");
-    } else {
+    if (pathname === "/search") router.replace(searchHref("", effectiveMode, params));
+    else {
       const updated = new URLSearchParams(params);
       updated.delete("q");
       router.replace(updated.size ? `/?${updated}` : "/");
     }
   }
-  if (!visible) return <span className="flex-1" />;
-  const current = debounced === value.trim();
-  const capability = status.isError ? undefined : status.data;
-  const visualReady = capability?.legs.some(
-    (leg) => leg === "thumbnail" || leg === "multiview" || leg === "point_cloud",
-  );
-  const aiEnabled = capability?.enabled === true;
-  const aiReady = aiEnabled && capability?.semantic_ready === true;
-  const aiActive =
-    aiReady &&
-    pathname === "/search" &&
-    !!q.trim() &&
-    value.trim() === q.trim() &&
-    searchParams.get("mode") !== "lexical" &&
-    searchParams.get("image") !== "1" &&
-    !searchParams.has("model");
-  const aiLabel = !aiReady
-    ? t("aiSearch.notReady")
-    : !value.trim()
-      ? t("aiSearch.enterQuery")
-      : aiActive
-        ? t("aiSearch.turnOffAi")
-        : t("aiSearch.submitAi");
-  const inputPadding = aiEnabled
-    ? visualReady
+  const inputPadding = showAi
+    ? showCamera
       ? value
         ? "pr-20 sm:pr-28"
         : "pr-20"
       : value
         ? "pr-20"
         : "pr-10"
-    : visualReady
+    : showCamera
       ? value
         ? "pr-12 sm:pr-20"
         : "pr-12"
@@ -192,160 +169,185 @@ export function LibrarySearch() {
         : "pr-3";
   return (
     <div
-      ref={wrapper}
-      className="shell-search ml-auto flex min-w-0 max-w-[382px] flex-1 items-center"
+      className={
+        sidebar
+          ? "flex min-h-0 min-w-0 flex-1 flex-col px-3"
+          : "shell-search ml-auto flex min-w-0 max-w-[382px] flex-1 items-center"
+      }
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) onSearchCommit?.(value.trim());
+      }}
     >
-      <DropdownMenu
-        open={open && !!value.trim()}
-        onOpenChange={setOpen}
-        className="min-w-0 flex-1"
-        role="dialog"
-        align="start"
-        contentClassName="w-full rounded-lg border border-border bg-popover text-popover-foreground shadow-lg"
-        trigger={
-          <form
-            className="relative"
-            role="search"
-            onSubmit={(event) => {
-              event.preventDefault();
-              submit();
-            }}
-          >
-            <Search
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
-              aria-hidden
-            />
-            <input
-              ref={input}
-              onFocus={() => {
-                setEngaged(true);
-                startup.request("search");
-              }}
-              data-model-search
-              data-menu-trigger
-              type="search"
-              maxLength={512}
-              autoComplete="off"
-              spellCheck={false}
-              aria-label={t("aiSearch.searchLibrary")}
-              aria-haspopup="dialog"
-              aria-expanded={open && !!value.trim()}
-              className={`block h-9 w-full rounded border border-input bg-card py-2 pl-9 ${inputPadding} text-[13px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:hidden`}
-              placeholder={t("Search Models, files and tags")}
-              value={value}
-              onClick={() => setOpen(!!value.trim())}
-              onChange={(event) => {
-                changeValue(event.target.value);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "ArrowDown" && open) {
-                  event.preventDefault();
-                  wrapper.current
-                    ?.querySelector<HTMLAnchorElement>("[data-search-suggestion]")
-                    ?.focus();
-                }
-              }}
-            />
-            <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
-              {!value && !aiEnabled && !visualReady && (
-                <kbd
-                  aria-hidden
-                  className="pointer-events-none mr-1 border border-border bg-muted px-1 font-mono text-2xs text-muted-foreground"
-                >
-                  /
-                </kbd>
-              )}
-              {aiEnabled && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  type="button"
-                  disabled={!aiReady || !value.trim()}
-                  aria-label={aiLabel}
-                  aria-pressed={aiActive}
-                  title={aiLabel}
-                  className={`h-8 w-8 ${aiActive ? "bg-accent text-accent-foreground" : "text-primary"}`}
-                  onClick={toggleAi}
-                >
-                  <Sparkles className="h-4 w-4" aria-hidden />
-                </Button>
-              )}
-              {visualReady && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  type="button"
-                  className={value ? "hidden h-8 w-8 sm:inline-flex" : "h-8 w-8"}
-                  aria-label={t("aiSearch.searchByImage")}
-                  title={t("aiSearch.searchByImage")}
-                  onClick={() => {
-                    setOpen(false);
-                    router.push("/search?image=1");
-                  }}
-                >
-                  <Camera className="h-4 w-4" />
-                </Button>
-              )}
-              {value && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  type="button"
-                  className="h-8 w-8"
-                  aria-label={t("nav.clearSearch")}
-                  onClick={() => {
-                    changeValue("");
-                    input.current?.focus();
-                  }}
-                >
-                  <XCircle className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </form>
-        }
+      <form
+        className={`relative min-w-0 ${sidebar ? "w-full shrink-0" : "flex-1"}`}
+        role="search"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
       >
-        <div className="p-2">
-          <p className="px-2 py-1 text-xs text-muted-foreground">
-            {t("aiSearch.keywordSuggestions")}
-          </p>
-          {!current || suggestions.isFetching ? (
-            <p role="status" className="p-2 text-sm">
-              {t("aiSearch.searching")}
-            </p>
-          ) : suggestions.isError ? (
-            <p role="alert" className="p-2 text-sm text-destructive">
-              {t("aiSearch.suggestionsError")}
-            </p>
-          ) : (
-            <ul>
-              {suggestions.data?.items.map((item) => (
-                <li key={`${item.subject_type}:${item.subject_id}`}>
-                  <Link
-                    data-search-suggestion
-                    href={item.href}
-                    className="block rounded-md px-2 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:bg-muted"
-                    onClick={() => setOpen(false)}
-                  >
-                    <span className="block truncate font-medium">{item.name}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {t(`aiSearch.type.${item.subject_type}`)}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
+        <Search
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground"
+          aria-hidden
+        />
+        <Input
+          ref={input}
+          autoFocus={sidebar ? desktop : pathname === "/search" && !desktop}
+          onFocus={() => {
+            setEngaged(true);
+            startup.request("search");
+          }}
+          data-model-search
+          data-shell-panel-search={sidebar ? "" : undefined}
+          type="search"
+          maxLength={512}
+          autoComplete="off"
+          spellCheck={false}
+          aria-label={t("aiSearch.searchLibrary")}
+          className={`block h-9 w-full rounded border border-input bg-card py-2 pl-9 ${inputPadding} text-[13px] text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring [&::-webkit-search-cancel-button]:hidden`}
+          placeholder={t(aiActive ? "aiSearch.describeModel" : "Search Models, files and tags")}
+          value={value}
+          onChange={(event) => changeValue(event.target.value)}
+          onCompositionStart={() => setComposing(true)}
+          onCompositionEnd={() => setComposing(false)}
+        />
+        <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center">
+          {!value && !showAi && !showCamera && (
+            <kbd
+              aria-hidden
+              className="pointer-events-none mr-1 border border-border bg-muted px-1 font-mono text-2xs text-muted-foreground"
+            >
+              /
+            </kbd>
           )}
-          <Button variant="ghost" className="mt-1 w-full justify-start" onClick={submit}>
-            {t("aiSearch.allResults")}
-          </Button>
-          {capability?.backlog && (
-            <p role="status" className="px-2 py-1 text-xs text-muted-foreground">
-              {t("aiSearch.backlog")}
-            </p>
+          {showAi && (
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              disabled={!aiReady}
+              aria-label={t("aiSearch.settingsTitle")}
+              aria-pressed={aiActive}
+              title={t(
+                !aiReady
+                  ? "aiSearch.notReady"
+                  : aiActive
+                    ? "aiSearch.turnOffAi"
+                    : "aiSearch.submitAi",
+              )}
+              className={`h-8 w-8 bg-transparent hover:bg-transparent ${aiActive ? "text-primary hover:text-primary" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={toggleAi}
+            >
+              <Sparkles className="h-4 w-4" aria-hidden />
+            </Button>
+          )}
+          {showCamera && (
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              className={value ? "hidden h-8 w-8 sm:inline-flex" : "h-8 w-8"}
+              aria-label={t("aiSearch.searchByImage")}
+              title={t("aiSearch.searchByImage")}
+              onClick={() => router.push("/search?image=1")}
+            >
+              <Camera className="h-4 w-4" aria-hidden />
+            </Button>
+          )}
+          {value && (
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              className="h-8 w-8"
+              aria-label={t("nav.clearSearch")}
+              onClick={() => {
+                changeValue("");
+                input.current?.focus();
+              }}
+            >
+              <XCircle className="h-4 w-4" aria-hidden />
+            </Button>
           )}
         </div>
-      </DropdownMenu>
+      </form>
+      {sidebar && (
+        <>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            {t(aiActive ? "aiSearch.meaningHelp" : "aiSearch.keywordHelp")}
+          </p>
+          {visualReady && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-3 self-start"
+              onClick={() => router.push("/search?image=1")}
+            >
+              {t("Image search")}
+            </Button>
+          )}
+          {!aiReady && (
+            <div className="mt-3 text-xs leading-relaxed text-muted-foreground">
+              <p role="status">
+                {t(
+                  status.isError
+                    ? "aiSearch.statusError"
+                    : status.isPending
+                      ? "Checking AI Search…"
+                      : aiEnabled
+                        ? "aiSearch.notReady"
+                        : "aiSearch.noActiveIndex",
+                )}
+              </p>
+              {status.isError ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  loading={status.isFetching}
+                  onClick={() => void status.refetch()}
+                >
+                  {t("Retry")}
+                </Button>
+              ) : user?.is_superuser && !status.isPending ? (
+                <Link
+                  href="/settings?section=ai-search"
+                  className="mt-1 inline-block underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {t(aiEnabled ? "aiSearch.viewPreparation" : "AI Search setup")}
+                </Link>
+              ) : null}
+            </div>
+          )}
+          <div className="mt-5 min-h-0 flex-1 overflow-y-auto border-t border-border pt-4 pb-3">
+            <h3 className="mb-2 px-1 text-xs font-medium text-muted-foreground">
+              {t("Recent searches")}
+            </h3>
+            {recent.length ? (
+              recent.map((query) => (
+                <Button
+                  key={query}
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-full justify-start gap-2 px-1 text-left text-xs font-normal"
+                  onClick={() => {
+                    setValue(query);
+                    searchFor(query, effectiveMode);
+                    onSearchCommit?.(query);
+                  }}
+                >
+                  <History className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="truncate">{query}</span>
+                </Button>
+              ))
+            ) : (
+              <p className="px-1 text-xs leading-relaxed text-muted-foreground">
+                {t("aiSearch.recentEmpty")}
+              </p>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

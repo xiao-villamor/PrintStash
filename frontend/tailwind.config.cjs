@@ -121,6 +121,11 @@ const config = {
       transitionTimingFunction: {
         out: "var(--ease-out)",
         "in-out": "var(--ease-in-out)",
+        settle: "var(--ease-content-settle)",
+      },
+      scale: {
+        "detail-enter": "var(--scale-detail-enter)",
+        "content-enter": "var(--scale-content-enter)",
       },
       transitionDuration: {
         press: "var(--duration-press)",

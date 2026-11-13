@@ -33,10 +33,7 @@ export function PendingSidebar() {
     }
   }
   return (
-    <aside
-      aria-label={t("inbox.title")}
-      className="flex h-full w-[321px] shrink-0 flex-col border-r border-border bg-sidebar"
-    >
+    <aside aria-label={t("inbox.title")} className="flex h-full w-full shrink-0 flex-col">
       <h2 className="flex h-12 shrink-0 items-center px-4 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
         {t("inbox.title")}
       </h2>
@@ -105,10 +102,7 @@ export function SavedViewsSidebar() {
   const router = useRouter();
   const shell = useNavigationShell();
   return (
-    <aside
-      aria-label={uiText("Saved views")}
-      className="flex h-full w-[321px] shrink-0 flex-col border-r border-border bg-sidebar"
-    >
+    <aside aria-label={uiText("Saved views")} className="flex h-full w-full shrink-0 flex-col">
       <div className="flex h-12 shrink-0 items-center justify-between pl-4 pr-2">
         <h2 className="font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
           {uiText("Saved views")}

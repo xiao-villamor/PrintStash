@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   CollectionsPaneContext,
@@ -12,12 +12,31 @@ import { readLibraryLocation } from "@/features/library/url";
 import { readLibraryFilters } from "@/features/library/filters";
 import { collectionIdentity } from "@/features/library/collection-navigation";
 import { FilterSidebar } from "@/components/filter-sidebar";
-import { Box, Boxes, History, Search } from "lucide-react";
+import { Box, Boxes } from "lucide-react";
+import { LibrarySearch } from "@/components/library-search";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 import { LibraryItemLink } from "@/features/library/navigation";
 import type { LibraryEntry } from "@/features/library/navigation-state";
+import { useContentReveal } from "@/lib/use-content-reveal";
+import { useCollectionsPaneMotion } from "./use-collections-pane-motion";
 import { PendingSidebar, SavedViewsSidebar } from "@/components/context-panels";
+
+declare module "react" {
+  interface CSSProperties {
+    "--workbench-sidebar-width"?: string;
+  }
+}
+
+function storedWidth() {
+  try {
+    const raw = localStorage.getItem("ps-sidebar-width");
+    const width = raw === null ? 320 : Number(raw);
+    return Number.isFinite(width) ? Math.max(280, Math.min(520, width)) : 320;
+  } catch {
+    return 320;
+  }
+}
 
 function storedPreference(key: string): boolean | null {
   try {
@@ -35,14 +54,31 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
   const searchParams = useSearchParams();
   if (!user) throw new Error("Collections pane requires a private session");
   const storageKey = `printstash.collections-pane.${user.id}`;
+  const [width, updateWidth] = useState(storedWidth);
+  const setWidth = useCallback(
+    (value: number) => updateWidth(Math.max(280, Math.min(520, value))),
+    [],
+  );
+  useEffect(() => {
+    try {
+      localStorage.setItem("ps-sidebar-width", String(width));
+    } catch {
+      /* Session preference remains usable. */
+    }
+  }, [width]);
   const [preference, setPreference] = useState(() => storedPreference(storageKey));
   const [host, attach] = useState<HTMLDivElement | null>(null);
   const [breadcrumbHost, attachBreadcrumbs] = useState<HTMLDivElement | null>(null);
-  const routeScope = `${pathname}:${searchParams.get("favorites") === "true"}`;
+  const settings =
+    pathname === "/settings" &&
+    (searchParams.get("section") !== "trash" || searchParams.get("view") === "settings");
+  const routeScope = `${pathname}:${searchParams.get("favorites") === "true"}:${settings}`;
   const [requestedMode, setRequestedMode] = useState<{
     scope: string;
     mode: "collections" | "search" | "pending" | "views";
   } | null>(null);
+  // A temporary tool selection belongs to this visit, not a future return.
+  if (requestedMode && requestedMode.scope !== routeScope) setRequestedMode(null);
   const mode =
     requestedMode?.scope === routeScope
       ? requestedMode.mode
@@ -50,16 +86,11 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
         ? "search"
         : pathname === "/" && searchParams.get("favorites") === "true"
           ? "favorites"
-          : "collections";
-  const open =
-    preference ??
-    (pathname === "/" ||
-      pathname === "/search" ||
-      pathname.startsWith("/inbox") ||
-      pathname.startsWith("/multipart-models/") ||
-      pathname.startsWith("/documents/") ||
-      pathname.startsWith("/builds") ||
-      pathname.startsWith("/library/similar"));
+          : settings
+            ? "settings"
+            : "collections";
+  // Section navigation never changes the user's sidebar geometry.
+  const open = preference ?? true;
   useEffect(() => {
     if (preference === null) return;
     try {
@@ -75,6 +106,8 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
       breadcrumbHost,
       attachBreadcrumbs,
       open,
+      width,
+      setWidth,
       toggle: () => setPreference(!open),
       mode,
       showCollections: () => {
@@ -94,19 +127,25 @@ export function CollectionsPaneProvider({ children }: { children: ReactNode }) {
         setRequestedMode({ scope: routeScope, mode: "views" });
       },
     }),
-    [host, breadcrumbHost, open, mode, routeScope],
+    [host, breadcrumbHost, open, mode, routeScope, width, setWidth],
   );
   return (
-    <CollectionsPaneContext.Provider value={value}>{children}</CollectionsPaneContext.Provider>
+    <CollectionsPaneContext.Provider value={value}>
+      <div className="contents" style={{ "--workbench-sidebar-width": `${width}px` }}>
+        {children}
+      </div>
+    </CollectionsPaneContext.Provider>
   );
 }
 
-/** The Library keeps the exact existing sidebar instance at its feature owner. */
-export function LibraryCollectionsPane({ children }: { children: ReactNode }) {
+/** Feature owners retain their navigation data while the shell owns the frame. */
+export function WorkbenchSidebarContent({ children }: { children: ReactNode }) {
   const pane = useCollectionsPane();
   if (!pane) return children;
   return pane.host ? createPortal(children, pane.host) : null;
 }
+
+export { WorkbenchSidebarContent as LibraryCollectionsPane };
 
 /** Collection breadcrumb data and commands remain in the mounted Library owner. */
 export function LibraryBreadcrumbs({ children }: { children: ReactNode }) {
@@ -141,9 +180,10 @@ function NavigationCollections() {
       selectedTags={filters.tag}
       selectedPrinterId={filters.printer_id}
       selectedPrinterPresence={filters.printer_presence}
-      onCollectionChange={(path) =>
+      onCollectionChange={(path, id = null) =>
         navigate((next) => {
           next.delete("cid");
+          if (path && id !== null) next.set("cid", String(id));
           if (path) next.set("c", path);
           else next.delete("c");
         })
@@ -183,21 +223,35 @@ export function CollectionsPaneHost() {
   const pathname = usePathname();
   if (!pane) throw new Error("Collections pane host requires its shell provider");
   const { attach, open, mode } = pane;
+  const motion = useCollectionsPaneMotion(open);
+  const params = useSearchParams();
+  const sectionMotion = useContentReveal(`${mode}:${pathname === "/" ? "library" : "navigation"}`, {
+    enabled: open,
+    scope: `${pathname}:${params.get("favorites") === "true"}`,
+  });
   return (
     <div
+      ref={motion.viewport}
       id="collections-pane"
       data-collections-pane
-      className={`h-full min-h-0 shrink-0 ${open ? "hidden md:flex" : "hidden"}`}
+      data-open={open}
+      inert={!open}
+      aria-hidden={!open}
+      className="collections-pane-shell hidden h-full min-h-0 shrink-0 md:flex"
     >
-      <div
-        ref={attach}
-        className={`flex h-full min-h-0 ${mode !== "collections" && mode !== "favorites" ? "hidden" : ""}`}
-      >
-        {pathname !== "/" && open && mode === "collections" ? <NavigationCollections /> : null}
+      <div ref={motion.content} className="collections-pane-content flex h-full min-h-0 shrink-0">
+        <div ref={sectionMotion} className="workbench-section-content flex h-full w-full min-h-0">
+          <div
+            ref={attach}
+            className={`flex h-full w-full min-h-0 ${mode !== "collections" && mode !== "favorites" && mode !== "settings" ? "hidden" : ""}`}
+          >
+            {pathname !== "/" && mode === "collections" ? <NavigationCollections /> : null}
+          </div>
+          {mode === "search" ? <SearchSidebar /> : null}
+          {mode === "pending" ? <PendingSidebar /> : null}
+          {mode === "views" ? <SavedViewsSidebar /> : null}
+        </div>
       </div>
-      {open && mode === "search" ? <SearchSidebar /> : null}
-      {open && mode === "pending" ? <PendingSidebar /> : null}
-      {open && mode === "views" ? <SavedViewsSidebar /> : null}
     </div>
   );
 }
@@ -213,10 +267,7 @@ export function FavoritesSidebar({
 }) {
   useUiLocale();
   return (
-    <aside
-      aria-label={uiText("Favorites")}
-      className="flex h-full w-[321px] shrink-0 flex-col border-r border-border bg-sidebar"
-    >
+    <aside aria-label={uiText("Favorites")} className="flex h-full w-full shrink-0 flex-col">
       <h2 className="flex h-12 shrink-0 items-center px-4 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
         {uiText("Favorites")}
       </h2>
@@ -259,12 +310,7 @@ export function FavoritesSidebar({
 function SearchSidebar() {
   useUiLocale();
   const { user } = useAuth();
-  const params = useSearchParams();
-  const pathname = usePathname();
-  const router = useRouter();
-  const q = params.get("q") ?? "";
   const key = `printstash.recent-searches.${user?.id}`;
-  const [value, setValue] = useState(q);
   const [recent, setRecent] = useState<string[]>(() => {
     try {
       const stored: unknown = JSON.parse(localStorage.getItem(key) ?? "[]");
@@ -279,17 +325,10 @@ function SearchSidebar() {
       return [];
     }
   });
-  const searchIdentity =
-    pathname === "/search" && q.trim() && q.length <= 512 ? `${key}:${q}` : null;
-  const [recordedSearch, setRecordedSearch] = useState<string | null>(null);
-  if (recordedSearch !== searchIdentity) {
-    setRecordedSearch(searchIdentity);
-    if (searchIdentity !== null) {
-      setRecent((previous) =>
-        [q.trim(), ...previous.filter((item) => item !== q.trim())].slice(0, 8),
-      );
-      setValue(q);
-    }
+  function rememberSearch(query: string) {
+    const trimmed = query.trim();
+    if (!trimmed || trimmed.length > 512) return;
+    setRecent((previous) => [trimmed, ...previous.filter((item) => item !== trimmed)].slice(0, 8));
   }
   useEffect(() => {
     try {
@@ -298,61 +337,12 @@ function SearchSidebar() {
       /* Recent queries remain usable in this tab when storage is unavailable. */
     }
   }, [key, recent]);
-  function search(query: string) {
-    router.push(`/search?${new URLSearchParams({ q: query })}`);
-  }
   return (
-    <aside
-      aria-label={uiText("Search panel")}
-      className="flex h-full w-[321px] shrink-0 flex-col border-r border-border bg-sidebar"
-    >
+    <aside aria-label={uiText("Search panel")} className="flex h-full w-full shrink-0 flex-col">
       <h2 className="flex h-12 shrink-0 items-center px-4 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
         {uiText("Search")}
       </h2>
-      <form
-        className="relative mx-2.5 mb-5"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (value.trim()) search(value.trim());
-        }}
-      >
-        <Search
-          className="pointer-events-none absolute left-2 top-2.5 h-3.5 w-3.5 text-muted-foreground"
-          aria-hidden
-        />
-        <input
-          data-shell-panel-search
-          type="search"
-          aria-label={uiText("Search library")}
-          placeholder={uiText("Name, tag, file or what it's for")}
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          className="h-[34px] w-full border border-input bg-card pl-7 pr-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      </form>
-      <h3 className="mb-2 px-4 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
-        {uiText("Recent")}
-      </h3>
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
-        {recent.map((query) => (
-          <button
-            key={query}
-            type="button"
-            onClick={() => {
-              setValue(query);
-              search(query);
-            }}
-            className="flex h-[30px] w-full items-center gap-2 px-2.5 text-left text-[13px] hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-          >
-            <History
-              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-              strokeWidth={1.6}
-              aria-hidden
-            />
-            <span className="truncate">{query}</span>
-          </button>
-        ))}
-      </div>
+      <LibrarySearch placement="sidebar" recent={recent} onSearchCommit={rememberSearch} />
     </aside>
   );
 }

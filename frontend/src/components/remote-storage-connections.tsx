@@ -1,4 +1,5 @@
 import { captureEditingBase } from "@/lib/api/editing";
+import { SettingsGroupHead } from "@/components/settings-card";
 import { StorageConnectionReview } from "@/components/storage-connection-review";
 import { knownUiText } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
@@ -457,29 +458,27 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
         aria-label={uiText("Remote storage")}
         className="overflow-hidden rounded-lg border border-border bg-card text-card-foreground shadow-sm"
       >
-        <header className="flex flex-wrap items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-            <Cloud className="h-4 w-4" aria-hidden />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-semibold text-foreground">{uiText("Connections")}</h2>
-            <p className="mt-0.5 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-              {uiText(
-                "Pausing a connection stops new backup copies and library scans without forgetting its credentials.",
-              )}
-            </p>
-          </div>
-          <Button
-            size="sm"
-            disabled={unavailable || busy !== null}
-            onClick={() => {
-              resetForm();
-              setFormOpen(true);
-            }}
-          >
-            {uiText("Add remote connection")}
-          </Button>
-        </header>
+        <SettingsGroupHead
+          icon={Cloud}
+          level={2}
+          title={uiText("Connections")}
+          description={uiText(
+            "Pausing a connection stops new backup copies and library scans without forgetting its credentials.",
+          )}
+          action={
+            <Button
+              size="sm"
+              disabled={unavailable || busy !== null}
+              onClick={() => {
+                resetForm();
+                setFormOpen(true);
+              }}
+            >
+              {uiText("Add remote connection")}
+            </Button>
+          }
+          className="settings-card-head--flush"
+        />
 
         {!formOpen && connectionReview}
         {connectionsFailed && connections.length > 0 && (
@@ -709,7 +708,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
             {connectionReview}
             <div className="space-y-5">
               <fieldset className="space-y-2">
-                <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
+                <legend className="text-[13px] font-medium text-foreground">
                   {uiText("Storage category")}
                 </legend>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -717,6 +716,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                     const Icon = choice.icon;
                     return (
                       <Button
+                        size="sm"
                         key={choice.id}
                         type="button"
                         variant="outline"
@@ -742,7 +742,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                 </div>
               </fieldset>
               <fieldset className="space-y-2">
-                <legend className="text-xs font-mono uppercase tracking-wider text-on-surface-variant">
+                <legend className="text-[13px] font-medium text-foreground">
                   {uiText("Provider")}
                 </legend>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -752,6 +752,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                     const reason = providerUnavailable ? providerAvailability.reason : undefined;
                     return (
                       <Button
+                        size="sm"
                         key={provider.id}
                         type="button"
                         variant="outline"
@@ -803,6 +804,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                   <div className="grid grid-cols-3 gap-1">
                     {PURPOSES.map((value) => (
                       <Button
+                        size="sm"
                         key={value}
                         type="button"
                         variant="outline"
@@ -865,6 +867,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
               <div className="flex justify-end gap-2">
                 {editing && (
                   <Button
+                    size="sm"
                     type="button"
                     variant="outline"
                     disabled={busy !== null}
@@ -880,6 +883,7 @@ export function RemoteStorageConnections({ disabled = false }: { disabled?: bool
                   </p>
                 )}
                 <Button
+                  size="sm"
                   type="button"
                   disabled={
                     unavailable ||

@@ -72,7 +72,7 @@ export function useOverlayBehavior(
     }
     layers.push(layer);
     const initial = panel?.querySelector<HTMLElement>("[autofocus]") ?? panel;
-    initial?.focus();
+    initial?.focus({ preventScroll: true });
 
     function onKey(e: KeyboardEvent) {
       if (layers.at(-1) !== layer || e.defaultPrevented) return;
@@ -114,7 +114,7 @@ export function useOverlayBehavior(
         restoreTo.isConnected &&
         (!remaining || remaining.contains(restoreTo))
       )
-        restoreTo.focus();
+        restoreTo.focus({ preventScroll: true });
     };
   }, [open, panelRef]);
 }

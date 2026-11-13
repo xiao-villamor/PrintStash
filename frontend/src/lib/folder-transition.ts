@@ -1,5 +1,6 @@
-/** How the user moved between two folders, which decides where the new
- *  folder's content settles in from. */
+import { DURATION } from "@/lib/overlay";
+
+/** Navigation relationship used to select the folder entrance class. */
 export type FolderMove = "forward" | "back" | "jump";
 
 const isInside = (path: string, ancestor: string) =>
@@ -14,19 +15,19 @@ export function folderMove(from: string, to: string): FolderMove {
   return "jump";
 }
 
-/** Horizontal or opacity-only: a vertical offset would move the entries that
- *  reading-position restoration measures. */
+/** Preserve reading-position geometry across every navigation relationship. */
 export const FOLDER_MOVE_CLASS = {
   forward: "folder-in-forward",
   back: "folder-in-back",
   jump: "fade-in",
 } satisfies Record<FolderMove, string>;
 
-/** The grid's cards enter one after another (a capped 30ms stagger) instead of
- *  the container moving as a block, so a folder whose cards were all cached
- *  still reads as arriving. */
+/** Card wrappers share the existing depth entrance on folder navigation. */
 export const FOLDER_CARDS_CLASS = {
   forward: "folder-cards-forward",
   back: "folder-cards-back",
   jump: "folder-cards-jump",
 } satisfies Record<FolderMove, string>;
+
+/** Keep the entrance window aligned with the shared slow motion timing. */
+export const FOLDER_ENTRANCE_MS = DURATION.slow;

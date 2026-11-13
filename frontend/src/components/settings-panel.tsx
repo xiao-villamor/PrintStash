@@ -1,5 +1,8 @@
 "use client";
+import { WorkbenchSidebarContent } from "@/components/collections-pane";
+import { useCollectionsPane } from "@/lib/collections-pane-context";
 
+import { useContentMotion } from "@/lib/use-content-motion";
 import { StorageConnectionReview } from "@/components/storage-connection-review";
 
 import { captureEditingBase } from "@/lib/api/editing";
@@ -81,7 +84,6 @@ import {
   Download,
   Eraser,
   Eye,
-  EyeOff,
   Gpu,
   Files,
   FolderSync,
@@ -90,6 +92,7 @@ import {
   HardDrive,
   HeartPulse,
   Activity,
+  FileText,
   Info,
   Images,
   KeyRound,
@@ -108,13 +111,11 @@ import {
   Tag,
   UserPlus,
   Users,
-  Upload,
 } from "lucide-react";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { Modal } from "@/components/ui/modal";
 import { DropdownMenu } from "@/components/ui/dropdown-menu";
 import { PageHeader } from "@/components/ui/page-header";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { TabBar } from "@/components/ui/tabs";
 import { inputClasses } from "@/components/ui/input";
@@ -139,7 +140,6 @@ import { OidcSettingsCard } from "@/components/oidc-settings-card";
 import { AiSearchSettings } from "@/components/ai-search-settings";
 import { MaintenancePanel } from "@/components/maintenance-panel";
 import { BackgroundWorkPanel } from "@/components/background-work-panel";
-import { BrandMark } from "@/components/brand-mark";
 import {
   downloadModelExport,
   downloadLibraryArchive,
@@ -174,6 +174,13 @@ import {
 import { toast } from "@/lib/toast";
 import { localeDefinitions, SUPPORTED_LOCALES, useI18n, type MessageKey } from "@/lib/i18n";
 import "./settings-panel.css";
+import { SettingsCard, SettingsNotice, SettingsSwitch } from "@/components/settings-card";
+import {
+  SETTINGS_BUTTON,
+  SETTINGS_BUTTON_DANGER,
+  SETTINGS_BUTTON_PRIMARY,
+  SETTINGS_FIELD,
+} from "@/components/settings-controls";
 import { storageOperationMessage } from "@/lib/storage-operations";
 import {
   usePrinterCardImagePreference,
@@ -340,10 +347,13 @@ function isModelPurge(operation: TrashOperation | null): operation is TrashRowKe
 }
 
 // Shared button styles — keep settings actions visually uniform and theme-aware.
-const BTN_PRIMARY = buttonVariants({ size: "xs" });
-const BTN_SECONDARY = buttonVariants({ variant: "outline", size: "xs" });
+const BTN_PRIMARY = SETTINGS_BUTTON_PRIMARY;
+const BTN_SECONDARY = SETTINGS_BUTTON;
 const BTN_ICON = buttonVariants({ variant: "outline", size: "icon-sm" });
-const INPUT = cn(inputClasses, "h-auto py-2 rounded");
+// Destructive actions keep the neutral outline; only the label carries the
+// destructive token, like Remove and Revoke elsewhere in Settings.
+const BTN_DANGER = SETTINGS_BUTTON_DANGER;
+const INPUT = SETTINGS_FIELD;
 
 function formatBytes(bytes: number | null | undefined): string {
   if (bytes == null) return "...";
@@ -462,70 +472,8 @@ function useDeadlineReached(deadline: string | null): boolean {
   return deadline !== null && reachedDeadline === deadline;
 }
 
-// Consistent card shell used across every settings section.
-function SettingsCard({
-  icon: Icon,
-  title,
-  description,
-  action,
-  footer,
-  children,
-  className,
-  stackActionOnMobile = false,
-  hideHeader = false,
-}: {
-  icon?: typeof Server;
-  title: string;
-  description?: string;
-  action?: React.ReactNode;
-  footer?: React.ReactNode;
-  children?: React.ReactNode;
-  className?: string;
-  stackActionOnMobile?: boolean;
-  hideHeader?: boolean;
-}) {
-  useUiLocale();
-  return (
-    <div
-      role="group"
-      aria-label={title}
-      className={cn(
-        "settings-card overflow-hidden rounded-lg border border-border bg-card text-card-foreground",
-        className,
-      )}
-    >
-      {!hideHeader && (
-        <div
-          className={cn(
-            "settings-card-head flex items-start justify-between gap-3 border-b border-border px-4 py-4 sm:px-5",
-            stackActionOnMobile && "flex-col sm:flex-row",
-          )}
-        >
-          <div className="flex items-start gap-3 min-w-0">
-            {Icon && (
-              <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                <Icon className="h-4 w-4" />
-              </div>
-            )}
-            <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-              {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
-            </div>
-          </div>
-          {action && (
-            <div className={cn("flex-shrink-0", stackActionOnMobile && "w-full sm:w-auto")}>
-              {action}
-            </div>
-          )}
-        </div>
-      )}
-      {children}
-      {footer && <div className="settings-card-foot">{footer}</div>}
-    </div>
-  );
-}
-
 export function SettingsPanel() {
+  const sidebar = useCollectionsPane();
   useUiLocale();
   const { user } = useAuth();
   const { locale, setLocale, t } = useI18n();
@@ -540,6 +488,7 @@ export function SettingsPanel() {
   // during render; mirroring it into state needed an effect to re-sync on every
   // deep link, back button, and replace.
   const activeSection = settingsSection(searchParams.get("section"));
+  const sectionMotion = useContentMotion<HTMLElement>(activeSection);
   const settingsTrash = activeSection === "trash" && searchParams.get("view") === "settings";
   const trashPage = activeSection === "trash" && !settingsTrash;
   const mobileTabsRef = useRef<HTMLDivElement>(null);
@@ -1534,13 +1483,6 @@ export function SettingsPanel() {
       if (accountCurrent(session)) toast.error(error);
     }
   }
-  async function refreshPrinterAccess() {
-    const session = getSessionVersion();
-    await accessPrintersQuery.refetch();
-    if (!accountCurrent(session)) return;
-    await Promise.all(printerAccess.map(({ query }) => query.refetch()));
-  }
-
   async function createUser() {
     if (!user?.is_superuser || usersBusy !== null || usersQuery.isError || usersQuery.isPending)
       return;
@@ -1963,6 +1905,7 @@ export function SettingsPanel() {
                 : uiText("Unknown"),
             desc: uiText("SQLite by default, Postgres optional"),
             icon: Database,
+            text: true,
           },
         ]
       : []),
@@ -1970,9 +1913,14 @@ export function SettingsPanel() {
       get label() {
         return uiText("Storage backend");
       },
-      value: stats ? stats.storage.backend.toUpperCase() : "...",
+      value: stats
+        ? stats.storage.backend === "local"
+          ? uiText("Local")
+          : stats.storage.backend.toUpperCase()
+        : "...",
       desc: stats?.storage.bucket ?? stats?.storage.prefix ?? uiText("Configured vault storage"),
       icon: HardDrive,
+      text: true,
     },
     {
       get label() {
@@ -2034,75 +1982,25 @@ export function SettingsPanel() {
     </button>
   );
 
-  const trashRetentionCard =
+  const trashCleanupDetails =
     activeSection === "trash" ? (
-      <SettingsCard
-        className="border-0"
-        icon={Trash2}
-        title={uiText("Trash retention")}
-        description={uiText(
-          "Soft-deleted models stay restorable until the retention window expires.",
-        )}
-        action={settingsTrash ? reviewExpiredButton : undefined}
-        footer={
-          <button
-            type="button"
-            onClick={saveTrashRetention}
-            disabled={
-              !user?.is_superuser ||
-              !remoteConfigData ||
-              remoteConfig.isError ||
-              preferenceCommand.blocked ||
-              backupPolicy.isPending ||
-              parsedTrashRetentionDays === null
-            }
-            className={BTN_PRIMARY}
-          >
-            {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
-          </button>
-        }
-      >
-        <div className="settings-preference-fields px-4 sm:px-5">
-          <label className="settings-preference-row">
-            <span>{uiText("Days")}</span>
-            <input
-              type="number"
-              min={-1}
-              value={trashRetentionText}
-              onChange={(event) => {
-                const text = event.target.value;
-                if (remoteConfigData)
-                  setTrashRetentionDraft((previous) => ({
-                    text,
-                    base: previous?.base ?? captureEditingBase(remoteConfigData),
-                  }));
-              }}
-              disabled={
-                !user?.is_superuser ||
-                !remoteConfigData ||
-                remoteConfig.isError ||
-                trashRetentionBusy
-              }
-              className={INPUT}
-            />
-          </label>
-        </div>
+      <>
         {trashPurgeResult && (
           <div
             role="status"
             aria-live="polite"
             className={cn(
-              "border-t px-4 py-3 text-xs sm:px-5",
+              "border-t border-border px-4 py-3 text-xs sm:px-5",
               (trashPurgeResult.storage_cleanup_status ?? "completed") === "completed"
-                ? "border-success/30 bg-success/10 text-success"
-                : "border-warning/30 bg-warning/10 text-warning",
+                ? "text-foreground"
+                : "settings-status text-xs",
             )}
           >
             {cleanupStatusMessage(t, trashPurgeResult)}
           </div>
         )}
         {gcPlan && (
-          <div className="border-t border-border bg-muted/20 px-4 py-4 sm:px-5">
+          <div className="border-t border-border px-4 py-4 sm:px-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold text-foreground">
@@ -2123,7 +2021,7 @@ export function SettingsPanel() {
                   )}
                 </p>
               </div>
-              <span className="rounded border border-border px-2 py-1 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+              <span className="settings-status">
                 {gcPlan.backup_id ? uiText("backup verified") : uiText("no backup bound")}
               </span>
             </div>
@@ -2206,6 +2104,134 @@ export function SettingsPanel() {
             </div>
           </div>
         )}
+      </>
+    ) : null;
+
+  const saveTrashRetentionDisabled =
+    !user?.is_superuser ||
+    !remoteConfigData ||
+    remoteConfig.isError ||
+    preferenceCommand.blocked ||
+    backupPolicy.isPending ||
+    parsedTrashRetentionDays === null;
+
+  // On the Trash page the retention is one line above the list: with a long
+  // list, a policy card below it is out of sight exactly when it matters.
+  const trashRetentionBar =
+    activeSection === "trash" ? (
+      <form
+        aria-label={uiText("Trash retention")}
+        className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5 text-[13px] sm:px-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!saveTrashRetentionDisabled) saveTrashRetention();
+        }}
+      >
+        <Trash2 className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <label htmlFor="trash-retention-days" className="text-foreground">
+          {uiText("Keep deleted items for")}
+        </label>
+        <input
+          id="trash-retention-days"
+          type="number"
+          min={0}
+          inputMode="numeric"
+          aria-describedby="trash-retention-hint"
+          aria-invalid={parsedTrashRetentionDays === null}
+          value={trashRetentionText}
+          onChange={(event) => {
+            const text = event.target.value;
+            if (remoteConfigData)
+              setTrashRetentionDraft((previous) => ({
+                text,
+                base: previous?.base ?? captureEditingBase(remoteConfigData),
+              }));
+          }}
+          disabled={
+            !user?.is_superuser || !remoteConfigData || remoteConfig.isError || trashRetentionBusy
+          }
+          className={cn(INPUT, "w-20 font-mono")}
+        />
+        <span className="text-foreground">{uiText("days")}</span>
+        <span id="trash-retention-hint" className="text-xs text-muted-foreground">
+          {uiText("Soft-deleted models stay restorable until the retention window expires.")}
+        </span>
+        <span className="ml-auto flex gap-2">
+          {trashRetentionDraft !== null && (
+            <button
+              type="button"
+              className={BTN_SECONDARY}
+              disabled={trashRetentionBusy}
+              onClick={() => setTrashRetentionDraft(null)}
+            >
+              {uiText("Cancel")}
+            </button>
+          )}
+          <button
+            type="submit"
+            disabled={saveTrashRetentionDisabled || trashRetentionDraft === null}
+            className={BTN_PRIMARY}
+          >
+            {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
+          </button>
+        </span>
+      </form>
+    ) : null;
+
+  const trashRetentionCard =
+    activeSection === "trash" ? (
+      <SettingsCard
+        className="border-0"
+        icon={Trash2}
+        title={uiText("Trash retention")}
+        description={uiText(
+          "Soft-deleted models stay restorable until the retention window expires.",
+        )}
+        action={settingsTrash ? reviewExpiredButton : undefined}
+        footer={
+          <button
+            type="button"
+            onClick={saveTrashRetention}
+            disabled={
+              !user?.is_superuser ||
+              !remoteConfigData ||
+              remoteConfig.isError ||
+              preferenceCommand.blocked ||
+              backupPolicy.isPending ||
+              parsedTrashRetentionDays === null
+            }
+            className={BTN_PRIMARY}
+          >
+            {trashRetentionBusy ? uiText("Saving") : uiText("Save retention")}
+          </button>
+        }
+      >
+        <div className="settings-preference-fields px-4 sm:px-5">
+          <label className="settings-preference-row">
+            <span>{uiText("Days")}</span>
+            <input
+              type="number"
+              min={-1}
+              value={trashRetentionText}
+              onChange={(event) => {
+                const text = event.target.value;
+                if (remoteConfigData)
+                  setTrashRetentionDraft((previous) => ({
+                    text,
+                    base: previous?.base ?? captureEditingBase(remoteConfigData),
+                  }));
+              }}
+              disabled={
+                !user?.is_superuser ||
+                !remoteConfigData ||
+                remoteConfig.isError ||
+                trashRetentionBusy
+              }
+              className={INPUT}
+            />
+          </label>
+        </div>
+        {trashCleanupDetails}
       </SettingsCard>
     ) : null;
 
@@ -2248,22 +2274,20 @@ export function SettingsPanel() {
                   disabled={trashBusy !== null}
                   className={BTN_SECONDARY}
                 >
-                  <RotateCcw className="h-3.5 w-3.5" />
                   {uiText("Restore selected")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setPurgeSelectionOpen(true)}
                   disabled={trashBusy !== null}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium disabled:opacity-50 disabled:cursor-disabled"
+                  className={BTN_DANGER}
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
                   {uiText("Delete selected")}
                 </button>
               </span>
             )}
             {trashItems.some((item) => item.kind === "model") && (
-              <span className="font-mono tabular-nums">
+              <span className="ml-auto font-mono tabular-nums">
                 {t("Known model storage: {size}", {
                   size: formatBytes(
                     trashItems.reduce(
@@ -2317,30 +2341,26 @@ export function SettingsPanel() {
                   <ProtectedThumbnail
                     path={item.kind === "model" ? item.thumbnail_url : null}
                     alt=""
-                    className="flex h-12 w-14 items-center justify-center border border-border bg-muted text-muted-foreground"
+                    className="flex h-10 w-10 items-center justify-center bg-muted text-muted-foreground"
                     imageClassName="h-full w-full object-cover"
                     placeholder={<Boxes className="h-5 w-5" aria-hidden />}
                   />
                 )}
                 <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="break-words text-sm font-medium text-foreground">{item.name}</p>
-                    <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
-                      {item.kind === "multipart"
+                  <p className="settings-list-title break-words">{item.name}</p>
+                  <p className="settings-list-meta">
+                    {[
+                      item.kind === "multipart"
                         ? uiText("multipart.trashLabel")
-                        : uiText("{value1} files", { value1: String(item.file_count) })}
-                    </span>
-                    <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
-                      {item.kind === "multipart"
+                        : uiText("{value1} files", { value1: String(item.file_count) }),
+                      item.kind === "multipart"
                         ? uiText("multipart.partsCount", { count: item.part_count })
-                        : formatBytes(item.size_bytes)}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {uiText("Deleted {value1} · Expires {value2}", {
-                      value1: String(formatDate(item.deleted_at) ?? ""),
-                      value2: String(formatDate(item.expires_at) ?? ""),
-                    })}
+                        : formatBytes(item.size_bytes),
+                      uiText("Deleted {value1} · Expires {value2}", {
+                        value1: String(formatDate(item.deleted_at) ?? ""),
+                        value2: String(formatDate(item.expires_at) ?? ""),
+                      }),
+                    ].join(" · ")}
                   </p>
                 </div>
                 <div
@@ -2355,16 +2375,14 @@ export function SettingsPanel() {
                     disabled={trashBusy !== null}
                     className={BTN_SECONDARY}
                   >
-                    <RotateCcw className="h-3.5 w-3.5" />
                     {uiText("Restore")}
                   </button>
                   <button
                     type="button"
                     onClick={() => purgeTrashItem(trashRowKey(item))}
                     disabled={trashBusy !== null}
-                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium disabled:opacity-50 disabled:cursor-disabled"
+                    className={BTN_DANGER}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
                     {uiText("Delete")}
                   </button>
                 </div>
@@ -2573,16 +2591,20 @@ export function SettingsPanel() {
           actions={
             trashPage ? (
               <>
-                <Button variant="outline" onClick={loadTrash} disabled={trashLoading}>
+                <Button size="sm" variant="outline" onClick={loadTrash} disabled={trashLoading}>
                   {t("Refresh")}
                 </Button>
                 {reviewExpiredButton}
-                <Button variant="outline" onClick={() => changeSection("overview")}>
+                <Button size="sm" variant="outline" onClick={() => changeSection("overview")}>
                   {t("settings.title")}
                 </Button>
               </>
             ) : settingsTrash ? (
-              <Button variant="outline" onClick={() => router.push("/settings?section=trash")}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => router.push("/settings?section=trash")}
+              >
                 {t("Open Trash")}
               </Button>
             ) : activeSection === "spoolman" ? (
@@ -2592,7 +2614,13 @@ export function SettingsPanel() {
         />
 
         {!trashPage && (
-          <div ref={mobileTabsRef} className="border-b border-border pb-3 lg:hidden">
+          <div
+            ref={mobileTabsRef}
+            className={cn(
+              "border-b border-border pb-3",
+              sidebar ? sidebar.open && sidebar.mode === "settings" && "md:hidden" : "lg:hidden",
+            )}
+          >
             <TabBar
               tabs={visibleSettingsSections.map((section) => {
                 const Icon = section.icon;
@@ -2618,64 +2646,76 @@ export function SettingsPanel() {
 
         <div
           className={
-            trashPage
+            trashPage || sidebar
               ? ""
               : "lg:grid lg:grid-cols-[14.375rem_minmax(0,1fr)] lg:items-start lg:gap-5"
           }
         >
           {!trashPage && (
-            <nav
-              aria-label={uiText("Settings sections")}
-              className="sticky top-0 hidden border border-border bg-card p-3.5 lg:block"
-            >
-              {SETTINGS_GROUPS.map((group) => {
-                const sections = group.ids.flatMap((id) => {
-                  const section = visibleSettingsSections.find((item) => item.id === id);
-                  return section ? [section] : [];
-                });
-                if (!sections.length) return null;
-                return (
-                  <div
-                    key={group.labelKey}
-                    className="border-b border-border px-1 py-2 last:border-b-0"
-                  >
-                    <p
-                      className={cn(
-                        "px-2 pb-1 font-mono text-3xs font-medium uppercase tracking-wider text-muted-foreground",
-                        group.labelKey === "Global settings" &&
-                          "pb-3 font-sans text-[13px] font-semibold normal-case tracking-normal text-foreground",
-                      )}
+            <WorkbenchSidebarContent>
+              <nav
+                aria-label={uiText("Settings sections")}
+                className={cn(
+                  "settings-nav",
+                  sidebar
+                    ? "h-full w-full overflow-y-auto px-3 pb-4"
+                    : "sticky top-0 hidden border border-border bg-card p-3.5 lg:block",
+                )}
+              >
+                {sidebar && (
+                  <h2 className="flex h-12 items-center px-1 font-mono text-2xs font-medium uppercase tracking-[.06em] text-muted-foreground">
+                    {t("settings.title")}
+                  </h2>
+                )}
+                {SETTINGS_GROUPS.map((group) => {
+                  const sections = group.ids.flatMap((id) => {
+                    const section = visibleSettingsSections.find((item) => item.id === id);
+                    return section ? [section] : [];
+                  });
+                  if (!sections.length) return null;
+                  return (
+                    <div
+                      key={group.labelKey}
+                      className="border-b border-border px-1 py-2 last:border-b-0"
                     >
-                      {uiText(group.labelKey)}
-                    </p>
-                    {sections.map((section) => {
-                      const Icon = section.icon;
-                      const isActive = section.id === activeSection;
-                      return (
-                        <button
-                          key={section.id}
-                          type="button"
-                          aria-current={isActive ? "page" : undefined}
-                          onClick={() => changeSection(section.id)}
-                          className={cn(
-                            "flex w-full items-center gap-2.5 px-2.5 py-[7px] text-left text-[13px] font-normal transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
-                            isActive
-                              ? "bg-accent text-accent-foreground"
-                              : "text-muted-foreground hover:bg-popover-hover hover:text-foreground",
-                          )}
-                        >
-                          <Icon className="h-3.5 w-3.5 shrink-0" />
-                          <span>{t(section.labelKey)}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-            </nav>
+                      <p
+                        className={cn(
+                          "px-2 pb-1 font-mono text-2xs font-medium uppercase tracking-wider text-muted-foreground",
+                          group.labelKey === "Global settings" &&
+                            "pb-3 font-sans text-[13px] font-semibold normal-case tracking-normal text-foreground",
+                        )}
+                      >
+                        {uiText(group.labelKey)}
+                      </p>
+                      {sections.map((section) => {
+                        const Icon = section.icon;
+                        const isActive = section.id === activeSection;
+                        return (
+                          <button
+                            key={section.id}
+                            type="button"
+                            aria-current={isActive ? "page" : undefined}
+                            onClick={() => changeSection(section.id)}
+                            className={cn(
+                              "flex h-8 w-full items-center gap-2.5 px-2.5 text-left text-[13px] font-normal transition-[color,background-color,transform] duration-press active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                              isActive
+                                ? "bg-accent text-accent-foreground"
+                                : "text-muted-foreground hover:bg-popover-hover hover:text-foreground",
+                            )}
+                          >
+                            <Icon className="h-4 w-4 shrink-0" />
+                            <span>{t(section.labelKey)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </nav>
+            </WorkbenchSidebarContent>
           )}
 
-          <main className="min-w-0">
+          <main ref={sectionMotion} className="settings-main min-w-0">
             {user?.is_superuser &&
               !configDenied &&
               preferenceReview.phase !== "idle" &&
@@ -2693,6 +2733,7 @@ export function SettingsPanel() {
                   </p>
                   <p>{preferenceLabel(preferenceReview.intent)}</p>
                   <Button
+                    size="sm"
                     variant="outline"
                     disabled={preferenceReview.phase === "loading"}
                     onClick={() => void recoverPreference("review")}
@@ -2709,6 +2750,7 @@ export function SettingsPanel() {
                       </p>
                       <div className="flex flex-wrap gap-2">
                         <Button
+                          size="sm"
                           variant="outline"
                           disabled={remoteConfig.isError}
                           onClick={adoptPreference}
@@ -2716,6 +2758,7 @@ export function SettingsPanel() {
                           {uiText("library.useLatest")}
                         </Button>
                         <Button
+                          size="sm"
                           disabled={
                             remoteConfig.isError ||
                             (preferenceReview.intent.kind === "backup-retention" &&
@@ -2736,7 +2779,7 @@ export function SettingsPanel() {
             {activeSection !== "trash" && user?.is_superuser && healthRead.isError && (
               <div role="alert" className="flex items-center gap-2 text-sm">
                 <p>{uiText("settings.healthLoadFailed")}</p>
-                <Button variant="outline" onClick={() => void healthRead.refetch()}>
+                <Button size="sm" variant="outline" onClick={() => void healthRead.refetch()}>
                   {uiText("Retry health check")}
                 </Button>
               </div>
@@ -2744,7 +2787,7 @@ export function SettingsPanel() {
             {activeSection !== "trash" && user?.is_superuser && releaseRead.isError && (
               <div role="alert" className="flex items-center gap-2 text-sm">
                 <p>{uiText("settings.releaseLoadFailed")}</p>
-                <Button variant="outline" onClick={() => void checkForUpdates(true)}>
+                <Button size="sm" variant="outline" onClick={() => void checkForUpdates(true)}>
                   {uiText("Retry update check")}
                 </Button>
               </div>
@@ -2755,10 +2798,10 @@ export function SettingsPanel() {
                 <div
                   role="status"
                   aria-live="polite"
-                  className="mb-6 flex flex-col gap-4 rounded-lg border border-warning/30 bg-warning/10 p-4 sm:flex-row sm:items-center"
+                  className="mb-6 flex flex-col gap-4 border border-border bg-card p-4 sm:flex-row sm:items-center"
                 >
                   <div className="flex min-w-0 flex-1 items-start gap-3">
-                    <CircleArrowUp className="mt-0.5 h-5 w-5 shrink-0 text-warning" />
+                    <CircleArrowUp className="mt-0.5 h-4 w-4 shrink-0 text-foreground" />
                     <div>
                       <p className="text-sm font-semibold text-foreground">
                         {uiText("PrintStash v{value1} is available", {
@@ -2788,22 +2831,15 @@ export function SettingsPanel() {
               )}
 
             {activeSection === "overview" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="space-y-6">
                 {storageHealth && !storageHealth.ok && (
-                  <div
+                  <SettingsNotice
+                    tone="warning"
                     role="alert"
-                    className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-4"
+                    title={t("settings.storageUnavailableTitle")}
                   >
-                    <HardDrive className="mt-0.5 h-5 w-5 shrink-0 text-warning" aria-hidden />
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">
-                        {t("settings.storageUnavailableTitle")}
-                      </p>
-                      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                        {t("settings.storageUnavailableDescription")}
-                      </p>
-                    </div>
-                  </div>
+                    <p>{t("settings.storageUnavailableDescription")}</p>
+                  </SettingsNotice>
                 )}
                 <ImportCopyWarning storageHealth={storageHealth} />
                 <div className="overflow-hidden border border-border bg-card">
@@ -2813,7 +2849,10 @@ export function SettingsPanel() {
                         key={item.label}
                         className="min-w-0 border-l border-border px-4 first:border-l-0 first:pl-0"
                       >
-                        <p className="text-xs text-muted-foreground">{item.label}</p>
+                        <p className="flex items-center justify-between gap-2 text-xs font-medium text-muted-foreground">
+                          {item.label}
+                          <item.icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        </p>
                         <p className="mt-1 break-words text-2xl font-semibold text-foreground">
                           {item.value}
                         </p>
@@ -2849,7 +2888,12 @@ export function SettingsPanel() {
                       >
                         <dl className="settings-safety-rows">
                           <div>
-                            <dt>{t("Last backup")}</dt>
+                            <dt>
+                              {t("Last backup")}
+                              <span className="settings-row-hint">
+                                {uiText("Most recent backup in Backups")}
+                              </span>
+                            </dt>
                             <dd>
                               {ownedBackupRead.isPending
                                 ? t("Loading…")
@@ -2861,7 +2905,12 @@ export function SettingsPanel() {
                             </dd>
                           </div>
                           <div>
-                            <dt>{t("Next automatic backup")}</dt>
+                            <dt>
+                              {t("Next automatic backup")}
+                              <span className="settings-row-hint">
+                                {uiText("Daily schedule in Backups")}
+                              </span>
+                            </dt>
                             <dd>
                               {remoteConfig.isPending
                                 ? t("Loading…")
@@ -2878,7 +2927,12 @@ export function SettingsPanel() {
                             </dd>
                           </div>
                           <div>
-                            <dt>{t("Last Vault audit")}</dt>
+                            <dt>
+                              {t("Last Vault audit")}
+                              <span className="settings-row-hint">
+                                {uiText("File check in Maintenance")}
+                              </span>
+                            </dt>
                             <dd>
                               {overviewAuditRead.isPending
                                 ? t("Loading…")
@@ -2913,17 +2967,21 @@ export function SettingsPanel() {
                         ) : undefined
                       }
                     >
-                      <div className="px-4 sm:px-5">
+                      <div className="pb-1 pr-5">
                         {systemItems.map((item) => (
-                          <div
-                            key={item.label}
-                            className="flex items-center gap-4 py-3 border-b border-border last:border-b-0"
-                          >
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm text-foreground">{item.label}</p>
-                              <p className="text-xs text-muted-foreground">{item.desc}</p>
+                          <div key={item.label} className="settings-readonly-row">
+                            <div className="min-w-0">
+                              <p className="text-[13px] font-medium text-foreground">
+                                {item.label}
+                              </p>
+                              <p className="settings-row-hint">{item.desc}</p>
                             </div>
-                            <span className="font-mono text-xs sm:text-sm text-foreground text-right flex-shrink-0">
+                            <span
+                              className={cn(
+                                "text-[13px] text-foreground",
+                                !("text" in item && item.text) && "font-mono",
+                              )}
+                            >
                               {item.value}
                             </span>
                           </div>
@@ -3021,7 +3079,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "access" && (
-              <div className="settings-grouped animate-panel-in">
+              <div className="settings-grouped">
                 {user?.is_superuser && (
                   <SettingsCard
                     icon={Users}
@@ -3030,7 +3088,11 @@ export function SettingsPanel() {
                       "Create users, assign vault admins, disable accounts, and reset passwords.",
                     )}
                     action={
-                      <Button onClick={() => setCreateUserOpen(true)} disabled={usersQuery.isError}>
+                      <Button
+                        size="sm"
+                        onClick={() => setCreateUserOpen(true)}
+                        disabled={usersQuery.isError}
+                      >
                         {t("Create user")}
                       </Button>
                     }
@@ -3045,7 +3107,7 @@ export function SettingsPanel() {
                       >
                         <div className="grid gap-4">
                           <label className="block space-y-1">
-                            <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                            <span className="block text-[13px] font-medium text-foreground">
                               {uiText("Username")}
                             </span>
                             <input
@@ -3063,7 +3125,7 @@ export function SettingsPanel() {
                             />
                           </label>
                           <label className="block space-y-1">
-                            <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                            <span className="block text-[13px] font-medium text-foreground">
                               {uiText("Email")}
                             </span>
                             <input
@@ -3082,7 +3144,7 @@ export function SettingsPanel() {
                             />
                           </label>
                           <label className="block space-y-1">
-                            <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                            <span className="block text-[13px] font-medium text-foreground">
                               {uiText("Initial password")}
                             </span>
                             <input
@@ -3108,6 +3170,7 @@ export function SettingsPanel() {
                         </p>
                         <div className="mt-5 flex justify-end gap-2">
                           <Button
+                            size="sm"
                             variant="outline"
                             onClick={() => setCreateUserOpen(false)}
                             disabled={usersBusy === "create"}
@@ -3137,7 +3200,7 @@ export function SettingsPanel() {
                           <div role="alert" className="flex items-center gap-2 text-sm">
                             <p>{t("settings.accountUsersFailed")}</p>
                             <Button
-                              size="xs"
+                              size="sm"
                               variant="outline"
                               onClick={() => void usersQuery.refetch()}
                             >
@@ -3160,17 +3223,12 @@ export function SettingsPanel() {
                               <div className="flex flex-col gap-3 md:flex-row md:items-center">
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-2">
-                                    <p className="truncate text-sm font-medium text-foreground">
-                                      {row.username}
-                                    </p>
+                                    <p className="settings-list-title truncate">{row.username}</p>
                                     {row.is_superuser && (
-                                      <span className="inline-flex items-center gap-1 rounded bg-muted px-2 py-0.5 font-mono text-3xs uppercase text-muted-foreground">
-                                        <ShieldCheck className="h-3 w-3" />
-                                        {uiText("Admin")}
-                                      </span>
+                                      <span className="settings-status">{uiText("Admin")}</span>
                                     )}
                                     {!row.is_active && (
-                                      <span className="rounded bg-red-500/10 px-2 py-0.5 font-mono text-3xs uppercase text-red-600">
+                                      <span className="settings-status" data-tone="danger">
                                         {uiText("Disabled")}
                                       </span>
                                     )}
@@ -3189,18 +3247,6 @@ export function SettingsPanel() {
                                       usersQuery.isError ||
                                       usersQuery.isPending
                                     }
-                                    onClick={() => setPasswordTarget(row.id)}
-                                    className={BTN_SECONDARY}
-                                  >
-                                    {uiText("Reset password")}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={
-                                      usersBusy !== null ||
-                                      usersQuery.isError ||
-                                      usersQuery.isPending
-                                    }
                                     onClick={() =>
                                       patchUser(row.id, { is_superuser: !row.is_superuser })
                                     }
@@ -3209,6 +3255,18 @@ export function SettingsPanel() {
                                     {row.is_superuser
                                       ? uiText("Remove admin")
                                       : uiText("Make admin")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={
+                                      usersBusy !== null ||
+                                      usersQuery.isError ||
+                                      usersQuery.isPending
+                                    }
+                                    onClick={() => setPasswordTarget(row.id)}
+                                    className={BTN_SECONDARY}
+                                  >
+                                    {uiText("Reset password")}
                                   </button>
                                   <button
                                     type="button"
@@ -3279,19 +3337,6 @@ export function SettingsPanel() {
                     description={uiText(
                       "Assign view, edit, or admin access per user. Child collections inherit parent grants.",
                     )}
-                    action={
-                      <button
-                        type="button"
-                        onClick={() => void collectionPermissionsQuery.refetch()}
-                        disabled={!accessCollection || collectionPermissionsQuery.isFetching}
-                        className={BTN_ICON}
-                        title={uiText("Refresh collection access")}
-                      >
-                        <RefreshCw
-                          className={`h-4 w-4 ${collectionPermissionsQuery.isFetching ? "animate-spin" : ""}`}
-                        />
-                      </button>
-                    }
                   >
                     <div className="p-4 sm:p-5 space-y-4">
                       <div className="settings-access-fields">
@@ -3396,21 +3441,20 @@ export function SettingsPanel() {
                         </button>
                       </div>
 
-                      <div className="rounded border border-border overflow-hidden">
-                        <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-border bg-muted/40 px-3 py-2 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                          <span>{uiText("Collection")}</span>
-                          <span>{uiText("Role")}</span>
-                          <span>{uiText("Remove")}</span>
-                        </div>
+                      <div
+                        role="list"
+                        aria-label={uiText("Collection access")}
+                        className="border-t border-border"
+                      >
                         {!accessCollection ? (
-                          <p className="px-3 py-4 text-sm text-muted-foreground">
+                          <p className="py-4 text-sm text-muted-foreground">
                             {uiText("Select a collection to review grants.")}
                           </p>
                         ) : collectionPermissionsQuery.isError ? (
-                          <div role="alert" className="flex items-center gap-2 px-3 py-4 text-sm">
+                          <div role="alert" className="flex items-center gap-2 py-4 text-sm">
                             <span>{uiText("Collection access could not be loaded.")}</span>
                             <Button
-                              size="xs"
+                              size="sm"
                               variant="outline"
                               onClick={() => void collectionPermissionsQuery.refetch()}
                             >
@@ -3418,15 +3462,15 @@ export function SettingsPanel() {
                             </Button>
                           </div>
                         ) : collectionPermissionsQuery.isPending ? (
-                          <p role="status" className="px-3 py-4 text-sm text-muted-foreground">
+                          <p role="status" className="py-4 text-sm text-muted-foreground">
                             {uiText("Loading…")}
                           </p>
                         ) : !accessUserId ? (
-                          <p className="px-3 py-4 text-sm text-muted-foreground">
+                          <p className="py-4 text-sm text-muted-foreground">
                             {uiText("Select a user to review collection grants.")}
                           </p>
                         ) : selectedUserPermissions.length === 0 ? (
-                          <p className="px-3 py-4 text-sm text-muted-foreground">
+                          <p className="py-4 text-sm text-muted-foreground">
                             {activeAccessUser?.username ?? uiText("User")}
                             {uiText(" has no direct collection access.")}
                           </p>
@@ -3436,44 +3480,44 @@ export function SettingsPanel() {
                             return (
                               <div
                                 key={`${row.collection_id}:${row.user_id}`}
-                                className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
+                                role="listitem"
+                                className="settings-list-row"
                               >
                                 <div className="min-w-0">
-                                  <p className="truncate text-sm text-foreground">
+                                  <p className="settings-list-title truncate">
                                     {accessCollection?.display_path ??
                                       uiText("Collection #{value1}", {
                                         value1: String(row.collection_id),
                                       })}
                                   </p>
-                                  <p className="text-xs text-muted-foreground">
+                                  <p className="settings-list-meta">
                                     {accessCollection?.model_count ?? 0}
                                     {uiText(" models")}
                                   </p>
                                 </div>
-                                <span className="rounded bg-muted px-2 py-1 font-mono text-3xs uppercase text-muted-foreground">
-                                  {row.role}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    removeCollectionAccess(row.collection_id, row.user_id)
-                                  }
-                                  disabled={
-                                    usersQuery.isError ||
-                                    usersQuery.isPending ||
-                                    accessBusy !== null ||
-                                    collectionPermissionsQuery.isError ||
-                                    collectionPermissionsQuery.isPending
-                                  }
-                                  className="rounded p-1 text-red-600 hover:bg-red-500/10 disabled:opacity-50"
-                                  title={uiText("Remove collection access")}
-                                >
-                                  {accessBusy === busyKey ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="h-4 w-4" />
-                                  )}
-                                </button>
+                                <div>
+                                  <span className="settings-status">{row.role}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      removeCollectionAccess(row.collection_id, row.user_id)
+                                    }
+                                    disabled={
+                                      usersQuery.isError ||
+                                      usersQuery.isPending ||
+                                      accessBusy !== null ||
+                                      collectionPermissionsQuery.isError ||
+                                      collectionPermissionsQuery.isPending
+                                    }
+                                    className={cn(BTN_SECONDARY, "text-destructive")}
+                                    aria-label={uiText("Remove collection access")}
+                                  >
+                                    {accessBusy === busyKey && (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    )}
+                                    {uiText("Remove")}
+                                  </button>
+                                </div>
                               </div>
                             );
                           })
@@ -3490,22 +3534,6 @@ export function SettingsPanel() {
                     description={uiText(
                       "Grant access per printer. Roles build from view to print, machine control, and administration.",
                     )}
-                    action={
-                      <button
-                        type="button"
-                        onClick={() => void refreshPrinterAccess()}
-                        disabled={
-                          accessPrintersQuery.isFetching ||
-                          printerAccess.some(({ query }) => query.isFetching)
-                        }
-                        className={BTN_ICON}
-                        title={uiText("Refresh printer access")}
-                      >
-                        <RefreshCw
-                          className={`h-4 w-4 ${accessPrintersQuery.isFetching || printerAccess.some(({ query }) => query.isFetching) ? "animate-spin" : ""}`}
-                        />
-                      </button>
-                    }
                   >
                     <div className="space-y-4 p-4 sm:p-5">
                       <div className="settings-access-fields">
@@ -3567,11 +3595,18 @@ export function SettingsPanel() {
                             ))}
                           </select>
                         </label>
-                        <label className="settings-preference-row">
-                          <span className="text-[13px] font-medium text-foreground">
-                            {uiText("Role")}
+                        <div className="settings-preference-row">
+                          <span>
+                            <label htmlFor="printer-access-role">{uiText("Role")}</label>
+                            <span id="printer-access-role-hint" className="settings-row-hint">
+                              {uiText(
+                                "View: status and history · Print: send and start jobs · Control: pause, cancel, temperatures, homing, emergency stop · Admin: settings, files, routing, and maintenance",
+                              )}
+                            </span>
                           </span>
                           <select
+                            id="printer-access-role"
+                            aria-describedby="printer-access-role-hint"
                             value={printerAccessRole}
                             onChange={(event) =>
                               setPrinterAccessRole(
@@ -3595,7 +3630,7 @@ export function SettingsPanel() {
                             <option value="control">{uiText("Control")}</option>
                             <option value="admin">{uiText("Admin")}</option>
                           </select>
-                        </label>
+                        </div>
                         <button
                           type="button"
                           onClick={savePrinterAccess}
@@ -3624,7 +3659,7 @@ export function SettingsPanel() {
                         <div role="alert" className="flex items-center gap-2 text-sm">
                           <p>{t("settings.accessPrintersFailed")}</p>
                           <Button
-                            size="xs"
+                            size="sm"
                             variant="outline"
                             onClick={() => void accessPrintersQuery.refetch()}
                           >
@@ -3643,7 +3678,7 @@ export function SettingsPanel() {
                             >
                               <p>{t("settings.accessPrinterFailed", { name: printer.name })}</p>
                               <Button
-                                size="xs"
+                                size="sm"
                                 variant="outline"
                                 onClick={() => void query.refetch()}
                               >
@@ -3657,20 +3692,13 @@ export function SettingsPanel() {
                           ) : null,
                         )}
 
-                      <p className="text-xs text-muted-foreground">
-                        {uiText(
-                          "View: status and history · Print: send and start jobs · Control: pause, cancel, temperatures, homing, emergency stop · Admin: settings, files, routing, and maintenance",
-                        )}
-                      </p>
-
-                      <div className="overflow-hidden rounded border border-border">
-                        <div className="grid grid-cols-[1fr_auto_auto] gap-3 border-b border-border bg-muted/40 px-3 py-2 font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                          <span>{uiText("Printer")}</span>
-                          <span>{uiText("Role")}</span>
-                          <span>{uiText("Remove")}</span>
-                        </div>
+                      <div
+                        role="list"
+                        aria-label={uiText("Printer access")}
+                        className="border-t border-border"
+                      >
                         {!printerAccessUserId ? (
-                          <p className="px-3 py-4 text-sm text-muted-foreground">
+                          <p className="py-4 text-sm text-muted-foreground">
                             {uiText("Select a user to review printer grants.")}
                           </p>
                         ) : accessPrintersQuery.isError ||
@@ -3678,7 +3706,7 @@ export function SettingsPanel() {
                           (printerAccess.some(({ query }) => query.isError || query.isPending) &&
                             selectedPrinterPermissions.length ===
                               0) ? null : selectedPrinterPermissions.length === 0 ? (
-                          <p className="px-3 py-4 text-sm text-muted-foreground">
+                          <p className="py-4 text-sm text-muted-foreground">
                             {activePrinterAccessUser?.username ?? uiText("User")}
                             {uiText(" has no direct printer access.")}
                           </p>
@@ -3687,45 +3715,41 @@ export function SettingsPanel() {
                             const printer = printerById.get(row.printer_id);
                             const busyKey = `${row.printer_id}:${row.user_id}`;
                             return (
-                              <div
-                                key={busyKey}
-                                className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-b border-border px-3 py-2 last:border-b-0"
-                              >
+                              <div key={busyKey} role="listitem" className="settings-list-row">
                                 <div className="min-w-0">
-                                  <p className="truncate text-sm text-foreground">
+                                  <p className="settings-list-title truncate">
                                     {printer?.name ??
                                       uiText("Printer #{value1}", {
                                         value1: String(row.printer_id),
                                       })}
                                   </p>
-                                  <p className="text-xs text-muted-foreground">
+                                  <p className="settings-list-meta">
                                     {printer?.group || uiText("Ungrouped")}
                                   </p>
                                 </div>
-                                <span className="rounded bg-muted px-2 py-1 font-mono text-3xs uppercase text-muted-foreground">
-                                  {row.role}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={() => removePrinterAccess(row.printer_id, row.user_id)}
-                                  disabled={
-                                    usersQuery.isError ||
-                                    usersQuery.isPending ||
-                                    printerAccessBusy !== null ||
-                                    accessPrintersQuery.isError ||
-                                    printerAccess.find(
-                                      ({ printer }) => printer.id === row.printer_id,
-                                    )?.query.isError
-                                  }
-                                  className="rounded p-1 text-destructive hover:bg-destructive/10 disabled:opacity-50"
-                                  title={uiText("Remove printer access")}
-                                >
-                                  {printerAccessBusy === busyKey ? (
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Trash2 className="h-4 w-4" />
-                                  )}
-                                </button>
+                                <div>
+                                  <span className="settings-status">{row.role}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => removePrinterAccess(row.printer_id, row.user_id)}
+                                    disabled={
+                                      usersQuery.isError ||
+                                      usersQuery.isPending ||
+                                      printerAccessBusy !== null ||
+                                      accessPrintersQuery.isError ||
+                                      printerAccess.find(
+                                        ({ printer }) => printer.id === row.printer_id,
+                                      )?.query.isError
+                                    }
+                                    className={cn(BTN_SECONDARY, "text-destructive")}
+                                    aria-label={uiText("Remove printer access")}
+                                  >
+                                    {printerAccessBusy === busyKey && (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    )}
+                                    {uiText("Remove")}
+                                  </button>
+                                </div>
                               </div>
                             );
                           })
@@ -3749,7 +3773,7 @@ export function SettingsPanel() {
                       </p>
                     ) : (
                       <>
-                        <div className="rounded border border-border bg-muted/40 p-3">
+                        <div className="border border-border p-3">
                           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <div className="min-w-0">
                               <p className="text-sm font-medium text-foreground">
@@ -3762,24 +3786,18 @@ export function SettingsPanel() {
                               </p>
                             </div>
                             {extensionSetupReady ? (
-                              <Badge
-                                variant="success"
-                                className="h-8 gap-1.5 border border-success/30 bg-success/10 px-3 font-mono text-success uppercase tracking-wider"
-                                role="status"
-                              >
-                                <Check className="h-3.5 w-3.5" aria-hidden />
+                              <span className="settings-status" role="status">
                                 {uiText("Setup prepared")}
-                              </Badge>
+                              </span>
                             ) : (
                               <Button
                                 type="button"
-                                size="xs"
+                                size="sm"
                                 onClick={setupBrowserExtension}
                                 loading={keyBusy}
                                 disabled={
                                   receipt !== null || apiKeysQuery.isError || apiKeysQuery.isPending
                                 }
-                                className="font-mono uppercase tracking-wider"
                               >
                                 <Puzzle className="h-3.5 w-3.5" />
                                 {uiText("Set up extension")}
@@ -3797,7 +3815,7 @@ export function SettingsPanel() {
 
                         <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
                           <label className="block space-y-1">
-                            <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                            <span className="block text-[13px] font-medium text-foreground">
                               {uiText("Key name")}
                             </span>
                             <input
@@ -3829,7 +3847,7 @@ export function SettingsPanel() {
                             <p className="text-xs text-muted-foreground">
                               {uiText("Copy this key now. It will only be shown once.")}
                             </p>
-                            <Button size="xs" variant="ghost" onClick={dismissReceipt}>
+                            <Button size="sm" variant="ghost" onClick={dismissReceipt}>
                               {t("settings.accountDismissSecret")}
                             </Button>
                             <div className="flex items-center gap-2">
@@ -3862,7 +3880,7 @@ export function SettingsPanel() {
                             <div role="alert" className="flex items-center gap-2 text-sm">
                               <p>{t("settings.accountKeysFailed")}</p>
                               <Button
-                                size="xs"
+                                size="sm"
                                 variant="outline"
                                 onClick={() => void apiKeysQuery.refetch()}
                               >
@@ -3898,17 +3916,17 @@ export function SettingsPanel() {
                                   disabled={
                                     keyBusy || apiKeysQuery.isError || apiKeysQuery.isPending
                                   }
-                                  className="inline-flex h-9 w-9 items-center justify-center rounded border border-border text-red-500 hover:bg-red-500/10 disabled:opacity-50"
-                                  title={uiText("Revoke API key")}
+                                  className={BTN_DANGER}
+                                  aria-label={uiText("Revoke API key")}
                                 >
-                                  <Trash2 className="h-4 w-4" />
+                                  {uiText("settings.pairedBrowsers.revokeAction")}
                                 </button>
                               </div>
                             ))
                           )}
                         </div>
 
-                        <div className="rounded border border-border bg-muted/40 p-3">
+                        <div className="border border-border p-3">
                           <p className="text-xs text-muted-foreground leading-relaxed">
                             {uiText("Use your username with this API key on")}{" "}
                             <code className="font-mono">/api/v1/auth/login</code>
@@ -3927,7 +3945,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "storage" && (
-              <div className="settings-storage border border-border bg-card animate-panel-in">
+              <div className="settings-storage border border-border bg-card">
                 <TabBar
                   tabs={[
                     { key: "location", label: t("Location") },
@@ -3980,7 +3998,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "backup" && (
-              <div className="settings-grouped animate-panel-in">
+              <div className="settings-grouped">
                 {!user?.is_superuser && (
                   <p className="text-sm text-muted-foreground">
                     {t("settings.backupAdministratorRequired")}
@@ -4038,6 +4056,7 @@ export function SettingsPanel() {
                       )}
                     </p>
                     <Button
+                      size="sm"
                       variant="outline"
                       disabled={backupPolicy.review.phase === "loading" || backupPolicyBusy}
                       onClick={() => {
@@ -4080,6 +4099,7 @@ export function SettingsPanel() {
                           </dd>
                         </dl>
                         <Button
+                          size="sm"
                           variant="outline"
                           disabled={backupPolicyBusy}
                           onClick={backupPolicy.adopt}
@@ -4087,6 +4107,7 @@ export function SettingsPanel() {
                           {uiText("library.useLatest")}
                         </Button>
                         <Button
+                          size="sm"
                           disabled={
                             backupPolicyBusy ||
                             backupConnectionCommand.blocked ||
@@ -4125,10 +4146,7 @@ export function SettingsPanel() {
                         backupConnectionRead.isError ||
                         !backupConnectionRead.data
                       }
-                      className={cn(
-                        BTN_PRIMARY,
-                        "h-auto min-h-8 w-full whitespace-normal py-2 sm:w-auto",
-                      )}
+                      className={BTN_PRIMARY}
                     >
                       {backupPolicyBusy ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -4141,21 +4159,19 @@ export function SettingsPanel() {
                 >
                   <div className="space-y-5 p-4 sm:p-5">
                     <div>
-                      <label className="settings-preference-row">
+                      <div className="settings-preference-row">
                         <span>
-                          <span className="block text-sm font-medium text-foreground">
-                            {t("settings.backupAutomaticEnable")}
-                          </span>
-                          <span className="block text-xs text-muted-foreground">
+                          {t("settings.backupAutomaticEnable")}
+                          <span className="settings-row-hint">
                             {t("settings.backupAutomaticEnableDescription")}
                           </span>
                         </span>
-                        <Checkbox
+                        <SettingsSwitch
                           checked={automaticBackupsEnabled}
                           onChange={(value) =>
                             backupPolicy.edit("automatic_backups_enabled", value)
                           }
-                          ariaLabel={t("settings.backupAutomaticEnable")}
+                          label={t("settings.backupAutomaticEnable")}
                           disabled={
                             !user?.is_superuser ||
                             backupPolicyBusy ||
@@ -4166,7 +4182,7 @@ export function SettingsPanel() {
                             !backupConnectionRead.data
                           }
                         />
-                      </label>
+                      </div>
                       <label className="settings-preference-row">
                         <span>{t("settings.backupAutomaticTime")}</span>
                         <input
@@ -4250,7 +4266,7 @@ export function SettingsPanel() {
                               <p className="truncate text-sm font-medium text-foreground">
                                 {connection.name}
                               </p>
-                              <p className="text-xs uppercase text-muted-foreground">
+                              <p className="text-xs text-muted-foreground">
                                 {connection.kind}
                                 {!connection.enabled
                                   ? ` · ${t("settings.backupDestinationPaused")}`
@@ -4308,7 +4324,7 @@ export function SettingsPanel() {
                           </div>
                         ))}
                         {backupConnections.length === 0 ? (
-                          <p className="px-3 py-4 text-sm text-muted-foreground">
+                          <p className="py-4 text-sm text-muted-foreground">
                             {t("settings.backupNoRemoteDestinations")}
                           </p>
                         ) : null}
@@ -4333,10 +4349,7 @@ export function SettingsPanel() {
                         preferenceCommand.blocked ||
                         backupPolicy.isPending
                       }
-                      className={cn(
-                        BTN_PRIMARY,
-                        "h-auto min-h-8 w-full whitespace-normal py-2 sm:w-auto",
-                      )}
+                      className={BTN_PRIMARY}
                     >
                       {backupRetentionBusy ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -4348,9 +4361,17 @@ export function SettingsPanel() {
                   }
                 >
                   <div className="p-4 sm:p-5">
-                    <label className="settings-preference-row">
-                      <span>{t("settings.backupRetentionLabel")}</span>
+                    <div className="settings-preference-row">
+                      <span>
+                        <label htmlFor="backup-retention-days">
+                          {t("settings.backupRetentionLabel")}
+                        </label>
+                        <span id="backup-retention-hint" className="settings-row-hint">
+                          {uiText("Between 0 and 365 days.")}
+                        </span>
+                      </span>
                       <input
+                        id="backup-retention-days"
                         type="number"
                         min={0}
                         max={365}
@@ -4368,11 +4389,13 @@ export function SettingsPanel() {
                         }}
                         aria-invalid={parsedBackupRetentionDays === null}
                         aria-describedby={
-                          parsedBackupRetentionDays === null ? "backup-retention-error" : undefined
+                          parsedBackupRetentionDays === null
+                            ? "backup-retention-hint backup-retention-error"
+                            : "backup-retention-hint"
                         }
                         className={cn(inputClasses, "w-full font-mono")}
                       />
-                    </label>
+                    </div>
                     {parsedBackupRetentionDays === null && (
                       <p
                         id="backup-retention-error"
@@ -4390,68 +4413,51 @@ export function SettingsPanel() {
                   description={t("settings.backupManualDescription")}
                   stackActionOnMobile
                   action={
-                    <button
-                      type="button"
-                      onClick={handleBackupNow}
-                      disabled={!user?.is_superuser || backingUp}
-                      className={cn(
-                        BTN_PRIMARY,
-                        "h-auto min-h-8 w-full whitespace-normal py-2 sm:w-auto",
-                      )}
-                    >
-                      {backingUp ? (
-                        <>
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          {uiText(" Backing up…")}
-                        </>
-                      ) : (
-                        <>
-                          <HardDrive className="h-3.5 w-3.5" />
-                          {uiText(" Backup now")}
-                        </>
-                      )}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <label
+                        className={cn(
+                          BTN_SECONDARY,
+                          "cursor-action",
+                          (!user?.is_superuser || uploadingBackup) &&
+                            "pointer-events-none opacity-50",
+                        )}
+                      >
+                        {uploadingBackup && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                        {uploadingBackup
+                          ? t("settings.backupUploading")
+                          : t("settings.backupUploadAction")}
+                        <input
+                          type="file"
+                          className="sr-only"
+                          aria-label={t("settings.backupUploadTitle")}
+                          accept=".tar.gz,application/gzip"
+                          disabled={!user?.is_superuser || uploadingBackup}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            event.target.value = "";
+                            if (file) void handleBackupUpload(file);
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleBackupNow}
+                        disabled={!user?.is_superuser || backingUp}
+                        className={BTN_PRIMARY}
+                      >
+                        {backingUp ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            {uiText(" Backing up…")}
+                          </>
+                        ) : (
+                          uiText(" Backup now")
+                        )}
+                      </button>
+                    </div>
                   }
                 >
-                  <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground">
-                        {t("settings.backupUploadTitle")}
-                      </p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {t("settings.backupUploadDescription")}
-                      </p>
-                    </div>
-                    <label
-                      className={cn(
-                        BTN_SECONDARY,
-                        "cursor-action",
-                        (!user?.is_superuser || uploadingBackup) &&
-                          "pointer-events-none opacity-50",
-                      )}
-                    >
-                      {uploadingBackup ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Upload className="h-3.5 w-3.5" />
-                      )}
-                      {uploadingBackup
-                        ? t("settings.backupUploading")
-                        : t("settings.backupUploadAction")}
-                      <input
-                        type="file"
-                        className="sr-only"
-                        aria-label={t("settings.backupUploadTitle")}
-                        accept=".tar.gz,application/gzip"
-                        disabled={!user?.is_superuser || uploadingBackup}
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          event.target.value = "";
-                          if (file) void handleBackupUpload(file);
-                        }}
-                      />
-                    </label>
-                  </div>
+                  <p className="settings-footnote pr-5">{t("settings.backupUploadDescription")}</p>
                 </SettingsCard>
                 {user?.is_superuser && (
                   <BackupRunHistory onPublished={() => void ownedBackupRead.refetch()} />
@@ -4467,10 +4473,10 @@ export function SettingsPanel() {
                       type="button"
                       onClick={() => void loadBackups()}
                       disabled={!user?.is_superuser || backupsLoading}
-                      className={BTN_ICON}
-                      title={uiText("Refresh backups")}
+                      className={BTN_SECONDARY}
                     >
-                      <RefreshCw className={`h-4 w-4 ${backupsLoading ? "animate-spin" : ""}`} />
+                      {backupsLoading && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                      {uiText("Refresh backups")}
                     </button>
                   }
                 >
@@ -4505,7 +4511,7 @@ export function SettingsPanel() {
                     ) : (
                       <>
                         {unownedBackups.length > 0 && (
-                          <div className="space-y-3 border-b border-warning/30 bg-warning/10 p-4 sm:p-5">
+                          <div className="space-y-3 border-b border-border p-4 sm:p-5">
                             <div>
                               <p className="text-sm font-semibold text-foreground">
                                 {t("settings.backupLegacyTitle")}
@@ -4517,7 +4523,7 @@ export function SettingsPanel() {
                             {unownedBackups.map((candidate) => (
                               <div
                                 key={candidate.filename}
-                                className="grid gap-3 rounded border border-border bg-background/50 p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                                className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
                                   <p className="truncate font-mono text-xs text-foreground">
@@ -4545,7 +4551,7 @@ export function SettingsPanel() {
                           </div>
                         )}
                         {unownedS3Backups.length > 0 && (
-                          <div className="space-y-3 border-b border-warning/30 bg-warning/10 p-4 sm:p-5">
+                          <div className="space-y-3 border-b border-border p-4 sm:p-5">
                             <div>
                               <p className="text-sm font-semibold text-foreground">
                                 {t("settings.backupS3Title")}
@@ -4557,7 +4563,7 @@ export function SettingsPanel() {
                             {unownedS3Backups.map((candidate) => (
                               <div
                                 key={candidate.source_ref ?? `${candidate.prefix}:${candidate.key}`}
-                                className="grid gap-3 rounded border border-border bg-background/50 p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                                className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
                                   <p className="truncate font-mono text-xs text-foreground">
@@ -4617,7 +4623,7 @@ export function SettingsPanel() {
                           </div>
                         )}
                         {unownedRemoteBackups.length > 0 && (
-                          <div className="space-y-3 border-b border-warning/30 bg-warning/10 p-4 sm:p-5">
+                          <div className="space-y-3 border-b border-border p-4 sm:p-5">
                             <div>
                               <p className="text-sm font-semibold text-foreground">
                                 {t("settings.backupRemoteTitle")}
@@ -4629,7 +4635,7 @@ export function SettingsPanel() {
                             {unownedRemoteBackups.map((candidate) => (
                               <div
                                 key={`${candidate.connection_id}:${candidate.key}`}
-                                className="grid gap-3 rounded border border-border bg-background/50 p-3 lg:grid-cols-[1fr_auto] lg:items-center"
+                                className="grid gap-3 border border-border p-3 lg:grid-cols-[1fr_auto] lg:items-center"
                               >
                                 <div className="min-w-0">
                                   <p className="truncate font-mono text-xs text-foreground">
@@ -4678,10 +4684,8 @@ export function SettingsPanel() {
                                 <p className="truncate text-sm font-medium text-foreground">
                                   {formatDate(backup.created_at)}
                                 </p>
-                                <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
-                                  {backup.location}
-                                </span>
-                                <span className="font-mono text-3xs uppercase tracking-wider px-2 py-0.5 rounded border border-border text-muted-foreground">
+                                <span className="settings-status">{backup.location}</span>
+                                <span className="settings-status">
                                   {uiText("v{value1}", {
                                     value1: String(backup.app_version ?? ""),
                                   })}
@@ -4794,15 +4798,14 @@ export function SettingsPanel() {
                                     ? undefined
                                     : t("settings.backupSourceUnavailable")
                                 }
-                                className="inline-flex items-center gap-1.5 px-3 py-2 rounded border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors text-xs font-medium uppercase tracking-wider disabled:opacity-50 disabled:cursor-disabled"
+                                className={BTN_SECONDARY}
                               >
-                                <RotateCcw className="h-3.5 w-3.5" />
                                 {uiText("Restore")}
                               </button>
                               <Button
                                 type="button"
-                                variant="destructive"
-                                size="xs"
+                                variant="danger"
+                                size="sm"
                                 onClick={() => setDeleteBackupTarget(backup)}
                                 disabled={
                                   downloadingBackup !== null ||
@@ -4818,7 +4821,6 @@ export function SettingsPanel() {
                                     : t("settings.backupSourceUnavailable")
                                 }
                                 aria-label={t("settings.backupDeleteAction")}
-                                className="uppercase tracking-wider"
                               >
                                 {deletingBackup === backupSourceKey(backup) ? (
                                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -4838,13 +4840,13 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "remote-storage" && (
-              <div className="animate-panel-in">
+              <div>
                 <RemoteStorageConnections disabled={!user?.is_superuser} />
               </div>
             )}
 
             {activeSection === "imports" && (
-              <div className="settings-imports animate-panel-in">
+              <div className="settings-imports">
                 <MakerWorldConnectCard />
                 <ProviderConnectionsPanel />
               </div>
@@ -4857,13 +4859,13 @@ export function SettingsPanel() {
             {activeSection === "work" && user?.is_superuser && <BackgroundWorkPanel />}
 
             {activeSection === "libraries" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="space-y-6">
                 <ExternalLibrariesPanel canEdit={!!user?.is_superuser} />
               </div>
             )}
 
             {activeSection === "notifications" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="space-y-6">
                 <NotificationsPanel canEdit={!!user?.is_superuser} />
               </div>
             )}
@@ -4871,7 +4873,7 @@ export function SettingsPanel() {
             {activeSection === "sso" && user?.is_superuser && <OidcSettingsCard />}
 
             {activeSection === "spoolman" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="space-y-6">
                 <SpoolmanConnectCard
                   canEdit={!!user?.is_superuser}
                   actionHost={spoolmanActionHost}
@@ -4880,7 +4882,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "design" && (
-              <div className="settings-grouped animate-panel-in">
+              <div className="settings-grouped">
                 {user?.is_superuser && remoteConfig.isError && (
                   <div role="alert" className="flex items-center gap-2 text-sm">
                     <p>{t("settings.configLoadFailed")}</p>
@@ -5076,71 +5078,35 @@ export function SettingsPanel() {
                   )}
                   action={
                     <button type="button" onClick={resetCardMetrics} className={BTN_SECONDARY}>
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      {uiText("Reset")}
+                      {uiText("Reset metrics")}
                     </button>
                   }
                 >
-                  <div className="p-4 sm:p-5 grid gap-4 sm:grid-cols-3">
+                  <div className="settings-preference-fields">
                     {([0, 1, 2] as const).map((slot) => (
-                      <div key={slot} className="space-y-2">
-                        <p className="text-2xs font-mono uppercase tracking-wider text-primary">
-                          {uiText("Slot ")}
-                          {slot + 1}
-                        </p>
-                        <div className="grid grid-cols-1 gap-1">
-                          {CARD_METRIC_OPTIONS.map((opt) => {
-                            const isSelected = cardMetrics[slot] === opt.id;
-                            const otherSlot = cardMetrics.findIndex(
-                              (id, i) => i !== slot && id === opt.id,
+                      <label key={slot} className="settings-preference-row">
+                        <span>{uiText("Metric {value1}", { value1: String(slot + 1) })}</span>
+                        <select
+                          value={cardMetrics[slot]}
+                          onChange={(event) => {
+                            const option = CARD_METRIC_OPTIONS.find(
+                              (item) => item.id === event.target.value,
                             );
-                            const usedInOther = otherSlot !== -1;
-                            return (
-                              <button
-                                key={opt.id}
-                                type="button"
-                                disabled={usedInOther}
-                                aria-pressed={isSelected}
-                                onClick={() => updateCardMetric(slot, opt.id)}
-                                className={`group flex items-center gap-2 px-3 py-2 rounded border text-sm transition-colors ${
-                                  isSelected
-                                    ? "border-transparent bg-accent text-accent-foreground"
-                                    : usedInOther
-                                      ? "border-dashed border-border bg-transparent text-muted-foreground/50 cursor-disabled"
-                                      : "border-border bg-background text-foreground hover:border-primary/50 hover:bg-muted"
-                                }`}
-                              >
-                                <span
-                                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition-colors ${
-                                    isSelected
-                                      ? "border-accent-foreground bg-accent-foreground text-accent"
-                                      : "border-border text-transparent"
-                                  }`}
-                                >
-                                  <Check className="h-3 w-3" strokeWidth={3} />
-                                </span>
-                                <span className="flex-1 text-left">{opt.label}</span>
-                                {usedInOther ? (
-                                  <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground/60">
-                                    {uiText("Slot ")}
-                                    {otherSlot + 1}
-                                  </span>
-                                ) : (
-                                  <span
-                                    className={`font-mono text-3xs uppercase tracking-wider ${
-                                      isSelected
-                                        ? "text-accent-foreground/80"
-                                        : "text-muted-foreground"
-                                    }`}
-                                  >
-                                    {opt.abbr}
-                                  </span>
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
+                            if (option) updateCardMetric(slot, option.id);
+                          }}
+                          className={INPUT}
+                        >
+                          {CARD_METRIC_OPTIONS.map((opt) => (
+                            <option
+                              key={opt.id}
+                              value={opt.id}
+                              disabled={cardMetrics.some((id, i) => i !== slot && id === opt.id)}
+                            >
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     ))}
                   </div>
                 </SettingsCard>
@@ -5150,68 +5116,52 @@ export function SettingsPanel() {
                   title={uiText("Model metadata")}
                   description={uiText("Choose which metadata fields appear on model detail pages.")}
                   action={
-                    <button
-                      type="button"
-                      onClick={resetMetadataPreferences}
-                      className={BTN_SECONDARY}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      {uiText("Reset")}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setAllMetadataPreferences(true)}
+                        className={BTN_SECONDARY}
+                      >
+                        {uiText("Show all")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAllMetadataPreferences(false)}
+                        className={BTN_SECONDARY}
+                      >
+                        {uiText("Hide all")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetMetadataPreferences}
+                        className={BTN_SECONDARY}
+                      >
+                        {uiText("Reset")}
+                      </button>
+                    </>
                   }
                 >
-                  <div className="p-4 sm:p-5 space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-2xs font-mono uppercase tracking-wider text-muted-foreground">
-                        {uiText("{value1} of {value2} shown", {
-                          value1: String(
-                            METADATA_FIELDS.filter((f) => metadataPrefs[f.id]).length ?? "",
-                          ),
-                          value2: String(METADATA_FIELDS.length ?? ""),
-                        })}
-                      </p>
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => setAllMetadataPreferences(true)}
-                          className="font-mono text-3xs uppercase tracking-wider text-muted-foreground hover:text-primary transition-colors"
-                        >
-                          {uiText("Show all")}
-                        </button>
-                        <span className="text-muted-foreground/40">·</span>
-                        <button
-                          type="button"
-                          onClick={() => setAllMetadataPreferences(false)}
-                          className="font-mono text-3xs uppercase tracking-wider text-muted-foreground hover:text-primary transition-colors"
-                        >
-                          {uiText("Hide all")}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {METADATA_FIELDS.map((field) => {
-                        const visible = metadataPrefs[field.id];
-                        return (
-                          <button
-                            key={field.id}
-                            type="button"
-                            aria-pressed={visible}
-                            onClick={() => updateMetadataPreference(field.id, !visible)}
-                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors ${
-                              visible
-                                ? "border-transparent bg-accent text-accent-foreground hover:bg-accent"
-                                : "border-dashed border-border bg-transparent text-muted-foreground/60 hover:border-border hover:text-foreground"
-                            }`}
-                          >
-                            {visible ? (
-                              <Eye className="h-3.5 w-3.5" />
-                            ) : (
-                              <EyeOff className="h-3.5 w-3.5" />
-                            )}
-                            {field.label}
-                          </button>
-                        );
+                  <div className="space-y-2 pb-4 pr-5">
+                    <p className="text-xs text-muted-foreground">
+                      {uiText("{value1} of {value2} shown", {
+                        value1: String(METADATA_FIELDS.filter((f) => metadataPrefs[f.id]).length),
+                        value2: String(METADATA_FIELDS.length),
                       })}
+                    </p>
+                    <div className="grid gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+                      {METADATA_FIELDS.map((field) => (
+                        <label
+                          key={field.id}
+                          className="flex h-8 cursor-pointer items-center gap-2 text-[13px] text-foreground"
+                        >
+                          <Checkbox
+                            checked={metadataPrefs[field.id]}
+                            onChange={(visible) => updateMetadataPreference(field.id, visible)}
+                            ariaLabel={field.label}
+                          />
+                          {field.label}
+                        </label>
+                      ))}
                     </div>
                   </div>
                 </SettingsCard>
@@ -5219,7 +5169,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "gpu" && (
-              <div className="settings-grouped animate-panel-in">
+              <div className="settings-grouped">
                 {user?.is_superuser && (
                   <SettingsCard
                     icon={Gpu}
@@ -5244,10 +5194,15 @@ export function SettingsPanel() {
                   title={uiText("3D rendering")}
                   description={uiText("Choose how 3D models are rendered in this browser.")}
                 >
-                  <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5">
-                    <label className="block space-y-1">
-                      <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                  <div className="settings-preference-fields">
+                    <label className="settings-preference-row">
+                      <span>
                         {uiText("Mesh renderer")}
+                        <span className="settings-row-hint">
+                          {uiText(
+                            "WebGPU requires HTTPS or localhost. Unavailable devices use WebGL.",
+                          )}
+                        </span>
                       </span>
                       <select
                         aria-label={uiText("Mesh renderer")}
@@ -5263,11 +5218,6 @@ export function SettingsPanel() {
                         <option value="auto">{uiText("Automatic · experimental")}</option>
                         <option value="webgpu">{uiText("WebGPU · experimental")}</option>
                       </select>
-                      <span className="block text-xs text-muted-foreground">
-                        {uiText(
-                          "WebGPU requires HTTPS or localhost. Unavailable devices use WebGL.",
-                        )}
-                      </span>
                     </label>
                   </div>
                 </SettingsCard>
@@ -5275,7 +5225,7 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "previews" && (
-              <div className="settings-grouped animate-panel-in">
+              <div className="settings-grouped">
                 {user?.is_superuser && remoteConfig.isError && (
                   <div role="alert" className="flex items-center gap-2 text-sm">
                     <p>{t("settings.configLoadFailed")}</p>
@@ -5297,8 +5247,11 @@ export function SettingsPanel() {
                 >
                   <div className="settings-preference-fields">
                     <label className="settings-preference-row">
-                      <span className="text-[13px] font-medium text-foreground">
+                      <span>
                         {uiText("Preview quality")}
+                        <span className="settings-row-hint">
+                          {uiText("Performance 1× · Balanced 1.5× · High detail 2×")}
+                        </span>
                       </span>
                       <select
                         aria-label={uiText("Preview quality")}
@@ -5317,8 +5270,11 @@ export function SettingsPanel() {
                     </label>
 
                     <label className="settings-preference-row">
-                      <span className="text-[13px] font-medium text-foreground">
+                      <span>
                         {uiText("Screenshot resolution")}
+                        <span className="settings-row-hint">
+                          {uiText("Standard 1× · Sharp 2× · Print-ready 3×")}
+                        </span>
                       </span>
                       <select
                         aria-label={uiText("Screenshot resolution")}
@@ -5347,11 +5303,27 @@ export function SettingsPanel() {
                   description={uiText(
                     "Choose the resolution of generated Model card images. Higher settings take longer to render and use more memory and storage.",
                   )}
+                  action={
+                    <button
+                      type="button"
+                      onClick={recreateModelImages}
+                      disabled={!user?.is_superuser || previewBusy !== null}
+                      className={BTN_SECONDARY}
+                    >
+                      {previewBusy === "rebuild" && (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      )}
+                      {uiText("Recreate all images")}
+                    </button>
+                  }
                 >
-                  <div className="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end sm:p-5">
-                    <label className="block space-y-1">
-                      <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
+                  <div className="settings-preference-fields">
+                    <label className="settings-preference-row">
+                      <span>
                         {uiText("Model image quality")}
+                        <span className="settings-row-hint">
+                          {uiText("Compact 320 × 240 · Standard 640 × 480 · High 1280 × 960")}
+                        </span>
                       </span>
                       <select
                         aria-label={uiText("Model image quality")}
@@ -5384,22 +5356,7 @@ export function SettingsPanel() {
                         <option value={1280}>{uiText("High · 1280 × 960")}</option>
                       </select>
                     </label>
-                    <button
-                      type="button"
-                      onClick={recreateModelImages}
-                      disabled={!user?.is_superuser || previewBusy !== null}
-                      className={BTN_PRIMARY}
-                    >
-                      {previewBusy === "rebuild" ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      )}
-                      {uiText("Recreate all images")}
-                    </button>
-                  </div>
-                  <div className="border-t border-border px-4 py-3 sm:px-5">
-                    <p className="text-xs text-muted-foreground">
+                    <p className="settings-footnote">
                       {uiText(
                         "Quality changes apply to new images. Recreate all images to update existing Models in the background.",
                       )}
@@ -5410,11 +5367,11 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "trash" && (
-              <div className="space-y-6 animate-panel-in">
+              <div className="space-y-6">
                 {gcRead.isError && user?.is_superuser && (
                   <div role="alert" className="flex items-center gap-2 text-sm">
                     <p>{uiText("settings.gcLoadFailed")}</p>
-                    <Button variant="outline" onClick={() => void gcRead.refetch()}>
+                    <Button size="sm" variant="outline" onClick={() => void gcRead.refetch()}>
                       {uiText("Retry cleanup plan")}
                     </Button>
                   </div>
@@ -5430,10 +5387,11 @@ export function SettingsPanel() {
                 {trashPage ? (
                   <>
                     <div className="overflow-hidden border border-border bg-card">
-                      {trashItemsCard}
+                      {trashRetentionBar}
+                      {trashCleanupDetails}
                     </div>
                     <div className="overflow-hidden border border-border bg-card">
-                      {trashRetentionCard}
+                      {trashItemsCard}
                     </div>
                   </>
                 ) : (
@@ -5446,104 +5404,120 @@ export function SettingsPanel() {
             )}
 
             {activeSection === "about" && (
-              <div className="space-y-6 animate-panel-in">
-                {/* App identity */}
-                <div className="bg-card border border-border rounded">
-                  <div className="px-4 sm:px-6 py-5 flex flex-col sm:flex-row sm:items-center gap-4">
-                    <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-                      <BrandMark className="h-10 w-10" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-bold text-foreground tracking-tight">
-                          PrintStash
-                        </h3>
-                        {health?.version && (
-                          <span className="rounded-full bg-muted px-2 py-0.5 text-3xs font-semibold text-muted-foreground">
-                            {uiText("v")}
-                            {health.version}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {uiText("Self-hosted asset management for 3D printing workflows.")}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
+              <div className="settings-grouped">
+                <SettingsCard
+                  icon={Info}
+                  title={uiText("Version")}
+                  description={uiText("Self-hosted asset management for 3D printing workflows.")}
+                  action={
+                    <div className="flex flex-wrap gap-2">
+                      <a
+                        href={`https://github.com/${GITHUB_REPO}`}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className={BTN_SECONDARY}
+                      >
+                        GitHub
+                      </a>
                       <button
                         type="button"
                         onClick={() => void checkForUpdates(true)}
                         disabled={!user?.is_superuser || releaseChecking}
                         className={BTN_SECONDARY}
                       >
-                        <RefreshCw
-                          className={cn("h-3.5 w-3.5", releaseChecking && "animate-spin")}
-                        />
+                        {releaseChecking && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                         {releaseChecking ? uiText("Checking") : uiText("Check for updates")}
                       </button>
-                      <a
-                        href={`https://github.com/${GITHUB_REPO}`}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="inline-flex items-center gap-1.5 rounded border border-border bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-muted transition-colors"
-                      >
-                        <svg
-                          viewBox="0 0 24 24"
-                          className="h-3.5 w-3.5"
-                          fill="currentColor"
-                          aria-hidden
+                    </div>
+                  }
+                >
+                  <div className="pb-2 pr-5">
+                    {releaseStatus?.status === "update_available" &&
+                      releaseStatus.latest_version && (
+                        <div
+                          role="status"
+                          className="mb-2 flex flex-wrap items-center justify-between gap-3 border border-border p-3"
                         >
-                          <path d="M12 .5C5.7.5.5 5.7.5 12c0 5.1 3.3 9.4 7.9 10.9.6.1.8-.3.8-.6v-2c-3.2.7-3.9-1.5-3.9-1.5-.5-1.3-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.3-1.3-5.3-5.8 0-1.3.5-2.3 1.2-3.1-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17 4.6 18 4.9 18 4.9c.6 1.6.2 2.8.1 3.1.8.8 1.2 1.8 1.2 3.1 0 4.5-2.7 5.5-5.3 5.8.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6 4.6-1.5 7.9-5.8 7.9-10.9C23.5 5.7 18.3.5 12 .5z" />
-                        </svg>
-                        GitHub
-                      </a>
+                          <div className="flex min-w-0 items-start gap-2">
+                            <CircleArrowUp
+                              className="mt-0.5 h-4 w-4 shrink-0 text-foreground"
+                              aria-hidden
+                            />
+                            <div>
+                              <p className="text-[13px] font-semibold text-foreground">
+                                {uiText("Update available: v")}
+                                {releaseStatus.latest_version}
+                              </p>
+                              <p className="settings-row-hint">
+                                {uiText(
+                                  "This vault is running v{value1}. Review release notes before updating your self-hosted installation.",
+                                  { value1: String(releaseStatus.current_version ?? "") },
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                          <a
+                            href={
+                              releaseStatus.release_url ??
+                              `https://github.com/${GITHUB_REPO}/releases/latest`
+                            }
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className={BTN_SECONDARY}
+                          >
+                            {uiText("View release")}
+                          </a>
+                        </div>
+                      )}
+                    <div className="settings-readonly-row">
+                      <div>
+                        <p className="text-[13px] font-medium text-foreground">
+                          {uiText("Installed")}
+                        </p>
+                        <p className="settings-row-hint">
+                          {releaseStatus?.status === "up_to_date"
+                            ? uiText("Latest published release installed.")
+                            : releaseStatus?.status === "unavailable"
+                              ? uiText("Release check unavailable. Try again later.")
+                              : uiText("API server status and version")}
+                        </p>
+                      </div>
+                      <span className="font-mono text-[13px] text-foreground">
+                        {health?.version
+                          ? uiText("v{value1}", { value1: health.version })
+                          : uiText("Loading…")}
+                      </span>
+                    </div>
+                    <div className="settings-readonly-row">
+                      <p className="text-[13px] font-medium text-foreground">{uiText("Source")}</p>
+                      <span className="font-mono text-[13px] text-foreground">
+                        {`github.com/${GITHUB_REPO}`}
+                      </span>
                     </div>
                   </div>
-                  {releaseStatus && (
-                    <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground sm:px-6">
-                      {releaseStatus.status === "up_to_date" &&
-                        uiText("Latest published release installed.")}
-                      {releaseStatus.status === "update_available" &&
-                        releaseStatus.latest_version && (
-                          <>
-                            {uiText("Update available: v")}
-                            {releaseStatus.latest_version}.
-                          </>
-                        )}
-                      {releaseStatus.status === "unavailable" &&
-                        uiText("Release check unavailable. Try again later.")}
-                    </div>
-                  )}
-                </div>
+                </SettingsCard>
 
-                {/* Changelog */}
                 <SettingsCard
-                  icon={Info}
+                  icon={FileText}
                   title={uiText("Latest changes")}
                   description={uiText("What changed in the current release")}
                 >
-                  <div className="divide-y divide-border">
-                    {latestRelease && (
-                      <div className="px-4 sm:px-6 py-5 grid grid-cols-1 sm:grid-cols-[8rem_1fr] gap-3">
-                        <div className="flex items-start gap-2">
-                          <span className="rounded bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-                            {uiText("v{value1}", { value1: String(latestRelease.version ?? "") })}
-                          </span>
-                          <span className="text-2xs text-muted-foreground pt-0.5">
-                            {knownUiText(latestRelease.date)}
-                          </span>
-                        </div>
-                        <ul className="space-y-1.5">
-                          {latestRelease.changes.map((change, i) => (
-                            <li key={i} className="flex gap-2 text-xs text-muted-foreground">
-                              <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-primary" />
-                              <span>{knownUiText(change)}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
+                  {latestRelease && (
+                    <div className="max-w-[80ch] pb-4 pr-5">
+                      <p className="text-[13px] font-semibold text-foreground">
+                        {uiText("v{value1}", { value1: String(latestRelease.version ?? "") })}
+                        <span className="font-normal text-muted-foreground">
+                          {" · "}
+                          {knownUiText(latestRelease.date)}
+                        </span>
+                      </p>
+                      <ul className="mt-2 list-disc space-y-1.5 pl-5 text-[13px] text-foreground marker:text-muted-foreground">
+                        {latestRelease.changes.map((change, i) => (
+                          <li key={i}>{knownUiText(change)}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </SettingsCard>
               </div>
             )}

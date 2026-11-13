@@ -1,5 +1,6 @@
 "use client";
 
+import { SETTINGS_FIELD } from "@/components/settings-controls";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
 
@@ -19,8 +20,7 @@ import type { SpoolmanStatus } from "@/types";
 import { Localized } from "@/components/ui/localized";
 import { Button } from "@/components/ui/button";
 
-const INPUT_CLASS =
-  "w-full px-2.5 py-1.5 text-sm rounded border border-border bg-card text-foreground placeholder:text-muted-foreground/40 disabled:opacity-50";
+const INPUT_CLASS = SETTINGS_FIELD;
 
 const SECRET_MASK = "********";
 
@@ -290,7 +290,7 @@ export function SpoolmanConnectCard({
                 </div>
               )}
               {/* Master switch */}
-              <label className="grid gap-2 border-b border-border py-3 text-sm sm:grid-cols-[240px_minmax(0,1fr)] sm:items-center sm:gap-6">
+              <label className="settings-preference-row">
                 <span className="font-medium text-foreground">
                   {uiText("Enable Spoolman integration")}
                 </span>
@@ -321,7 +321,7 @@ export function SpoolmanConnectCard({
                   saveConnection();
                 }}
               >
-                <div className="grid gap-2 border-b border-border py-3 sm:grid-cols-[240px_minmax(0,1fr)] sm:items-center sm:gap-6">
+                <div className="settings-preference-row">
                   <label className="text-sm font-medium" htmlFor={formId + "-base-url"}>
                     {uiText("Base URL")}
                   </label>
@@ -338,10 +338,10 @@ export function SpoolmanConnectCard({
                     className={INPUT_CLASS}
                   />
                 </div>
-                <div className="grid gap-2 border-b border-border py-3 sm:grid-cols-[240px_minmax(0,1fr)] sm:items-center sm:gap-6">
+                <div className="settings-preference-row">
                   <label className="text-sm font-medium" htmlFor={formId + "-api-key"}>
                     {uiText("API key ")}
-                    <span className="opacity-60">{uiText("(optional)")}</span>
+                    <span className="settings-row-hint">{uiText("(optional)")}</span>
                   </label>
                   <input
                     id={formId + "-api-key"}
@@ -365,7 +365,7 @@ export function SpoolmanConnectCard({
               {/* Write-back + double-count warning */}
               {enabled && (
                 <div className="space-y-2">
-                  <label className="grid gap-2 border-b border-border py-3 sm:grid-cols-[240px_minmax(0,1fr)] sm:items-center sm:gap-6">
+                  <label className="settings-preference-row">
                     <span className="text-sm text-foreground">
                       {uiText("Write consumption back to Spoolman")}
                       <span className="block text-2xs text-muted-foreground">
@@ -385,9 +385,9 @@ export function SpoolmanConnectCard({
                     </select>
                   </label>
                   {status?.native_hook_detected && (
-                    <div className="space-y-2 text-2xs text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded p-2">
+                    <div className="space-y-2 border border-border p-3 text-xs text-foreground">
                       <div className="flex items-start gap-2">
-                        <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-warning" />
                         <span>
                           {uiText(
                             "Moonraker's native Spoolman integration is already decrementing the active spool, so PrintStash automatically skips its own write-back to avoid double-counting. Only override this if you have disabled Moonraker's hook and want PrintStash to count consumption.",
@@ -412,7 +412,7 @@ export function SpoolmanConnectCard({
               {/* Inventory */}
               {enabled && connected && spools && spools.length > 0 && (
                 <div className="pt-1 border-t border-border">
-                  <h4 className="text-2xs uppercase tracking-wider text-muted-foreground pt-3 pb-2">
+                  <h4 className="pb-2 pt-3 text-[13px] font-medium text-foreground">
                     {uiText("Inventory")}
                   </h4>
                   <ul className="space-y-1">
@@ -450,9 +450,9 @@ export function SpoolmanConnectCard({
                 </div>
               )}
 
-              {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+              {error && <p className="text-xs text-destructive">{error}</p>}
               {notice && !error && (
-                <p className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                <p className="flex items-center gap-1.5 text-xs text-foreground">
                   <CheckCircle2 className="h-3.5 w-3.5" />
                   {notice}
                 </p>

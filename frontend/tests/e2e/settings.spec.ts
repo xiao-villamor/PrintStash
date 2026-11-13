@@ -47,6 +47,30 @@ const accessibleGpu = {
 };
 
 test.describe("settings route", () => {
+  test("dropdowns open the shared square menu and still choose a value", async ({ page }) => {
+    await page.goto("/settings?section=design");
+    const theme = page.getByRole("combobox", { name: "Theme", exact: true });
+    await expect(theme).toBeVisible();
+    const style = await theme.evaluate((select) => {
+      const picker = getComputedStyle(select, "::picker(select)");
+      const chosen = select.querySelector("option:checked");
+      return {
+        appearance: getComputedStyle(select).appearance,
+        pickerRadius: picker.borderTopLeftRadius,
+        chosenBackground: chosen ? getComputedStyle(chosen).backgroundColor : null,
+        accent: getComputedStyle(document.documentElement).getPropertyValue("--accent").trim(),
+      };
+    });
+    expect(style.appearance).toBe("base-select");
+    expect(style.pickerRadius).toBe("0px");
+    expect(style.chosenBackground).not.toBe("rgba(0, 0, 0, 0)");
+
+    await theme.click();
+    await page.getByRole("option", { name: "Dark", exact: true }).click();
+    await expect(theme).toHaveValue("dark");
+    await theme.selectOption("light");
+  });
+
   test("rejects a stale configuration write in the browser fake", async ({ request }) => {
     const before = await (await request.get("/api/v1/config")).json();
     const headers = {

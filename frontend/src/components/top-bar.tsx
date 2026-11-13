@@ -2,15 +2,20 @@
 
 import { useUiLocale } from "@/lib/i18n";
 
-import { Suspense, useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter, usePathname, useSearchParams } from "@/lib/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@/lib/link";
-import { ArrowLeft, Bell, PanelLeft, PanelRight, Upload } from "lucide-react";
+import { ArrowLeft, Bell, PanelLeft, PanelRight, Search, Upload } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useLibraryStartup } from "@/lib/library-startup-context";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
-import { useCollectionSearch } from "@/lib/queries";
+import {
+  collectionLookupByIdOptions,
+  collectionLookupOptions,
+  useCollectionSearch,
+} from "@/lib/queries";
+import { collectionIdentity } from "@/features/library/collection-navigation";
 import { modelDetailOptions } from "@/features/library/model-detail";
 import { multipartDetailOptions } from "@/features/library/multipart";
 import { printerDetailOptions } from "@/features/printers/queries";
@@ -19,7 +24,6 @@ import { LibraryBackLink } from "@/features/library/navigation";
 import { uiText } from "@/lib/locale";
 import { userMessage } from "@/lib/errors";
 import { lastVaultHref } from "@/lib/last-collection";
-import { LibrarySearch } from "@/components/library-search";
 import { useI18n, type MessageKey } from "@/lib/i18n";
 import { TaskList } from "@/components/task-list";
 import { subscribeArchiveReviewRequests } from "@/lib/archive-review-events";
@@ -79,6 +83,17 @@ export function TopBar() {
   const router = useRouter();
   const { user } = useAuth();
   const startup = useLibraryStartup();
+  const queryClient = useQueryClient();
+  const collectionPath = pathname === "/" ? searchParams.get("c") : null;
+  const collectionId = pathname === "/" ? collectionIdentity(searchParams) : null;
+  const collection = useQuery({
+    ...(collectionId === null
+      ? collectionLookupOptions(collectionPath, queryClient)
+      : collectionLookupByIdOptions(collectionId, queryClient)),
+    enabled: false,
+  });
+  const collectionName =
+    collectionPath && !collection.isError ? collection.data?.collection.name : null;
   const modelMatch = /^\/models\/(\d+)\/?$/.exec(pathname);
   const parsedModelId = modelMatch ? Number(modelMatch[1]) : null;
   const modelId =
@@ -214,7 +229,7 @@ export function TopBar() {
             : pathname === "/"
               ? searchParams.get("favorites") === "true"
                 ? uiText("Favorites")
-                : (searchParams.get("c")?.split("/").at(-1) ?? uiText("Library"))
+                : (collectionName ?? uiText("Library"))
               : titleKey
                 ? t(titleKey)
                 : t("Page not found")}
@@ -294,13 +309,19 @@ export function TopBar() {
         </nav>
       )}
 
-      {/* Search */}
-      <Suspense fallback={<span className="flex-1" />}>
-        <LibrarySearch />
-      </Suspense>
-
       {/* Right Actions & Profile */}
       <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+        {!desktop && pathname !== "/search" && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground"
+            aria-label={t("Search")}
+            onClick={() => router.push("/search")}
+          >
+            <Search className="h-4 w-4" aria-hidden />
+          </Button>
+        )}
         <Button
           type="button"
           size="sm"

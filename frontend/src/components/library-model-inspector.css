@@ -1,13 +1,14 @@
 .library-model-inspector {
   position: fixed;
   z-index: 20;
-  top: 56px;
-  right: 0;
-  bottom: 0;
-  width: 340px;
+  top: 68px;
+  right: 12px;
+  bottom: 12px;
+  width: var(--workbench-sidebar-width);
   overflow-y: auto;
   overflow-anchor: none;
-  border-left: 1px solid var(--border);
+  border: 1px solid var(--border);
+  box-shadow: 0 16px 40px var(--dialog-shadow);
   background: var(--card);
   color: var(--foreground);
   font-size: 13px;
@@ -409,19 +410,6 @@
   font-size: 12px;
   color: var(--muted-foreground);
 }
-@media (min-width: 768px) {
-  main.library-inspector-space {
-    padding-right: 352px;
-  }
-}
-@media (min-width: 1600px) {
-  .library-model-inspector {
-    width: 380px;
-  }
-  main.library-inspector-space {
-    padding-right: 392px;
-  }
-}
 @media (max-width: 767px) {
   .library-model-inspector {
     z-index: 60;
@@ -430,7 +418,8 @@
     right: 0;
     bottom: 64px;
     width: auto;
-    border-left: 0;
+    border: 0;
+    box-shadow: none;
   }
 }
 
@@ -440,4 +429,29 @@
 }
 .library-inspector-failure textarea {
   min-height: 70px;
+}
+
+/* The same solid surface enters and exits through its docked edge. A live
+   spring owns displacement and presence; model changes never replay entry. */
+.library-model-inspector {
+  --inspector-displacement: 1;
+  --inspector-edge-gap: 12px;
+  transform: translateX(calc((100% + var(--inspector-edge-gap)) * var(--inspector-displacement)));
+}
+.library-model-inspector[data-state="closed"] {
+  pointer-events: none;
+}
+.library-inspector-header button:active {
+  transform: scale(var(--scale-detail-enter));
+}
+@media (max-width: 767px) {
+  .library-model-inspector {
+    --inspector-edge-gap: 0px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-model-inspector,
+  .library-inspector-header button:active {
+    transform: none;
+  }
 }

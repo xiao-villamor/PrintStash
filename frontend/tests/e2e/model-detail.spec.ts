@@ -135,13 +135,52 @@ test.describe("model detail route", () => {
     const canvas = preview.locator("canvas");
     const before = await canvas.screenshot();
 
-    await preview.getByRole("button", { name: "Top", exact: true }).click();
+    await preview.getByRole("combobox", { name: "Camera view", exact: true }).selectOption("top");
 
-    await expect(preview.getByRole("button", { name: "Top", exact: true })).toHaveAttribute(
+    await expect(preview.getByRole("combobox", { name: "Camera view", exact: true })).toHaveValue(
+      "top",
+    );
+    await expect.poll(async () => (await canvas.screenshot()).equals(before)).toBe(false);
+  });
+
+  test("keeps the chosen toolpath camera while scrubbing layers", async ({ page }) => {
+    const preview = await openToolpath(page);
+    const canvas = preview.locator("canvas");
+    const isometric = await canvas.screenshot();
+    await preview.getByRole("combobox", { name: "Camera view", exact: true }).selectOption("top");
+    await expect.poll(async () => (await canvas.screenshot()).equals(isometric)).toBe(false);
+    const slider = preview.getByRole("slider", { name: "Current layer" });
+    const last = await slider.getAttribute("max");
+    const top = await canvas.screenshot();
+
+    // A re-render used to re-apply the starting camera position.
+    await slider.fill("0");
+    await slider.fill(last!);
+
+    await expect.poll(async () => (await canvas.screenshot()).equals(top)).toBe(true);
+    await expect(preview.getByRole("combobox", { name: "Camera view", exact: true })).toHaveValue(
+      "top",
+    );
+  });
+
+  test("isolates one toolpath layer and fits the view back to isometric", async ({ page }) => {
+    const preview = await openToolpath(page);
+    const canvas = preview.locator("canvas");
+    const all = await canvas.screenshot();
+
+    await preview.getByRole("button", { name: "Previous layer", exact: true }).click();
+    await preview.getByRole("button", { name: "This layer", exact: true }).click();
+    await expect(preview.getByRole("button", { name: "This layer", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    await expect.poll(async () => (await canvas.screenshot()).equals(before)).toBe(false);
+    await expect.poll(async () => (await canvas.screenshot()).equals(all)).toBe(false);
+
+    await preview.getByRole("combobox", { name: "Camera view", exact: true }).selectOption("top");
+    await preview.getByRole("button", { name: "Fit to view", exact: true }).click();
+    await expect(preview.getByRole("combobox", { name: "Camera view", exact: true })).toHaveValue(
+      "isometric",
+    );
   });
 
   test("toggles the details panel from a focused search field", async ({ page }) => {
@@ -981,7 +1020,10 @@ test.describe("model detail route", () => {
     expect(toolpathRequest.method()).toBe("GET");
     const toolpathDialog = page.getByRole("dialog", { name: "Toolpath preview" });
     await expect(toolpathDialog).toBeVisible();
-    await expect(toolpathDialog.getByText(/Layer 1 \/ 1/)).toBeVisible();
+    await expect(toolpathDialog.getByRole("slider", { name: "Current layer" })).toHaveAttribute(
+      "aria-valuetext",
+      "Layer 1 / 1",
+    );
     await page.keyboard.press("Escape");
     await expect(toolpathDialog).toHaveCount(0);
   });

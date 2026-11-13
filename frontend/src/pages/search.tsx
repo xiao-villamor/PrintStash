@@ -5,6 +5,8 @@ import { useEffect, useId, useState } from "react";
 import { SearchFilterControls } from "@/components/search-filter-controls";
 import { SearchPreferences } from "@/components/search-preferences";
 import { SearchSavedViews } from "@/components/search-saved-views";
+import { LibrarySearch } from "@/components/library-search";
+import { useMediaQuery } from "@/lib/use-media-query";
 import {
   readSearchFilters,
   writeSearchFilters,
@@ -13,7 +15,6 @@ import {
 } from "@/lib/search-filters";
 import { SearchSubjectPreview } from "@/components/search-evidence";
 import { SearchImageInput } from "@/components/search-image-input";
-import { Input } from "@/components/ui/input";
 import { uiText } from "@/lib/locale";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -47,6 +48,7 @@ export default function SearchPage() {
 }
 
 function SearchContent() {
+  const desktop = useMediaQuery("(min-width: 768px)");
   const { t } = useI18n();
   const { user } = useAuth();
   const router = useRouter();
@@ -174,25 +176,12 @@ function SearchContent() {
       </div>
       {!imageMode && !modelId && (
         <section aria-label={t("aiSearch.searchOptions")} className="px-4 sm:px-6">
-          <form
-            className="flex flex-wrap items-center gap-2"
-            key={q}
-            onSubmit={(event) => {
-              event.preventDefault();
-              const value = new FormData(event.currentTarget).get("q");
-              applySearch(filters, value === null || value instanceof File ? q : value, sort);
-            }}
-          >
-            <Input
-              name="q"
-              defaultValue={q}
-              maxLength={512}
-              aria-label={t("aiSearch.residualQuery")}
-              className="h-9 w-full min-w-0 flex-1 basis-full sm:w-0 sm:basis-0"
-            />
-            <Button type="submit" size="xs" className="h-9">
-              {t("aiSearch.applySearch")}
-            </Button>
+          {!desktop && (
+            <div className="mb-4">
+              <LibrarySearch />
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
               variant="outline"
@@ -210,7 +199,7 @@ function SearchContent() {
                 onSelect={(value) => router.push(`/search?${writeSearchFilters(value)}`)}
               />
             )}
-          </form>
+          </div>
           <div
             className="mt-5 flex gap-6 overflow-x-auto border-b border-border"
             role="group"

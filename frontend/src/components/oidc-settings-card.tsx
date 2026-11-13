@@ -3,12 +3,11 @@
 import { uiText } from "@/lib/locale";
 import { useI18n, useUiLocale } from "@/lib/i18n";
 
-import { useEffect, useRef, useState } from "react";
-import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { Loader2, ShieldCheck, SlidersHorizontal } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { SettingsCard, SettingsSwitch } from "@/components/settings-card";
 import { Input } from "@/components/ui/input";
 import { Localized } from "@/components/ui/localized";
 import { useVaultConfig } from "@/lib/queries";
@@ -63,14 +62,19 @@ function Field({
   ...props
 }: React.ComponentProps<typeof Input> & { label: string; hint?: string }) {
   useUiLocale();
+  const id = useId();
   return (
-    <label className="space-y-1.5">
-      <span className="block font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-        {label}
+    <div className="settings-preference-row">
+      <span>
+        <label htmlFor={id}>{label}</label>
+        {hint && (
+          <span id={`${id}-hint`} className="settings-row-hint">
+            {hint}
+          </span>
+        )}
       </span>
-      <Input {...props} />
-      {hint && <span className="block text-xs text-muted-foreground">{hint}</span>}
-    </label>
+      <Input id={id} aria-describedby={hint ? `${id}-hint` : undefined} {...props} />
+    </div>
   );
 }
 
@@ -215,28 +219,19 @@ function OidcEditor({
   if (retired) return null;
   return (
     <Localized>
-      <Card className="animate-panel-in overflow-hidden">
-        <CardHeader className="border-b border-border p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-muted-foreground">
-                <ShieldCheck className="h-4 w-4" />
-              </div>
-              <div>
-                <CardTitle className="text-sm">{uiText("OpenID Connect")}</CardTitle>
-                <CardDescription className="mt-1 text-xs">
-                  {uiText(
-                    "Connect Authentik, Authelia, Keycloak, or another standards-compatible identity provider. Local login stays available.",
-                  )}
-                </CardDescription>
-              </div>
-            </div>
-            {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-5 p-4 sm:p-5">
+      <div className="settings-grouped">
+        <SettingsCard
+          icon={ShieldCheck}
+          title={uiText("OpenID Connect")}
+          description={uiText(
+            "Connect Authentik, Authelia, Keycloak, or another standards-compatible identity provider. Local login stays available.",
+          )}
+          action={
+            loading ? <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" /> : undefined
+          }
+        >
           {review.phase !== "idle" && (
-            <div role="alert" className="space-y-3">
+            <div role="alert" className="space-y-3 pb-4 pr-5">
               <p>
                 {uiText(
                   review.problem === "conflict"
@@ -245,6 +240,7 @@ function OidcEditor({
                 )}
               </p>
               <Button
+                size="sm"
                 variant="outline"
                 disabled={saving || review.phase === "loading"}
                 onClick={() => void reviewLatest()}
@@ -289,6 +285,7 @@ function OidcEditor({
                   </dl>
                   <div className="flex flex-wrap gap-2">
                     <Button
+                      size="sm"
                       variant="outline"
                       disabled={saving || loading}
                       onClick={() => {
@@ -304,6 +301,7 @@ function OidcEditor({
                       {uiText("library.useLatest")}
                     </Button>
                     <Button
+                      size="sm"
                       disabled={saving || loading}
                       onClick={() => void save(captureEditingBase(review.snapshot))}
                     >
@@ -314,24 +312,21 @@ function OidcEditor({
               )}
             </div>
           )}
-          <label className="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/40 p-3">
-            <span>
-              <span className="block text-sm font-medium text-foreground">
+          <div className="settings-preference-fields">
+            <div className="settings-preference-row">
+              <span>
                 {uiText("Enable SSO login")}
+                <span className="settings-row-hint">
+                  {uiText("Shows provider button on login page.")}
+                </span>
               </span>
-              <span className="block text-xs text-muted-foreground">
-                {uiText("Shows provider button on login page.")}
-              </span>
-            </span>
-            <Checkbox
-              checked={draft.oidc_enabled}
-              onChange={(value) => set("oidc_enabled", value)}
-              ariaLabel={uiText("Enable SSO login")}
-              disabled={loading || saving || retired}
-            />
-          </label>
-
-          <div className="grid gap-4 lg:grid-cols-2">
+              <SettingsSwitch
+                checked={draft.oidc_enabled}
+                onChange={(value) => set("oidc_enabled", value)}
+                label={uiText("Enable SSO login")}
+                disabled={loading || saving || retired}
+              />
+            </div>
             <Field
               label={uiText("Issuer URL")}
               value={draft.oidc_issuer_url}
@@ -374,90 +369,95 @@ function OidcEditor({
               placeholder="Authentik"
               disabled={loading || saving || retired}
             />
-          </div>
 
-          {hasClientSecret && (
-            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Checkbox
-                checked={clearClientSecret}
-                onChange={(value) => {
-                  generation.current += 1;
-                  if (!edited) {
-                    setDraft(oidcDraft(config));
-                    setBase(captureEditingBase(config));
-                  }
-                  setEdited(true);
-                  setClearClientSecret(value);
-                }}
-                ariaLabel={uiText("Clear stored client secret")}
-                disabled={loading || saving || retired}
-              />
-              {uiText("Clear stored client secret when saving")}
-            </label>
-          )}
-
-          <details className="rounded-md border border-border bg-background">
-            <summary className="cursor-action px-3 py-2 text-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              {uiText("Advanced mapping")}
-            </summary>
-            <div className="grid gap-4 border-t border-border p-3 lg:grid-cols-2">
-              <Field
-                label={uiText("Scopes")}
-                value={draft.oidc_scopes}
-                onChange={(event) => set("oidc_scopes", event.target.value)}
-                disabled={loading || saving || retired}
-              />
-              <Field
-                label={uiText("Admin groups")}
-                value={draft.oidc_admin_groups}
-                onChange={(event) => set("oidc_admin_groups", event.target.value)}
-                hint={uiText("Comma-separated group names granted superuser access.")}
-                disabled={loading || saving || retired}
-              />
-              <Field
-                label={uiText("Username claim")}
-                value={draft.oidc_username_claim}
-                onChange={(event) => set("oidc_username_claim", event.target.value)}
-                disabled={loading || saving || retired}
-              />
-              <Field
-                label={uiText("Groups claim")}
-                value={draft.oidc_groups_claim}
-                onChange={(event) => set("oidc_groups_claim", event.target.value)}
-                disabled={loading || saving || retired}
-              />
-              <Field
-                label={uiText("Public callback URL override")}
-                value={draft.oidc_redirect_uri}
-                onChange={(event) => set("oidc_redirect_uri", event.target.value)}
-                hint={uiText("Leave blank unless reverse-proxy URL detection is incorrect.")}
-                disabled={loading || saving || retired}
-              />
-              <label className="flex items-center gap-2 self-end pb-2 text-sm text-foreground">
-                <Checkbox
-                  checked={draft.oidc_allow_insecure_http}
-                  onChange={(value) => set("oidc_allow_insecure_http", value)}
-                  ariaLabel={uiText("Allow insecure HTTP issuer")}
+            {hasClientSecret && (
+              <div className="settings-preference-row">
+                <span>
+                  {uiText("Clear stored client secret")}
+                  <span className="settings-row-hint">
+                    {uiText("Clear stored client secret when saving")}
+                  </span>
+                </span>
+                <SettingsSwitch
+                  checked={clearClientSecret}
+                  onChange={(value) => {
+                    generation.current += 1;
+                    if (!edited) {
+                      setDraft(oidcDraft(config));
+                      setBase(captureEditingBase(config));
+                    }
+                    setEdited(true);
+                    setClearClientSecret(value);
+                  }}
+                  label={uiText("Clear stored client secret")}
                   disabled={loading || saving || retired}
                 />
-                {uiText("Allow HTTP issuer on trusted LAN")}
-              </label>
-            </div>
-          </details>
+              </div>
+            )}
+          </div>
+        </SettingsCard>
 
-          <div className="flex justify-end border-t border-border pt-4">
+        <SettingsCard
+          icon={SlidersHorizontal}
+          title={uiText("Advanced mapping")}
+          description={uiText("Scopes, claims and callback overrides for your identity provider.")}
+          footer={
             <Button
               type="button"
+              size="sm"
               onClick={() => void save()}
               loading={saving}
               disabled={loading || retired || review.phase !== "idle"}
             >
-              <KeyRound className="h-4 w-4" />
               {uiText("Save SSO settings")}
             </Button>
+          }
+        >
+          <div className="settings-preference-fields">
+            <Field
+              label={uiText("Scopes")}
+              value={draft.oidc_scopes}
+              onChange={(event) => set("oidc_scopes", event.target.value)}
+              disabled={loading || saving || retired}
+            />
+            <Field
+              label={uiText("Admin groups")}
+              value={draft.oidc_admin_groups}
+              onChange={(event) => set("oidc_admin_groups", event.target.value)}
+              hint={uiText("Comma-separated group names granted superuser access.")}
+              disabled={loading || saving || retired}
+            />
+            <Field
+              label={uiText("Username claim")}
+              value={draft.oidc_username_claim}
+              onChange={(event) => set("oidc_username_claim", event.target.value)}
+              disabled={loading || saving || retired}
+            />
+            <Field
+              label={uiText("Groups claim")}
+              value={draft.oidc_groups_claim}
+              onChange={(event) => set("oidc_groups_claim", event.target.value)}
+              disabled={loading || saving || retired}
+            />
+            <Field
+              label={uiText("Public callback URL override")}
+              value={draft.oidc_redirect_uri}
+              onChange={(event) => set("oidc_redirect_uri", event.target.value)}
+              hint={uiText("Leave blank unless reverse-proxy URL detection is incorrect.")}
+              disabled={loading || saving || retired}
+            />
+            <div className="settings-preference-row">
+              <span>{uiText("Allow HTTP issuer on trusted LAN")}</span>
+              <SettingsSwitch
+                checked={draft.oidc_allow_insecure_http}
+                onChange={(value) => set("oidc_allow_insecure_http", value)}
+                label={uiText("Allow insecure HTTP issuer")}
+                disabled={loading || saving || retired}
+              />
+            </div>
           </div>
-        </CardContent>
-      </Card>
+        </SettingsCard>
+      </div>
     </Localized>
   );
 }

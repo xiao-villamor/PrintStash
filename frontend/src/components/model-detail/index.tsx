@@ -25,13 +25,14 @@ import "./model-detail.css";
 import { ModelSearchAction } from "@/components/model-search-action";
 
 import { uiText } from "@/lib/locale";
+import { formatNumber } from "@/lib/format";
 import { useUiLocale } from "@/lib/i18n";
 
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent } from "react";
 import { useRouter, useSearchParams } from "@/lib/navigation";
 import { useLocation } from "@tanstack/react-router";
-import { FileText, Link2, Loader2, Pencil, Trash2, Wifi } from "lucide-react";
+import { FileText, Link2, Loader2, Pencil, Star, Trash2, Wifi } from "lucide-react";
 
 import type {
   STLViewerControls,
@@ -78,6 +79,8 @@ import { SendToButtons } from "./send-to-buttons";
 import { ShareDialog } from "./share-dialog";
 import { SettingsTab } from "./settings-tab";
 import { SourceTab } from "./source-tab";
+import { useContentMotion } from "@/lib/use-content-motion";
+import { DetailTabLoading } from "./tab-loading";
 import { useDerivativeRefresh } from "./use-derivative-refresh";
 import { ViewerToolbar } from "./viewer-toolbar";
 import { PlatePicker } from "./plate-picker";
@@ -224,12 +227,18 @@ function ModelDetailPresentation({
   const [metadataPreferences] = useState(readMetadataPreferences);
   const [addRevisionOpen, setAddRevisionOpen] = useState(false);
   const requestedTab = TABS.find((tab) => tab.key === searchParams.get("tab"))?.key ?? "overview";
+  const tabIntent = useRef(requestedTab);
   function selectTab(tab: TabKey) {
+    // A click back to the visible tab must still supersede a pending navigation.
+    if (tab === activeTab && tabIntent.current === tab) return;
+    tabIntent.current = tab;
     if (tab !== "revisions") setCompareRequested(false);
     if (tab !== "history") setHistoryDraft(null);
     const params = new URLSearchParams(searchParams);
     params.set("tab", tab);
-    router.replace(`/models/${model.id}?${params}`, { state: location.state });
+    router.replace(`/models/${model.id}?${params}`, {
+      state: location.state,
+    });
   }
   const [displayMode, setDisplayMode] = useState<ViewerDisplayMode>("solid");
   const detailLayout = useRef<HTMLDivElement>(null);
@@ -344,6 +353,7 @@ function ModelDetailPresentation({
     (!canEditModel && requestedTab === "similar")
       ? "overview"
       : requestedTab;
+  const detailTabBody = useContentMotion(activeTab, { scroll: "parent" });
   const visibleTabs = useMemo(
     () =>
       TABS.filter(
@@ -1039,12 +1049,27 @@ function ModelDetailPresentation({
                 <>
                   <Button
                     type="button"
-                    variant="outline"
-                    size="sm"
+                    variant="ghost"
+                    size="icon-sm"
+                    className="model-detail-favorite"
+                    aria-pressed={model.starred}
+                    aria-label={
+                      model.starred
+                        ? uiText("Remove {value1} from favorites", { value1: model.name })
+                        : uiText("Add {value1} to favorites", { value1: model.name })
+                    }
+                    title={model.starred ? uiText("Favorited") : uiText("Favorite")}
                     onClick={() => void toggleFavorite()}
                     disabled={starBusy || !auth.isAuthenticated}
                   >
-                    {model.starred ? uiText("Favorited") : uiText("Favorite")}
+                    <Star
+                      aria-hidden
+                      className={
+                        model.starred
+                          ? "h-5 w-5 fill-primary text-primary"
+                          : "h-5 w-5 text-muted-foreground"
+                      }
+                    />
                   </Button>
                   <Button
                     variant="outline"
@@ -1128,7 +1153,7 @@ function ModelDetailPresentation({
           showIndicator={false}
           className="model-detail-tabs shrink-0 overflow-x-auto border-b"
           tabClassName="relative inline-flex items-center gap-1.5 h-10 min-w-max whitespace-nowrap px-0 py-0 text-sm font-medium text-secondary hover:text-on-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          activeTabClassName="text-foreground font-semibold"
+          activeTabClassName="text-foreground"
         />
 
         {/* Two-Column Layout. On mobile the panels stack and the whole area
@@ -1143,7 +1168,7 @@ function ModelDetailPresentation({
             <div
               role="region"
               aria-label={uiText("Preview")}
-              className={`model-detail-preview relative min-h-80 overflow-hidden border border-outline-variant bg-surface-container-low ${pickerShown ? "pb-20" : ""}`}
+              className="model-detail-preview relative min-h-80 overflow-hidden border border-outline-variant bg-surface-container-low"
             >
               <div className="detail-preview-canvas relative flex min-h-80 w-full items-center justify-center md:min-h-0">
                 {viewerMode === "gcode" && hasToolpathPreview ? (
@@ -1213,9 +1238,15 @@ function ModelDetailPresentation({
                         <span className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span className="font-mono text-[13px] text-on-surface">
                           {uiText("{value1}×{value2}×{value3} mm", {
-                            value1: String(meshFile.metadata.bbox_x_mm),
-                            value2: String(meshFile.metadata.bbox_y_mm),
-                            value3: String(meshFile.metadata.bbox_z_mm),
+                            value1: formatNumber(meshFile.metadata.bbox_x_mm, {
+                              maximumFractionDigits: 1,
+                            }),
+                            value2: formatNumber(meshFile.metadata.bbox_y_mm, {
+                              maximumFractionDigits: 1,
+                            }),
+                            value3: formatNumber(meshFile.metadata.bbox_z_mm, {
+                              maximumFractionDigits: 1,
+                            }),
                           })}
                         </span>
                       </div>
@@ -1306,203 +1337,204 @@ function ModelDetailPresentation({
             </div>
 
             <div
-              key={activeTab}
-              className="model-detail-content flex-1 min-h-0 overflow-y-auto p-4 space-y-4"
+              role="tabpanel"
+              aria-label={visibleTabs.find((tab) => tab.key === activeTab)?.label}
+              className="model-detail-content flex-1 min-h-0 overflow-y-auto p-4"
             >
-              {activeTab === "overview" && (
-                <div className="space-y-4">
-                  <OverviewTab
-                    model={model}
-                    editing={false}
-                    editor={modelMetadataEditor}
-                    revision={{
-                      file: inspectedGcode,
-                      recommended: recommendedGcode,
-                      revisionCount: gcodeFiles.length,
-                      canEdit: canEditModel,
-                      canSend: canViewPrinters,
-                      jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
-                      onRevisions: () => {
-                        setCompareRequested(false);
-                        selectTab("revisions");
-                      },
-                      onSettings: () => selectTab("settings"),
-                      onHistory: () => selectTab("history"),
-                      onCompare: () => {
-                        setComparisonMode("gcode");
-                        setCompareRequested(true);
-                        selectTab("revisions");
-                      },
-                      onInspect: (fileId) => setRevisionSelection({ modelId: model.id, fileId }),
-                      onSend: (mode) => {
-                        setDeliveryMode(mode);
-                        setSendOpen(true);
-                      },
-                      onLogPrint: (state) => {
-                        if (inspectedGcode) setHistoryDraft({ fileId: inspectedGcode.id, state });
-                        selectTab("history");
-                      },
-                      onAddRevision: requestAddRevision,
-                    }}
-                  />
-                  {!editing && !hasGcode && latestFile?.file_type === "resin" && (
-                    <SettingsTab
-                      meta={meta}
-                      printSettingRows={printSettingRows}
-                      preferences={metadataPreferences}
-                    />
-                  )}
-                </div>
-              )}
-
-              {activeTab === "settings" && (
-                <SettingsTab
-                  meta={meta}
-                  printSettingRows={printSettingRows}
-                  preferences={metadataPreferences}
-                  headerActions={
-                    gcodeFiles.length > 1 ? (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
+              <div ref={detailTabBody} className="model-detail-tab-body space-y-4">
+                {activeTab === "overview" && (
+                  <div className="space-y-4">
+                    <OverviewTab
+                      model={model}
+                      editing={false}
+                      editor={modelMetadataEditor}
+                      revision={{
+                        file: inspectedGcode,
+                        recommended: recommendedGcode,
+                        revisionCount: gcodeFiles.length,
+                        canEdit: canEditModel,
+                        canSend: canViewPrinters,
+                        jobs: canViewPrinters && printJobQuery.isSuccess ? printJobs : null,
+                        onRevisions: () => {
+                          setCompareRequested(false);
+                          selectTab("revisions");
+                        },
+                        onSettings: () => selectTab("settings"),
+                        onHistory: () => selectTab("history"),
+                        onCompare: () => {
                           setComparisonMode("gcode");
                           setCompareRequested(true);
                           selectTab("revisions");
-                        }}
-                      >
-                        {uiText("Compare")}
-                      </Button>
-                    ) : undefined
-                  }
-                  actions={
-                    inspectedGcode ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <SlicerOpenButton
-                          fileId={inspectedGcode.id}
-                          fileType={
-                            inspectedGcode.original_filename.toLowerCase().endsWith(".bgcode")
-                              ? "bgcode"
-                              : inspectedGcode.file_type
-                          }
-                          showLabel
-                        />
-                        <Button
-                          variant="outline"
-                          onClick={() =>
-                            void downloadAuthenticatedFile(
-                              `/api/v1/files/${inspectedGcode.id}/download`,
-                              inspectedGcode.original_filename,
-                            ).catch((error) => toast.error(error))
-                          }
-                        >
-                          {uiText("Download")}
-                        </Button>
-                      </div>
-                    ) : undefined
-                  }
-                  revisionPicker={
-                    <RevisionPicker
-                      files={gcodeFiles}
-                      selected={inspectedGcode}
-                      onSelect={(fileId) => setRevisionSelection({ modelId: model.id, fileId })}
-                    />
-                  }
-                />
-              )}
-
-              {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
-              {activeTab === "source" && (
-                <SourceTab modelName={model.name} modelId={model.id} canEdit={canEditModel} />
-              )}
-
-              {activeTab === "revisions" && canViewPrinters && printerFileQuery.isError && (
-                <Button variant="outline" onClick={() => void printerFileQuery.refetch()}>
-                  {uiText("Retry")}
-                </Button>
-              )}
-              {activeTab === "revisions" && (
-                <RevisionsTab
-                  inspectedFileId={inspectedGcode?.id}
-                  onInspect={(fileId) => setRevisionSelection({ modelId: model.id, fileId })}
-                  startComparing={compareRequested}
-                  comparisonMode={comparisonMode}
-                  jobs={canViewPrinters && printJobQuery.isSuccess ? printJobs : null}
-                  onSend={
-                    canViewPrinters
-                      ? (mode) => {
+                        },
+                        onInspect: (fileId) => setRevisionSelection({ modelId: model.id, fileId }),
+                        onSend: (mode) => {
                           setDeliveryMode(mode);
                           setSendOpen(true);
-                        }
-                      : undefined
-                  }
-                  onSettings={() => selectTab("settings")}
-                  onLogPrint={
-                    canViewPrinters && canEditModel && auth.isAuthenticated
-                      ? (fileId, state) => {
-                          setHistoryDraft({ fileId, state });
+                        },
+                        onLogPrint: (state) => {
+                          if (inspectedGcode) setHistoryDraft({ fileId: inspectedGcode.id, state });
                           selectTab("history");
-                        }
-                      : undefined
-                  }
-                  modelId={model.id}
-                  gcodeFiles={gcodeFiles}
-                  allFiles={model.files}
-                  printerFilesByFileId={printerFilesByFileId}
-                  onModel={setModel}
-                  onAddRevision={requestAddRevision}
-                  canEdit={canEditModel}
-                />
-              )}
+                        },
+                        onAddRevision: requestAddRevision,
+                      }}
+                    />
+                    {!editing && !hasGcode && latestFile?.file_type === "resin" && (
+                      <SettingsTab
+                        meta={meta}
+                        printSettingRows={printSettingRows}
+                        preferences={metadataPreferences}
+                      />
+                    )}
+                  </div>
+                )}
 
-              {activeTab === "files" && (
-                <>
-                  <FilesTab
-                    modelId={model.id}
-                    onCompare={() => {
-                      setComparisonMode("source");
-                      setCompareRequested(true);
-                      selectTab("revisions");
-                    }}
-                    sourceFiles={sourceFiles}
-                    previewFailure={
-                      meshFile &&
-                      previewFeedback?.url === getAssetUrl(`/api/v1/files/${meshFile.id}/stl`) &&
-                      previewFeedback.reason !== null
-                        ? { fileId: meshFile.id, reason: previewFeedback.reason }
-                        : null
+                {activeTab === "settings" && (
+                  <SettingsTab
+                    meta={meta}
+                    printSettingRows={printSettingRows}
+                    preferences={metadataPreferences}
+                    headerActions={
+                      gcodeFiles.length > 1 ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setComparisonMode("gcode");
+                            setCompareRequested(true);
+                            selectTab("revisions");
+                          }}
+                        >
+                          {uiText("Compare")}
+                        </Button>
+                      ) : undefined
                     }
-                    trashedSourceFiles={model.trashed_source_files ?? []}
-                    canEdit={canEditModel}
-                    onModel={setModel}
-                  />
-                </>
-              )}
-
-              {activeTab === "history" && canViewPrinters && printJobQuery.isError && (
-                <Button variant="outline" onClick={() => void printJobQuery.refetch()}>
-                  {uiText("Retry")}
-                </Button>
-              )}
-              {activeTab === "history" && canViewPrinters && printJobQuery.isPending && (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              )}
-              {activeTab === "history" &&
-                canViewPrinters &&
-                printJobQuery.data &&
-                !printJobQuery.isError && (
-                  <PrintHistorySection
-                    modelName={model.name}
-                    initialEntry={historyDraft}
-                    jobs={printJobs}
-                    modelId={model.id}
-                    gcodeFiles={gcodeFiles}
-                    onJobCreated={(job) => {
-                      setHistoryDraft(null);
-                      void printJobQuery.publish(job);
-                    }}
+                    actions={
+                      inspectedGcode ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <SlicerOpenButton
+                            fileId={inspectedGcode.id}
+                            fileType={
+                              inspectedGcode.original_filename.toLowerCase().endsWith(".bgcode")
+                                ? "bgcode"
+                                : inspectedGcode.file_type
+                            }
+                            showLabel
+                          />
+                          <Button
+                            variant="outline"
+                            onClick={() =>
+                              void downloadAuthenticatedFile(
+                                `/api/v1/files/${inspectedGcode.id}/download`,
+                                inspectedGcode.original_filename,
+                              ).catch((error) => toast.error(error))
+                            }
+                          >
+                            {uiText("Download")}
+                          </Button>
+                        </div>
+                      ) : undefined
+                    }
+                    revisionPicker={
+                      <RevisionPicker
+                        files={gcodeFiles}
+                        selected={inspectedGcode}
+                        onSelect={(fileId) => setRevisionSelection({ modelId: model.id, fileId })}
+                      />
+                    }
                   />
                 )}
+
+                {activeTab === "similar" && canEditModel && <SimilarityQueue modelId={model.id} />}
+                {activeTab === "source" && (
+                  <SourceTab modelName={model.name} modelId={model.id} canEdit={canEditModel} />
+                )}
+
+                {activeTab === "revisions" && canViewPrinters && printerFileQuery.isError && (
+                  <Button variant="outline" onClick={() => void printerFileQuery.refetch()}>
+                    {uiText("Retry")}
+                  </Button>
+                )}
+                {activeTab === "revisions" && (
+                  <RevisionsTab
+                    inspectedFileId={inspectedGcode?.id}
+                    onInspect={(fileId) => setRevisionSelection({ modelId: model.id, fileId })}
+                    startComparing={compareRequested}
+                    comparisonMode={comparisonMode}
+                    jobs={canViewPrinters && printJobQuery.isSuccess ? printJobs : null}
+                    onSend={
+                      canViewPrinters
+                        ? (mode) => {
+                            setDeliveryMode(mode);
+                            setSendOpen(true);
+                          }
+                        : undefined
+                    }
+                    onSettings={() => selectTab("settings")}
+                    onLogPrint={
+                      canViewPrinters && canEditModel && auth.isAuthenticated
+                        ? (fileId, state) => {
+                            setHistoryDraft({ fileId, state });
+                            selectTab("history");
+                          }
+                        : undefined
+                    }
+                    modelId={model.id}
+                    gcodeFiles={gcodeFiles}
+                    allFiles={model.files}
+                    printerFilesByFileId={printerFilesByFileId}
+                    onModel={setModel}
+                    onAddRevision={requestAddRevision}
+                    canEdit={canEditModel}
+                  />
+                )}
+
+                {activeTab === "files" && (
+                  <>
+                    <FilesTab
+                      modelId={model.id}
+                      onCompare={() => {
+                        setComparisonMode("source");
+                        setCompareRequested(true);
+                        selectTab("revisions");
+                      }}
+                      sourceFiles={sourceFiles}
+                      previewFailure={
+                        meshFile &&
+                        previewFeedback?.url === getAssetUrl(`/api/v1/files/${meshFile.id}/stl`) &&
+                        previewFeedback.reason !== null
+                          ? { fileId: meshFile.id, reason: previewFeedback.reason }
+                          : null
+                      }
+                      trashedSourceFiles={model.trashed_source_files ?? []}
+                      canEdit={canEditModel}
+                      onModel={setModel}
+                    />
+                  </>
+                )}
+
+                {activeTab === "history" && canViewPrinters && printJobQuery.isError && (
+                  <Button variant="outline" onClick={() => void printJobQuery.refetch()}>
+                    {uiText("Retry")}
+                  </Button>
+                )}
+                {activeTab === "history" && canViewPrinters && !printJobQuery.isError && (
+                  <DetailTabLoading pending={printJobQuery.isPending} variant="history">
+                    {printJobQuery.data && (
+                      <PrintHistorySection
+                        modelName={model.name}
+                        initialEntry={historyDraft}
+                        jobs={printJobs}
+                        modelId={model.id}
+                        gcodeFiles={gcodeFiles}
+                        onJobCreated={(job) => {
+                          setHistoryDraft(null);
+                          void printJobQuery.publish(job);
+                        }}
+                      />
+                    )}
+                  </DetailTabLoading>
+                )}
+              </div>
             </div>
 
             {/* Klipper Sync Panel */}

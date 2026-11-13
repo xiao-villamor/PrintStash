@@ -36,6 +36,8 @@ test.describe("Paired browser settings", () => {
       // Both editors type from one version before the first confirmation.
       await page.reload();
       await second.goto("/settings?section=imports");
+      await page.getByRole("button", { name: `Rename ${name}`, exact: true }).click();
+      await second.getByRole("button", { name: `Rename ${name}`, exact: true }).click();
       const firstInput = page.getByRole("textbox", { name: `Browser name for ${name}` });
       const secondInput = second.getByRole("textbox", { name: `Browser name for ${name}` });
       await firstInput.fill(`${name}-winner`);
@@ -63,8 +65,8 @@ test.describe("Paired browser settings", () => {
       await second.getByRole("button", { name: "Save revised changes" }).click();
       expect((await revised).status()).toBe(200);
       await expect(
-        second.getByRole("textbox", { name: `Browser name for ${name}-revised` }),
-      ).toHaveValue(`${name}-revised`);
+        second.getByRole("button", { name: `Rename ${name}-revised`, exact: true }),
+      ).toBeVisible();
       const persisted: BrowserDeviceRead[] = await (
         await page.request.get(`${API}/api/v1/browser-pairings`)
       ).json();
@@ -76,9 +78,10 @@ test.describe("Paired browser settings", () => {
         .getByRole("dialog")
         .getByRole("button", { name: "Revoke browser", exact: true })
         .click();
+      await expect(second.getByText("Revoked", { exact: true })).toBeVisible();
       await expect(
-        second.getByRole("textbox", { name: `Browser name for ${name}-revised` }),
-      ).toBeDisabled();
+        second.getByRole("button", { name: `Rename ${name}-revised`, exact: true }),
+      ).toHaveCount(0);
     } finally {
       if (device) await page.request.delete(`${API}/api/v1/browser-pairings/${device.id}`);
       await second.close();

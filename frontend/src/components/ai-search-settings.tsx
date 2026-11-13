@@ -1,4 +1,5 @@
 import { SearchSettingsSnapshot } from "@/components/search-settings-snapshot";
+import { SettingsGroupHead } from "@/components/settings-card";
 import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Settings2 } from "lucide-react";
@@ -392,6 +393,7 @@ function SettingsForm({
           >
             <p role="alert">{t("library.saveUnconfirmed")}</p>
             <Button
+              size="sm"
               type="button"
               variant="outline"
               loading={review.phase === "loading"}
@@ -418,6 +420,7 @@ function SettingsForm({
                   <p role="alert">{t("aiSearch.historyChanged")}</p>
                 )}
                 <Button
+                  size="sm"
                   type="button"
                   variant="outline"
                   onClick={() => {
@@ -434,6 +437,7 @@ function SettingsForm({
           </section>
         )}
         <Button
+          size="sm"
           type="submit"
           loading={save.isPending}
           disabled={Boolean(
@@ -465,7 +469,11 @@ export function AiSearchSettings() {
       {settings.isError && (
         <EmptyState
           title={t("aiSearch.settingsLoadError")}
-          action={<Button onClick={refresh}>{t("aiSearch.retry")}</Button>}
+          action={
+            <Button size="sm" onClick={refresh}>
+              {t("aiSearch.retry")}
+            </Button>
+          }
         />
       )}
       {denied ? null : !settings.data ? (
@@ -499,18 +507,13 @@ export function AiSearchSettings() {
             </fieldset>
           </Modal>
           <section className="border-t border-border">
-            <div className="flex items-start gap-3 px-4 pb-3 pt-4 sm:px-5">
-              <Settings2
-                className="h-8 w-8 shrink-0 bg-muted p-2 text-muted-foreground"
-                aria-hidden
-              />
-              <div>
-                <h2 className="text-sm font-semibold">{t("Setup and options")}</h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {t("Search types, AI servers and technical limits.")}
-                </p>
-              </div>
-            </div>
+            <SettingsGroupHead
+              icon={Settings2}
+              level={2}
+              title={t("Setup and options")}
+              description={t("Search types, AI servers and technical limits.")}
+              className="settings-card-head--flush"
+            />
             <div className="divide-y divide-border px-4 pb-4 sm:pl-16 sm:pr-5">
               <div className="flex flex-wrap items-center justify-between gap-3 py-3">
                 <div>
@@ -645,9 +648,12 @@ export function AiSearchSettings() {
                         {t("aiSearch.noServers")}
                       </p>
                     )}
-                    <Button onClick={() => setEditing("new")}>{t("aiSearch.newEndpoint")}</Button>
+                    <Button size="sm" onClick={() => setEditing("new")}>
+                      {t("aiSearch.newEndpoint")}
+                    </Button>
                     {settings.data.environment_endpoints.map((kind) => (
                       <Button
+                        size="sm"
                         key={kind}
                         variant="outline"
                         loading={fromEnvironment.isPending}

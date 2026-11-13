@@ -16,11 +16,26 @@ import { cn } from "@/lib/utils";
 import "./library-items.css";
 
 const NATIVE_RENDER_LIMIT = 120;
+const CARD_WIDTH_MIN = 320;
+const CARD_WIDTH_MAX = 360;
+const SINGLE_COLUMN_MAX = 400;
+const CARD_GROWTH_START = 1000;
+const CARD_GROWTH_END = 2000;
+
+/** One width scale for collection and Model rows, independent of item count. */
+function preferredCardWidth(paneWidth: number, compact: boolean) {
+  if (compact) return 200;
+  const progress = Math.min(
+    1,
+    Math.max(0, (paneWidth - CARD_GROWTH_START) / (CARD_GROWTH_END - CARD_GROWTH_START)),
+  );
+  return CARD_WIDTH_MIN + (CARD_WIDTH_MAX - CARD_WIDTH_MIN) * progress;
+}
 
 interface LibraryItemsProps<T> {
   items: readonly T[];
   itemKey: (item: T) => string;
-  renderItem: (item: T) => ReactNode;
+  renderItem: (item: T, index: number) => ReactNode;
   scrollRef: RefObject<HTMLElement | null>;
   readingRenderers: RefObject<Map<string, LibraryReadingRenderer>>;
   readingId: string;
@@ -54,8 +69,12 @@ export function LibraryItems<T>({
   const focusRestore = useRef<{ key: string; index: number } | null>(null);
   const restore = useRef<{ key: string; offset: number } | null>(null);
   const readyGeometry = useRef<typeof geometry | null>(null);
-  const gap = layout === "list" ? 0 : compact ? 8 : 14;
-  const minWidth = compact ? 200 : 256;
+  const gap = layout === "list" ? 0 : compact ? 8 : 16;
+  const preferredWidth = preferredCardWidth(geometry.width, compact);
+  const trackWidth =
+    geometry.columns === 1
+      ? Math.min(geometry.width || preferredWidth, SINGLE_COLUMN_MAX)
+      : preferredWidth;
   // Production-card measurements favor native rows for short loaded snapshots.
   // Larger snapshots bound their DOM while retaining the same row/card identities.
   const virtual =
@@ -104,7 +123,9 @@ export function LibraryItems<T>({
       // Hidden surfaces have no layout yet; observe again when they become visible.
       if (width === 0) return;
       const nextColumns =
-        layout === "list" ? 1 : Math.max(1, Math.floor((width + gap) / (minWidth + gap)));
+        layout === "list"
+          ? 1
+          : Math.max(1, Math.floor((width + gap) / (preferredCardWidth(width, compact) + gap)));
       const margin =
         node.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop;
       setGeometry((previous) => {
@@ -157,7 +178,7 @@ export function LibraryItems<T>({
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
     };
-  }, [scrollRef, layout, minWidth, gap]);
+  }, [scrollRef, layout, compact, gap]);
 
   useLayoutEffect(() => {
     virtualizer.measure();
@@ -237,9 +258,14 @@ export function LibraryItems<T>({
     };
   }, [readingRenderers, readingId, keys, columns, virtual, virtualizer, geometry]);
 
-  const child = (item: T) => (
-    <div key={itemKey(item)} data-library-key={itemKey(item)} className="min-w-0">
-      {renderItem(item)}
+  const child = (item: T, index: number) => (
+    <div
+      key={itemKey(item)}
+      data-library-key={itemKey(item)}
+      data-entry-slot={Math.min(index, 4)}
+      className="min-w-0"
+    >
+      {renderItem(item, index)}
     </div>
   );
   const renderedRows = virtual
@@ -293,12 +319,14 @@ export function LibraryItems<T>({
             left: 0,
             width: "100%",
             transform: virtual ? `translateY(${row.start - geometry.margin}px)` : undefined,
-            gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+            gridTemplateColumns: `repeat(${columns}, minmax(0, ${layout === "list" ? "1fr" : `${trackWidth}px`}))`,
             gap,
             marginBottom: virtual || row.index === rows - 1 ? undefined : gap,
           }}
         >
-          {items.slice(row.index * columns, (row.index + 1) * columns).map(child)}
+          {items
+            .slice(row.index * columns, (row.index + 1) * columns)
+            .map((item, index) => child(item, row.index * columns + index))}
         </div>
       ))}
     </div>

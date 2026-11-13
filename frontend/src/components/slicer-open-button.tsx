@@ -85,13 +85,17 @@ export function SlicerOpenButton({
     <DropdownMenu
       open={open}
       onOpenChange={setOpen}
+      portal
       align="end"
       role="menu"
+      aria-label={uiText("Open in slicer")}
       trigger={
         <button
+          type="button"
           data-menu-trigger
           onClick={() => setOpen((o) => !o)}
           title={uiText("Open in slicer")}
+          aria-label={uiText("Open in slicer")}
           aria-haspopup="menu"
           aria-expanded={open}
           className="inline-flex items-center gap-0.5 text-on-surface-variant hover:text-primary p-2 rounded hover:bg-surface-container-high transition-colors"
@@ -101,18 +105,15 @@ export function SlicerOpenButton({
           <ChevronDown className={chevronSize} />
         </button>
       }
-      contentClassName="min-w-[10rem] rounded border border-outline-variant bg-surface shadow-lg"
+      contentClassName="w-48 rounded border border-border bg-popover p-1 text-popover-foreground shadow-lg"
     >
-      <p className="px-3 py-1.5 font-mono text-3xs uppercase tracking-wider text-on-surface-variant border-b border-outline-variant">
-        {uiText("Open in slicer")}
-      </p>
       {slicers.map(({ name, scheme }) => (
         <button
           key={scheme}
           type="button"
           role="menuitem"
           onClick={() => openInSlicer(scheme)}
-          className="block w-full px-3 py-2 text-left font-mono text-xs text-on-surface hover:bg-surface-container-low focus-visible:bg-surface-container-low outline-none transition-colors last:rounded-b"
+          className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-popover-hover focus-visible:bg-popover-hover outline-none transition-colors"
         >
           {name}
         </button>

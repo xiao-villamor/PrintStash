@@ -1,4 +1,5 @@
 @import "./cursors.css";
+@import "./motion.css";
 
 @layer base {
   :root {
@@ -28,7 +29,7 @@
     --dialog-shadow: rgb(16 24 40 / 0.12);
     --input: #8190a3;
     --ring: #4d6f9b;
-    --radius: 0px;
+    --radius: 4px;
     --primary-hover: #41638e;
     --primary-soft: rgb(77 111 155 / 0.4);
     --success: #067647;

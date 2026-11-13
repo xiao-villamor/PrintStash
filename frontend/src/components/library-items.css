@@ -1,12 +1,3 @@
-.library-items-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 256px), 1fr));
-  gap: 14px;
-}
-.library-items-compact {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
-  gap: 8px;
-}
 .library-virtual-row {
   display: grid;
   align-items: stretch;
@@ -17,11 +8,47 @@
 }
 .library-preview {
   background-color: var(--plate);
-  background-image:
-    linear-gradient(color-mix(in srgb, var(--primary) 6%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--primary) 6%, transparent) 1px, transparent 1px);
-  background-size: 16px 16px;
-  background-position: center;
+}
+
+/* Data and image readiness fill a stationary frame, independently of navigation. */
+.library-preview-placeholder {
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+.library-card-fill-preview {
+  aspect-ratio: 8 / 5;
+  border-bottom: 1px solid transparent;
+}
+.library-card-fill {
+  animation: library-card-fill var(--duration-library-enter) var(--ease-library-enter) both;
+}
+.library-card-fill-position {
+  animation: library-card-fill-position var(--duration-library-enter) var(--ease-library-enter) both;
+}
+@keyframes library-card-fill-position {
+  from {
+    transform: translate(var(--card-fill-x), var(--card-fill-y));
+  }
+  to {
+    transform: translate(0, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .library-card-fill-position {
+    animation: none;
+  }
+}
+@keyframes library-card-fill {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.library-thumbnail-fill {
+  transition-property: opacity;
+  transition-duration: var(--duration-library-enter);
+  transition-timing-function: var(--ease-library-enter);
 }
 
 .library-card-facts > span + span::before {
@@ -54,7 +81,7 @@
 
 .library-model-card:not([data-favorites]) .library-preview {
   height: auto;
-  aspect-ratio: 2 / 1;
+  aspect-ratio: 8 / 5;
 }
 .library-card-standard {
   display: flex;
@@ -134,11 +161,9 @@
 }
 .library-card-dimensions {
   position: absolute;
-  left: 10px;
-  bottom: 8px;
-  padding: 3px 8px;
-  background: var(--card);
-  color: var(--secondary);
+  left: 14px;
+  bottom: 10px;
+  color: var(--muted-foreground);
   font: 400 11px/1.4 var(--font-mono);
 }
 .library-card-revision-actions {
@@ -229,8 +254,22 @@
   justify-content: center;
 }
 .library-card-thumbnail {
-  width: 30%;
+  width: 45%;
   height: auto;
   max-height: 80%;
   object-fit: contain;
+}
+
+/* Preview shape and type stay consistent as the shared track grows. */
+.collection-card-collage {
+  aspect-ratio: 2 / 1;
+}
+[data-compact] .collection-card-collage {
+  width: 96px;
+  height: 64px;
+  aspect-ratio: auto;
+}
+.collection-card-name,
+.library-card-standard h2 {
+  font-size: 1rem;
 }

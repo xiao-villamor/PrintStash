@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Skeleton } from "@/components/ui/skeleton";
+import { DetailTabLoading } from "./tab-loading";
 import {
   sourceApi,
   useSourceEditing,
@@ -519,164 +519,168 @@ function SourceTabContent({
         </Button>
       </div>
     );
-  if (!data)
-    return (
-      <div className="space-y-3">
-        <Skeleton className="h-20 w-full" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-    );
   const blocked = state.phase !== "idle";
   const editable = canEdit && !editor.editDenied && !blocked;
   const reviewed = state.phase === "blocked" ? state.reviewed : null;
   return (
-    <div className="@container/source space-y-6">
-      {editor.query.isError && (
-        <div role="alert">
-          <p>{uiText("Couldn’t load this model")}</p>
-          <Button onClick={editor.retryRead}>{uiText("Retry")}</Button>
-        </div>
-      )}
-      {state.phase === "blocked" && (
-        <div role="alert" className="space-y-3 rounded border border-border bg-muted p-3 text-sm">
-          <p>
-            {uiText(
-              state.problem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
-            )}
-          </p>
-          <Button variant="outline" loading={editor.reviewing} onClick={() => void editor.review()}>
-            {uiText("library.reviewLatest")}
-          </Button>
-          {reviewed && (
-            <section aria-label={uiText("library.latestVersion")} className="space-y-3">
-              <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
-              <SourceReview
-                modelId={modelId}
-                api={api}
-                command={state.pending.command}
-                model={reviewed.model}
-                data={reviewed.provenance}
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="outline"
-                  disabled={editor.reviewing}
-                  onClick={() => void editor.adopt()}
-                >
-                  {uiText("library.useLatest")}
-                </Button>
-                <Button
-                  disabled={!canEdit || editor.editDenied || editor.reviewing}
-                  onClick={editor.retry}
-                >
-                  {uiText("library.retryDraft")}
-                </Button>
-              </div>
-            </section>
+    <DetailTabLoading pending={!data} variant="source">
+      {data && (
+        <div className="@container/source space-y-6">
+          {editor.query.isError && (
+            <div role="alert">
+              <p>{uiText("Couldn’t load this model")}</p>
+              <Button onClick={editor.retryRead}>{uiText("Retry")}</Button>
+            </div>
           )}
+          {state.phase === "blocked" && (
+            <div
+              role="alert"
+              className="space-y-3 rounded border border-border bg-muted p-3 text-sm"
+            >
+              <p>
+                {uiText(
+                  state.problem === "conflict" ? "library.editConflict" : "library.saveUnconfirmed",
+                )}
+              </p>
+              <Button
+                variant="outline"
+                loading={editor.reviewing}
+                onClick={() => void editor.review()}
+              >
+                {uiText("library.reviewLatest")}
+              </Button>
+              {reviewed && (
+                <section aria-label={uiText("library.latestVersion")} className="space-y-3">
+                  <h3 className="font-semibold">{uiText("library.latestVersion")}</h3>
+                  <SourceReview
+                    modelId={modelId}
+                    api={api}
+                    command={state.pending.command}
+                    model={reviewed.model}
+                    data={reviewed.provenance}
+                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      disabled={editor.reviewing}
+                      onClick={() => void editor.adopt()}
+                    >
+                      {uiText("library.useLatest")}
+                    </Button>
+                    <Button
+                      disabled={!canEdit || editor.editDenied || editor.reviewing}
+                      onClick={editor.retry}
+                    >
+                      {uiText("library.retryDraft")}
+                    </Button>
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+          {!data.sources.length && (
+            <EmptyState title={t("source.emptyTitle")} description={t("source.emptyDescription")} />
+          )}
+          {data.sources.map((source) => {
+            const canonicalUrl = safeHttpUrl(source.canonical_url);
+            const fieldCount = source.fields.length + (source.tags?.length ? 1 : 0);
+            return (
+              <article key={source.id} className="min-w-0">
+                <section aria-labelledby={`source-heading-${source.id}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h2 id={`source-heading-${source.id}`} className="text-base font-semibold">
+                      {uiText("Source information")}
+                    </h2>
+                    {canonicalUrl && (
+                      <a
+                        href={canonicalUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-foreground hover:underline"
+                      >
+                        {uiText("Open source page")}
+                        <ExternalLink className="h-3.5 w-3.5" aria-hidden />
+                      </a>
+                    )}
+                  </div>
+                  <div className="space-y-3 border-b border-border py-4">
+                    <h3 className="text-lg font-semibold capitalize">
+                      {source.provider}
+                      <span className="ml-2 text-xs font-normal normal-case text-muted-foreground">
+                        {t("source.capturedStatus")}
+                      </span>
+                    </h3>
+                    <p className="break-words text-xs text-muted-foreground">
+                      {canonicalUrl ? (
+                        <a
+                          href={canonicalUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="hover:underline"
+                        >
+                          {canonicalUrl}
+                        </a>
+                      ) : (
+                        source.canonical_url
+                      )}
+                    </p>
+                    <dl
+                      className="grid grid-cols-2 gap-4 @xl/source:grid-cols-4"
+                      data-testid="source-identity-panel"
+                    >
+                      <SourceIdentityRow label={t("source.sourceId")}>
+                        {source.source_item_id || t("source.notSuppliedGeneric")}
+                      </SourceIdentityRow>
+                      <SourceIdentityRow label={t("source.revision")}>
+                        {source.source_revision || t("source.notSuppliedGeneric")}
+                      </SourceIdentityRow>
+                      <SourceIdentityRow label={t("source.captured")}>
+                        {new Date(source.first_captured_at).toLocaleDateString(i18n?.locale)}
+                      </SourceIdentityRow>
+                      <SourceIdentityRow label={t("source.checked")} last>
+                        {new Date(source.last_checked_at).toLocaleDateString(i18n?.locale)}
+                      </SourceIdentityRow>
+                    </dl>
+                  </div>
+                </section>
+                <SourceCover
+                  modelId={modelId}
+                  source={source}
+                  canEdit={editable}
+                  blocked={blocked}
+                  snapshot={data}
+                  submit={editor.submit}
+                  api={api}
+                />
+                {fieldCount > 0 && (
+                  <section aria-labelledby={`metadata-heading-${source.id}`}>
+                    <h2 id={`metadata-heading-${source.id}`} className="sr-only">
+                      {t("source.metadata")}
+                    </h2>
+                    <div>
+                      {source.fields.map((field, index) => (
+                        <SourceField
+                          modelName={modelName}
+                          key={field.field_name}
+                          source={source}
+                          field={field}
+                          canEdit={editable}
+                          blocked={blocked}
+                          snapshot={data}
+                          submit={editor.submit}
+                          last={index === source.fields.length - 1}
+                        />
+                      ))}
+                      <SourceTags tags={source.tags ?? []} last />
+                    </div>
+                  </section>
+                )}
+              </article>
+            );
+          })}
         </div>
       )}
-      {!data.sources.length && (
-        <EmptyState title={t("source.emptyTitle")} description={t("source.emptyDescription")} />
-      )}
-      {data.sources.map((source) => {
-        const canonicalUrl = safeHttpUrl(source.canonical_url);
-        const fieldCount = source.fields.length + (source.tags?.length ? 1 : 0);
-        return (
-          <article key={source.id} className="min-w-0">
-            <section aria-labelledby={`source-heading-${source.id}`}>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 id={`source-heading-${source.id}`} className="text-base font-semibold">
-                  {uiText("Source information")}
-                </h2>
-                {canonicalUrl && (
-                  <a
-                    href={canonicalUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-xs text-foreground hover:underline"
-                  >
-                    {uiText("Open source page")}
-                    <ExternalLink className="h-3.5 w-3.5" aria-hidden />
-                  </a>
-                )}
-              </div>
-              <div className="space-y-3 border-b border-border py-4">
-                <h3 className="text-lg font-semibold capitalize">
-                  {source.provider}
-                  <span className="ml-2 text-xs font-normal normal-case text-muted-foreground">
-                    {t("source.capturedStatus")}
-                  </span>
-                </h3>
-                <p className="break-words text-xs text-muted-foreground">
-                  {canonicalUrl ? (
-                    <a
-                      href={canonicalUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="hover:underline"
-                    >
-                      {canonicalUrl}
-                    </a>
-                  ) : (
-                    source.canonical_url
-                  )}
-                </p>
-                <dl
-                  className="grid grid-cols-2 gap-4 @xl/source:grid-cols-4"
-                  data-testid="source-identity-panel"
-                >
-                  <SourceIdentityRow label={t("source.sourceId")}>
-                    {source.source_item_id || t("source.notSuppliedGeneric")}
-                  </SourceIdentityRow>
-                  <SourceIdentityRow label={t("source.revision")}>
-                    {source.source_revision || t("source.notSuppliedGeneric")}
-                  </SourceIdentityRow>
-                  <SourceIdentityRow label={t("source.captured")}>
-                    {new Date(source.first_captured_at).toLocaleDateString(i18n?.locale)}
-                  </SourceIdentityRow>
-                  <SourceIdentityRow label={t("source.checked")} last>
-                    {new Date(source.last_checked_at).toLocaleDateString(i18n?.locale)}
-                  </SourceIdentityRow>
-                </dl>
-              </div>
-            </section>
-            <SourceCover
-              modelId={modelId}
-              source={source}
-              canEdit={editable}
-              blocked={blocked}
-              snapshot={data}
-              submit={editor.submit}
-              api={api}
-            />
-            {fieldCount > 0 && (
-              <section aria-labelledby={`metadata-heading-${source.id}`}>
-                <h2 id={`metadata-heading-${source.id}`} className="sr-only">
-                  {t("source.metadata")}
-                </h2>
-                <div>
-                  {source.fields.map((field, index) => (
-                    <SourceField
-                      modelName={modelName}
-                      key={field.field_name}
-                      source={source}
-                      field={field}
-                      canEdit={editable}
-                      blocked={blocked}
-                      snapshot={data}
-                      submit={editor.submit}
-                      last={index === source.fields.length - 1}
-                    />
-                  ))}
-                  <SourceTags tags={source.tags ?? []} last />
-                </div>
-              </section>
-            )}
-          </article>
-        );
-      })}
-    </div>
+    </DetailTabLoading>
   );
 }
 

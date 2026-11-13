@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { useLibraryStar } from "@/features/library/mutations";
 import { toast } from "@/lib/toast";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import { LibraryPreviewPlaceholder } from "@/components/library-card-placeholder";
 import { Localized } from "@/components/ui/localized";
 import "./library-items.css";
 import { MODEL_DND_MIME, captureModelDrag } from "@/lib/model-dnd";
@@ -199,6 +200,10 @@ function ModelCardInner({
   const dimensions = cardDimensions(detail);
   const revisions = cardRevisions(detail);
   const revision = revisions.find((file) => file.is_recommended) ?? revisions[0];
+  const cornerStatus =
+    detail && revisions.length === 0
+      ? null
+      : (revision?.revision_status ?? model.recommended_revision_status);
   const ps = model.print_summary;
   const factMetrics: readonly CardMetricId[] =
     metrics.join(",") === "layer_height,print_time,filament_weight"
@@ -300,7 +305,8 @@ function ModelCardInner({
                 path={model.thumbnail_url}
                 alt={model.name}
                 fade
-                className="library-preview relative overflow-hidden border-b border-border shrink-0 h-36"
+                loadingPlaceholder={<LibraryPreviewPlaceholder />}
+                className="library-preview relative overflow-hidden shrink-0 h-36"
                 imageClassName={
                   favorites ? "w-full h-full object-contain" : "library-card-thumbnail"
                 }
@@ -313,22 +319,13 @@ function ModelCardInner({
                   </div>
                 }
               >
-                {!favorites && (
+                {/* The footer already says "No G-code yet"; the corner only speaks for a known status. */}
+                {!favorites && cornerStatus && (
                   <div className="library-card-status">
-                    {detail && revisions.length === 0 ? (
-                      <span className="inline-flex items-center gap-1 text-xs">
-                        <span
-                          className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40"
-                          aria-hidden
-                        />
-                        {uiText("No G-code")}
-                      </span>
-                    ) : (
-                      <RevisionBadge
-                        status={revision?.revision_status ?? model.recommended_revision_status}
-                        label={revision?.revision_label ?? model.recommended_revision_label}
-                      />
-                    )}
+                    <RevisionBadge
+                      status={cornerStatus}
+                      label={revision?.revision_label ?? model.recommended_revision_label}
+                    />
                   </div>
                 )}
                 {!favorites && dimensions && (

@@ -2,6 +2,7 @@ import "./library-items.css";
 import { Boxes } from "lucide-react";
 import { useUiLocale } from "@/lib/i18n";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
+import { LibraryPreviewPlaceholder } from "@/components/library-card-placeholder";
 
 export function Count({ count, one, many }: { count: number; one: string; many: string }) {
   useUiLocale();
@@ -14,6 +15,8 @@ export function Cover({ src, alt }: { src: string | null; alt: string }) {
     <ProtectedThumbnail
       path={src}
       alt={alt}
+      fade
+      loadingPlaceholder={<LibraryPreviewPlaceholder />}
       className="library-preview h-full w-full"
       imageClassName="h-full w-full object-contain"
       placeholder={

@@ -27,6 +27,7 @@ import { formatBytes, formatDuration, formatGrams, formatNumber, timeAgo } from 
 import { ApiError, userMessage } from "@/lib/errors";
 import { isTypingTarget, keyboardOverlayOpen } from "@/lib/keyboard-commands";
 import { toast } from "@/lib/toast";
+import { useInspectorMotion } from "./use-inspector-motion";
 import { Button } from "@/components/ui/button";
 import { ProtectedThumbnail } from "@/components/protected-thumbnail";
 import { AddGcodeRevisionModal } from "@/components/model-detail/add-revision-modal";
@@ -63,12 +64,21 @@ export function LibraryModelInspector({
   useUiLocale();
   const detail = useModelDetail(id);
   const title = useRef<HTMLHeadingElement>(null);
+  // One panel serves every Model it is pointed at: switching Models swaps its
+  // contents in place, so the panel itself only moves when it opens or closes.
+  const { panel, present } = useInspectorMotion(open);
+  useEffect(() => {
+    if (panel.current) panel.current.scrollTop = 0;
+  }, [id]);
   useEffect(() => {
     if (open) title.current?.focus({ preventScroll: true });
   }, [id, open]);
   return (
     <aside
-      hidden={!open}
+      ref={panel}
+      hidden={!present}
+      inert={!open}
+      data-state={open ? "open" : "closed"}
       id="model-drawer"
       aria-label={uiText("Model details")}
       className="library-model-inspector"
@@ -493,7 +503,7 @@ function InspectorContent({
   }
 
   return (
-    <div className="library-inspector-body">
+    <div className="library-inspector-body fade-in">
       {error && (
         <p role="alert" className="text-xs text-destructive">
           {error}

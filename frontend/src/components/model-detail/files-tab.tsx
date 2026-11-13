@@ -214,6 +214,7 @@ export function FilesTab({
                   <DropdownMenu
                     open={menuFileId === f.id}
                     onOpenChange={(open) => setMenuFileId(open ? f.id : null)}
+                    portal
                     trigger={
                       <Button
                         type="button"

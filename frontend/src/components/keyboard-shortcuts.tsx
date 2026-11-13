@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { ModalShell } from "@/components/ui/modal";
 import { useCollectionsPane } from "@/lib/collections-pane-context";
+import { useMediaQuery } from "@/lib/use-media-query";
 import { usePathname, useRouter, useSearchParams } from "@/lib/navigation";
 import { useUiLocale } from "@/lib/i18n";
 import { uiText, type MessageKey } from "@/lib/locale";
@@ -24,6 +25,7 @@ export function KeyboardShortcuts() {
   const params = useSearchParams();
   const router = useRouter();
   const pane = useCollectionsPane();
+  const desktop = useMediaQuery("(min-width: 768px)");
   const [open, setOpen] = useState(false);
   const titleId = useId();
   const [focusRequest, requestFocus] = useState<{ token: number; kind: "search" | "collections" }>({
@@ -90,6 +92,18 @@ export function KeyboardShortcuts() {
     };
   }, [focusRequest, pane?.open, pane?.mode]);
   useEffect(() => {
+    function focusSearch() {
+      if (desktop && pane) {
+        pane.showSearch();
+        requestFocus((value) => ({ token: value.token + 1, kind: "search" }));
+      } else {
+        const input = Array.from(
+          document.querySelectorAll<HTMLInputElement>("[data-model-search]"),
+        ).find((element) => element.getClientRects().length > 0);
+        if (input) input.focus();
+        else router.push("/search");
+      }
+    }
     function keydown(event: KeyboardEvent) {
       if (
         event.defaultPrevented ||
@@ -127,8 +141,7 @@ export function KeyboardShortcuts() {
         if (event.code === "KeyF" && event.shiftKey) {
           event.preventDefault();
           window.dispatchEvent(new Event(CLOSE_SEARCH_SUGGESTIONS));
-          pane.showSearch();
-          requestFocus((value) => ({ token: value.token + 1, kind: "search" }));
+          focusSearch();
           return;
         }
         if (event.code === "KeyZ" && !event.shiftKey && !typing && undoLastChange()) {
@@ -138,6 +151,11 @@ export function KeyboardShortcuts() {
       }
       if (keyboardOverlayOpen()) return;
       if (typing || modified || event.altKey) return;
+      if (event.key === "/") {
+        event.preventDefault();
+        focusSearch();
+        return;
+      }
       if (event.key === "?") {
         event.preventDefault();
         setOpen(true);
@@ -171,7 +189,7 @@ export function KeyboardShortcuts() {
     }
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [open, pane, pathname, router]);
+  }, [open, pane, pathname, router, desktop]);
   const groups: { titleKey: MessageKey; noteKey?: MessageKey; rows: Shortcut[] }[] = [
     {
       titleKey: "Find and move around",

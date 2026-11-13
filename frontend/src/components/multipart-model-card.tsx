@@ -133,9 +133,9 @@ export function MultipartModelCard({
         }}
         className="flex h-full min-w-0 flex-col overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       >
-        <div className="library-preview relative h-36 shrink-0 overflow-hidden border-b border-border bg-muted/40">
+        <div className="library-preview relative h-36 shrink-0 overflow-hidden">
           <Cover src={item.cover_thumbnail_url} alt="" />
-          <span className="absolute left-2 bottom-2 max-w-[calc(100%-6rem)] truncate rounded border border-primary/30 bg-card/90 px-2 py-1 font-mono text-3xs font-semibold uppercase tracking-wider text-primary shadow-sm">
+          <span className="absolute left-3.5 bottom-2.5 max-w-[calc(100%-6rem)] truncate font-mono text-3xs font-semibold uppercase tracking-wider text-muted-foreground">
             {t("multipart.badge")}
           </span>
         </div>

@@ -32,10 +32,7 @@ export function ImportCopyWarning({ storageHealth }: { storageHealth?: StorageHe
   )
     return null;
   return (
-    <div
-      role="status"
-      className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3"
-    >
+    <div role="status" className="flex items-start gap-3 border border-border bg-card p-3">
       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden />
       <div className="min-w-0">
         <p className="text-sm font-semibold text-foreground">

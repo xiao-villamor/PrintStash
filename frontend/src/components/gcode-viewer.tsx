@@ -7,7 +7,9 @@ import React, { useEffect, useMemo, useRef, useState, type ComponentType } from 
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
-import { AlertTriangle, Layers, Loader2, Minus, Plus } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, Layers, Loader2, Maximize2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import "./gcode-viewer.css";
 import { getDerivedText } from "@/lib/api/request";
 import { subscribeEvents } from "@/lib/events";
 import { useOptionalI18n, type MessageKey } from "@/lib/i18n";
@@ -22,6 +24,7 @@ import type { STLViewerControls, ViewerCameraPreset } from "@/components/stl-vie
 function GcodeScene({
   data,
   currentLayer,
+  onlyCurrentLayer,
   showTravel,
   showBed,
   printerBedMm,
@@ -31,6 +34,7 @@ function GcodeScene({
 }: {
   data: ToolpathData;
   currentLayer: number;
+  onlyCurrentLayer: boolean;
   showTravel: boolean;
   showBed: boolean;
   printerBedMm: { x: number; y: number } | null;
@@ -80,18 +84,27 @@ function GcodeScene({
   // Update drawRange directly on the stable geometry — no ref gymnastics needed
   useEffect(() => {
     const count = data.cumulativeVertices[currentLayer + 1] ?? data.extrudePositions.length / 3;
-    extrudeGeo.setDrawRange(0, count);
-  }, [currentLayer, data, extrudeGeo]);
+    const start = onlyCurrentLayer ? (data.cumulativeVertices[currentLayer] ?? 0) : 0;
+    extrudeGeo.setDrawRange(start, Math.max(count - start, 0));
+  }, [currentLayer, onlyCurrentLayer, data, extrudeGeo]);
+
+  // One array per toolpath: R3F re-applies a changed `position` prop on every
+  // render, so a fresh array would snap the camera back to its starting point
+  // whenever a control or the layer slider re-rendered the scene.
+  const initialCameraPosition = useMemo<[number, number, number]>(
+    () => [data.bounds.maxDim * 0.8, data.bounds.maxDim * 0.9, data.bounds.maxDim * 1.2],
+    [data],
+  );
 
   useEffect(() => {
     const distance = Math.max(data.bounds.maxDim, 1);
     function setView(preset: ViewerCameraPreset) {
+      // OrbitControls keeps the world up axis it started with; the top view
+      // looks straight down by sitting a hair off the axis instead of rolling it.
       camera.up.set(0, 1, 0);
       if (preset === "front") camera.position.set(0, 0, distance * 1.8);
-      else if (preset === "top") {
-        camera.up.set(0, 0, -1);
-        camera.position.set(0, distance * 1.8, 0);
-      } else camera.position.set(distance * 0.8, distance * 0.9, distance * 1.2);
+      else if (preset === "top") camera.position.set(0, distance * 1.8, distance * 0.001);
+      else camera.position.set(distance * 0.8, distance * 0.9, distance * 1.2);
       orbitRef.current?.target.set(0, 0, 0);
       camera.lookAt(0, 0, 0);
       orbitRef.current?.update();
@@ -142,7 +155,7 @@ function GcodeScene({
         fov={45}
         near={0.1}
         far={10000}
-        position={[data.bounds.maxDim * 0.8, data.bounds.maxDim * 0.9, data.bounds.maxDim * 1.2]}
+        position={initialCameraPosition}
       />
       <ambientLight intensity={0.8} />
       <primitive object={extrudeLines} />
@@ -248,6 +261,15 @@ interface LoadedToolpath {
 
 /** How often a toolpath still being derived is checked again. */
 const PREPARING_POLL_MS = 3_000;
+const CAMERA_PRESETS = [
+  "isometric",
+  "front",
+  "top",
+] as const satisfies readonly ViewerCameraPreset[];
+const TOGGLE =
+  "h-7 px-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40";
+const ICON_BUTTON =
+  "inline-flex h-7 w-7 items-center justify-center text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40";
 
 export interface GcodeViewerProps {
   url: string;
@@ -283,6 +305,7 @@ export function GcodeViewer({
   const [retry, setRetry] = useState(0);
   const [loaded, setLoaded] = useState<LoadedToolpath | null>(null);
   const [currentLayer, setCurrentLayer] = useState(0);
+  const [onlyCurrentLayer, setOnlyCurrentLayer] = useState(false);
   const [showTravel, setShowTravel] = useState(false);
   const [showBed, setShowBed] = useState(true);
   const localControls = useRef<STLViewerControls | null>(null);
@@ -452,6 +475,7 @@ export function GcodeViewer({
           <GcodeScene
             data={data}
             currentLayer={currentLayer}
+            onlyCurrentLayer={onlyCurrentLayer}
             showTravel={showTravel}
             showBed={showBed}
             printerBedMm={printerBedMm ?? null}
@@ -463,7 +487,7 @@ export function GcodeViewer({
       </GcodeErrorBoundary>
 
       {showDimensions && (
-        <div className="absolute bottom-24 left-3 bg-card px-2 py-1 text-xs text-muted-foreground">
+        <div className="absolute bottom-12 left-2 bg-card px-2 py-1 font-mono text-2xs text-muted-foreground">
           {formatNumber(data.bounds.sizeX, { maximumFractionDigits: 1 })} ×{" "}
           {formatNumber(data.bounds.sizeY, { maximumFractionDigits: 1 })} ×{" "}
           {uiText("{value1} mm", {
@@ -471,106 +495,124 @@ export function GcodeViewer({
           })}
         </div>
       )}
-      <div className="absolute bottom-3 left-3 right-3 z-10 border border-border bg-card p-1.5">
-        <div className="flex flex-wrap items-center gap-1 text-[13px]">
-          <div className="flex">
-            {(["isometric", "front", "top"] as const).map((preset) => (
-              <Button
-                key={preset}
-                size="sm"
-                variant="ghost"
-                aria-pressed={cameraPreset === preset}
-                className={cameraPreset === preset ? "bg-accent" : ""}
-                onClick={() => {
-                  localControls.current?.setView(preset);
-                  setCameraPreset(preset);
-                }}
-              >
-                {uiText(
-                  preset === "isometric" ? "Isometric" : preset === "front" ? "Front" : "Top",
-                )}
-              </Button>
-            ))}
-          </div>
-          <span className="whitespace-nowrap">
-            {viewerCopy(i18n, "viewer.layer", {
-              current: String(currentLayer + 1),
-              total: String(data.totalLayers),
-            })}
-          </span>
-          {data.layerRanges[currentLayer] && (
-            <span className="whitespace-nowrap px-1">
-              {uiText("{value1} mm", {
+      <div
+        role="group"
+        aria-label={viewerCopy(i18n, "viewer.currentLayer")}
+        className="absolute bottom-2 right-2 top-2 z-10 flex w-14 flex-col items-center gap-1 border border-border bg-card py-1"
+      >
+        <span className="font-mono text-2xs tabular-nums text-foreground">
+          {currentLayer + 1}
+          <span className="text-muted-foreground">/{data.totalLayers}</span>
+        </span>
+        <button
+          type="button"
+          aria-label={uiText("Next layer")}
+          disabled={currentLayer >= data.totalLayers - 1}
+          onClick={() => setCurrentLayer((layer) => Math.min(layer + 1, data.totalLayers - 1))}
+          className={ICON_BUTTON}
+        >
+          <ChevronUp className="h-3.5 w-3.5" aria-hidden />
+        </button>
+        <input
+          aria-label={viewerCopy(i18n, "viewer.currentLayer")}
+          aria-valuetext={viewerCopy(i18n, "viewer.layer", {
+            current: String(currentLayer + 1),
+            total: String(data.totalLayers),
+          })}
+          type="range"
+          min={0}
+          max={data.totalLayers - 1}
+          value={currentLayer}
+          onChange={(event) => setCurrentLayer(Number(event.target.value))}
+          className="min-h-0 w-4 flex-1 cursor-pointer accent-primary [direction:rtl] [writing-mode:vertical-lr]"
+        />
+        <button
+          type="button"
+          aria-label={uiText("Previous layer")}
+          disabled={currentLayer <= 0}
+          onClick={() => setCurrentLayer((layer) => Math.max(layer - 1, 0))}
+          className={ICON_BUTTON}
+        >
+          <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+        </button>
+        <span className="font-mono text-2xs tabular-nums text-muted-foreground">
+          {data.layerRanges[currentLayer]
+            ? uiText("{value1} mm", {
                 value1: formatNumber(data.layerRanges[currentLayer].z, {
                   maximumFractionDigits: 2,
                 }),
-              })}
-            </span>
-          )}
-          <input
-            aria-label={viewerCopy(i18n, "viewer.currentLayer")}
-            type="range"
-            min={0}
-            max={data.totalLayers - 1}
-            value={currentLayer}
-            onChange={(event) => setCurrentLayer(Number(event.target.value))}
-            className="h-1.5 min-w-16 flex-1 accent-primary"
-          />
-          <div className="flex">
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label={uiText("Zoom out")}
-              onClick={() => localControls.current?.zoomOut()}
-            >
-              <Minus className="h-3 w-3" />
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              aria-label={uiText("Fit to view")}
-              onClick={() => {
-                localControls.current?.fit();
-                setCameraPreset("isometric");
+              })
+            : "–"}
+        </span>
+      </div>
+      <div
+        className="absolute bottom-2 left-2 right-18 z-10 flex justify-start"
+        title={uiText("Drag to orbit · Scroll to zoom")}
+      >
+        <div className="flex max-w-full flex-wrap items-center gap-0.5 border border-border bg-card p-0.5">
+          <label>
+            <span className="sr-only">{uiText("Camera view")}</span>
+            <select
+              value={cameraPreset}
+              onChange={(event) => {
+                const preset = CAMERA_PRESETS.find((item) => item === event.target.value);
+                if (!preset) return;
+                localControls.current?.setView(preset);
+                setCameraPreset(preset);
               }}
+              className="toolpath-view-select h-7 border-0 bg-transparent px-1.5 text-xs text-foreground hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
             >
-              {uiText("Fit")}
-            </Button>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label={uiText("Zoom in")}
-              onClick={() => localControls.current?.zoomIn()}
-            >
-              <Plus className="h-3 w-3" />
-            </Button>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-2 px-2 text-xs text-muted-foreground">
-          <p>{uiText("Drag to orbit · Scroll to zoom")}</p>
-          <div className="flex gap-2">
+              {CAMERA_PRESETS.map((preset) => (
+                <option key={preset} value={preset}>
+                  {uiText(
+                    preset === "isometric" ? "Isometric" : preset === "front" ? "Front" : "Top",
+                  )}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            aria-label={uiText("Fit to view")}
+            title={uiText("Fit to view")}
+            onClick={() => {
+              localControls.current?.fit();
+              setCameraPreset("isometric");
+            }}
+            className={ICON_BUTTON}
+          >
+            <Maximize2 className="h-3.5 w-3.5" aria-hidden />
+          </button>
+          <span className="mx-0.5 h-4 w-px bg-border" aria-hidden />
+          <button
+            type="button"
+            aria-pressed={onlyCurrentLayer}
+            onClick={() => setOnlyCurrentLayer((value) => !value)}
+            className={cn(TOGGLE, onlyCurrentLayer && "bg-accent text-foreground")}
+          >
+            {uiText("This layer")}
+          </button>
+          <button
+            type="button"
+            aria-pressed={showTravel}
+            onClick={() => setShowTravel((value) => !value)}
+            className={cn(TOGGLE, showTravel && "bg-accent text-foreground")}
+          >
+            {viewerCopy(i18n, "viewer.travel")}
+          </button>
+          {printerBedMm && (
             <button
               type="button"
-              aria-pressed={showTravel}
-              onClick={() => setShowTravel((value) => !value)}
-              className={showTravel ? "text-foreground underline" : ""}
+              aria-pressed={showBed}
+              onClick={() => setShowBed((value) => !value)}
+              className={cn(TOGGLE, showBed && "bg-accent text-foreground")}
             >
-              {viewerCopy(i18n, "viewer.travel")}
+              {viewerCopy(i18n, "viewer.bed", {
+                x: String(printerBedMm.x),
+                y: String(printerBedMm.y),
+              })}
             </button>
-            {printerBedMm && (
-              <button
-                type="button"
-                aria-pressed={showBed}
-                onClick={() => setShowBed((value) => !value)}
-                className={showBed ? "text-foreground underline" : ""}
-              >
-                {viewerCopy(i18n, "viewer.bed", {
-                  x: String(printerBedMm.x),
-                  y: String(printerBedMm.y),
-                })}
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
     </div>

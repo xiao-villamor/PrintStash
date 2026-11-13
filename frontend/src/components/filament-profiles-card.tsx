@@ -905,7 +905,7 @@ export function FilamentProfilesCard() {
 
   return (
     <Localized>
-      <div className="animate-panel-in space-y-4">
+      <div className="space-y-4">
         <PageHeader
           title={translateUiText(locale, "Profiles")}
           description={translateUiText(locale, "profiles.description")}

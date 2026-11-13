@@ -1,3 +1,4 @@
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatNumber } from "@/lib/format";
@@ -43,9 +44,7 @@ export function ModelInformation({
           )}
         </div>
         {model.description && (
-          <p className="mt-2 whitespace-pre-wrap wrap-anywhere text-sm text-muted-foreground">
-            {model.description}
-          </p>
+          <ModelDescription key={model.description} description={model.description} />
         )}
         <dl className="model-information-facts">
           {sourceUrl && (
@@ -126,5 +125,47 @@ export function ModelInformation({
         </dl>
       </div>
     </section>
+  );
+}
+
+function ModelDescription({ description }: { description: string }) {
+  const id = useId();
+  const content = useRef<HTMLParagraphElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+  useLayoutEffect(() => {
+    const element = content.current;
+    if (!element) return;
+    const measure = () => {
+      const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight);
+      setOverflows(element.scrollHeight > lineHeight * 4 + 1);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [description]);
+  return (
+    <div className="mt-2">
+      <p
+        id={id}
+        ref={content}
+        className={`whitespace-pre-wrap wrap-anywhere text-sm leading-5 text-muted-foreground ${expanded ? "" : "line-clamp-4"}`}
+      >
+        {description}
+      </p>
+      {overflows && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="mt-1"
+          aria-controls={id}
+          aria-expanded={expanded}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {uiText(expanded ? "Show less" : "Show more")}
+        </Button>
+      )}
+    </div>
   );
 }

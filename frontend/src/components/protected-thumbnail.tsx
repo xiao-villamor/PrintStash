@@ -9,6 +9,7 @@ export function ProtectedThumbnail({
   path,
   alt,
   placeholder,
+  loadingPlaceholder,
   className,
   imageClassName,
   fade = false,
@@ -17,6 +18,8 @@ export function ProtectedThumbnail({
   path: string | null | undefined;
   alt: string;
   placeholder: ReactNode;
+  /** Loading stays distinct from a genuinely missing or failed preview. */
+  loadingPlaceholder?: ReactNode;
   className?: string;
   imageClassName?: string;
   fade?: boolean;
@@ -40,6 +43,7 @@ export function ProtectedThumbnail({
   const reveal = fade && url !== cachedSource.url;
   const [failedSource, setFailedSource] = useState<string | null>(null);
   const failed = asset.status === "failed" || (url !== null && failedSource === url);
+  const cover = path && !failed ? (loadingPlaceholder ?? placeholder) : placeholder;
 
   const decode = useCallback(async (image: HTMLImageElement, loaded = false) => {
     const source = image.getAttribute("src");
@@ -87,6 +91,7 @@ export function ProtectedThumbnail({
           className={cn(
             imageClassName,
             reveal && "thumbnail-reveal transition-opacity duration-slow ease-out",
+            reveal && loadingPlaceholder && "library-thumbnail-fill",
             fade && (failed || (reveal && !ready) ? "opacity-0" : "opacity-100"),
           )}
           onError={(event) => setFailedSource(event.currentTarget.getAttribute("src"))}
@@ -96,17 +101,18 @@ export function ProtectedThumbnail({
           ref={bindImage}
         />
       ) : (
-        placeholder
+        cover
       )}
       {url && fade && (
         <div
           aria-hidden
           className={cn(
             "pointer-events-none absolute inset-0 transition-opacity duration-slow ease-out",
+            loadingPlaceholder && "library-thumbnail-fill",
             failed || (reveal && !ready) ? "opacity-100" : "opacity-0",
           )}
         >
-          {placeholder}
+          {cover}
         </div>
       )}
       {children}

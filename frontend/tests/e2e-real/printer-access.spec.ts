@@ -56,8 +56,10 @@ test.describe("printer access", () => {
         .selectOption({ label: "Control" });
       await card.getByRole("button", { name: "Save", exact: true }).click();
       await expect(card.getByText("control", { exact: true })).toBeVisible();
-      await card.getByTitle("Remove printer access", { exact: true }).click();
-      await expect(card.getByTitle("Remove printer access", { exact: true })).toHaveCount(0);
+      await card.getByRole("button", { name: "Remove printer access", exact: true }).click();
+      await expect(
+        card.getByRole("button", { name: "Remove printer access", exact: true }),
+      ).toHaveCount(0);
       const remaining = await (
         await page.request.get(`/api/v1/printers/${printerId}/permissions`)
       ).json();

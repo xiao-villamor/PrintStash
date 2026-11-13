@@ -163,19 +163,19 @@ export function SidebarNav() {
         href={item.href}
         title={label}
         aria-current={
-          active && item.id !== "library" && item.id !== "search" && item.id !== "inbox"
-            ? "page"
-            : undefined
+          item.id === "search"
+            ? pathname === "/search"
+              ? "page"
+              : undefined
+            : active && item.id !== "library" && item.id !== "inbox"
+              ? "page"
+              : undefined
         }
         aria-expanded={
-          item.id === "library" || item.id === "search" || item.id === "inbox"
-            ? active && pane?.open
-            : undefined
+          item.id === "library" || item.id === "inbox" ? active && pane?.open : undefined
         }
         aria-controls={
-          item.id === "library" || item.id === "search" || item.id === "inbox"
-            ? "collections-pane"
-            : undefined
+          item.id === "library" || item.id === "inbox" ? "collections-pane" : undefined
         }
         className={railClass(active)}
         onClick={(event) => {
@@ -192,12 +192,15 @@ export function SidebarNav() {
           )
             return;
           event.preventDefault();
-          if (pane && (item.id === "library" || item.id === "search" || item.id === "inbox")) {
-            const mode =
-              item.id === "library" ? "collections" : item.id === "search" ? "search" : "pending";
+          if (item.id === "search") {
+            if (pathname !== "/search") router.push(item.href);
+            else if (pane?.open) pane.showSearch();
+            return;
+          }
+          if (pane && (item.id === "library" || item.id === "inbox")) {
+            const mode = item.id === "library" ? "collections" : "pending";
             if (pane.open && pane.mode === mode) pane.toggle();
             else if (mode === "collections") pane.showCollections();
-            else if (mode === "search") pane.showSearch();
             else pane.showPending();
             return;
           }

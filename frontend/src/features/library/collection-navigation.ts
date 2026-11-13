@@ -84,7 +84,7 @@ export function useCollectionDestination(path: string | null, id: number | null)
   return useQuery({
     ...(id === null
       ? collectionLookupOptions(path, client, api)
-      : collectionLookupByIdOptions(id, api)),
+      : collectionLookupByIdOptions(id, client, api)),
     enabled: path !== null,
     staleTime: 0,
     refetchOnMount: "always",
@@ -101,7 +101,7 @@ export function useRecentFolders(current: CollectionLookupRead | undefined, open
     queries: folders.map((folder) => ({
       ...(folder.id === null
         ? collectionLookupOptions(folder.path, client, api)
-        : collectionLookupByIdOptions(folder.id, api)),
+        : collectionLookupByIdOptions(folder.id, client, api)),
       enabled: open,
       staleTime: 0,
       retry: false,

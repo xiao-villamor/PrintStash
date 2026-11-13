@@ -520,8 +520,13 @@
 /* Controls occupy their own rows so loading/error content cannot be covered. */
 .model-detail-preview {
   display: grid;
+  flex: 1 0 auto;
+  min-height: min-content;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto minmax(20rem, 1fr) auto;
+  grid-template-rows: auto auto minmax(20rem, 1fr) auto auto;
+}
+.model-information {
+  flex-shrink: 0;
 }
 .detail-preview-canvas {
   grid-row: 3;
@@ -758,6 +763,10 @@
   height: 34px;
   padding-inline: 14px;
 }
+.model-detail-heading > div:last-child > .model-detail-favorite {
+  width: 36px;
+  padding: 0;
+}
 .model-detail-tab-count {
   margin-left: 3px;
   font-size: 12px;
@@ -769,12 +778,83 @@
 .model-detail-tabs [role="tab"] {
   line-height: 1.4;
 }
-.model-detail-tabs [data-active="true"]::after {
+/* Immediate press feedback and a local selection mark, without lateral travel. */
+.model-detail-tabs [role="tab"] {
+  transform-origin: center;
+  transition:
+    color var(--duration-press) var(--ease-out),
+    transform var(--duration-press) var(--ease-out);
+}
+.model-detail-tabs [role="tab"]:active {
+  color: var(--foreground);
+  transform: scale(var(--scale-detail-enter));
+  transition-duration: 0s;
+}
+.model-detail-tabs [role="tab"]::after {
   content: "";
   position: absolute;
-  left: 0;
-  right: 0;
+  inset-inline: 0;
   bottom: 0;
   height: 2px;
   background: var(--foreground);
+  visibility: hidden;
+  transform: scaleX(0.65);
+  transform-origin: center;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+.model-detail-tabs [data-active="true"]::after {
+  visibility: visible;
+  transform: scaleX(1);
+}
+.model-detail-tab-body {
+  transform-origin: center top;
+}
+@media (min-width: 1100px) {
+  .model-detail-inspector {
+    height: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .model-detail-tabs [role="tab"]:active {
+    transform: none;
+  }
+  .model-detail-tabs [role="tab"]::after {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* Loading shares the inspector's surface and text rhythm, without pulsing blocks.
+   The cover remains mounted while content fills beneath it. */
+.detail-tab-load {
+  position: relative;
+  min-height: 18rem;
+  container-type: inline-size;
+  container-name: source;
+}
+.detail-tab-load[data-variant="history"] {
+  min-height: 14rem;
+}
+.detail-tab-load[data-variant="similar"] {
+  min-height: 10rem;
+}
+.detail-tab-load-content {
+  opacity: 1;
+}
+.detail-tab-load[data-pending="true"] .detail-tab-load-content {
+  opacity: 0;
+}
+.detail-tab-placeholder {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-press) var(--ease-out);
+}
+.detail-tab-placeholder[data-visible="true"] {
+  opacity: 1;
+}
+.detail-tab-placeholder .animate-pulse {
+  animation: none;
+  border-radius: 2px;
 }

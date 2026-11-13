@@ -76,7 +76,9 @@ module.exports = {
       transitionTimingFunction: {
         out: "var(--ease-out)",
         "in-out": "var(--ease-in-out)",
+        settle: "var(--ease-content-settle)",
       },
+      scale: { "content-enter": "var(--scale-content-enter)" },
       transitionDuration: {
         press: "var(--duration-press)",
         fast: "var(--duration-fast)",

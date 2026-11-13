@@ -1,5 +1,11 @@
 "use client";
 
+import { SettingsGroupHead } from "@/components/settings-card";
+import {
+  SETTINGS_BUTTON,
+  SETTINGS_BUTTON_PRIMARY,
+  SETTINGS_FIELD,
+} from "@/components/settings-controls";
 import { currentLocale } from "@/lib/locale";
 import { uiText } from "@/lib/locale";
 import { useUiLocale } from "@/lib/i18n";
@@ -23,9 +29,8 @@ import type {
   PrinterRead,
 } from "@/types";
 import { toast } from "@/lib/toast";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
-import { inputClasses } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { Localized } from "@/components/ui/localized";
 
@@ -44,9 +49,9 @@ import type { EditingBase } from "@/types/editing";
 import type { NotificationsSettings, NotificationChannelUpdate } from "@/types";
 
 const CARD = "overflow-hidden rounded-lg border border-border bg-card shadow-sm";
-const INPUT = cn(inputClasses, "h-auto px-2.5 py-1.5 rounded placeholder:text-muted-foreground/40");
-const BTN_PRIMARY = buttonVariants({ size: "xs" });
-const BTN_SECONDARY = buttonVariants({ variant: "outline", size: "xs" });
+const INPUT = SETTINGS_FIELD;
+const BTN_PRIMARY = SETTINGS_BUTTON_PRIMARY;
+const BTN_SECONDARY = SETTINGS_BUTTON;
 const LABEL = "mb-1 block text-sm font-medium";
 
 const TARGETS: { value: NotificationTarget; label: string }[] = [
@@ -307,20 +312,17 @@ function emptyDraft(): DraftState {
   };
 }
 
-/** Delivery-status chip: its wording plus the token classes that colour it. */
+/** Delivery status as aligned text: its wording plus the tone that marks attention. */
 interface StatusBadge {
   text: string;
-  cls: string;
+  tone: "danger" | "warning" | undefined;
 }
 
 function statusBadge(status: string | null): StatusBadge {
-  if (status === "sent")
-    return { text: "Delivered", cls: "text-green-600 dark:text-green-400 border-green-600/40" };
-  if (status === "failed")
-    return { text: uiText("Failed"), cls: "text-red-600 dark:text-red-400 border-red-600/40" };
-  if (status === "pending")
-    return { text: "Pending", cls: "text-amber-600 dark:text-amber-400 border-amber-600/40" };
-  return { text: "—", cls: "text-muted-foreground border-border" };
+  if (status === "sent") return { text: "Delivered", tone: undefined };
+  if (status === "failed") return { text: uiText("Failed"), tone: "danger" };
+  if (status === "pending") return { text: "Pending", tone: "warning" };
+  return { text: "—", tone: undefined };
 }
 
 /**
@@ -599,7 +601,7 @@ export function NotificationsPanel({
   const settingsFailure = settingsQuery.error && (
     <div role="alert">
       <p>{uiText("Notification settings could not be loaded.")}</p>
-      <Button onClick={() => void settingsQuery.refetch()}>
+      <Button size="sm" onClick={() => void settingsQuery.refetch()}>
         {uiText("Retry notification settings")}
       </Button>
     </div>
@@ -622,26 +624,22 @@ export function NotificationsPanel({
         )}
         <fieldset className="min-w-0" disabled={busy !== null || Boolean(settingsQuery.error)}>
           {/* Master switch */}
-          <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-3 pt-4 sm:px-5">
-            <div className="min-w-0 flex items-start gap-3">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center bg-muted text-muted-foreground">
-                <Bell className="h-4 w-4" aria-hidden />
-              </span>
-              <div>
-                <h3 className="text-sm font-semibold text-foreground">{uiText("Channels")}</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {uiText(
-                    "Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.",
-                  )}
-                </p>
-              </div>
-            </div>
-            {canEdit && (
-              <Button size="sm" disabled={draft !== null} onClick={() => setDraft(emptyDraft())}>
-                {uiText("Add channel")}
-              </Button>
+          <SettingsGroupHead
+            icon={Bell}
+            level={3}
+            title={uiText("Channels")}
+            description={uiText(
+              "Send webhook, Discord, Telegram, or ntfy alerts on print and printer events.",
             )}
-          </div>
+            action={
+              canEdit ? (
+                <Button size="sm" disabled={draft !== null} onClick={() => setDraft(emptyDraft())}>
+                  {uiText("Add channel")}
+                </Button>
+              ) : undefined
+            }
+            className="settings-card-head--flush"
+          />
           <div className="px-4 sm:pl-16 sm:pr-5">
             <label className="settings-preference-row">
               <span>
@@ -747,21 +745,18 @@ export function NotificationsPanel({
                           <span className="text-sm font-medium text-foreground truncate">
                             {ch.name}
                           </span>
-                          <span className="font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border border-border text-muted-foreground">
-                            {ch.target}
-                          </span>
+                          <span className="settings-status">{ch.target}</span>
                           {!ch.enabled &&
                             (ch.consecutive_failures > 0 ? (
                               <span
-                                className="font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border text-amber-600 dark:text-amber-400 border-amber-600/40"
+                                className="settings-status"
+                                data-tone="warning"
                                 title={ch.last_error ?? undefined}
                               >
                                 {uiText("Auto-disabled")}
                               </span>
                             ) : (
-                              <span className="font-mono text-3xs uppercase tracking-wider text-muted-foreground">
-                                {uiText("disabled")}
-                              </span>
+                              <span className="settings-status">{uiText("disabled")}</span>
                             ))}
                         </div>
                         <p className="text-2xs text-muted-foreground mt-0.5 truncate">
@@ -777,7 +772,8 @@ export function NotificationsPanel({
                       </div>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
                         <span
-                          className={`font-mono text-3xs uppercase tracking-wider px-2 py-1 rounded border ${badge.cls}`}
+                          className="settings-status"
+                          data-tone={badge.tone}
                           title={ch.last_error ?? undefined}
                         >
                           {badge.text}
@@ -909,7 +905,7 @@ export function NotificationsPanel({
         {deliveriesQuery.error && (
           <div role="alert">
             <p>{uiText("Notification delivery history could not be loaded.")}</p>
-            <Button onClick={() => void deliveriesQuery.refetch()}>
+            <Button size="sm" onClick={() => void deliveriesQuery.refetch()}>
               {uiText("Retry delivery history")}
             </Button>
           </div>
@@ -946,7 +942,8 @@ export function NotificationsPanel({
                         {d.created_at ? new Date(d.created_at).toLocaleString(currentLocale()) : ""}
                       </span>
                       <span
-                        className={`font-mono text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded border ${badge.cls}`}
+                        className="settings-status"
+                        data-tone={badge.tone}
                         title={d.last_error ?? undefined}
                       >
                         {badge.text}
@@ -1103,7 +1100,7 @@ function ChannelForm({
               {printersError ? (
                 <div role="alert">
                   <p>{uiText("Printer choices could not be loaded.")}</p>
-                  <Button type="button" onClick={retryPrinters}>
+                  <Button size="sm" type="button" onClick={retryPrinters}>
                     {uiText("Retry printer choices")}
                   </Button>
                 </div>

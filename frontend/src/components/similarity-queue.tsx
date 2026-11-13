@@ -4,6 +4,7 @@ import { useRouter, useHistoryAction } from "@/lib/navigation";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Box, Columns2, ScanSearch, SlidersHorizontal } from "lucide-react";
 
+import { DetailTabLoading } from "@/components/model-detail/tab-loading";
 import { SimilaritySearch } from "@/components/similarity-search";
 import { CollectionPicker } from "@/components/collection-picker";
 import { Badge } from "@/components/ui/badge";
@@ -633,60 +634,68 @@ export function SimilarityQueue({ modelId }: { modelId?: number }) {
             )}
           </div>
         )}
-        {filtersSettling || queue.isPending ? (
-          <p role="status" className="p-6 text-sm text-muted-foreground">
-            {t("similarity.loading")}
-          </p>
-        ) : queue.isError && !queue.data ? (
-          <SimilarityEmptyState
-            modelDetail={modelDetail}
-            title={t("similarity.loadError")}
-            action={<Button onClick={() => void queue.refetch()}>{t("similarity.retry")}</Button>}
-          />
-        ) : rows.length ? (
-          <ul className="divide-y divide-border">
-            {rows.map((candidate) => (
-              <SimilarityRow
-                key={candidate.id}
-                candidate={candidate}
-                returnTo={returnTo}
-                compact={modelDetail}
-              />
-            ))}
-          </ul>
-        ) : (
-          <SimilarityEmptyState
-            modelDetail={modelDetail}
-            icon={ScanSearch}
-            title={t(
-              activeFilters.length
-                ? "similarity.emptyFiltered"
-                : filters.review_state === "confirmed"
-                  ? "similarity.emptyConfirmed"
-                  : filters.review_state === "later"
-                    ? "similarity.emptyLater"
-                    : filters.review_state === "rejected"
-                      ? "similarity.emptyRejected"
-                      : "similarity.empty",
-            )}
-            description={t(
-              activeFilters.length
-                ? "similarity.emptyFilteredHelp"
-                : filters.review_state !== "open"
-                  ? "similarity.emptyReviewedHelp"
-                  : status.data?.enabled === false
-                    ? "similarity.queueDisabledHelp"
-                    : "similarity.emptyHelp",
-            )}
-            action={
-              activeFilters.length > 0 ? (
-                <Button variant="outline" onClick={clearFilters}>
-                  {uiText("Clear filters")}
-                </Button>
-              ) : undefined
-            }
-          />
-        )}
+        <DetailTabLoading
+          pending={filtersSettling || queue.isPending}
+          variant="similar"
+          enabled={modelDetail}
+        >
+          {filtersSettling || queue.isPending ? (
+            modelDetail ? null : (
+              <p role="status" className="p-6 text-sm text-muted-foreground">
+                {t("similarity.loading")}
+              </p>
+            )
+          ) : queue.isError && !queue.data ? (
+            <SimilarityEmptyState
+              modelDetail={modelDetail}
+              title={t("similarity.loadError")}
+              action={<Button onClick={() => void queue.refetch()}>{t("similarity.retry")}</Button>}
+            />
+          ) : rows.length ? (
+            <ul className="divide-y divide-border">
+              {rows.map((candidate) => (
+                <SimilarityRow
+                  key={candidate.id}
+                  candidate={candidate}
+                  returnTo={returnTo}
+                  compact={modelDetail}
+                />
+              ))}
+            </ul>
+          ) : (
+            <SimilarityEmptyState
+              modelDetail={modelDetail}
+              icon={ScanSearch}
+              title={t(
+                activeFilters.length
+                  ? "similarity.emptyFiltered"
+                  : filters.review_state === "confirmed"
+                    ? "similarity.emptyConfirmed"
+                    : filters.review_state === "later"
+                      ? "similarity.emptyLater"
+                      : filters.review_state === "rejected"
+                        ? "similarity.emptyRejected"
+                        : "similarity.empty",
+              )}
+              description={t(
+                activeFilters.length
+                  ? "similarity.emptyFilteredHelp"
+                  : filters.review_state !== "open"
+                    ? "similarity.emptyReviewedHelp"
+                    : status.data?.enabled === false
+                      ? "similarity.queueDisabledHelp"
+                      : "similarity.emptyHelp",
+              )}
+              action={
+                activeFilters.length > 0 ? (
+                  <Button variant="outline" onClick={clearFilters}>
+                    {uiText("Clear filters")}
+                  </Button>
+                ) : undefined
+              }
+            />
+          )}
+        </DetailTabLoading>
         {!filtersSettling && queue.isError && queue.data && (
           <div role="alert" className="space-y-2 border-t p-3 text-sm text-destructive">
             <p>{t("similarity.loadError")}</p>
